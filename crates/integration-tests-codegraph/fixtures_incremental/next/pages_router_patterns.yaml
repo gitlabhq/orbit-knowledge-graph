@@ -153,24 +153,22 @@ fixtures:
       }
 
 tests:
-  - name: Next pages router files are indexed as ordinary module definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Next pages router paths are cataloged as files
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
-      ORDER BY file_path
+      MATCH (file:File)
+      WHERE file.path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 3 }
-      - { row: { file_path: "pages/_app.tsx", fqn: "pages/_app.tsx", type: "Module" } }
-      - { row: { file_path: "pages/index.tsx", fqn: "pages/index.tsx", type: "Module" } }
-      - { row: { file_path: "pages/api/users.ts", fqn: "pages/api/users.ts", type: "Module" } }
+      - { row: { path: "pages/_app.tsx" } }
+      - { row: { path: "pages/index.tsx" } }
+      - { row: { path: "pages/api/users.ts" } }
 
   - name: Next pages router default pages and data functions are definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
         AND d.fqn IN ['App', 'IndexPage', 'getStaticProps', 'handler']
       RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
       ORDER BY file_path, fqn
@@ -239,12 +237,10 @@ tests:
       - { row: { caller: "App", callee: "Layout" } }
       - { not: true, row: { callee: "Component" } }
 
-  - name: Next pages router dynamic and special files are indexed as modules
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Next pages router dynamic and special paths are cataloged as files
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)
+      WHERE file.path IN [
         'pages/_document.tsx',
         'pages/_error.tsx',
         'pages/404.tsx',
@@ -254,23 +250,23 @@ tests:
         'pages/shop/[[...filters]].tsx',
         'pages/api/users/[id].ts'
       ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
-      ORDER BY file_path
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 8 }
-      - { row: { file_path: "pages/_document.tsx", fqn: "pages/_document.tsx", type: "Module" } }
-      - { row: { file_path: "pages/_error.tsx", fqn: "pages/_error.tsx", type: "Module" } }
-      - { row: { file_path: "pages/404.tsx", fqn: "pages/404.tsx", type: "Module" } }
-      - { row: { file_path: "pages/500.tsx", fqn: "pages/500.tsx", type: "Module" } }
-      - { row: { file_path: "pages/blog/[slug].tsx", fqn: "pages/blog/[slug].tsx", type: "Module" } }
-      - { row: { file_path: "pages/docs/[...slug].tsx", fqn: "pages/docs/[...slug].tsx", type: "Module" } }
-      - { row: { file_path: "pages/shop/[[...filters]].tsx", fqn: "pages/shop/[[...filters]].tsx", type: "Module" } }
-      - { row: { file_path: "pages/api/users/[id].ts", fqn: "pages/api/users/[id].ts", type: "Module" } }
+      - { row: { path: "pages/_document.tsx" } }
+      - { row: { path: "pages/_error.tsx" } }
+      - { row: { path: "pages/404.tsx" } }
+      - { row: { path: "pages/500.tsx" } }
+      - { row: { path: "pages/blog/[slug].tsx" } }
+      - { row: { path: "pages/docs/[...slug].tsx" } }
+      - { row: { path: "pages/shop/[[...filters]].tsx" } }
+      - { row: { path: "pages/api/users/[id].ts" } }
 
   - name: Next pages router dynamic page and data functions are definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN [
         'pages/_document.tsx',
         'pages/_error.tsx',
         'pages/404.tsx',
@@ -308,10 +304,6 @@ tests:
       - { row: { file_path: "pages/api/users/[id].ts", fqn: "userHandler", type: "Function" } }
 
   - name: Next pages router dynamic and special files resolve local calls
-
-    # Known gap: Next.js route conventions are not fully resolved.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path IN [

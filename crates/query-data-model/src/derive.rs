@@ -103,6 +103,17 @@ mod tests {
     }
 
     #[test]
+    fn hides_traversal_path_only_in_the_remote_model() {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
+        let local = DuckDbDataModel::derive(ontology).unwrap();
+        let property = remote.property("Definition", "traversal_path").unwrap().id;
+
+        assert!(remote.property_is_hidden(property));
+        assert!(!local.property_is_hidden(property));
+    }
+
+    #[test]
     fn resolves_relationship_variants_and_foreign_keys_to_ids() {
         let model =
             ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))

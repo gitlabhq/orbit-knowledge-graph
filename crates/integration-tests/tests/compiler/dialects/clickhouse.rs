@@ -1995,7 +1995,8 @@ fn gql_prepares_queries_and_scoped_schema() {
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_schema_response(&ontology, scope, &[])).unwrap(),
+                serde_json::to_value(build_schema_response(&ontology, scope, &[]).unwrap())
+                    .unwrap(),
             );
         }
     }

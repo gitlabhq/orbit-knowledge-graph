@@ -18,12 +18,11 @@ use super::{
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::file_tree::ProjectTree;
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Edge, Tag, Tree};
+use crate::tree::{Edge, Storage, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -331,14 +330,31 @@ impl ItemPhase<Rewritten> for Canonicalize {
 
     fn run(
         &self,
-        _env: &Env,
+        env: &Env,
         _run: &Sentinel,
         Rewritten(mut tree): Rewritten,
     ) -> Result<Canonical, Killed> {
         tree.prune();
-        tree.compact();
+        for id in tree.preorder() {
+            let sym = tree.sym_of(id, &env.lang);
+            tree.node_mut(id).sym = sym;
+        }
+        let key = crate::tags::ReservedTags::new(&env.lang).original_source_path;
+        let imports: Vec<_> = tree
+            .root()
+            .descendants()
+            .filter_map(|node| {
+                Some((
+                    node.index(),
+                    node.child_sym(crate::canonical::Canonical::SourcePath)?,
+                ))
+            })
+            .collect();
+        for (node, path) in imports {
+            tree.set_tag(node, key, path);
+        }
         tree.source = std::sync::Arc::from("");
-        Ok(Canonical(tree))
+        Ok(Canonical(tree.compact_and_remap()))
     }
 }
 
@@ -408,7 +424,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         for (path, size, reason) in files {
             state
                 .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()).into());
         }
         for tree in &state.trees {
             candidates.remove(&tree.label);
@@ -416,19 +432,16 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         for killed in &context.report.skipped {
             if let Some(size) = candidates.remove(&killed.path) {
                 let reason = crate::inventory::timeout(killed.label);
-                state.trees.push(Tree::unparsed(
-                    lang,
-                    &killed.path,
-                    size,
-                    &reason.to_string(),
-                ));
+                state
+                    .trees
+                    .push(Tree::unparsed(lang, &killed.path, size, &reason.to_string()).into());
             }
         }
         for (path, size) in candidates {
             let reason = FileReason::Fault(FileFault::FileRead);
             state
                 .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()).into());
         }
         Ok(DirtyGraph { state, dirty })
     }
@@ -449,19 +462,7 @@ impl Phase<DirtyGraph> for Resolve {
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
         let DirtyGraph { mut state, dirty } = input;
         let env = context.env;
-        let paths: Vec<&str> = state
-            .trees
-            .iter()
-            .map(|t| t.label.as_str())
-            .chain(state.configs.iter().map(|f| f.path.as_str()))
-            .collect();
-        let walk = ProjectTree::build(
-            &env.lang,
-            &env.resolve.config,
-            &env.resolve.stages,
-            &paths,
-            Some(&state.configs),
-        );
+        let walk = state.project_tree(env);
         let tree_by_path: FxHashMap<&str, usize> = state
             .trees
             .iter()
@@ -487,15 +488,14 @@ impl Phase<DirtyGraph> for Resolve {
             &env.lang,
             &dirty,
             env.lang_id,
-            &walk.prefixes,
+            &walk.lookup,
             &env.resolve.config,
-            &walk.aliases,
+            &walk.entrypoints,
             env,
             &context.run,
         )?;
         for rsp in &result.resolved_source_paths {
-            let nid = state.trees[rsp.fi as usize].to_id(rsp.node);
-            state.trees[rsp.fi as usize].node_mut(nid).sym = rsp.sym;
+            state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
@@ -536,20 +536,21 @@ impl Phase<Resolved> for Display {
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
-        for (fi, tree) in state.trees.iter_mut().enumerate() {
-            let ctx = EdgeCtx {
-                tree_index: fi as u32,
-                edges: &edges,
-            };
-            let _ = pattern::apply_rewrites_with_edges(
-                tree,
-                &env.lang,
-                &env.rules_for(&tree.label).display_rules,
-                true,
-                &ctx,
-                &[],
-            );
-        }
+        state.trees = std::mem::take(&mut state.trees)
+            .into_iter()
+            .enumerate()
+            .map(|(fi, tree)| {
+                let rules = &env.rules_for(&tree.label).display_rules;
+                if rules.is_empty() {
+                    return tree;
+                }
+                let ctx = EdgeCtx {
+                    tree_index: fi as u32,
+                    edges: &edges,
+                };
+                pattern::apply_display(tree, &env.lang, rules, &ctx)
+            })
+            .collect();
         Ok(Displayed { state })
     }
 }

@@ -10,8 +10,49 @@
 #   calls without parentheses are modeled as this-calls and may over-link.
 
 config:
+  frameworks:
+    - name: rails
+      providers:
+        - { module: rails, precedence: runtime }
+        - { module: active_record, precedence: runtime }
+        - { module: active_model, precedence: runtime }
+        - { module: active_support, precedence: runtime }
+        - { module: action_controller, precedence: runtime }
+        - { module: action_dispatch, precedence: runtime }
+        - { module: action_view, precedence: runtime }
+        - { module: action_mailer, precedence: runtime }
+        - { module: action_cable, precedence: runtime }
+        - { module: active_job, precedence: runtime }
+        - { module: active_storage, precedence: runtime }
+        - { module: action_mailbox, precedence: runtime }
+        - { module: action_text, precedence: runtime }
+        - { module: arel, precedence: runtime }
   link:
     imports_shadow_locals: false
+  stdlib: [
+      { module: kernel, availability: implicit, symbols: [abort, at_exit, autoload, binding, 'block_given?', caller,
+      caller_locations, catch, chomp, chop, eval, exec, exit, exit!, fail, fork,
+       format, gets, global_variables, 'iterator?', lambda, load, local_variables,
+      loop, open, p, print, printf, proc, putc, puts, raise, rand, readline,
+      readlines, require, require_relative, select, sleep, spawn, sprintf, srand,
+      syscall, system, test, throw, trace_var, trap, untrace_var, warn] },
+      { module: pp, symbols: [pp, pretty_inspect] },
+      { module: abbrev }, { module: base64 }, { module: benchmark }, { module: bigdecimal },
+      { module: bundler }, { module: cgi }, { module: csv }, { module: date },
+      { module: delegate }, { module: digest }, { module: drb }, { module: erb },
+      { module: etc }, { module: fcntl }, { module: fiddle }, { module: fileutils },
+      { module: find }, { module: forwardable }, { module: getoptlong }, { module: io },
+      { module: ipaddr }, { module: irb }, { module: json }, { module: logger },
+      { module: monitor }, { module: mutex_m }, { module: net }, { module: nkf },
+      { module: objspace }, { module: observer }, { module: open-uri }, { module: open3 },
+      { module: openssl }, { module: optparse }, { module: ostruct }, { module: pathname },
+      { module: prettyprint }, { module: pstore }, { module: psych }, { module: racc },
+      { module: rdoc }, { module: readline }, { module: resolv }, { module: ripper },
+      { module: securerandom }, { module: set }, { module: shellwords },
+      { module: singleton }, { module: socket }, { module: stringio }, { module: strscan },
+      { module: syslog }, { module: tempfile }, { module: time }, { module: timeout },
+      { module: tmpdir }, { module: tsort }, { module: un }, { module: uri },
+      { module: weakref }, { module: yaml }, { module: zlib }]
   resolve:
     lookup_from:
       - __source_root
@@ -25,7 +66,7 @@ stages:
       - match: '(call method: (identifier "require") arguments: (argument_list (string $S:string_content)))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "*"))'
         tag: { import_type: Require }
-      - match: '(call method: (identifier "included") block: (do_block $$$B))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "/^(included|prepended)$/") block: (do_block $$$B))'
         replace: '(rb_synth $$$B)'
 
       # include/extend/prepend: each module argument becomes a supertype and an import
@@ -43,33 +84,40 @@ stages:
         replace: '(rb_synth $$$S->rb_attr)'
       - match: '(call method: (identifier "attr_writer") arguments: (argument_list $$$S:simple_symbol))'
         replace: '(rb_synth $$$S->rb_attr)'
-      - match: '(call method: (identifier "class_attribute") arguments: (argument_list $S:simple_symbol))'
-        replace: '(rb_synth (rb_attr @$S))'
-      - match: '(call method: (identifier "delegate") arguments: (argument_list $$$S:simple_symbol))'
-        replace: '(rb_synth $$$S->rb_method)'
+      - match: '(call receiver: !$RECEIVER method: (identifier "/^(class_attribute|mattr_accessor|mattr_reader|mattr_writer|cattr_accessor|cattr_reader|cattr_writer)$/") arguments: (argument_list $S:simple_symbol $$$REST:simple_symbol))'
+        replace: '(rb_synth (rb_attr @$S) $$$REST->rb_attr)'
+      - match: '(call receiver: !$RECEIVER method: (identifier "delegate") arguments: (argument_list $S:simple_symbol $$$REST:simple_symbol))'
+        replace: '(rb_synth (rb_method @$S) $$$REST->rb_method)'
       - match: '(call method: (identifier "def_delegators") arguments: (argument_list (simple_symbol) $$$S:simple_symbol))'
         replace: '(rb_synth $$$S->rb_method)'
-      - match: '(call method: (identifier "define_method") arguments: (argument_list $S:simple_symbol) block:? $B)'
+      - match: '(call receiver: !$RECEIVER method: (identifier "def_delegator") arguments: (argument_list (simple_symbol) (simple_symbol) $A:simple_symbol))'
+        replace: '(rb_synth (rb_method @$A))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "def_delegator") arguments: (argument_list (simple_symbol) $S:simple_symbol))'
+        replace: '(rb_synth (rb_method @$S))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "define_method") arguments: (argument_list $S:simple_symbol) block:? $B)'
         replace: '(rb_synth (rb_method @$S $B))'
-      - match: '(call method: (identifier "has_many") arguments: (argument_list $S:simple_symbol))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "define_method") arguments: (argument_list (string $S:string_content)) block:? $B)'
+        replace: '(rb_synth (rb_method @$S $B))'
+      - match: '(alias name: $N:simple_symbol alias: $O:simple_symbol)'
+        replace: '(rb_synth (rb_method @$N (__call (__callee (__ivar @$O|strip=:)))))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "/^(has_many|has_and_belongs_to_many)$/") arguments: (argument_list $S:simple_symbol))'
         replace: '(rb_synth (rb_method @$S))'
-      - match: '(call method: (identifier "has_one") arguments: (argument_list $S:simple_symbol))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "has_one") arguments: (argument_list $S:simple_symbol))'
         replace: '(rb_synth (rb_method @$S))'
-      - match: '(call method: (identifier "belongs_to") arguments: (argument_list $S:simple_symbol))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "belongs_to") arguments: (argument_list $S:simple_symbol))'
         replace: '(rb_synth (rb_method @$S))'
-      - match: '(call method: (identifier "scope") arguments: (argument_list $S:simple_symbol $$$L))'
+      - match: '(call receiver: !$RECEIVER method: (identifier "scope") arguments: (argument_list $S:simple_symbol $$$L))'
         replace: '(rb_synth (rb_method @$S $$$L))'
 
-      # send(:m) / public_send(:m) / __send__(:m) → implicit-self call
-      - match: '(call method: (identifier "send") arguments: (argument_list $S:simple_symbol))'
-        replace: '(__call (__callee (__ivar @$S|strip=:)))'
-      - match: '(call method: (identifier "public_send") arguments: (argument_list $S:simple_symbol))'
-        replace: '(__call (__callee (__ivar @$S|strip=:)))'
-      - match: '(call method: (identifier "__send__") arguments: (argument_list $S:simple_symbol))'
-        replace: '(__call (__callee (__ivar @$S|strip=:)))'
+      - match: '(call receiver:? $R method: $M:(identifier "/^(send|public_send|__send__)$/") arguments: (argument_list $N:_*_named $$$A) block:? $B)'
+        replace: '(rb_send receiver: $R method: $M (rb_send_name $N) arguments: (argument_list $$$A) block: $B)'
 
   - name: synth
     rules:
+      - match: '(rb_send_name $N:simple_symbol)'
+        replace: '(rb_literal_method @$N|strip=:)'
+      - match: '(rb_send_name (string !(interpolation) $N:string_content))'
+        replace: '(rb_literal_method @$N)'
       - match: '(rb_include)'
         replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
         tag: { import_type: Include }
@@ -86,6 +134,13 @@ stages:
         replace: '(__def (__defname @$ROOT|strip=:) (__property))'
       - match: '(rb_method $$$B)'
         replace: '(__def (__defname @$ROOT|strip=:) (__method) $$$B)'
+
+  - name: literal-dispatch
+    rules:
+      - match: '(rb_send receiver:? $R method: $M $N:rb_literal_method arguments: $A block:? $B)'
+        replace: '(call receiver: $R method: (identifier @$N) arguments: $A block: $B)'
+      - match: '(rb_send receiver:? $R method: $M (rb_send_name $N) arguments: (argument_list $$$A) block:? $B)'
+        replace: '(call receiver: $R method: $M arguments: (argument_list $N $$$A) block: $B)'
 
   - name: constants
     rules:

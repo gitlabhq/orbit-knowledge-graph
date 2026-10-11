@@ -368,7 +368,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { empty: true }
-  - name: Named import targets export proxy
+  - name: Named import targets the exported definition
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'named/main.ts'
@@ -659,9 +659,7 @@ tests:
       - { row: { name: "track", alias: "secondTrack" } }
 
   - name: Missing members on local namespace imports do not become external calls
-
-    # Known gap: Imported-symbol rows for external namespace imports differ from the old pipeline.
-
+    # Deferred: suppressing fallback requires proof that the module's exports are complete.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)

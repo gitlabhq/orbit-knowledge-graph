@@ -392,6 +392,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             let properties: Vec<_> = entity_record
                 .into_iter()
                 .flat_map(|entity| &entity.properties)
+                .filter(|property| !self.model.get().property_is_hidden(**property))
                 .map(|property| self.model.get().graph().property(*property).name.as_str())
                 .collect();
             QueryError::AllowlistRejected(format!(

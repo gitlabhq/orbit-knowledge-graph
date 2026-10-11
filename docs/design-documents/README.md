@@ -77,6 +77,7 @@ See the following design documents for more details on the Orbit architecture:
 - [Orbit Schema Management](schema_management.md)
 - [Orbit Security](security.md)
 - [Orbit Observability](observability.md)
+- [Orbit Testing](testing.md)
 - [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
 - [Architecture Decision Records](decisions/): numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
 

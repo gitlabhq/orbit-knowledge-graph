@@ -77,6 +77,7 @@ properties:
     type: string
     source: traversal_path
     filterable: false
+    hidden: true
     nullable: false
     description: "Namespace path for authz."
 

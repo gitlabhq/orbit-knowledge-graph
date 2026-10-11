@@ -20,18 +20,23 @@ pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
         .chain(std::iter::once("*".into()))
         .collect();
     definitions["NodeSelector"]["allOf"] = model.graph().entities().map(|entity| {
-        let reserved = || ontology::constants::NODE_RESERVED_COLUMNS.iter().map(|name| (*name).to_string());
-        let columns: Vec<_> = reserved().chain(entity.properties.iter().map(|id| model.graph().property(*id).name.clone())).collect();
-        let filters: Vec<_> = reserved().chain(entity.properties.iter().filter_map(|id| {
-            let property = model.graph().property(*id);
-            (model.property_is_filterable(&entity.name, &property.name) || property.name == ontology::TRAVERSAL_PATH_COLUMN)
-                .then(|| property.name.clone())
-        })).collect();
+        let allowlist = |filterable_only: bool| {
+            let mut listed: Vec<_> = ontology::constants::NODE_RESERVED_COLUMNS.iter().map(|name| (*name).to_string()).collect();
+            let mut hidden = Vec::new();
+            for id in &entity.properties {
+                let property = model.graph().property(*id);
+                if filterable_only && !model.property_is_filterable(&entity.name, &property.name)
+                    && property.name != ontology::TRAVERSAL_PATH_COLUMN { continue; }
+                if model.property_is_hidden(*id) { hidden.push(property.name.clone()); }
+                else { listed.push(property.name.clone()); }
+            }
+            serde_json::json!({"anyOf": [{"enum": listed}, {"enum": hidden}]})
+        };
         serde_json::json!({
             "if": { "properties": { "entity": { "const": entity.name } } },
             "then": { "properties": {
-                "columns": { "oneOf": [ { "const": "*" }, { "type": "array", "items": { "enum": columns }, "minItems": 1 } ] },
-                "filters": { "propertyNames": { "enum": filters } }
+                "columns": { "oneOf": [ { "const": "*" }, { "type": "array", "items": allowlist(false), "minItems": 1 } ] },
+                "filters": { "propertyNames": allowlist(true) }
             } }
         })
     }).collect();

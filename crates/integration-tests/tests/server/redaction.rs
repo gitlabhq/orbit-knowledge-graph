@@ -2084,7 +2084,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     }
 }
 
-async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &TestContext) {
+async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2129,8 +2129,8 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
         "wildcard should include g_visibility_level column"
     );
     assert!(
-        query.base.sql.contains("g_traversal_path"),
-        "wildcard should include g_traversal_path column"
+        !query.base.sql.contains("g_traversal_path"),
+        "wildcard must leave out the hidden g_traversal_path column"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -4426,7 +4426,7 @@ async fn redaction_integration() {
         search_fail_closed_no_authorization,
         search_preserves_metadata_columns_after_redaction,
         column_selection_specific_columns_includes_mandatory_columns,
-        column_selection_wildcard_returns_all_columns_plus_mandatory,
+        column_selection_wildcard_returns_listed_columns_plus_mandatory,
         column_selection_omitted_includes_mandatory_columns,
         column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns,
         column_selection_redaction_works_with_specific_columns,

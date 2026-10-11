@@ -8,6 +8,7 @@ struct PropertyPolicy {
     admin_only: bool,
     filterable: bool,
     like_allowed: bool,
+    hidden: bool,
 }
 
 fn derive_property_policy(
@@ -19,6 +20,7 @@ fn derive_property_policy(
             admin_only: false,
             filterable: true,
             like_allowed: true,
+            hidden: false,
         };
         graph.properties().count()
     ];
@@ -41,6 +43,7 @@ fn derive_property_policy(
                 admin_only: field.admin_only,
                 filterable: field.filterable,
                 like_allowed: field.like_allowed,
+                hidden: field.hidden,
             };
         }
     }

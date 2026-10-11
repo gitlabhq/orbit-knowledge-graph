@@ -22,9 +22,22 @@ fixtures:
       @Retention(RetentionPolicy.RUNTIME)
       @Target({ElementType.METHOD, ElementType.TYPE})
       public @interface Traceable {}
+  - path: com/example/app/ExplicitTarget.java
+    content: |
+      package com.example.app;
+      import java.lang.annotation.Target;
+      @Target({})
+      public @interface ExplicitTarget {}
 
 tests:
-  # ── J2: test_java_reference_resolution_to_imported_symbol ──
+  - name: "explicit Target annotation resolves to its declared import"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.ExplicitTarget'
+      RETURN sym.import_path AS path, sym.identifier_name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'java.lang.annotation', name: Target } }
 
   - name: "Main.main -> ArrayList (imported symbol)"
     
@@ -48,7 +61,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # corrected: the wildcard import binds both unbound annotation names (Retention, Target); one row per reference
   - name: "Traceable -> java.lang.annotation.* (annotation wildcard import)"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
@@ -58,12 +70,11 @@ tests:
     assert:
       - { row_count: 2 }
 
-  - name: "Traceable -> Target (annotation import)"
-    skip: true
+  - name: "wildcard annotation imports do not synthesize named imported symbols"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
-      WHERE caller.fqn = 'com.example.app.Traceable'
-        AND sym.identifier_name = 'Target'
-      RETURN caller.fqn AS caller, sym.identifier_name AS symbol
+      MATCH (sym:ImportedSymbol)
+      WHERE sym.file_path = 'com/example/app/Traceable.java'
+      RETURN sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { row_count: 1 }
+      - { row: { path: 'java.lang.annotation', name: '*' } }

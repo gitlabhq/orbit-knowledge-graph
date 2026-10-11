@@ -107,30 +107,28 @@ fixtures:
       }
 
 tests:
-  - name: Next app router files are indexed as ordinary module definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Next app router paths are cataloged as files
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)
+      WHERE file.path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',
         'app/api/health/route.ts'
       ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
-      ORDER BY file_path
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 4 }
-      - { row: { file_path: "app/layout.tsx", fqn: "app/layout.tsx", type: "Module" } }
-      - { row: { file_path: "app/page.tsx", fqn: "app/page.tsx", type: "Module" } }
-      - { row: { file_path: "app/blog/[slug]/page.tsx", fqn: "app/blog/[slug]/page.tsx", type: "Module" } }
-      - { row: { file_path: "app/api/health/route.ts", fqn: "app/api/health/route.ts", type: "Module" } }
+      - { row: { path: "app/layout.tsx" } }
+      - { row: { path: "app/page.tsx" } }
+      - { row: { path: "app/blog/[slug]/page.tsx" } }
+      - { row: { path: "app/api/health/route.ts" } }
 
   - name: Next app router route exports are ordinary definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',

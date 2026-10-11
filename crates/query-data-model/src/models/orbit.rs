@@ -37,6 +37,9 @@ where
 }
 
 pub trait OrbitQueryModel {
+    fn property_is_hidden(&self, property: PropertyId) -> bool {
+        self.query_authorization().is_hidden(property)
+    }
     type BackendCatalog: RelationalMapping;
     type AuthorizationCatalog: GitLabPolicy;
 

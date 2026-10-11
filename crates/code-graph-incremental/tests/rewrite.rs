@@ -4,7 +4,9 @@ use code_graph_incremental::canonical::{Canonical as C, def_type_of, is_canonica
 use code_graph_incremental::pipeline::{
     Canonical, Canonicalize, Each, Parse, Prepare, Rewrite, Sources,
 };
-use code_graph_incremental::tree::{Cursor, Tree};
+use code_graph_incremental::tree::Compact;
+type Tree = code_graph_incremental::tree::Tree<Compact>;
+type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline, inventory};
 
@@ -20,6 +22,43 @@ def run():
     g = Greeter()
     g.greet(os.getcwd())
 ";
+
+#[test]
+fn standard_library_configuration_rejects_invalid_entries_and_legacy_fields() {
+    let lang = code_graph_incremental::intern::Lang::new();
+    for entry in [
+        "{}",
+        "json",
+        "{module: ''}",
+        "{module: json, symbols: ['']}",
+        "{symbols: [print]}",
+        "{symbols: [print], availability: imported}",
+        "{symbols: [print], availability: implicit, precedence: runtime}",
+        "{module: json, availability: implicit}",
+        "{module: json, availability: imported}",
+        "{module: json, availability: sometimes}",
+        "{module: json, precedence: unknown}",
+        "{module: json, implicit: true}",
+        "{module: json, typo: true}",
+    ] {
+        let yaml = format!("config:\n  stdlib: [{entry}]\nstages: []\n");
+        assert!(
+            code_graph_incremental::rules::load_lang(&yaml, &lang).is_err(),
+            "accepted {entry}"
+        );
+    }
+    for legacy in [
+        "link: {builtins: [print]}",
+        "resolve: {external: [sys]}",
+        "resolve: {stdlib: [json]}",
+    ] {
+        let yaml = format!("config:\n  {legacy}\nstages: []\n");
+        assert!(
+            code_graph_incremental::rules::load_lang(&yaml, &lang).is_err(),
+            "accepted {legacy}"
+        );
+    }
+}
 
 fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Canonical>, Vec<Killed>) {
     let entries = inventory::walk(root).unwrap().into_inner();

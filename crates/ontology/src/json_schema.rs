@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 
 use crate::constants::{NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
-use crate::{Ontology, OntologyError};
+use crate::{Field, Ontology, OntologyError};
 
 impl Ontology {
     /// Returns an error if the base schema is invalid JSON or missing required sections.
@@ -78,22 +78,13 @@ impl Ontology {
     fn build_node_selector_validation(&self) -> Vec<Value> {
         self.nodes()
             .map(|node| {
-                let valid_columns: Vec<Value> = NODE_RESERVED_COLUMNS
-                    .iter()
-                    .map(|s| Value::String((*s).to_string()))
-                    .chain(node.fields.iter().map(|f| Value::String(f.name.clone())))
-                    .collect();
+                let valid_columns = field_name_allowlist(node.fields.iter());
 
-                let filterable_fields: Vec<Value> = NODE_RESERVED_COLUMNS
-                    .iter()
-                    .map(|s| Value::String((*s).to_string()))
-                    .chain(
-                        node.fields
-                            .iter()
-                            .filter(|f| f.filterable || f.name == TRAVERSAL_PATH_COLUMN)
-                            .map(|f| Value::String(f.name.clone())),
-                    )
-                    .collect();
+                let filterable_fields = field_name_allowlist(
+                    node.fields
+                        .iter()
+                        .filter(|f| f.filterable || f.name == TRAVERSAL_PATH_COLUMN),
+                );
 
                 serde_json::json!({
                     "if": { "properties": { "entity": { "const": node.name } } },
@@ -102,11 +93,11 @@ impl Ontology {
                             "columns": {
                                 "oneOf": [
                                     { "const": "*" },
-                                    { "type": "array", "items": { "enum": valid_columns }, "minItems": 1 }
+                                    { "type": "array", "items": valid_columns, "minItems": 1 }
                                 ]
                             },
                             "filters": {
-                                "propertyNames": { "enum": filterable_fields }
+                                "propertyNames": filterable_fields
                             }
                         }
                     }
@@ -114,4 +105,16 @@ impl Ontology {
             })
             .collect()
     }
+}
+
+fn field_name_allowlist<'a>(fields: impl Iterator<Item = &'a Field>) -> Value {
+    let (hidden, listed): (Vec<&Field>, Vec<&Field>) = fields.partition(|f| f.hidden);
+    let names = |fields: Vec<&'a Field>| fields.into_iter().map(|f| f.name.as_str());
+    let listed: Vec<&str> = NODE_RESERVED_COLUMNS
+        .iter()
+        .copied()
+        .chain(names(listed))
+        .collect();
+    let hidden: Vec<&str> = names(hidden).collect();
+    serde_json::json!({ "anyOf": [{ "enum": listed }, { "enum": hidden }] })
 }

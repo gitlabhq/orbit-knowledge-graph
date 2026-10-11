@@ -54,7 +54,7 @@ query object in a top-level `query` field:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `query` | Yes | The query object documented below. |
-| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+| `response_format` | No | `"llm"` (default when omitted; compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text with one table per node type, optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
 
 Pass this envelope to `orbit query` with `--file`.
 
@@ -201,7 +201,7 @@ case: `contains: "Migration"` and `contains: "MIGRATION"` return the same rows.
 The server (ClickHouse) folds ASCII letters only, so `starts_with: "ÄRG"` does
 not match `ärger`. Local queries (DuckDB) fold Unicode, so the same query does.
 `eq` and `in` compare exact values, and so does every operator on a sort-key
-column such as `traversal_path` or `branch`, so the primary key keeps pruning.
+column such as `branch`, so the primary key keeps pruning.
 `contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID
 properties. Token operators work only on text-indexed properties and reject
 other properties at compile time.

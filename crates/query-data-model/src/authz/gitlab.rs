@@ -6,6 +6,7 @@ use super::{PropertyPolicy, derive_property_policy};
 use crate::{DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipVariantId};
 
 pub trait GitLabPolicy: Send + Sync {
+    fn is_hidden(&self, property: PropertyId) -> bool;
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
     fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
     fn is_admin_only(&self, property: PropertyId) -> bool;
@@ -71,6 +72,11 @@ impl GitLabAuthzCatalog {
 }
 
 impl GitLabPolicy for GitLabAuthzCatalog {
+    fn is_hidden(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.hidden)
+    }
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         GitLabAuthzCatalog::variant_scope(self, variant)
     }

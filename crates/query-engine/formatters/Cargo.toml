@@ -19,12 +19,10 @@ serde = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
+toon-format = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
-insta = { workspace = true }
-proptest = { workspace = true }
-rand = { workspace = true }
 
 [lints]
 workspace = true

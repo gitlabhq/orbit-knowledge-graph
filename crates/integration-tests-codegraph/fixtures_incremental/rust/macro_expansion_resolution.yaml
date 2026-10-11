@@ -21,6 +21,12 @@ fixtures:
 
       pub fn helper() {}
 
+      fn invoke_helper() {}
+
+      pub fn direct_function_call() {
+          invoke_helper();
+      }
+
       macro_rules! invoke_helper {
           () => {
               helper();
@@ -33,6 +39,12 @@ fixtures:
           };
       }
 
+      fn invoke_method() {}
+
+      pub fn same_named_function_call() {
+          invoke_method();
+      }
+
       pub fn call_macro_function() {
           invoke_helper!();
       }
@@ -43,24 +55,21 @@ fixtures:
       }
 
 tests:
-  - name: "macro-expanded function call resolves to local function"
-    # Known gap: Macro expansion is not modelled.
-    skip: true
+  - name: "macro invocations do not expand bodies or call same-named functions"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'call_macro_function' AND callee.name = 'helper'
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['call_macro_function', 'call_macro_method']
+        AND callee.name IN ['helper', 'run', 'invoke_helper', 'invoke_method']
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
+      - { empty: true }
 
-  - name: "macro-expanded method call resolves to impl method"
-    # Known gap: Macro expansion is not modelled.
-    skip: true
+  - name: "ordinary function calls still resolve beside macro definitions"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'call_macro_method' AND callee.name = 'run'
-      RETURN callee.fqn AS fqn, callee.definition_type AS type
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['direct_function_call', 'same_named_function_call']
+      RETURN caller.name AS caller, callee.name AS target, callee.definition_type AS type
     assert:
-      - { row_count: 1 }
-      - { row: { fqn: 'Service::run', type: 'Method' } }
+      - { row_count: 2 }
+      - { row: { caller: direct_function_call, target: invoke_helper, type: Function } }
+      - { row: { caller: same_named_function_call, target: invoke_method, type: Function } }

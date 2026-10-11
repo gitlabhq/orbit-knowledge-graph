@@ -11,7 +11,9 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Cursor, Edge, EdgeKind, Tree, members_by_level};
+use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
+type Tree = crate::tree::Tree<Compact>;
+type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 enum WorkItem {
     Visit(u32),
@@ -31,7 +33,6 @@ enum BindingKey {
 /// Which wildcard imports an unresolved bare name may fall back to.
 #[derive(Clone, Copy)]
 enum Wildcards {
-    None,
     All,
     Callable,
 }
@@ -308,6 +309,9 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
+        if c.has(C::ImplBlock) {
+            self.link_reference(c.child(C::DefName).unwrap());
+        }
         self.register_def(c);
         for supertype in c.children_of(C::SuperType) {
             self.handle_inline_imports(supertype);
@@ -400,6 +404,12 @@ impl<'t> Fold<'t> {
                 .child(C::Dispatch)
                 .is_some_and(|dispatch| !dispatch.has(C::Object))
             {
+                for reference in member
+                    .children()
+                    .filter(|node| node.is(C::Object) || node.is(C::Dispatch))
+                {
+                    self.link_reference(reference);
+                }
                 return;
             }
             if let Some(receiver) = member
@@ -434,16 +444,12 @@ impl<'t> Fold<'t> {
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
-            let fallback = if callee
-                .sym_opt()
-                .is_some_and(|sym| !self.config.builtins.contains(&sym))
-                && !callee.has(C::Member)
-                && !callee.has(C::Ivar)
-            {
-                self.wildcards.clone()
-            } else {
-                Vec::new()
-            };
+            let fallback =
+                if callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar) {
+                    self.wildcards.clone()
+                } else {
+                    Vec::new()
+                };
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -460,11 +466,7 @@ impl<'t> Fold<'t> {
             if c.has_tag(self.tags.implicit_self) {
                 self.resolve_implicit(sym, from);
             } else {
-                let fallback = match self.config.builtins.contains(&sym) {
-                    true => Wildcards::None,
-                    false => Wildcards::All,
-                };
-                self.resolve_name(sym, from, fallback);
+                self.resolve_name(sym, from, Wildcards::All);
             }
         }
         for edge in &mut self.edges[first..] {
@@ -482,6 +484,19 @@ impl<'t> Fold<'t> {
             for edge in &mut self.edges[first..] {
                 edge.call_resolution = crate::tree::CallResolution::Reference;
             }
+        }
+    }
+
+    fn link_reference(&mut self, reference: Cursor<'t>) {
+        self.handle_inline_imports(reference);
+        if let [Value::LocalDef(target) | Value::ImportRef(target)] =
+            self.lookup_chain(reference).as_slice()
+            && *target != reference.parent().map_or(reference.index(), Cursor::index)
+        {
+            self.edges.push(Edge {
+                call_resolution: crate::tree::CallResolution::Reference,
+                ..Edge::local(reference.index(), *target, EdgeKind::Imports)
+            });
         }
     }
 
@@ -536,11 +551,16 @@ impl<'t> Fold<'t> {
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
-            if let Some(rhs) = rhs.filter(|rhs| rhs.children().next().is_none()) {
+            if let Some(rhs) = c.bare_rhs() {
                 for value in self.lookup(rhs.sym()) {
                     match value {
-                        Value::ImportRef(_) => {
+                        Value::ImportRef(node) => {
                             val = Value::Call(c.index());
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                call_resolution: crate::tree::CallResolution::Reference,
+                                ..Edge::local(self.enclosing(), node, EdgeKind::Imports)
+                            });
                             self.edges.push(Edge {
                                 site: Some(c.index()),
                                 ..Edge::local(self.enclosing(), c.index(), EdgeKind::TypeFlow)
@@ -871,7 +891,6 @@ impl<'t> Fold<'t> {
                 import.is_some_and(|i| i.has_tag(self.tags.callable))
             };
             let wild = self.wildcards.iter().filter(|n| match fallback {
-                Wildcards::None => false,
                 Wildcards::All => true,
                 Wildcards::Callable => callable_import(n),
             });
@@ -1154,6 +1173,29 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         }
     }
 
+    for edge in &mut f.edges {
+        if edge.kind == EdgeKind::Imports
+            && (tree.cursor(edge.to_node).sym() == f.wildcard
+                || tree.cursor(edge.to_node).child_sym(C::SsaHint) == Some(f.wildcard))
+            && edge
+                .site
+                .and_then(|site| tree.cursor(site).child_sym(C::Callee))
+                .is_some_and(|name| {
+                    config.builtins.contains(&name)
+                        || tree
+                            .cursor(edge.to_node)
+                            .parent()
+                            .and_then(|import| import.child_sym(C::SourcePath))
+                            .is_some_and(|source| {
+                                config.providers.iter().any(|(module, symbols)| {
+                                    *module == source && symbols.contains(&name)
+                                })
+                            })
+                })
+        {
+            edge.call_resolution = crate::tree::CallResolution::Reference;
+        }
+    }
     Ok(f.edges)
 }
 

@@ -60,11 +60,11 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
 
 fn node_ref_to_json(node: &NodeRef) -> Value {
     let mut obj = serde_json::Map::new();
-    obj.insert("id".to_string(), json!(node.id.to_string()));
-    obj.insert("entity_type".to_string(), json!(node.entity_type));
     for (key, value) in &node.properties {
         obj.insert(key.clone(), column_value_to_json(value));
     }
+    obj.insert("id".to_string(), json!(node.id.to_string()));
+    obj.insert("entity_type".to_string(), json!(node.entity_type));
     Value::Object(obj)
 }
 
@@ -149,6 +149,12 @@ mod tests {
         for node in result.rows_mut()[0].dynamic_nodes_mut() {
             node.properties
                 .insert("name".to_string(), ColumnValue::String("test".to_string()));
+            node.properties
+                .insert("id".to_string(), ColumnValue::Int64(node.id));
+            node.properties.insert(
+                "type".to_string(),
+                ColumnValue::String("Ci::Build".to_string()),
+            );
         }
 
         let json = row_to_json(&result.rows()[0], &ctx);
@@ -164,5 +170,6 @@ mod tests {
             "Project"
         );
         assert_eq!(first.get("name").unwrap().as_str().unwrap(), "test");
+        assert_eq!(first.get("type").unwrap().as_str().unwrap(), "Ci::Build");
     }
 }
