@@ -1,0 +1,10 @@
+description: NOT IN over an empty list is rejected, so no condition becomes a constant true
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN []
+    RETURN wi.weight LIMIT 10
+
+expect:
+  compile_error: "IN requires 1-100 values"

@@ -163,6 +163,8 @@ const MAX_PATH_ANCHOR_RANGE: i64 = 500;
 /// path_finding endpoint CTE. Matches the node_ids cap (500).
 pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
 
+const CONDITION_COLUMN_RULE: &str = "every condition must compare a property of a matched node or relationship with a value or another property";
+
 /// Whether a path_finding endpoint has bounded selectivity.
 /// Uses the tighter MAX_PATH_ANCHOR_RANGE cap for id_range because
 /// the BFS frontier cost is O(anchors * E^depth).
@@ -765,7 +767,16 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    fn check_filter_types(&self, input: &Input) -> Result<()> {
+    pub(crate) fn check_filter_types(&self, input: &Input) -> Result<()> {
+        if input.predicates.iter().any(|root| {
+            root.fold(
+                &|_| false,
+                &|children| children.is_empty() || children.contains(&true),
+                &|child| child,
+            )
+        }) {
+            return Err(QueryError::Validation(CONDITION_COLUMN_RULE.into()));
+        }
         for node in &input.nodes {
             for (prop, filters) in &node.filters {
                 self.check_node_filters(input, node, prop, filters)?;
@@ -802,6 +813,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         prop: &str,
         filters: &[InputFilter],
     ) -> Result<()> {
+        for filter in filters {
+            check_condition_column((&node.id, prop), filter)?;
+        }
         let Some(entity) = node.entity.as_deref() else {
             return Ok(());
         };
@@ -876,6 +890,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     ) -> Result<()> {
         let data_type = self.relationship_column_type(input, index, prop)?;
         for filter in filters {
+            check_condition_column(("", prop), filter)?;
             if filter.rhs_column.is_some() {
                 return Err(QueryError::Validation(
                     "property comparisons involving relationships are unsupported".into(),
@@ -1526,6 +1541,24 @@ fn check_condition_counts(
     Ok(())
 }
 
+fn check_condition_column(lhs: (&str, &str), filter: &InputFilter) -> Result<()> {
+    let constant = lhs.1.is_empty()
+        || filter
+            .rhs_column
+            .as_ref()
+            .is_some_and(|(alias, property)| (alias.as_str(), property.as_str()) == lhs)
+        || filter.op == Some(FilterOp::In)
+            && filter
+                .value
+                .as_ref()
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(Vec::is_empty);
+    if constant {
+        return Err(QueryError::Validation(CONDITION_COLUMN_RULE.into()));
+    }
+    Ok(())
+}
+
 fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) -> Result<()> {
     for (property, predicates) in filters {
         check_filter_entries(property, predicates)?;
@@ -1565,10 +1598,10 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
         if op == FilterOp::In
             && !value
                 .as_array()
-                .is_some_and(|values| values.len() <= MAX_IN_VALUES)
+                .is_some_and(|values| (1..=MAX_IN_VALUES).contains(&values.len()))
         {
             return Err(QueryError::Validation(format!(
-                "IN requires 0-{MAX_IN_VALUES} values"
+                "IN requires 1-{MAX_IN_VALUES} values"
             )));
         }
         if matches!(

@@ -64,6 +64,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [data_model]
             reads_state: [input]
         }
+        validate_conditions {
+            reads_env: [data_model]
+            reads_state: [input]
+        }
         validate {
             reads_env: [data_model]
             mutates: [input, pagination]
@@ -162,7 +166,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
+            phases: [validate_conditions, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -207,6 +211,11 @@ fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
         frontend::gql::parse_with_hash(&raw)?.load(ctx);
     }
     Ok(())
+}
+
+fn validate_conditions(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    validate::Validator::new(ctx.data_model()).check_filter_types(input)
 }
 
 fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {

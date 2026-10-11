@@ -1544,6 +1544,39 @@ fn native_predicate_trees_are_bounded_before_planning() {
 }
 
 #[test]
+fn native_conditions_need_a_column() {
+    use compiler::input::{BooleanExpression, InputFilter};
+    let base = compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let mut empty_group = base.clone();
+    empty_group.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
+        vec![],
+    )))];
+    let mut empty_property = base;
+    empty_property.nodes[0].filters.insert(
+        String::new(),
+        vec![InputFilter {
+            value: Some(serde_json::json!(1)),
+            ..Default::default()
+        }],
+    );
+    for input in [empty_group, empty_property] {
+        let error = compiler::compile_input(
+            input,
+            Default::default(),
+            &crate::compiler::setup::embedded_ontology(),
+            &test_ctx(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("every condition must compare a property"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn orbit_query_schema_caps_reject_with_the_json_category() {
     let cases = [
         (

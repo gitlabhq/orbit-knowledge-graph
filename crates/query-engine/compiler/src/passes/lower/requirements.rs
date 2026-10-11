@@ -12,7 +12,7 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
         Predicate::Boolean(expression) => expression.fold(
             &|leaf| predicate(leaf),
-            &|children| Expr::conjoin(children).unwrap_or_else(|| Expr::lit(true)),
+            &|children| Expr::conjoin(children).expect("validated non-empty condition group"),
             &|child| Expr::unary(Op::Not, child),
         ),
         Predicate::Property {
