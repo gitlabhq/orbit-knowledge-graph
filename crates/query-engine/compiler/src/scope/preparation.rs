@@ -75,7 +75,7 @@ pub fn prepare(
     scope.nodes.insert(target, target_proof);
     scope.requirements.push(proof);
     scope.relationships.remove(index);
-    input.relationships.remove(index);
+    input.remove_relationship(index);
     input.nodes.retain(|node| node.id != anchor);
     scope
 }
