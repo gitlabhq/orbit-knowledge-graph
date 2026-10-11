@@ -15,6 +15,10 @@
 
 .local-cli-linux-rules:
   rules:
+    # .skip-on-solo-schedule only matches schedules that set SCHEDULE_ONLY, so
+    # it misses the Renovate schedule. Drop every scheduled pipeline instead.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
     - !reference [.local-cli-release-rules, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
