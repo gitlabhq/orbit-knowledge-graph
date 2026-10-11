@@ -13,6 +13,6 @@ physical:
   clickhouse:
     planned:
       ctes:
-        exact_order: [_narrow_wi]
+        exact_order: [_filter_mr, _narrow_wi]
       expect:
-        - (Filter NOT ((e0.source_tags HAS ANY ['state:merged']) AND (wi.title = 'x')) (_))
+        - (Filter NOT (((mr.state = 'merged') AND (e0.source_tags HAS ANY ['state:merged'])) AND (wi.title = 'x')) (_))

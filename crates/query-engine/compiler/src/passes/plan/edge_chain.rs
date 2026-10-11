@@ -224,6 +224,13 @@ where
                         .filter(|(_, property)| *property != DEFAULT_PRIMARY_KEY)
                         .map(|(alias, _)| alias.to_string()),
                 );
+            } else if let PredicateTarget::Node(alias) = &condition.target
+                && nodes[alias]
+                    .filters
+                    .iter()
+                    .any(|(_, filter)| denorm_hop(filter, alias, &hops, &denormalized).is_none())
+            {
+                predicate_joins.insert(alias.clone());
             }
         }
         let local = root
@@ -838,7 +845,13 @@ fn bind_tree<M: OrbitQueryModel + ?Sized>(
                 && let Some(tag) =
                     edge_tag(&column.source, &bound, &context.hops, &context.denormalized)
             {
-                return Ok(Box::new(tag));
+                return Ok(Box::new(match resolve(column) {
+                    Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
+                        BooleanExpression::Leaf(Box::new(bound.at(column))),
+                        BooleanExpression::Leaf(Box::new(tag)),
+                    ])),
+                    Err(_) => tag,
+                }));
             }
             let column = if node { resolve(column)? } else { column };
             if let Some((alias, property)) = &bound.filter.rhs_column {

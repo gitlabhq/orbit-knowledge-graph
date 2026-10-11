@@ -1,0 +1,25 @@
+description: >-
+  With the user table joined, NOT reads u.state from the same row and tag as
+  its positive twin, so the two counts add up to all four memberships. Only
+  the mismatched user 5 matches.
+
+config:
+  extra_seed:
+    gl_edge:
+      - { traversal_path: "1/100/", source_id: 5, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:active], target_tags: [] }
+      - { traversal_path: "1/100/", source_id: 77, source_kind: User, relationship_kind: MEMBER_OF, target_id: 100, target_kind: Group, source_tags: [state:blocked], target_tags: [] }
+
+query:
+  gql: |
+    MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+    WHERE u.username IS NOT NULL AND NOT (r.source_id < 70 AND u.state = 'active')
+    RETURN g{.name}, count(u) AS members LIMIT 10
+
+expect:
+  skip_requirements: ["filter:username"]
+  groups:
+    g:
+      entity: Group
+      ids: [100]
+      rows:
+        - { entity: Group, id: 100, values: { members: 1 } }

@@ -1,4 +1,4 @@
-name: A NOT group across two nodes binds both denormalized leaves to edge tags
+name: A NOT group across two nodes reads each leaf from the source its positive form reads
 query:
   gql: |
     MATCH (mr:MergeRequest {project_id: 1000})-[:CLOSES]->(wi:WorkItem)
@@ -13,6 +13,6 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter NOT ((e0.source_tags HAS ANY ['state:merged']) AND (e0.target_tags HAS ANY ['state:closed'])) (_))
+        - (Filter NOT (((mr.state = 'merged') AND (e0.source_tags HAS ANY ['state:merged'])) AND (e0.target_tags HAS ANY ['state:closed'])) (_))
       reject:
         - (Scan Table(gl_work_item) ...)

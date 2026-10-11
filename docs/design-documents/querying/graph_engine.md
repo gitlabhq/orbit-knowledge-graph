@@ -99,6 +99,8 @@ Planning binds a tree that reads one node to that node's scan, unless every leaf
 There, a node ID reads the edge column that binds the node.
 An `=` or `IN` leaf on a non-nullable denormalized property reads the edge tags, as a positive filter on that property does.
 This applies only to a one-hop edge that has no foreign key.
+When the plan also reads that node's table, the leaf reads the node row and the tag, as a positive filter does.
+Thus `NOT` stays the exact complement of its positive form.
 A nullable property reads the node table, because a missing tag does not show a NULL value.
 Nodes and relationships that a tree reads keep their table scans: foreign-key elision and FK chains skip them, and aggregation scope proofs exclude them.
 Trees never make a node selective, so a node whose only condition is `NOT` gets no candidate or filter keys.
