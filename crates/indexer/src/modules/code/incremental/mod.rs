@@ -10,12 +10,11 @@ use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::repository::{ByteStream, cache::RepositoryCacheError};
 
-mod outcome;
 mod output;
 mod policy;
 mod run;
-pub(super) use outcome::Outcome;
-pub(super) use run::{Options, run};
+pub(super) use code_graph_incremental::index::{Options, Outcome};
+pub(super) use run::run;
 #[cfg(test)]
 mod tests;
 use policy::CodePolicy;

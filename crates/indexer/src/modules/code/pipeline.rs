@@ -519,14 +519,9 @@ impl CodeIndexer {
                 e.decision == code_graph::v2::Decision::Parse
                     && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
             }),
-            Repository::IncrementalEngine(repository) => repository
-                .files()
-                .filter(|file| {
-                    file.keeps()
-                        && code_graph_incremental::treesitter::SupportLang::from_path(&file.path)
-                            .is_some_and(code_graph_incremental::treesitter::SupportLang::has_rules)
-                })
-                .count(),
+            Repository::IncrementalEngine(repository) => {
+                code_graph_incremental::index::candidate_count(repository)
+            }
         };
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots

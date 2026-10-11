@@ -46,6 +46,7 @@ impl Scalar<'_> {
 /// Named values every row carries, such as the project and branch being
 /// indexed. `export.yaml` binds them to header columns and picks the ones
 /// that seed row ids, so ids match code-graph's for the same inputs.
+#[derive(Clone)]
 pub struct Envelope<'a> {
     values: Vec<(&'a str, Scalar<'a>)>,
 }

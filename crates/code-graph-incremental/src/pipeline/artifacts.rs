@@ -32,11 +32,11 @@ pub struct ReindexInput {
 
 /// The graph so far plus the items still moving through the per-item
 /// phases; `dirty` is every file the resolver must revisit.
-pub struct Workset<C> {
+pub struct Workset<C, L = Listed> {
     pub state: State,
     pub items: C,
     pub dirty: FxHashSet<u32>,
-    pub listed: Listed,
+    pub listed: L,
 }
 
 pub struct SourcePaths {

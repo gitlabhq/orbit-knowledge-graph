@@ -52,3 +52,15 @@ pub fn reindex<'e>(
         .then(Insert)?
         .then(Resolve)
 }
+
+pub fn index_vfs<'e>(
+    context: Context<'e>,
+    sources: crate::pipeline::vfs::Sources,
+) -> Result<Pipeline<'e, Resolved>, Error> {
+    let parse = crate::pipeline::vfs::Parse(context.parse_timeout_ms);
+    Pipeline::new(context, sources)
+        .then(Prepare)?
+        .then(Each(parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
+        .then(Insert)?
+        .then(Resolve)
+}

@@ -3929,7 +3929,6 @@ dependencies = [
  "prost",
  "query-data-model",
  "rand 0.10.2",
- "rayon",
  "regex",
  "rustc-hash 2.1.3",
  "serde",

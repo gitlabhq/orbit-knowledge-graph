@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BooleanArray, StringArray, TimestampMicrosecondArray, UInt32Array};
+use arrow::array::{ArrayRef, BooleanArray, StringArray, TimestampMicrosecondArray};
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
@@ -16,7 +16,6 @@ use super::super::arrow_converter::{
 pub(super) struct Output<'a> {
     envelope: &'a IndexerEnvelope,
     ontology: &'a Ontology,
-    directories: HashSet<i64>,
     emitted_branch: bool,
 }
 
@@ -35,7 +34,6 @@ impl<'a> Output<'a> {
         Self {
             envelope,
             ontology,
-            directories: HashSet::new(),
             emitted_branch: false,
         }
     }
@@ -43,7 +41,6 @@ impl<'a> Output<'a> {
     pub fn convert(
         &mut self,
         tables: Vec<(String, RecordBatch)>,
-        owns_file: impl Fn(&str) -> bool,
     ) -> Result<ConvertedGraphData, SinkError> {
         let mut tables: HashMap<_, _> = tables.into_iter().collect();
         let properties = build_tag_properties(self.ontology);
@@ -55,7 +52,6 @@ impl<'a> Output<'a> {
             .map(|(key, _)| format!("{key}:true"))
             .collect();
         let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
-        let mut emitted = HashSet::new();
         let mut structure = Vec::new();
         let mut entities = Vec::new();
         for kind in ["Directory", "File", "Definition", "ImportedSymbol"] {
@@ -66,7 +62,6 @@ impl<'a> Output<'a> {
             let batch = tables
                 .remove(table)
                 .ok_or_else(|| SinkError(format!("missing {table}")))?;
-            let mut selected = Vec::new();
             for row in 0..batch.num_rows() {
                 let id = id(&batch, "id", row)?;
                 let row_tags = properties
@@ -78,21 +73,11 @@ impl<'a> Output<'a> {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 tags.insert(id, row_tags);
-                let keep = match kind {
-                    "Directory" => self.directories.insert(id),
-                    "File" => owns_file(&text(&batch, "path", row)?),
-                    _ => true,
-                };
-                if keep {
-                    selected.push(row as u32);
-                    emitted.insert(id);
-                    if matches!(kind, "Directory" | "File") {
-                        structure.push((id, kind, text(&batch, "path", row)?));
-                    }
+                if matches!(kind, "Directory" | "File") {
+                    structure.push((id, kind, text(&batch, "path", row)?));
                 }
             }
-            let selected = arrow::compute::take_record_batch(&batch, &UInt32Array::from(selected))?;
-            entities.push(self.entity(kind, selected)?);
+            entities.push(self.entity(kind, batch)?);
         }
         let mut edges = BatchBuilder::new(&edge_specs(self.ontology), 0)?;
         let empty_tags = Vec::new();
@@ -152,9 +137,6 @@ impl<'a> Output<'a> {
         for row in 0..batch.num_rows() {
             let target = id(&batch, "target_id", row)?;
             let kind = text(&batch, "relationship_kind", row)?;
-            if kind == "CONTAINS" && !emitted.contains(&target) {
-                continue;
-            }
             edge(
                 id(&batch, "source_id", row)?,
                 target,

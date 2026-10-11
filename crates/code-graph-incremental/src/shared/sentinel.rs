@@ -77,6 +77,15 @@ impl Sentinel {
         Self::new("", "", u64::MAX)
     }
 
+    pub fn child(&self, label: &'static str, path: &str, budget_ms: u64) -> Self {
+        let mut child = Self::new(label, path, budget_ms);
+        child.budget = child
+            .budget
+            .min(self.budget.saturating_sub(self.started.elapsed()));
+        child.cancelled = self.cancelled.clone();
+        child
+    }
+
     pub fn with_cancellation(
         mut self,
         cancelled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,

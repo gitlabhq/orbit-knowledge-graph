@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use code_graph_incremental::sentinel::Killed;
+use crate::sentinel::Killed;
 
 #[derive(Default)]
-pub(in crate::modules::code) struct Outcome {
+pub struct Outcome {
     pub files: usize,
     pub source_bytes: u64,
     pub candidates: usize,
@@ -18,12 +18,12 @@ pub(in crate::modules::code) struct Outcome {
     pub elapsed: Duration,
 }
 
-pub(in crate::modules::code) struct ReadFailure {
+pub struct ReadFailure {
     pub path: String,
     pub detail: String,
 }
 
-pub(in crate::modules::code) struct FamilyTiming {
+pub struct FamilyTiming {
     pub language: String,
     pub files: usize,
     pub bytes: u64,

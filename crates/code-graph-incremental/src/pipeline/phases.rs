@@ -197,20 +197,20 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
 /// overruns its budget is skipped and reported; the rest continue.
 pub struct Each<P>(pub P);
 
-impl<C, P> Phase<Workset<C>> for Each<P>
+impl<C, P, L> Phase<Workset<C, L>> for Each<P>
 where
     C: IntoParallel,
     C::Item: Labelled,
     P: ItemPhase<C::Item> + Sync,
     P::Output: Send,
 {
-    type Output = Workset<Vec<P::Output>>;
+    type Output = Workset<Vec<P::Output>, L>;
 
     fn name(&self) -> Cow<'static, str> {
         self.0.name()
     }
 
-    fn run(self, context: &mut Context, input: Workset<C>) -> Result<Self::Output, Error> {
+    fn run(self, context: &mut Context, input: Workset<C, L>) -> Result<Self::Output, Error> {
         let Workset {
             state,
             items,
@@ -462,6 +462,7 @@ impl Phase<DirtyGraph> for Resolve {
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
         let DirtyGraph { mut state, dirty } = input;
         let env = context.env;
+        let resolve_budget = context.run.child("resolve", "", context.resolve_timeout_ms);
         let walk = state.project_tree(env);
         let tree_by_path: FxHashMap<&str, usize> = state
             .trees
@@ -492,7 +493,7 @@ impl Phase<DirtyGraph> for Resolve {
             &env.resolve.config,
             &walk.entrypoints,
             env,
-            &context.run,
+            &resolve_budget,
         )?;
         for rsp in &result.resolved_source_paths {
             state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
