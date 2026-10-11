@@ -124,6 +124,10 @@ description = "Run unit tests with reduced debug info (no integration targets, n
 run = "cargo nextest run -p duckdb-client --features static-fts"
 description = "Run duckdb-client tests gated on static-fts (bundled DuckDB build, slow when cold)"
 
+[tasks."lint:duckdb-static"]
+run = "cargo clippy -p duckdb-client --all-targets --features static-fts -- -D warnings"
+description = "Clippy duckdb-client with static-fts (bundled DuckDB build, slow when cold; CI runs it, the pre-push hook does not)"
+
 [tasks."test:local"]
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
@@ -192,7 +196,6 @@ description = "Check Rust formatting"
 run = [
   "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings",
   "cargo clippy -p duckdb-client --all-targets -- -D warnings",
-  "cargo clippy -p duckdb-client --all-targets --features static-fts -- -D warnings",
 ]
 description = "Run clippy lint checks"
 
@@ -205,7 +208,6 @@ run = [
   "cargo fmt",
   "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features --fix --allow-dirty -- -D warnings",
   "cargo clippy -p duckdb-client --all-targets --fix --allow-dirty -- -D warnings",
-  "cargo clippy -p duckdb-client --all-targets --features static-fts --fix --allow-dirty -- -D warnings",
   "cargo fmt",
 ]
 description = "Run clippy lint checks and fix applicable issues"

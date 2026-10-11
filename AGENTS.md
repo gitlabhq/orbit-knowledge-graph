@@ -8,6 +8,7 @@ Use mise for all tasks.
 | --- | --- |
 | Build | `mise build` |
 | Fast tests | `mise test:fast` |
+| DuckDB static-fts tests | `mise test:duckdb-static` |
 | Local tests | `mise test:local` |
 | Integration tests | `mise test:integration` |
 | Code-graph integration tests | `mise test:integration:codegraph` |
