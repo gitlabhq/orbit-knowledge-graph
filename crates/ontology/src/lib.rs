@@ -27,7 +27,6 @@ pub mod introspection;
 mod loading;
 pub mod migrations;
 pub mod pipelines;
-pub mod query_dsl;
 pub mod sql_template;
 
 pub use constants::{
@@ -2387,18 +2386,6 @@ mod tests {
         // Node without a `redaction` block yields None — caller picks the
         // default role.
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
-    }
-
-    #[test]
-    fn test_data_type_to_json_schema_type() {
-        assert_eq!(DataType::String.to_json_schema_type(), "string");
-        assert_eq!(DataType::Int.to_json_schema_type(), "integer");
-        assert_eq!(DataType::Float.to_json_schema_type(), "number");
-        assert_eq!(DataType::Bool.to_json_schema_type(), "boolean");
-        assert_eq!(DataType::Date.to_json_schema_type(), "string");
-        assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
-        assert_eq!(DataType::Enum.to_json_schema_type(), "string");
-        assert_eq!(DataType::Uuid.to_json_schema_type(), "string");
     }
 
     fn assert_redaction(
