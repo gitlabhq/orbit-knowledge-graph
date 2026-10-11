@@ -359,12 +359,26 @@ impl CodeIndexer {
                 request.project_id,
                 &request.branch,
                 request.commit_sha.as_deref(),
+                request.traversal_path.top_level_namespace_id(),
+                &self.pipeline_config,
             )
             .await
         {
-            Ok(path) => {
+            Ok(super::repository::resolver::Repository::Extracted(path)) => {
                 self.metrics.record_resolution_strategy("full_download");
                 path
+            }
+            Ok(super::repository::resolver::Repository::Virtual(repository)) => {
+                for file in repository.files() {
+                    if let orbit_utils::vfs::Decision::List(reason) = file.decision() {
+                        self.metrics
+                            .record_archive_entry_skipped(reason, 1, file.size);
+                    }
+                }
+                // TODO: pass the filtered VFS to the incremental indexing pipeline.
+                return Err(HandlerError::Processing(
+                    "incremental VFS indexing is not implemented yet".into(),
+                ));
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
                 // A commit SHA proves content exists, so an empty archive is
