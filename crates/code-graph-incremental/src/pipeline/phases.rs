@@ -1,10 +1,8 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
 use std::time::Instant;
 
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -13,12 +11,11 @@ use ontology::Ontology;
 
 use super::{
     Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
-    LinkedFile, Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths,
-    Sources, State, Workset,
+    LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, Sources,
+    State, Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
@@ -34,74 +31,61 @@ impl Phase<Sources> for Prepare {
         "prepare".into()
     }
 
-    fn run(self, context: &mut Context, sources: Sources) -> Result<Self::Output, Error> {
-        let Sources { root, entries } = sources;
-        Ok(workset(
-            context.env,
+    fn run(self, context: &mut Context, repository: Sources) -> Result<Self::Output, Error> {
+        workset(
+            context,
             State::new(context.env),
-            root,
-            entries,
+            repository,
             FxHashSet::default(),
-        ))
+        )
     }
 }
 
-/// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `root` when a worker takes them. Everything else is listed now:
-/// manifests for the resolver, and every file as a `File` row.
+fn read(repository: &orbit_utils::vfs::Vfs<()>, path: &str) -> std::io::Result<String> {
+    String::from_utf8(repository.read(path)?.to_vec())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 fn workset(
-    env: &Env,
-    state: State,
-    root: PathBuf,
-    entries: Vec<FileInventoryEntry>,
+    context: &Context,
+    mut state: State,
+    repository: Sources,
     dirty: FxHashSet<u32>,
-) -> Workset<SourcePaths> {
-    let manifest_names = &env.resolve.config.parse_files;
-    let is_manifest = |path: &str| {
-        let name = path.rsplit('/').next().unwrap_or(path);
-        manifest_names.iter().any(|pf| pf.name == name)
-    };
-    let mut listed = Listed::default();
-    let mut candidates = Vec::new();
-    for entry in entries {
-        let FileInventoryEntry {
-            path,
-            size,
-            decision,
-            label,
-        } = entry;
-        let manifest = decision != Decision::ListOnly && is_manifest(&path);
-        let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        let content = manifest
-            .then(|| std::fs::read_to_string(root.join(&path)).ok())
-            .flatten();
-        let reason = match (decision, label.skip) {
-            (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
-            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
-            _ => FileReason::None,
-        };
-        if let Some(content) = content {
-            listed.manifests.push(SourceFile {
-                path: path.clone(),
+) -> Result<Workset<SourcePaths>, Error> {
+    let paths: Vec<_> = crate::index::candidates(&repository, context.max_files)
+        .filter(|file| {
+            SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
+        })
+        .map(|file| file.path.to_string())
+        .collect();
+    for file in repository.files().filter(|file| file.keeps()) {
+        context.run.check()?;
+        let path = file.path.as_ref();
+        if context
+            .env
+            .resolve
+            .config
+            .parse_files
+            .iter()
+            .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
+            && let Ok(content) = read(&repository, path)
+        {
+            state.configs.retain(|file| file.path != path);
+            state.configs.push(SourceFile {
+                path: path.into(),
                 content,
             });
         }
-        if decision == Decision::Parse && in_family {
-            listed.candidates.insert(path.clone(), size);
-            candidates.push(path);
-        } else {
-            listed.files.push((path, size, reason));
-        }
     }
-    Workset {
+    Ok(Workset {
         state,
         items: SourcePaths {
-            root,
-            paths: candidates,
+            repository: repository.clone(),
+            paths,
         },
         dirty,
-        listed,
-    }
+        repository,
+    })
 }
 
 /// Incremental index: removed and modified files leave the graph, edges and
@@ -117,23 +101,19 @@ impl Phase<ReindexInput> for Remap {
     }
 
     fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
-        let ReindexInput {
-            mut state,
-            root,
-            changes,
-        } = input;
+        let ReindexInput { mut state, changes } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
         let dirty_labels: FxHashSet<&str> = changes
             .removed
             .iter()
             .map(String::as_str)
-            .chain(changes.changed.iter().map(|f| f.path.as_str()))
+            .chain(changes.changed.files().map(|f| f.path.as_ref()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        Ok(workset(context.env, state, root, changes.changed, dirty))
+        workset(context, state, changes.changed, dirty)
     }
 }
 
@@ -197,25 +177,25 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
 /// overruns its budget is skipped and reported; the rest continue.
 pub struct Each<P>(pub P);
 
-impl<C, P, L> Phase<Workset<C, L>> for Each<P>
+impl<C, P> Phase<Workset<C>> for Each<P>
 where
     C: IntoParallel,
     C::Item: Labelled,
     P: ItemPhase<C::Item> + Sync,
     P::Output: Send,
 {
-    type Output = Workset<Vec<P::Output>, L>;
+    type Output = Workset<Vec<P::Output>>;
 
     fn name(&self) -> Cow<'static, str> {
         self.0.name()
     }
 
-    fn run(self, context: &mut Context, input: Workset<C, L>) -> Result<Self::Output, Error> {
+    fn run(self, context: &mut Context, input: Workset<C>) -> Result<Self::Output, Error> {
         let Workset {
             state,
             items,
             dirty,
-            listed,
+            repository,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
         let (outcomes, timings): (Vec<_>, Vec<_>) = items
@@ -248,7 +228,7 @@ where
             state,
             items,
             dirty,
-            listed,
+            repository,
         })
     }
 }
@@ -271,7 +251,7 @@ impl IntoParallel for SourcePaths {
     type Item = SourceFile;
     fn into_parallel(self) -> impl ParallelIterator<Item = SourceFile> {
         self.paths.into_par_iter().filter_map(move |path| {
-            let content = std::fs::read_to_string(self.root.join(&path)).ok()?;
+            let content = read(&self.repository, &path).ok()?;
             Some(SourceFile { path, content })
         })
     }
@@ -287,9 +267,11 @@ impl ItemPhase<SourceFile> for Parse {
         "parse".into()
     }
 
-    fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
+    fn run(&self, env: &Env, run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
-        treesitter::parse(&file.content, grammar, &env.lang, &file.path).map(Parsed)
+        let budget = run.child("tree-sitter", &file.path, env.limits.file_parse_ms);
+        treesitter::parse_with_sentinel(&file.content, grammar, &env.lang, &file.path, &budget)
+            .map(Parsed)
     }
 }
 
@@ -399,7 +381,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             mut state,
             items,
             mut dirty,
-            listed,
+            repository,
         } = input;
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
@@ -411,37 +393,54 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 e
             }));
         }
-        let Listed {
-            manifests,
-            files,
-            mut candidates,
-        } = listed;
-        for manifest in manifests {
-            state.configs.retain(|c| c.path != manifest.path);
-            state.configs.push(manifest);
-        }
         let lang = &context.env.lang;
-        for (path, size, reason) in files {
+        let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.clone()).collect();
+        let candidates: FxHashSet<_> = crate::index::candidates(&repository, context.max_files)
+            .filter(|file| {
+                SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
+            })
+            .map(|file| file.path.as_ref())
+            .collect();
+        let skipped: FxHashMap<_, _> = context
+            .report
+            .skipped
+            .iter()
+            .map(|file| (file.path.as_str(), file.label))
+            .collect();
+        let manifests: FxHashSet<_> = state
+            .configs
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        for file in repository
+            .files()
+            .filter(|file| !parsed.contains(file.path.as_ref()))
+        {
+            let path = file.path.as_ref();
+            let missing_manifest = file.keeps()
+                && !manifests.contains(path)
+                && context
+                    .env
+                    .resolve
+                    .config
+                    .parse_files
+                    .iter()
+                    .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()));
+            let reason = match file.decision() {
+                orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
+                _ if skipped.contains_key(path) => match skipped[path] {
+                    "tree-sitter" => "skip_timeout_parse",
+                    "rewrite" => "skip_timeout_walk",
+                    "link" => "skip_timeout_ssa",
+                    _ => "skip_timeout_sentinel",
+                }
+                .into(),
+                _ if candidates.contains(path) || missing_manifest => "fault_file_read".into(),
+                _ => String::new(),
+            };
             state
                 .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()).into());
-        }
-        for tree in &state.trees {
-            candidates.remove(&tree.label);
-        }
-        for killed in &context.report.skipped {
-            if let Some(size) = candidates.remove(&killed.path) {
-                let reason = crate::inventory::timeout(killed.label);
-                state
-                    .trees
-                    .push(Tree::unparsed(lang, &killed.path, size, &reason.to_string()).into());
-            }
-        }
-        for (path, size) in candidates {
-            let reason = FileReason::Fault(FileFault::FileRead);
-            state
-                .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()).into());
+                .push(Tree::unparsed(lang, path, file.size, &reason).into());
         }
         Ok(DirtyGraph { state, dirty })
     }

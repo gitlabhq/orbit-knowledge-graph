@@ -6,7 +6,6 @@ pub mod export;
 pub mod file_tree;
 pub mod index;
 pub mod intern;
-pub mod inventory;
 pub mod linker;
 pub mod pipeline;
 pub mod resolver;

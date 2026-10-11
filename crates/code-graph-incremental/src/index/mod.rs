@@ -39,6 +39,20 @@ fn is_candidate(file: &orbit_utils::vfs::File<'_, ()>) -> bool {
     file.keeps() && SupportLang::from_path(&file.path).is_some_and(SupportLang::has_rules)
 }
 
+pub(crate) fn candidates(
+    repository: &orbit_utils::vfs::Vfs<()>,
+    max_files: usize,
+) -> impl Iterator<Item = &orbit_utils::vfs::File<'static, ()>> {
+    repository
+        .files()
+        .filter(|file| is_candidate(file))
+        .take(if max_files == 0 {
+            usize::MAX
+        } else {
+            max_files
+        })
+}
+
 pub fn run<E: std::fmt::Display>(
     repository: Arc<orbit_utils::vfs::Vfs<()>>,
     options: Options,
@@ -47,18 +61,9 @@ pub fn run<E: std::fmt::Display>(
     mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
 ) -> Result<Outcome, Error> {
     let started = Instant::now();
-    let selected: Arc<FxHashSet<_>> = Arc::new(
-        repository
-            .files()
-            .filter(|file| is_candidate(file))
-            .take(if options.max_files == 0 {
-                usize::MAX
-            } else {
-                options.max_files
-            })
-            .map(|file| file.path.to_string())
-            .collect(),
-    );
+    let selected: FxHashSet<_> = candidates(&repository, options.max_files)
+        .map(|file| file.path.to_string())
+        .collect();
     let mut families = BTreeMap::new();
     for path in selected.iter() {
         if let Some(language) = SupportLang::from_path(path) {
@@ -98,6 +103,7 @@ pub fn run<E: std::fmt::Display>(
         run.check()?;
         let family_started = Instant::now();
         let limits = Limits {
+            file_parse_ms: millis(options.parse_timeout),
             file_rewrite_ms: millis(options.rewrite_timeout),
             file_link_ms: millis(options.link_timeout),
             file_resolve_ms: millis(options.resolve_timeout),
@@ -106,17 +112,9 @@ pub fn run<E: std::fmt::Display>(
         let env = Env::with_limits(*language, limits)?;
         let mut context = Context::new(&env);
         context.run = run.clone();
-        context.parse_timeout_ms = millis(options.parse_timeout);
+        context.max_files = options.max_files;
         context.resolve_timeout_ms = millis(options.cross_file_timeout);
-        let pipeline = pool.install(|| {
-            templates::index_vfs(
-                context,
-                crate::pipeline::vfs::Sources {
-                    repository: repository.clone(),
-                    selected: selected.clone(),
-                },
-            )
-        })?;
+        let pipeline = pool.install(|| templates::index(context, repository.clone()))?;
         result
             .skipped
             .extend(pipeline.context().report.skipped.iter().cloned());

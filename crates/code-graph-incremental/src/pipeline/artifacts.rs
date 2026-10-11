@@ -1,57 +1,40 @@
 //! What flows through the pipeline. Each artifact is a checkpoint: holding
 //! one says which phases may follow.
 
-use std::path::PathBuf;
+use std::sync::Arc;
 
-use crate::inventory::FileReason;
 use arrow::record_batch::RecordBatch;
-use orbit_utils::fs_walk::FileInventoryEntry;
-use rustc_hash::{FxHashMap, FxHashSet};
+use orbit_utils::vfs::Vfs;
+use rustc_hash::FxHashSet;
 
 use super::{SourceFile, State};
 use crate::tree::{Compact, Edge, Tree};
 
-/// A repository's classified files; parse entries are read from `root` as
-/// workers take them.
-pub struct Sources {
-    pub root: PathBuf,
-    pub entries: Vec<FileInventoryEntry>,
-}
+pub type Sources = Arc<Vfs<()>>;
 
 /// Files changed since the graph was built, already classified.
 pub struct Changes {
-    pub changed: Vec<FileInventoryEntry>,
+    pub changed: Sources,
     pub removed: Vec<String>,
 }
 
 pub struct ReindexInput {
     pub state: State,
-    pub root: PathBuf,
     pub changes: Changes,
 }
 
 /// The graph so far plus the items still moving through the per-item
 /// phases; `dirty` is every file the resolver must revisit.
-pub struct Workset<C, L = Listed> {
+pub struct Workset<C> {
     pub state: State,
     pub items: C,
     pub dirty: FxHashSet<u32>,
-    pub listed: L,
+    pub repository: Sources,
 }
 
 pub struct SourcePaths {
-    pub root: PathBuf,
+    pub repository: Sources,
     pub paths: Vec<String>,
-}
-
-/// What the inventory held besides parseable code: manifests for the
-/// resolver, every other file with the reason it was not parsed, and each
-/// parse candidate's size so a killed or unreadable one still gets a row.
-#[derive(Default)]
-pub struct Listed {
-    pub(super) manifests: Vec<SourceFile>,
-    pub(super) files: Vec<(String, u64, FileReason)>,
-    pub(super) candidates: FxHashMap<String, u64>,
 }
 
 /// The tree-sitter tree, source attached.

@@ -12,7 +12,6 @@
 mod artifacts;
 mod phases;
 mod state;
-pub mod vfs;
 
 pub use artifacts::*;
 pub use phases::*;
@@ -104,7 +103,7 @@ pub struct Context<'e> {
     pub env: &'e Env,
     pub run: Sentinel,
     pub report: Report,
-    pub parse_timeout_ms: u64,
+    pub max_files: usize,
     pub resolve_timeout_ms: u64,
     observers: Vec<Box<dyn Observer>>,
 }
@@ -115,7 +114,7 @@ impl<'e> Context<'e> {
             env,
             run: Sentinel::new("run", "", env.limits.total_ms),
             report: Report::default(),
-            parse_timeout_ms: u64::MAX,
+            max_files: 0,
             resolve_timeout_ms: u64::MAX,
             observers: Vec::new(),
         }
