@@ -14,6 +14,7 @@ use crate::input::*;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{BTreeMap, HashMap};
 
+use super::plan::edge_chain::Hop;
 use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
@@ -185,6 +186,21 @@ impl EmitOutput {
     }
 }
 
+fn multi_type_edge_types(node: &Node, hops: &[Hop]) -> Vec<Expr> {
+    let Node::Query(query) = node else {
+        return Vec::new();
+    };
+    hops.iter()
+        .enumerate()
+        .filter(|(_, hop)| {
+            hop.max_hops == 1
+                && (hop.rel_types.len() > 1
+                    || crate::passes::normalize::is_wildcard(&hop.rel_types))
+        })
+        .filter_map(|(index, hop)| traversal::edge_type(query, hop, index))
+        .collect()
+}
+
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let mut node = match plan {
@@ -294,7 +310,9 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             })
             .collect::<BTreeMap<_, _>>()
             .into_values()
-            .map(|identity| OrderExpr::asc(identity.clone()))
+            .cloned()
+            .chain(multi_type_edge_types(&node, &plan.hops))
+            .map(OrderExpr::asc)
             .collect(),
     };
     Ok(LoweredQuery {

@@ -1,4 +1,4 @@
-description: RETURN p, type(r) in path finding is accepted; each step's edge type is in the path edges
+description: RETURN p, type(r) on a one-hop shortest path is accepted; the path shows the edge type
 
 query:
   json: |
@@ -6,17 +6,16 @@ query:
       "query_type": "path_finding",
       "nodes": [
         {"id": "start", "entity": "User", "node_ids": [1]},
-        {"id": "end", "entity": "Project", "node_ids": [1000]}
+        {"id": "end", "entity": "Group", "node_ids": [100]}
       ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-               "rel_types": ["MEMBER_OF", "CONTAINS"]}
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
+               "rel_types": ["MEMBER_OF"]}
     }
   gql: |
-    MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1000}) RETURN p, type(r)
+    MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) RETURN p, type(r)
 
 expect:
   referential_integrity: true
   path_count: 1
   path_edges:
-    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 },
-       { type: CONTAINS, to: Project, to_id: 1000 }]
+    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }]

@@ -17,6 +17,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
+        variable_length: HashSet::new(),
         path: None,
         neighbor: None,
         aliases: HashMap::new(),
@@ -63,6 +64,7 @@ fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
 struct Lowering {
     input: Input,
     edges: HashMap<String, usize>,
+    variable_length: HashSet<String>,
     path: Option<String>,
     neighbor: Option<String>,
     aliases: HashMap<String, Option<PropertyRef>>,
@@ -174,6 +176,10 @@ impl Lowering {
                 ),
             ));
         }
+        let variable = relationship
+            .variable
+            .as_ref()
+            .map(|alias| alias.value.clone());
         if let Some(alias) = relationship.variable
             && (self.input.nodes.iter().any(|n| n.id == alias.value)
                 || self.path.as_ref() == Some(&alias.value)
@@ -193,6 +199,11 @@ impl Lowering {
         }
         if let Some(range) = relationship.range {
             edge.hops = hop_range(range)?;
+        }
+        if edge.hops.max > 1
+            && let Some(variable) = variable
+        {
+            self.variable_length.insert(variable);
         }
         if let Some(map) = relationship.properties {
             if edge.hops.max > 1 && !map.entries.is_empty() {
@@ -227,6 +238,19 @@ impl Lowering {
                 "type() takes a relationship variable, such as r in -[r]->, but {name} is {kind}"
             ),
         ))
+    }
+
+    fn one_hop(&self, span: pest::Span<'_>, variable: &Name<'_>) -> Result<()> {
+        let name = &variable.value;
+        if self.variable_length.contains(name) {
+            return Err(invalid(
+                span,
+                &format!(
+                    "{name} has a variable length and binds a list; type({name}) and RETURN {name} need a one-hop relationship, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
+                ),
+            ));
+        }
+        Ok(())
     }
 
     fn classify(&mut self) -> Result<()> {
@@ -331,7 +355,7 @@ fn hop_range(range: Range<'_>) -> Result<HopRange> {
     Ok(HopRange { min, max })
 }
 
-pub(super) fn is_type_shaped(name: &str) -> bool {
+fn is_type_shaped(name: &str) -> bool {
     name.len() > 1
         && name.starts_with(|c: char| c.is_ascii_uppercase())
         && name

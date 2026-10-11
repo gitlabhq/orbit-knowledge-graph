@@ -196,9 +196,14 @@ The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
 `type(r) = 'T'` and `type(r) IN [...]` on a one-hop relationship variable lower to the relationship's types, the same as `-[r:T]->`, so the relationship validation applies unchanged.
-Types declared in both places intersect, and an empty intersection rejects. Other operators, a node or path argument, and a variable-length relationship reject.
-`RETURN type(r)` and `RETURN r` are accepted in traversal, path finding, and neighbors, and the edges table lists each edge's type. In a traversal, each one-hop item also adds a `gql` table column, named by its alias or expression. Its hop stays in the plan even when a foreign key could answer it.
-`ORDER BY type(r)`, or by its alias, sorts a traversal by the edge type column of a one-hop relationship. Aggregation rejects `type(r)` and `r` as group keys and as sort keys.
+Types declared in both places intersect, and an empty intersection rejects. Other operators, a node or path argument, and a lowercase type name reject.
+A variable-length relationship variable binds a list. In every query type, `type(r)` and `RETURN r` on it reject with one message that points to the typed pattern form.
+`RETURN type(r)` and `RETURN r` on a one-hop relationship are accepted in traversal, path finding, and neighbors, and the edges table lists each edge's type.
+In a traversal, each item also adds a `gql` table column, named by its alias or by the expression as written. When a traversal returns such an item, the columns follow `RETURN` order.
+A returned relationship that the planner answers from a foreign key keeps the foreign-key plan and emits its edge columns from that key.
+Neighbors and path finding print one path column that shows each edge type, so they reject an alias on these items.
+`ORDER BY type(r)`, or by its alias, sorts a traversal by the edge type of a one-hop relationship. Keyset pages also break ties on the edge type when a hop allows more than one type.
+Aggregation rejects `type(r)` and `r` as group keys and as sort keys.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
 
 ID forms preserve the compiler's distinct selector and filter representations:

@@ -284,9 +284,14 @@ pub struct Query {
 
 impl Query {
     pub fn selects_alias(&self, alias: &str) -> bool {
+        self.selected(alias).is_some()
+    }
+
+    pub fn selected(&self, alias: &str) -> Option<&Expr> {
         self.select
             .iter()
-            .any(|s| s.alias.as_deref() == Some(alias))
+            .find(|s| s.alias.as_deref() == Some(alias))
+            .map(|s| &s.expr)
     }
 }
 

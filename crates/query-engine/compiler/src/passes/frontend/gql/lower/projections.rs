@@ -130,6 +130,8 @@ impl Lowering {
                             node: variable,
                             alias,
                         });
+                    } else {
+                        self.order_column(variable);
                     }
                 }
                 Expression::Property(property) => {
@@ -157,6 +159,7 @@ impl Lowering {
                             property: property.clone(),
                         };
                         self.alias(span, alias, Some(target))?;
+                        self.order_column(node.clone());
                         let input_node = self
                             .input
                             .nodes
@@ -201,29 +204,65 @@ impl Lowering {
                 }
                 Expression::RelationshipType { span, variable } => {
                     let relationship = self.relationship_index(span, &variable)?;
+                    self.one_hop(span, &variable)?;
                     if aggregate {
                         return Err(invalid(
                             span,
                             "grouping by relationship type is not supported yet",
                         ));
                     }
-                    if self.input.query_type == QueryType::Traversal {
-                        self.one_hop(span, relationship)?;
-                        let name = alias
-                            .clone()
-                            .unwrap_or_else(|| format!("type({})", variable.value));
-                        self.relationship_column(
-                            span,
-                            name,
-                            relationship,
-                            RelationshipColumnKind::Type,
-                        )?;
-                    }
-                    self.alias(span, alias, None)?;
+                    self.relationship_item(
+                        span,
+                        alias,
+                        span.as_str().to_owned(),
+                        relationship,
+                        RelationshipColumnKind::Type,
+                    )?;
                 }
             }
         }
+        if self.input.relationship_return.columns.is_empty() {
+            self.input.relationship_return.column_order.clear();
+        }
         Ok(())
+    }
+
+    fn relationship_projection(
+        &mut self,
+        span: pest::Span<'_>,
+        variable: Name<'_>,
+        all: bool,
+        alias: Option<String>,
+        aggregate: bool,
+        selected: &mut HashSet<String>,
+    ) -> Result<()> {
+        if aggregate {
+            return Err(invalid(
+                span,
+                "grouping by a relationship variable is not supported yet",
+            ));
+        }
+        if all {
+            return Err(invalid(
+                span,
+                &format!(
+                    "properties({}) is not supported; relationships have no properties",
+                    variable.value
+                ),
+            ));
+        }
+        self.one_hop(span, &variable)?;
+        if !selected.insert(variable.value.clone()) {
+            return Err(invalid(span, "duplicate graph projection"));
+        }
+        let relationship = self.edges[&variable.value];
+        self.relationship_item(
+            span,
+            alias,
+            variable.value,
+            relationship,
+            RelationshipColumnKind::Relationship,
+        )
     }
 
     fn graph_projection(
@@ -235,17 +274,13 @@ impl Lowering {
         aggregate: bool,
         selected: &mut HashSet<String>,
     ) -> Result<()> {
+        if self.edges.contains_key(&variable.value) {
+            return self.relationship_projection(span, variable, all, alias, aggregate, selected);
+        }
         let variable = variable.value;
         let dynamic =
             self.path.as_ref() == Some(&variable) || self.neighbor.as_ref() == Some(&variable);
-        let relationship = self.edges.contains_key(&variable);
-        if dynamic || relationship || (self.input.query_type == QueryType::Neighbors && all) {
-            if aggregate && relationship {
-                return Err(invalid(
-                    span,
-                    "grouping by a relationship variable is not supported yet",
-                ));
-            }
+        if dynamic || (self.input.query_type == QueryType::Neighbors && all) {
             if aggregate {
                 return Err(invalid(span, "aggregation cannot return the path variable"));
             }
@@ -258,19 +293,8 @@ impl Lowering {
             if all {
                 self.input.options.dynamic_columns = DynamicColumnMode::All;
             }
-            if !selected.insert(variable.clone()) {
+            if !selected.insert(variable) {
                 return Err(invalid(span, "duplicate graph projection"));
-            }
-            if relationship && self.input.query_type == QueryType::Traversal {
-                let index = self.edges[&variable];
-                if self.input.relationships[index].hops.max == 1 {
-                    self.relationship_column(
-                        span,
-                        variable,
-                        index,
-                        RelationshipColumnKind::Relationship,
-                    )?;
-                }
             }
             return Ok(());
         }
@@ -310,39 +334,51 @@ impl Lowering {
             });
         } else {
             self.alias(span, alias, None)?;
+            self.order_column(variable);
         }
         Ok(())
     }
 
-    fn relationship_column(
+    fn relationship_item(
         &mut self,
         span: pest::Span<'_>,
-        name: String,
+        alias: Option<String>,
+        written: String,
         relationship: usize,
         kind: RelationshipColumnKind,
     ) -> Result<()> {
-        let columns = &mut self.input.options.relationship_columns;
+        if self.input.query_type != QueryType::Traversal {
+            return match alias {
+                Some(alias) => Err(invalid(
+                    span,
+                    &format!(
+                        "{alias}: neighbors and path finding return one path column that shows each edge type, so a relationship item cannot be renamed"
+                    ),
+                )),
+                None => Ok(()),
+            };
+        }
+        let name = alias.clone().unwrap_or(written);
+        let columns = &mut self.input.relationship_return.columns;
         if columns.iter().any(|column| column.name == name)
             || self.input.nodes.iter().any(|node| node.id == name)
         {
             return Err(invalid(span, "duplicate RETURN column name"));
         }
         columns.push(RelationshipColumn {
-            name,
+            name: name.clone(),
             relationship,
             kind,
         });
-        Ok(())
+        self.order_column(name);
+        self.alias(span, alias, None)
     }
 
-    fn one_hop(&self, span: pest::Span<'_>, relationship: usize) -> Result<()> {
-        if self.input.relationships[relationship].hops.max != 1 {
-            return Err(invalid(
-                span,
-                "type(r) needs a one-hop relationship here; a variable-length relationship binds a list",
-            ));
+    fn order_column(&mut self, name: String) {
+        let order = &mut self.input.relationship_return.column_order;
+        if !order.contains(&name) {
+            order.push(name);
         }
-        Ok(())
     }
 
     fn alias(
@@ -387,7 +423,10 @@ impl Lowering {
                     SortKey::RelationshipType(name) => {
                         return Err(invalid(
                             name.span,
-                            "ORDER BY type(r) is not supported in aggregations yet",
+                            &format!(
+                                "ORDER BY type({}) is not supported in aggregations yet",
+                                name.value
+                            ),
                         ));
                     }
                 };
@@ -401,7 +440,7 @@ impl Lowering {
                     SortKey::Property(key) => key.into(),
                     SortKey::RelationshipType(name) => {
                         let relationship = self.relationship_index(name.span, &name)?;
-                        self.one_hop(name.span, relationship)?;
+                        self.one_hop(name.span, &name)?;
                         self.order_by_relationship(relationship, sort.direction);
                         return Ok(());
                     }
@@ -445,15 +484,15 @@ impl Lowering {
 
     fn type_column(&self, name: &str) -> Option<usize> {
         self.input
-            .options
-            .relationship_columns
+            .relationship_return
+            .columns
             .iter()
             .find(|column| column.kind == RelationshipColumnKind::Type && column.name == name)
             .map(|column| column.relationship)
     }
 
     fn order_by_relationship(&mut self, relationship: usize, direction: OrderDirection) {
-        self.input.relationship_order = Some(RelationshipOrder {
+        self.input.relationship_return.sort = Some(RelationshipOrder {
             relationship,
             direction,
         });

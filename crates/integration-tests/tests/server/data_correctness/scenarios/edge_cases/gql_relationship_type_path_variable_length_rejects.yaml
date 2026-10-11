@@ -1,0 +1,8 @@
+description: RETURN p, type(r) on a variable-length shortest path rejects because r binds a list
+
+query:
+  gql: |
+    MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1000}) RETURN p, type(r)
+
+expect:
+  compile_error: "r has a variable length and binds a list"

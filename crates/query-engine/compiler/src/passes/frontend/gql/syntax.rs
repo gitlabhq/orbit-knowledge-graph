@@ -6,7 +6,6 @@ use pest_consume::{Error, match_nodes};
 use serde_json::{Number, Value};
 
 use super::ast::*;
-use super::lower::is_type_shaped;
 use super::{QueryParser, Rule};
 use crate::input::{Direction, FilterOp, OrderDirection, TruncateUnit};
 
@@ -267,34 +266,12 @@ impl QueryParser {
             [RelationshipType(variable), operator(op), PropertyExpression(_)] => (variable, op, None),
             [RelationshipType(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
         );
-        let names = match (op, value) {
-            (FilterOp::Eq, Some(name @ Value::String(_))) => vec![name],
-            (FilterOp::In, Some(Value::Array(names))) => names,
-            _ => Vec::new(),
-        };
-        let types: Option<Vec<String>> = names
-            .into_iter()
-            .map(|name| match name {
-                Value::String(name)
-                    if is_type_shaped(&name)
-                        && crate::passes::validate::validate_identifier(&name).is_ok() =>
-                {
-                    Some(name)
-                }
-                _ => None,
-            })
-            .collect();
-        match types {
-            Some(types) if !types.is_empty() => Ok(vec![Predicate::RelationshipType {
-                span,
-                variable,
-                types,
-            }]),
-            _ => Err(error_at(
-                span,
-                "type(r) supports = or IN with relationship type names, such as type(r) = 'AUTHORED' or type(r) IN ['AUTHORED', 'MENTIONS']",
-            )),
-        }
+        Ok(vec![Predicate::RelationshipType {
+            span,
+            variable,
+            op,
+            value,
+        }])
     }
 
     fn RelationshipType(input: Node) -> Result<Name> {

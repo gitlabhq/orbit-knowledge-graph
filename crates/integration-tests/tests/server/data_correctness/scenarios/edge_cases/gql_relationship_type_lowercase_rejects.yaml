@@ -1,0 +1,9 @@
+description: A lowercase relationship type name rejects, says type names are uppercase and case-sensitive, and does not echo the value
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) = 'private_query_literal' RETURN u LIMIT 10
+
+expect:
+  compile_error: "relationship type names are uppercase and case-sensitive"
+  compile_error_not_contains: ["private_query_literal"]

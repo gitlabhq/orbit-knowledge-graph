@@ -7,6 +7,8 @@ use serde_json::Value;
 use super::super::ast::{Comparison, MapEntry, Name, Predicate};
 use super::super::errors::invalid;
 use super::Lowering;
+use super::is_type_shaped;
+use crate::passes::validate::validate_identifier;
 
 impl Lowering {
     pub(super) fn map_filters(
@@ -31,8 +33,9 @@ impl Lowering {
             Predicate::RelationshipType {
                 span,
                 variable,
-                types,
-            } => self.relationship_type(span, &variable, types),
+                op,
+                value,
+            } => self.relationship_type(span, &variable, op, value),
         }
     }
 
@@ -40,16 +43,13 @@ impl Lowering {
         &mut self,
         span: pest::Span<'_>,
         variable: &Name<'_>,
-        types: Vec<String>,
+        op: FilterOp,
+        value: Option<Value>,
     ) -> Result<()> {
+        let types = relationship_type_names(span, &variable.value, op, value)?;
         let index = self.relationship_index(span, variable)?;
+        self.one_hop(span, variable)?;
         let edge = &mut self.input.relationships[index];
-        if edge.hops.max != 1 {
-            return Err(invalid(
-                span,
-                "a variable-length relationship binds a list; list its types in the pattern, such as -[r:CLOSES|MENTIONS*1..3]->",
-            ));
-        }
         if edge.types == ["*"] {
             edge.types = types;
         } else {
@@ -217,4 +217,40 @@ impl Lowering {
         }
         Ok(())
     }
+}
+
+fn relationship_type_names(
+    span: pest::Span<'_>,
+    name: &str,
+    op: FilterOp,
+    value: Option<Value>,
+) -> Result<Vec<String>> {
+    let unsupported = || {
+        invalid(
+            span,
+            &format!(
+                "type({name}) supports = or IN with relationship type names, such as type({name}) = 'CLOSES' or type({name}) IN ['CLOSES', 'MENTIONS']"
+            ),
+        )
+    };
+    let values = match (op, value) {
+        (FilterOp::Eq, Some(value @ Value::String(_))) => vec![value],
+        (FilterOp::In, Some(Value::Array(values))) if !values.is_empty() => values,
+        _ => return Err(unsupported()),
+    };
+    values
+        .into_iter()
+        .map(|value| match value {
+            Value::String(kind) if is_type_shaped(&kind) && validate_identifier(&kind).is_ok() => {
+                Ok(kind)
+            }
+            Value::String(kind) if validate_identifier(&kind).is_ok() => Err(invalid(
+                span,
+                &format!(
+                    "relationship type names are uppercase and case-sensitive, such as type({name}) = 'CLOSES'"
+                ),
+            )),
+            _ => Err(unsupported()),
+        })
+        .collect()
 }

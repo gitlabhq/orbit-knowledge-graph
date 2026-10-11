@@ -5,4 +5,4 @@ query:
     MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, g ORDER BY type(r) LIMIT 10
 
 expect:
-  compile_error: "type(r) needs a one-hop relationship here; a variable-length relationship binds a list"
+  compile_error: "r has a variable length and binds a list"

@@ -29,7 +29,8 @@ Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints the result rows as a cypher-
 ```
 
 - Traversal columns are the query's node aliases, in pattern order. Each row is one authorized result row.
-- A traversal that returns `type(r)` or a one-hop `r` adds one column per item after the node columns, named by the alias or the expression. `type(r)` prints the edge type as a quoted string, such as `"CLOSES"`, and `r` prints it as `[:CLOSES]`.
+- A traversal that returns `type(r)` or `r` adds one column per item, named by the alias or by the expression as written. `type(r)` prints the edge type as a quoted string, such as `"CLOSES"`, and `r` prints it as `[:CLOSES]`.
+- When a traversal returns such an item, the columns follow `RETURN` order. A node column takes the position of the first item that names the node. Nodes that no item names follow, in pattern order.
 - Aggregation columns are the group and metric output names. Node groups print as node literals.
 - Neighbors and path finding print one `path` column, such as `(:User {id: 1})-[:MEMBER_OF]->(:Group {id: 22})`. Neighbor direction follows the stored edge.
 - Values use cypher-shell literals: quoted strings, `TRUE`, `FALSE`, and `NULL`. Long text uses the shared truncation limits and adds a `<key>_len` property with the original length.
@@ -37,7 +38,7 @@ Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints the result rows as a cypher-
 - The footer reports the row count. A paginated page adds `more available` and the next cursor.
 - A duplicate path or neighbor prints once, as in the raw format. Traversal and aggregation keep every row.
 
-The formatter reads the authorized, hydrated `PipelineOutput` rows. It knows only the returned relationship items from the `RETURN` expressions, so a returned property prints inside its node. Only `ExecuteQuery` renders GQL results; it rejects unknown format values. Schema queries return TOON text for `gql`, as they do for `llm`.
+The formatter reads the authorized, hydrated `PipelineOutput` rows. From the `RETURN` expressions it knows only the relationship items and the column order, so a returned property prints inside its node. Only `ExecuteQuery` renders GQL results; it rejects unknown format values. Schema queries return TOON text for `gql`, as they do for `llm`.
 
 ## Consequences
 

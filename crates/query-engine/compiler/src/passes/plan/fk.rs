@@ -203,7 +203,7 @@ pub(super) fn chain<M: QueryDataModel + ?Sized>(
     Ok(plan)
 }
 
-fn edge_outputs(
+pub(super) fn edge_outputs(
     hop: &Hop,
     index: usize,
     nodes: &HashMap<String, NodePlan>,

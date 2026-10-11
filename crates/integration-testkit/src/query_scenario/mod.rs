@@ -286,7 +286,9 @@ async fn run_frontend(
     }
 
     let output = execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
-    assert_gql_columns(&output, &expect.gql_columns, label);
+    if frontend == Frontend::Gql {
+        assert_gql_table(&output, expect, label);
+    }
     let resp = GraphFormatter.format(&output);
 
     if let Some(n) = expect.repeat_count {
@@ -597,39 +599,24 @@ async fn execute_output(
     }
 }
 
-fn assert_gql_columns(
-    output: &PipelineOutput,
-    expected: &std::collections::BTreeMap<String, Vec<String>>,
-    label: &str,
-) {
-    if expected.is_empty() {
+fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
+    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
         return;
     }
-    let table = GqlFormatter.format(output);
-    let table = table.as_str().expect("the gql format renders text");
-    let mut lines = table
-        .lines()
-        .filter(|line| line.starts_with('|'))
-        .map(|line| {
-            line.trim_matches('|')
-                .split(" | ")
-                .map(str::trim)
-                .collect::<Vec<_>>()
-        });
-    let header = lines
-        .next()
-        .unwrap_or_else(|| panic!("{label}: gql table has no header\n{table}"));
-    let rows: Vec<_> = lines.collect();
-    for (name, values) in expected {
+    let (header, rows) = GqlFormatter.table(output);
+    if !expect.gql_column_names.is_empty() {
+        assert_eq!(
+            header, expect.gql_column_names,
+            "{label}: gql column names mismatch"
+        );
+    }
+    for (name, values) in &expect.gql_columns {
         let index = header
             .iter()
             .position(|column| column == name)
-            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}\n{table}"));
-        let actual: Vec<&str> = rows.iter().map(|row| row[index]).collect();
-        assert_eq!(
-            actual, *values,
-            "{label}: gql column {name} mismatch\n{table}"
-        );
+            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
+        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
+        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
     }
 }
 

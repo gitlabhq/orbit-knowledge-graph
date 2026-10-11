@@ -96,7 +96,8 @@ pub(super) enum Predicate<'i> {
     RelationshipType {
         span: Span<'i>,
         variable: Name<'i>,
-        types: Vec<String>,
+        op: FilterOp,
+        value: Option<Value>,
     },
 }
 

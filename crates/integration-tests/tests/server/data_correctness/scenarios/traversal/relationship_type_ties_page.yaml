@@ -1,0 +1,33 @@
+description: >
+  Two edges with different types between the same pair page without a
+  skip. User 1 both authored and approved MR 2000 here, so source and
+  target ids tie and the edge type breaks the tie.
+
+config:
+  extra_seed:
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2000, target_kind: MergeRequest, source_tags: [], target_tags: [state:opened] }
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest {id: 2000})
+    WHERE type(r) IN ['AUTHORED', 'APPROVED']
+    RETURN mr.title, type(r) PAGE 1
+
+expect:
+  all_pages:
+    edge_count: 2
+    page_count: 2
+  pages:
+    - node_count: 2
+      nodes:
+        MergeRequest:
+          ids: [2000]
+      edge_count: {APPROVED: 1, AUTHORED: 0}
+      has_more: true
+    - node_count: 2
+      nodes:
+        MergeRequest:
+          ids: [2000]
+      edge_count: {APPROVED: 0, AUTHORED: 1}
+      has_more: false

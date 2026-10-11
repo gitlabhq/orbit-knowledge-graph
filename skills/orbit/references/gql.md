@@ -59,7 +59,9 @@ center node, and a shortest path needs both endpoints bounded.
 - Nulls: `IS NULL`, `IS NOT NULL`.
 - Relationship types: `type(r) = 'CLOSES'` or `type(r) IN ['CLOSES', 'MENTIONS']`
   on a one-hop relationship variable. It matches like `-[r:CLOSES|MENTIONS]->`.
-  For a variable-length hop, list the types in the pattern instead.
+  Type names are uppercase and case-sensitive. A variable-length `r` binds a
+  list, so `type(r)` and `RETURN r` reject on it; list the types in the
+  pattern instead: `-[r:CLOSES|MENTIONS*1..3]->`.
 
 Values are literals. There are no query parameters, so never splice untrusted
 text into a query.
@@ -92,7 +94,9 @@ LIMIT 10
 - The response always includes node identity and relationship metadata.
 - `RETURN type(r)` and `RETURN r` are accepted. The edges table lists each
   edge's type. In the `gql` format, a traversal adds a column for each one,
-  named by its alias: `RETURN m.iid, type(r) AS kind`.
+  in `RETURN` order, named by its alias: `RETURN m.iid, type(r) AS kind`.
+  Neighbors and shortest paths show the type in the path column and reject
+  an alias on these items.
 - `ORDER BY type(r)` or its alias sorts a traversal by edge type, on one-hop
   relationships only. Aggregations cannot group or sort by `type(r)` yet.
 - Aggregates are `count`, `sum`, `avg`, `min`, and `max`. Other return items
