@@ -1,9 +1,9 @@
-description: IS TRUE is not supported, and the syntax error names NOT instead of a grammar rule
+description: IS TRUE is not supported, and the syntax error names NULL or NOT NULL instead of a grammar rule
 
 query:
   gql: |
     MATCH (wi:WorkItem {id: 4000}) WHERE wi.confidential IS TRUE RETURN wi.id
 
 expect:
-  compile_error: "expected NOT"
+  compile_error: "expected NULL or NOT NULL"
   compile_error_not_contains: ["expected Not", "Rule"]
