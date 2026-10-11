@@ -1,6 +1,8 @@
 description: NOT IN on a denormalized property reads the node table and removes the closed work item
 
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed","locked"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
   gql: |
     MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
     WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed', 'locked']

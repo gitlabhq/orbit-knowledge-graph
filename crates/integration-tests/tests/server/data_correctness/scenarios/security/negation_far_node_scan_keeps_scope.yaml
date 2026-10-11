@@ -3,6 +3,8 @@ description: >
   table scan carries the caller's traversal_path filter next to the NOT.
 
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
     WHERE NOT g.name CONTAINS 'secret'

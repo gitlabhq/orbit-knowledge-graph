@@ -1,6 +1,8 @@
 description: A node whose only condition is NOT over a list is not anchored
 
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"id":{"in":[1]}}}],"limit":30}
   gql: |
     MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
 

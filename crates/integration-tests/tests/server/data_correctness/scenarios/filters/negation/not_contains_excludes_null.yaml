@@ -11,6 +11,8 @@ config:
       - { id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
 
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","id_range":{"start":9500,"end":9502},"not":{"discussion_id":{"contains":"abc"}},"columns":["discussion_id"]}],"limit":10}
   gql: |
     MATCH (n:Note)
     WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id CONTAINS 'abc'

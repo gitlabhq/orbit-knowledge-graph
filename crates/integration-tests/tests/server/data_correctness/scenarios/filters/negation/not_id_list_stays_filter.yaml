@@ -1,6 +1,8 @@
 description: NOT over an ID list stays a filter and does not become an ID selector
 
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"id":{"lt":4003}},"not":{"id":{"in":[4000,4001]}},"columns":["state"]}],"limit":10}
   gql: |
     MATCH (wi:WorkItem)
     WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.id < 4003 AND NOT wi.id IN [4000, 4001]

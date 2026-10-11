@@ -1,11 +1,11 @@
 name: A node whose only condition is NOT gets no candidate or filter keys
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition","not":{"name":{"in":["skip","other"]}},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
   gql: |
     MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
     WHERE NOT b.name IN ['skip', 'other']
     RETURN b.name
-missing_frontends:
-  json: JSON filters cannot express NOT over a list.
 logical:
   expect:
     - (Filter NOT (b.name IN ['skip', 'other']) (_))

@@ -1,6 +1,8 @@
 description: NOT over a range keeps the smaller weights and drops NULL weights
 
 query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"gte":8}},"columns":["weight"]}],"limit":10}
   gql: |
     MATCH (wi:WorkItem)
     WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight >= 8

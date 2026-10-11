@@ -4,6 +4,8 @@ config:
   security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
 
 query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"title":{"token_match":"SQLi"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
   gql: |
     MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT token_match(v.title, 'SQLi') RETURN p{.id, .name}, count(v) AS c LIMIT 10
 

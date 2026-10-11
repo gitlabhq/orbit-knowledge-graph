@@ -1,0 +1,9 @@
+description: A JSON not entry on a property the entity does not have is rejected like a filter
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"missing":"private-query-literal"}}],"limit":30}
+
+expect:
+  compile_error: "missing"
+  compile_error_not_contains: ["private-query-literal"]

@@ -4,6 +4,8 @@ config:
   security: { org_id: 1, paths: ["1/100/"], access_level: 10 }
 
 query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"columns":["name"]},{"id":"b","entity":"Definition","not":{"name":{"in":["missing"]}}}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["a"],"aggregations":[{"count":"b","as":"calls"}],"limit":10}
   gql: |
     MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition) WHERE NOT b.name IN ['missing'] RETURN a{.name}, count(b) AS calls LIMIT 10
 
