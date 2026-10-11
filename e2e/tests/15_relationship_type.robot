@@ -3,9 +3,10 @@ Documentation       type(r) on a relationship variable, end to end through Rails
 ...                 project with a merge request that closes an issue in a private project under
 ...                 another top-level group, then checks that a type(r) filter returns the same
 ...                 edge as the typed pattern, that the gql format adds a type column in RETURN
-...                 order sorted by type, that raw and llm list the edge type, that a
-...                 variable-length type(r) rejects, and that a user without access to the private
-...                 project does not see the edge through type(r).
+...                 order sorted by type, that raw and llm list the edge type, that NOT type(r)
+...                 removes the closing edge, that a variable-length type(r) and type(r) inside a
+...                 NOT group reject, and that a user without access to the private project does
+...                 not see the edge through type(r).
 
 Resource            gitlab.resource
 Resource            orbit.resource
@@ -29,6 +30,22 @@ Gql Format Adds A Sorted Type Column In Return Order
 Raw And LLM Formats List The Edge Type
     [Tags]    type-r
     Within Budget    Raw And LLM List Edge Type
+
+NOT Type Removes The Closing Edge
+    [Tags]    type-r    negation
+    Within Budget    Type Filter Matches Typed Pattern
+    ${resp}=    Orbit Query
+    ...    MATCH (mr:MergeRequest {id: ${RT_MR_ID}})-[r]->(w:WorkItem) WHERE NOT type(r) = 'CLOSES' RETURN mr, w LIMIT 100
+    ${edges}=    Edge Keys    ${resp}
+    Should Not Contain    ${edges}    ${RT_EDGE_KEY}    NOT type(r) returned the closing edge
+    ${types}=    Evaluate    {e["type"] for e in $resp["result"].get("edges", [])}
+    Should Not Contain    ${types}    CLOSES    NOT type(r) returned a CLOSES edge
+
+Type Inside A NOT Group Rejects
+    [Tags]    type-r    negation
+    ${message}=    Orbit Query Rejected
+    ...    MATCH (mr:MergeRequest {id: ${RT_MR_ID}})-[r]->(w:WorkItem) WHERE NOT (type(r) = 'CLOSES' AND w.state = 'opened') RETURN mr, w
+    Should Contain    ${message}    type(r) cannot be used inside a NOT group
 
 Variable Length Type Rejects With The One Hop Message
     [Tags]    type-r
