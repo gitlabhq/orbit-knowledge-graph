@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use compiler::input::Input;
 use compiler::passes::{frontend, lower, normalize, plan};
-use query_data_model::{ClickHouseDataModel, DuckDbDataModel, QueryDataModel};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -226,7 +226,7 @@ impl Assertions {
     }
 }
 
-fn check<M: QueryDataModel>(
+fn check<M: OrbitQueryModel>(
     scenario: &Scenario,
     model: &M,
     backend: &str,
@@ -240,7 +240,7 @@ fn check<M: QueryDataModel>(
             scenario.name
         );
         let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model.ontology()).map(|(input, _)| input),
+            "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
             "gql" => frontend::gql::parse(raw),
             _ => panic!("{label}: unknown frontend"),
         }
@@ -305,7 +305,7 @@ fn check<M: QueryDataModel>(
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
-    let local = DuckDbDataModel::derive(ontology).unwrap();
+    let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
     let mut paths = Vec::new();
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
@@ -326,7 +326,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
             let ontology = Arc::new(crate::load_ontology_overlay(name));
             (
                 ClickHouseDataModel::derive(ontology.clone()).unwrap(),
-                DuckDbDataModel::derive(ontology).unwrap(),
+                DuckDbDataModel::derive(ontology.clone()).unwrap(),
             )
         });
         let (remote, local) = overlay

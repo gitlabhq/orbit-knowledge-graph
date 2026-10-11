@@ -45,7 +45,7 @@ async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
 }
 
 fn test_schema(ontology: &ontology::Ontology) -> GraphSchema {
-    GraphSchema::from_ontology(ontology)
+    GraphSchema::from_ontology(ontology).unwrap()
 }
 
 fn lock() -> Arc<dyn LockService> {
@@ -1511,7 +1511,7 @@ async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
     ))
     .await;
 
-    let schema = GraphSchema::from_ontology(&ontology);
+    let schema = GraphSchema::from_ontology(&ontology).unwrap();
     let entities = find_droppable_entities(&client, &schema, 2, &[])
         .await
         .unwrap();

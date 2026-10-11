@@ -25,6 +25,27 @@ primary keys, and secondary indexes.
   these columns into the physical sort and primary keys where required. See
   [Code Indexing](../indexing/code_indexing.md).
 
+### Storage catalogs
+
+Each backend owns its storage catalog under `query-data-model/src/implementations/`.
+Both use `Layout<Relational<Backend>, Mapping>` with shared table, column, and key structures.
+`Layout<S, M>` pairs an explicit schema and mapping. The bound `M: Mapping<S>` enforces compatible types.
+`Relational<Backend>` owns the tables directly. `RelationalBackend` supplies physical types, options, and backend metadata.
+ClickHouse keeps codecs, engines, indexes, and auxiliary objects in those backend-specific types.
+DuckDB uses the same relational structures with its local type facts.
+`DataModel<S, M, A>` owns the graph, layout, and an independent policy value.
+Its fallible constructor derives the mapping from the supplied graph and schema. Private layout fields prevent callers from substituting an unrelated mapping.
+Constructors in `derive.rs` derive a storage schema once, then build its query mapping from that schema.
+The model does not retain the ontology. JSON frontend validation reads the graph and policy catalogs directly.
+The existing compiler uses `OrbitQueryModel` in `models/orbit.rs`, which combines relational mapping with GitLab policy.
+Backend implementations remain under `implementations/`; authorization policies live under `authz/`.
+Document storage can use the core model without implementing that Orbit contract.
+The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
+It also resolves the source bindings for declared joined tables and records which entities write each table.
+Query mappings, DDL rendering, migration scope, and cleanup consume these facts.
+The DuckDB catalog records local node and edge layouts for its query mapping.
+Shared graph contracts contain logical identities; ClickHouse codecs and engine settings stay in its backend.
+
 ### Edge table schema
 
 Each physical edge table has ontology-defined columns and storage settings. For example,

@@ -281,6 +281,7 @@ impl Cluster {
             let ontology = test_archive(version).load_ontology().unwrap();
             let project_table = format!("v{version}_gl_project");
             for table_name in GraphSchema::from_ontology(&ontology)
+                .unwrap()
                 .prefixed_table_names(&table_prefix(version))
                 .into_iter()
                 .filter(|table_name| *table_name != project_table)

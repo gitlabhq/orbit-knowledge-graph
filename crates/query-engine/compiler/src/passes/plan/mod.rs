@@ -19,7 +19,7 @@ use crate::input::*;
 
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
 #[derive(Clone)]
@@ -59,7 +59,7 @@ impl QueryPlan {
 
 pub fn denormalized_facts(
     input: &Input,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
     input
         .nodes
@@ -136,7 +136,7 @@ pub struct EdgeTableConfig {
 }
 
 impl EdgeTableConfig {
-    pub fn from_model(model: &(impl QueryDataModel + ?Sized), rel_types: &[String]) -> Self {
+    pub fn from_model(model: &(impl OrbitQueryModel + ?Sized), rel_types: &[String]) -> Self {
         use std::collections::BTreeSet;
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
@@ -204,7 +204,7 @@ fn plan<M>(
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     let context = context::PlanningContext {
         input,

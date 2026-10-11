@@ -124,7 +124,7 @@ fn scope_value_expr(source: &ScopeSource) -> Expr {
 
 pub fn derive_scope_proofs(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> HashMap<String, ScopeProof> {
     if !matches!(
         input.query_type,
@@ -163,7 +163,7 @@ pub fn derive_scope_proofs(
 
 fn propagate_scope_proofs(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     seed: &HashMap<String, ScopeProof>,
 ) -> HashMap<String, ScopeProof> {
     if seed.is_empty() {
@@ -351,7 +351,7 @@ struct ScopeEdge<'a> {
 
 fn scope_edges<'a>(
     input: &'a Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<ScopeEdge<'a>> {
     let entities: HashMap<&str, &str> = input
         .nodes
