@@ -11,7 +11,7 @@ pub mod traversal;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use std::collections::{BTreeMap, HashMap};
 
 use super::plan::{Plan, QueryPlan};
@@ -67,28 +67,6 @@ impl NodeBinding {
             unreachable!("projected bindings supply their own ordering")
         };
         identity
-    }
-
-    fn property(&self, property: &str) -> Result<Expr> {
-        let Self::Values {
-            identity,
-            table_alias,
-            ..
-        } = self
-        else {
-            return Err(QueryError::Lowering(
-                "projected result has no node-table properties".into(),
-            ));
-        };
-        if property == DEFAULT_PRIMARY_KEY {
-            return Ok(identity.clone());
-        }
-        table_alias
-            .as_ref()
-            .map(|alias| Expr::col(alias, property))
-            .ok_or_else(|| {
-                QueryError::Lowering(format!("property '{property}' has no visible node table"))
-            })
     }
 }
 
@@ -186,7 +164,7 @@ impl EmitOutput {
 
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
-    let mut node = match plan {
+    let node = match plan {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
@@ -206,30 +184,6 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
         QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
     }?;
-
-    if !input.join_predicates.is_empty()
-        && let Node::Query(q) = &mut node
-    {
-        let column = |alias: &str, property: &str| -> Result<Expr> {
-            nodes
-                .get(alias)
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!("node '{alias}' has no lowered binding"))
-                })?
-                .property(property)
-        };
-        for jp in &input.join_predicates {
-            let pred = sql::comparison(
-                column(&jp.lhs_node, &jp.lhs_prop)?,
-                jp.op,
-                column(&jp.rhs_node, &jp.rhs_prop)?,
-            )?;
-            q.where_clause = Some(match q.where_clause.take() {
-                Some(existing) => Expr::and(existing, pred),
-                None => pred,
-            });
-        }
-    }
 
     let edges = plan
         .hops()

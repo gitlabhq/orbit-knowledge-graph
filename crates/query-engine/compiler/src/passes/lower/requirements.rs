@@ -1,6 +1,6 @@
 use super::sql;
 use crate::ast::*;
-use crate::input::OrderDirection;
+use crate::input::{BooleanExpression, OrderDirection};
 use crate::passes::plan::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
 
@@ -10,6 +10,7 @@ pub(super) fn column(value: &Column) -> Expr {
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
+        Predicate::Boolean(expression) => boolean_expression(expression),
         Predicate::Property {
             column: value,
             filter,
@@ -55,6 +56,17 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             cte_name: definition.clone(),
             column: key.clone(),
         },
+    }
+}
+
+fn boolean_expression(expression: &BooleanExpression<Box<Predicate>>) -> Expr {
+    match expression {
+        BooleanExpression::Leaf(leaf) => predicate(leaf),
+        BooleanExpression::And(children) => {
+            Expr::conjoin(children.iter().map(boolean_expression).collect())
+                .unwrap_or_else(|| Expr::lit(true))
+        }
+        BooleanExpression::Not(child) => Expr::unary(Op::Not, boolean_expression(child)),
     }
 }
 

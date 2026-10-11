@@ -49,19 +49,246 @@ pub struct Input {
     #[serde(default)]
     pub options: QueryOptions,
     #[serde(skip)]
-    pub join_predicates: Vec<JoinPredicate>,
+    pub predicates: Vec<BooleanExpression<Condition>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct JoinPredicate {
-    pub lhs_node: String,
-    pub lhs_prop: String,
-    pub op: FilterOp,
-    pub rhs_node: String,
-    pub rhs_prop: String,
+#[derive(Debug, Clone, PartialEq)]
+pub enum BooleanExpression<T> {
+    Leaf(T),
+    And(Vec<Self>),
+    Not(Box<Self>),
+}
+
+impl<T> BooleanExpression<T> {
+    pub fn leaves(&self) -> impl Iterator<Item = &T> {
+        self.polarized_leaves().map(|(leaf, _)| leaf)
+    }
+
+    pub fn negated_leaves(&self) -> impl Iterator<Item = &T> {
+        self.polarized_leaves()
+            .filter_map(|(leaf, negated)| negated.then_some(leaf))
+    }
+
+    fn polarized_leaves(&self) -> impl Iterator<Item = (&T, bool)> {
+        let mut pending = vec![(self, false)];
+        std::iter::from_fn(move || {
+            while let Some((expression, negated)) = pending.pop() {
+                match expression {
+                    Self::Leaf(leaf) => return Some((leaf, negated)),
+                    Self::And(children) => {
+                        pending.extend(children.iter().rev().map(|child| (child, negated)))
+                    }
+                    Self::Not(child) => pending.push((child, true)),
+                }
+            }
+            None
+        })
+    }
+
+    pub fn try_map<U, E>(
+        self,
+        map: &mut impl FnMut(T) -> Result<U, E>,
+    ) -> Result<BooleanExpression<U>, E> {
+        Ok(match self {
+            Self::Leaf(leaf) => BooleanExpression::Leaf(map(leaf)?),
+            Self::And(children) => BooleanExpression::And(
+                children
+                    .into_iter()
+                    .map(|child| child.try_map(map))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Self::Not(child) => BooleanExpression::Not(Box::new(child.try_map(map)?)),
+        })
+    }
+
+    pub fn visit_mut(&mut self, visit: &mut impl FnMut(&mut T)) {
+        match self {
+            Self::Leaf(leaf) => visit(leaf),
+            Self::And(children) => children.iter_mut().for_each(|child| child.visit_mut(visit)),
+            Self::Not(child) => child.visit_mut(visit),
+        }
+    }
+
+    pub fn depth(&self) -> usize {
+        let mut pending = vec![(self, 0)];
+        let mut maximum = 0;
+        while let Some((expression, depth)) = pending.pop() {
+            maximum = maximum.max(depth);
+            match expression {
+                Self::Leaf(_) => {}
+                Self::And(children) => {
+                    pending.extend(children.iter().map(|child| (child, depth + 1)))
+                }
+                Self::Not(child) => pending.push((child, depth + 1)),
+            }
+        }
+        maximum
+    }
+
+    pub fn conjuncts(self) -> Vec<Self> {
+        match self {
+            Self::And(children) => children,
+            expression => vec![expression],
+        }
+    }
+}
+
+impl<T: Complement> BooleanExpression<T> {
+    pub fn normalize(self) -> Self {
+        self.with_polarity(false)
+    }
+
+    fn with_polarity(self, negated: bool) -> Self {
+        match self {
+            Self::Leaf(leaf) if negated => match leaf.complement() {
+                Ok(complement) => Self::Leaf(complement),
+                Err(leaf) => Self::Not(Box::new(Self::Leaf(leaf))),
+            },
+            Self::Leaf(leaf) => Self::Leaf(leaf),
+            Self::Not(child) => child.with_polarity(!negated),
+            Self::And(mut children) if children.len() == 1 => {
+                children.pop().expect("one child").with_polarity(negated)
+            }
+            Self::And(children) => {
+                let conjunction = Self::And(
+                    children
+                        .into_iter()
+                        .flat_map(|child| child.with_polarity(false).conjuncts())
+                        .collect(),
+                );
+                if negated {
+                    Self::Not(Box::new(conjunction))
+                } else {
+                    conjunction
+                }
+            }
+        }
+    }
+}
+
+pub trait Complement: Sized {
+    fn complement(self) -> Result<Self, Self>;
+}
+
+impl Complement for FilterOp {
+    fn complement(self) -> Result<Self, Self> {
+        match self {
+            Self::Eq => Ok(Self::Ne),
+            Self::Ne => Ok(Self::Eq),
+            Self::IsNull => Ok(Self::IsNotNull),
+            Self::IsNotNull => Ok(Self::IsNull),
+            other => Err(other),
+        }
+    }
+}
+
+impl Complement for InputFilter {
+    fn complement(self) -> Result<Self, Self> {
+        match self.op.unwrap_or(FilterOp::Eq).complement() {
+            Ok(op) => Ok(Self {
+                op: Some(op),
+                ..self
+            }),
+            Err(_) => Err(self),
+        }
+    }
+}
+
+impl Complement for Condition {
+    fn complement(self) -> Result<Self, Self> {
+        match self {
+            Self::Property(predicate) => match predicate.filter.complement() {
+                Ok(filter) => Ok(Self::Property(PropertyPredicate {
+                    filter,
+                    ..predicate
+                })),
+                Err(filter) => Err(Self::Property(PropertyPredicate {
+                    filter,
+                    ..predicate
+                })),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PredicateTarget {
+    Node(String),
+    Relationship(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PropertyPredicate {
+    pub target: PredicateTarget,
+    pub property: String,
+    pub filter: InputFilter,
+}
+
+impl PropertyPredicate {
+    pub fn compares_aliases(&self) -> bool {
+        match (&self.target, &self.filter.rhs_column) {
+            (PredicateTarget::Node(alias), Some((rhs, _))) => alias != rhs,
+            (PredicateTarget::Relationship(_), rhs) => rhs.is_some(),
+            (PredicateTarget::Node(_), None) => false,
+        }
+    }
+
+    pub fn node_properties(&self) -> impl Iterator<Item = (&str, &str)> {
+        let lhs = match &self.target {
+            PredicateTarget::Node(alias) => Some((alias.as_str(), self.property.as_str())),
+            PredicateTarget::Relationship(_) => None,
+        };
+        lhs.into_iter().chain(
+            self.filter
+                .rhs_column
+                .as_ref()
+                .map(|(alias, property)| (alias.as_str(), property.as_str())),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Condition {
+    Property(PropertyPredicate),
+}
+
+impl Condition {
+    pub fn references(&self, target: &PredicateTarget) -> bool {
+        match self {
+            Self::Property(predicate) => {
+                predicate.target == *target
+                    || matches!(target, PredicateTarget::Node(alias)
+                        if predicate.node_properties().any(|(node, _)| node == alias))
+            }
+        }
+    }
+}
+
+impl BooleanExpression<Condition> {
+    pub fn local_node(&self) -> Option<&str> {
+        let mut aliases = self.leaves().map(|condition| match condition {
+            Condition::Property(predicate) => match &predicate.target {
+                PredicateTarget::Node(alias) if !predicate.compares_aliases() => {
+                    Some(alias.as_str())
+                }
+                _ => None,
+            },
+        });
+        let first = aliases.next()??;
+        aliases.all(|alias| alias == Some(first)).then_some(first)
+    }
 }
 
 impl Input {
+    pub fn conditions(&self) -> impl Iterator<Item = &Condition> {
+        self.predicates.iter().flat_map(BooleanExpression::leaves)
+    }
+
+    pub fn references(&self, target: &PredicateTarget) -> bool {
+        self.conditions()
+            .any(|condition| condition.references(target))
+    }
+
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {
@@ -90,7 +317,7 @@ impl Default for Input {
             cursor: None,
             order_by: None,
             options: QueryOptions::default(),
-            join_predicates: Vec::new(),
+            predicates: Vec::new(),
         }
     }
 }

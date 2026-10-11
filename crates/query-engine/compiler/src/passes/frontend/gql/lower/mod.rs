@@ -4,8 +4,8 @@ mod projections;
 use std::collections::{HashMap, HashSet};
 
 use crate::input::{
-    Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
-    PropertyRef, QueryType,
+    BooleanExpression, Direction, HopRange, InputCursor, InputNeighbors, InputPath,
+    InputRelationship, PathType, PropertyRef, QueryType,
 };
 use crate::passes::cursor;
 use crate::{Input, InputNode, QueryError, Result};
@@ -22,9 +22,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
         aliases: HashMap::new(),
     };
     lowering.pattern(query.pattern)?;
-    for predicate in query.predicates {
-        lowering.predicate(predicate)?;
-    }
+    lowering.predicates(query.predicates)?;
     lowering.promote_ids()?;
     lowering.classify()?;
     lowering.project(query.projections)?;
@@ -287,6 +285,21 @@ impl Lowering {
                     edge.direction = Direction::Outgoing;
                 }
             }
+        }
+        let shape = match self.input.query_type {
+            QueryType::PathFinding => "shortest paths",
+            QueryType::Neighbors => "neighbors queries",
+            _ => return Ok(()),
+        };
+        if self
+            .input
+            .predicates
+            .iter()
+            .any(|root| matches!(root, BooleanExpression::Not(_)))
+        {
+            return Err(QueryError::Validation(format!(
+                "{shape} support NOT only on =, <>, IS NULL, and IS NOT NULL conditions; use a traversal for other negated conditions"
+            )));
         }
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use query_data_model::QueryDataModel;
 
 use super::{QueryScope, ScopeProof, is_scope_only};
-use crate::input::{Direction, Input, InputNode, InputRelationship, QueryType};
+use crate::input::{Direction, Input, InputNode, InputRelationship, PredicateTarget, QueryType};
 
 pub fn prepare(
     input: &mut Input,
@@ -51,7 +51,10 @@ pub fn prepare(
                     .variant_scope(kind, to, from)
                     .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
         });
-    if !scope_preserving || !relationship.filters.is_empty() {
+    if !scope_preserving
+        || !relationship.filters.is_empty()
+        || input.references(&PredicateTarget::Relationship(*index))
+    {
         return scope;
     }
     let Some((anchor, target, target_proof)) = [&relationship.from, &relationship.to]
@@ -153,10 +156,7 @@ fn scope_only_container(
             .order_by
             .as_ref()
             .is_some_and(|order| order.node == node.id)
-        && !input
-            .join_predicates
-            .iter()
-            .any(|predicate| predicate.lhs_node == node.id || predicate.rhs_node == node.id)
+        && !input.references(&PredicateTarget::Node(node.id.clone()))
 }
 
 fn relationship_proof(

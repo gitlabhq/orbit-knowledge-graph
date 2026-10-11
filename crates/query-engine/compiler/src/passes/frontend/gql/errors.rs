@@ -15,7 +15,7 @@ pub(super) fn parse_failure(error: Error<Rule>) -> QueryError {
         LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
     };
     QueryError::Validation(format!(
-        "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
+        "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); predicates support AND, NOT, and parentheses; patterns require named nodes and bounded paths.",
         expected_message(&error.variant)
     ))
 }
@@ -75,10 +75,17 @@ fn rule_label(rule: &Rule) -> String {
         Rule::ProjectionItems | Rule::ProjectionItem | Rule::ProjectionExpression => {
             "a RETURN item"
         }
-        Rule::AndExpression | Rule::ComparisonExpression | Rule::TokenPredicate => "a condition",
+        Rule::AndExpression
+        | Rule::NotExpression
+        | Rule::ParenthesizedExpression
+        | Rule::ComparisonExpression
+        | Rule::TokenPredicate => "a condition",
+        Rule::Negation => "NOT",
+        Rule::UnsupportedBooleanOperator => "AND",
+        Rule::TokenFunction => "token_match, all_tokens, or any_tokens",
         Rule::ComparisonOperator => "a comparison operator",
         Rule::StringOperator => "STARTS WITH, ENDS WITH, or CONTAINS",
-        Rule::InOperator => "IN",
+        Rule::InOperator | Rule::NegatedInOperator => "IN",
         Rule::NullOperator => "IS NULL",
         Rule::SortItem => "a sort key",
         Rule::SortDirection => "ASC or DESC",
