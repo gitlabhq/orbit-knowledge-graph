@@ -316,6 +316,32 @@ impl Input {
         Ok(())
     }
 
+    pub(crate) fn lift_negated_filters(&mut self) -> crate::error::Result<()> {
+        for index in 0..self.nodes.len() {
+            let alias = self.nodes[index].id.clone();
+            let mut entries: Vec<_> = std::mem::take(&mut self.nodes[index].negated_filters)
+                .into_iter()
+                .collect();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            for (property, filters) in entries {
+                let leaves = filters
+                    .into_iter()
+                    .map(|filter| {
+                        BooleanExpression::Leaf(Condition {
+                            target: PredicateTarget::Node(alias.clone()),
+                            property: property.clone(),
+                            filter,
+                        })
+                    })
+                    .collect();
+                self.absorb(BooleanExpression::Not(Box::new(BooleanExpression::And(
+                    leaves,
+                ))))?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn remove_relationship(&mut self, index: usize) -> InputRelationship {
         for root in &mut self.predicates {
             root.visit_mut(&mut |condition| {
@@ -415,6 +441,8 @@ pub struct InputNode {
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
+    #[serde(default, rename = "not", deserialize_with = "deserialize_filters")]
+    pub negated_filters: HashMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
@@ -433,6 +461,7 @@ impl Default for InputNode {
             entity: None,
             columns: None,
             filters: HashMap::new(),
+            negated_filters: HashMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),

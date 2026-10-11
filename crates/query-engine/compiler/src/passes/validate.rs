@@ -305,6 +305,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     "unknown entity '{entity}'"
                 )));
             }
+            if !node.negated_filters.is_empty() {
+                return Err(QueryError::PipelineInvariant(format!(
+                    "node \"{}\" has not conditions the frontend did not lift",
+                    node.id
+                )));
+            }
             self.check_field(entity, &node.id_property)?;
             if let Some(ColumnSelection::List(columns)) = &node.columns {
                 if columns.is_empty() {
