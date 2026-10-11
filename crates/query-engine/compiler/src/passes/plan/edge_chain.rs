@@ -359,7 +359,10 @@ where
                         referenced_column,
                     })
                 })
-                .filter(|_| !input.references(&PredicateTarget::Relationship(input_index)));
+                .filter(|_| {
+                    rel.filters.is_empty()
+                        && !input.references(&PredicateTarget::Relationship(input_index))
+                });
             let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
             let scope_preserving = !rel.types.is_empty()

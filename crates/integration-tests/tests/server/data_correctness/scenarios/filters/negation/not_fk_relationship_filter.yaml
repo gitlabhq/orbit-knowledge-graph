@@ -1,0 +1,14 @@
+description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes every row
+
+query:
+  gql: |
+    MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
+    WHERE NOT r.source_kind = 'MergeRequest'
+    RETURN p.name, mr.title LIMIT 20
+
+expect:
+  skip_requirements: [node_ids]
+  sql_contains: ["source_kind != 'MergeRequest'"]
+  node_count: 0
+  edges:
+    IN_PROJECT: []
