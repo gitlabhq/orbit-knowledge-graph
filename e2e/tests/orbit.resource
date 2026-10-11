@@ -159,6 +159,28 @@ Orbit Query LLM
     ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp}
 
+Orbit Query Text
+    [Documentation]    POST /orbit/query with ${response_format} and return the response body text.
+    ...                Sends ${token} when given, else the e2e-bot PAT.
+    [Arguments]    ${query}    ${response_format}    ${token}=${None}
+    IF    $token is None
+        ${headers}=    GitLab Auth Headers
+    ELSE
+        ${headers}=    Create Dictionary    PRIVATE-TOKEN=${token}    Content-Type=application/json
+    END
+    ${body}=    Create Dictionary    query=${query}    response_format=${response_format}
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
+    RETURN    ${resp.text}
+
+Orbit Query Rejected
+    [Documentation]    POST /orbit/query expecting a 400 compile error; returns the error message.
+    [Arguments]    ${query}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=400
+    RETURN    ${resp.json()["message"]}
+
 Result Node Ids Contain
     [Documentation]    Assert ${node_id} is among the ids of the nodes in a graph-shaped query
     ...                response (neighbors / path_finding return result.nodes with string ids).
