@@ -6,13 +6,13 @@ query:
       "query_type": "traversal",
       "nodes": [
         {"id": "project", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
-        {"id": "_gkg", "entity": "MergeRequest", "columns": ["project_id"]}
+        {"id": "_orbit", "entity": "MergeRequest", "columns": ["project_id"]}
       ],
-      "relationships": [{"type": "IN_PROJECT", "from": "_gkg", "to": "project"}],
+      "relationships": [{"type": "IN_PROJECT", "from": "_orbit", "to": "project"}],
       "limit": 10
     }
   gql: |
-    MATCH (_gkg:MergeRequest)-[:IN_PROJECT]->(project:Project) WHERE project.id = 1000 RETURN project{.name}, _gkg{.project_id} LIMIT 10
+    MATCH (_orbit:MergeRequest)-[:IN_PROJECT]->(project:Project) WHERE project.id = 1000 RETURN project{.name}, _orbit{.project_id} LIMIT 10
 
 expect:
-  compile_error: "node id \"_gkg\" conflicts with reserved prefix \"_gkg_\""
+  compile_error: "node id \"_orbit\" conflicts with reserved prefix \"_orbit_\""

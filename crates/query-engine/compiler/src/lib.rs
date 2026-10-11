@@ -839,8 +839,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("toString(paths._gkg_path)")
-                && !sql.contains("toString(paths._gkg_edge_kinds)"),
+            !sql.contains("toString(paths._orbit_path)")
+                && !sql.contains("toString(paths._orbit_edge_kinds)"),
             "path array tie-break sorting should only be emitted for cursor pagination, got:\n{sql}"
         );
     }
@@ -861,8 +861,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("toString(paths._gkg_path)")
-                && sql.contains("toString(paths._gkg_edge_kinds)"),
+            sql.contains("toString(paths._orbit_path)")
+                && sql.contains("toString(paths._orbit_edge_kinds)"),
             "cursor pagination should keep deterministic path tie-break sorting, got:\n{sql}"
         );
     }
@@ -953,7 +953,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("ORDER BY _gkg_mr_id ASC, _gkg_neighbor_id ASC"),
+            sql.contains("ORDER BY _orbit_mr_id ASC, _orbit_neighbor_id ASC"),
             "cursor neighbors over UNION should order by projected aliases, got:\n{sql}"
         );
         assert!(
@@ -1486,7 +1486,7 @@ mod tests {
             "property group key must drive GROUP BY, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_gkg_p_id"),
+            !sql.contains("_orbit_p_id"),
             "property grouping should not emit node-group columns, got:\n{sql}"
         );
     }

@@ -192,7 +192,7 @@ async fn wait_for_new_events(
 }
 
 #[tokio::test]
-async fn snowplow_micro_receives_gkg_query_executed() {
+async fn snowplow_micro_receives_orbit_query_executed() {
     init_crypto_provider();
     let http = reqwest::Client::new();
     let micro = start_micro(&http).await;

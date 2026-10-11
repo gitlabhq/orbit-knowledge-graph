@@ -4,11 +4,11 @@ query:
   json: |
     {
       "query_type": "traversal",
-      "nodes": [{"id": "_gkg_p", "entity": "Project", "node_ids": [1000], "columns": ["id"]}],
+      "nodes": [{"id": "_orbit_p", "entity": "Project", "node_ids": [1000], "columns": ["id"]}],
       "limit": 10
     }
   gql: |
-    MATCH (_gkg_p:Project {id: 1000}) RETURN _gkg_p{.id} LIMIT 10
+    MATCH (_orbit_p:Project {id: 1000}) RETURN _orbit_p{.id} LIMIT 10
 
 expect:
-  compile_error: "node id \"_gkg_p\" conflicts with reserved prefix \"_gkg_\""
+  compile_error: "node id \"_orbit_p\" conflicts with reserved prefix \"_orbit_\""

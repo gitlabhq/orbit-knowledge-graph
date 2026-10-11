@@ -54,8 +54,8 @@ Agent Commands Endpoint Responds
 Query Names Cannot Use The Internal Column Prefix
     [Tags]    api
     Orbit Query Is Rejected
-    ...    MATCH (g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN count(g) AS _gkg_total
-    ...    output column "_gkg_total" conflicts with reserved prefix "_gkg_"
+    ...    MATCH (g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN count(g) AS _orbit_total
+    ...    output column "_orbit_total" conflicts with reserved prefix "_orbit_"
     Orbit Query Is Rejected
-    ...    MATCH (_gkg_g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN _gkg_g
-    ...    node id "_gkg_g" conflicts with reserved prefix "_gkg_"
+    ...    MATCH (_orbit_g:Group {id: ${SHARED_NAMESPACE_ID}}) RETURN _orbit_g
+    ...    node id "_orbit_g" conflicts with reserved prefix "_orbit_"
