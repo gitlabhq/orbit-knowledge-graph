@@ -59,7 +59,8 @@ Adding another MATCH clause does not reset the count.
 `WHERE` combines predicates with `AND` and `NOT`, and parentheses group them.
 `NOT` binds tighter than `AND`. Supported forms:
 
-- Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`.
+- Comparisons: `=`, `<>`, `<`, `<=`, `>`, `>=`. Orbit also accepts `!=` as an
+  alias of `<>`.
 - Lists: `x.state IN ['opened', 'merged']`.
 - Strings: `STARTS WITH`, `ENDS WITH`, `CONTAINS`. The pattern needs at least
   3 characters. Matching ignores ASCII case, except on sort-key columns such as
@@ -68,7 +69,8 @@ Adding another MATCH clause does not reset the count.
 - Nulls: `IS NULL`, `IS NOT NULL`.
 
 Values are literals. There are no query parameters, so never splice untrusted
-text into a query.
+text into a query. A literal of the wrong type for its property rejects the
+query instead of matching nothing.
 
 ### Negation
 
@@ -85,7 +87,8 @@ text into a query.
 - `traversal_path` cannot appear under `NOT`. Orbit scopes every query to your
   authorized paths.
 - `OR` and `XOR` reject. Use `IN [...]` to match one of several values, or run
-  one query for each alternative.
+  one query for each alternative. `a OR b` can also be written as
+  `NOT (NOT a AND NOT b)`, but that group does not anchor a node.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest {project_id: 278964})
@@ -140,7 +143,15 @@ window is incomplete. Do not report the returned rows as a complete list.
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
 subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
-and offset pagination all reject. Syntax errors report a line and column.
+and offset pagination all reject. These forms also reject:
+
+- `IS [NOT] TRUE`, `IS [NOT] FALSE`, and `IS [NOT] UNKNOWN`
+- a bare boolean property as a condition, such as `WHERE n.confidential`
+- chained comparisons, such as `1 < n.x < 3`
+- a literal on the left, such as `1 = n.x`
+- the `null` literal
+
+Syntax errors report a line and column.
 Other function calls, such as `type(r)` or `collect(x)`, reject with an error
 that names the function. For relationship types, match a typed relationship
 such as `-[r:CLOSES]->`. The response lists each edge type under `@edges`.

@@ -185,6 +185,7 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | Operator | Use |
 |----------|-----|
 | `eq` | Equal to a scalar value. |
+| `ne` | Not equal to a scalar value. Rows whose property is null do not match. |
 | `gt`, `gte`, `lt`, `lte` | Numeric, date, or timestamp comparison. |
 | `in` | Value is in an array. Maximum 100 values. |
 | `contains` | String contains the value as a plain substring. |
@@ -205,6 +206,29 @@ column such as `branch`, so the primary key keeps pruning.
 `contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID
 properties. Token operators work only on text-indexed properties and reject
 other properties at compile time.
+
+### Exclude rows with `not`
+
+A node's `not` object takes the same entries as `filters` and excludes the
+rows that match them. Each property entry is negated as one unit, and
+different properties are separate exclusions:
+
+```json
+{
+  "id": "mr",
+  "entity": "MergeRequest",
+  "filters": {"state": "merged"},
+  "not": {"target_branch": {"in": ["main", "master"]}}
+}
+```
+
+This keeps merged merge requests whose target branch is neither `main` nor
+`master`. On a work item, `"not": {"weight": {"gte": 1, "lte": 5}}` keeps the
+rows whose weight is outside 1 to 5. A row whose property is
+null never matches, so `not` drops it as well. `not` on `traversal_path` is
+rejected, because GitLab Orbit scopes every query to your authorized paths. A `not`
+over a list, a range, or a text match does not anchor a node, and it needs a
+traversal or aggregation query.
 
 ### Text-indexed properties
 

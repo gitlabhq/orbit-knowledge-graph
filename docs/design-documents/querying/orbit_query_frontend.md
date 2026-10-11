@@ -42,6 +42,7 @@ flowchart LR
 
 Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and lowers graph queries to the language-neutral Input.
 `json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes; JSON is query-only.
+It then lifts each node's `not` entries, one negated unit per property, through `Input::absorb`.
 The GQL frontend uses one anchored `Statement` grammar root for queries and schema calls. Query lowering runs in two steps and never serializes a JSON query.
 `syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
 Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
@@ -201,13 +202,13 @@ Predicates support AND, NOT, parentheses, comparisons, IN, string matching, null
 NOT binds tighter than AND, and the `Negation` rule requires a word boundary, so `notes` and `ORDER` stay identifiers and keywords.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
 
-Lowering resolves every WHERE clause into one condition tree and normalizes it.
+Lowering resolves every WHERE clause into one condition tree and hands it to `Input::absorb`, the intake that the JSON Query DSL's `not` object also uses.
+`absorb` rejects `traversal_path` under any `NOT`, including a double negation, before it normalizes the tree.
 NOT flips the polarity of its operand. A negated `=`, `<>`, `IS NULL`, or `IS NOT NULL` becomes its exact complement, and `NOT NOT` cancels.
 Other negated leaves and negated groups stay `NOT` nodes; ranges are not complemented, and there is no De Morgan rewrite.
 Each top-level conjunct that is a plain leaf becomes an ordinary filter, as before. Cross-node comparisons and the remaining `NOT` nodes go to `Input.predicates`.
 ID promotion reads only ordinary filters, so `NOT n.id IN [...]` never becomes an ID selector.
-Before normalization, lowering rejects `traversal_path` under any `NOT`, including a double negation, at the condition's position. Validation repeats the check, and also rejects hidden and virtual properties under `NOT`.
-Shortest paths and neighbors queries reject `NOT` nodes; complemented leaves are ordinary filters there.
+Validation rejects hidden and virtual properties under `NOT`, and rejects `NOT` nodes in shortest paths and neighbors queries; complemented leaves are ordinary filters there.
 The `UnsupportedBooleanOperator` rule parses `OR` and `XOR`, and its consumer rejects them with a hint to use `AND`, `NOT`, or `IN [...]`. The `NegatedInOperator` rule does the same for `x NOT IN [...]`.
 
 ID forms preserve the compiler's distinct selector and filter representations:
