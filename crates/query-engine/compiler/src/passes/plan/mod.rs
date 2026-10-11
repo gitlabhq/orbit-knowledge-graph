@@ -10,7 +10,6 @@ pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 pub mod physical;
-mod predicates;
 pub mod requirements;
 
 use std::collections::{HashMap, HashSet};
@@ -30,6 +29,17 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
+}
+
+impl BoundFilter {
+    pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
+        requirements::Predicate::Property {
+            column,
+            filter: self.filter.clone(),
+            data_type: self.data_type,
+            in_sort_key: self.in_sort_key,
+        }
+    }
 }
 
 pub struct Plan<T> {

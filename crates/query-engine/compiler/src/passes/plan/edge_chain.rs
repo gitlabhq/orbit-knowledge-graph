@@ -4,6 +4,9 @@ use std::collections::HashSet;
 use ontology::constants::*;
 
 use super::context::PlanningContext;
+use super::helpers::{FilterOwner, bind_filter};
+use super::physical::BindingSource;
+use super::requirements::{Column, Predicate, tag_filter};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
@@ -202,46 +205,38 @@ where
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
     let denormalized = super::denormalized_facts(input, model);
-    let after_joins: Vec<bool> = input
-        .predicates
-        .iter()
-        .map(|root| {
-            root.local_node().is_none()
-                || !hops.is_empty()
-                    && root.leaves().all(|condition| {
-                        super::predicates::edge_covered(
-                            condition,
-                            input,
-                            model,
-                            &hops,
-                            &denormalized,
-                        )
-                    })
+    let tagged = |condition: &Condition| -> Result<Option<Predicate>> {
+        let (column, bound) = bind_leaf(condition.clone(), input, model, &hops)?;
+        Ok(match condition.target {
+            PredicateTarget::Node(_) => edge_tag(&column.source, &bound, &hops, &denormalized),
+            PredicateTarget::Relationship(_) => None,
         })
-        .collect();
+    };
+    let mut after_joins = Vec::new();
     let mut predicate_joins = HashSet::new();
-    for (root, after_joins) in input.predicates.iter().zip(&after_joins) {
-        match root.local_node() {
-            Some(alias) if !after_joins => {
-                predicate_joins.insert(alias.to_string());
+    for root in &input.predicates {
+        let mut joins = HashSet::new();
+        for condition in root.leaves() {
+            if tagged(condition)?.is_none() {
+                joins.extend(
+                    condition
+                        .node_properties()
+                        .filter(|(_, property)| *property != DEFAULT_PRIMARY_KEY)
+                        .map(|(alias, _)| alias.to_string()),
+                );
             }
-            _ => predicate_joins.extend(
-                root.leaves()
-                    .filter(|condition| {
-                        super::predicates::edge_tag(condition, input, model, &hops, &denormalized)
-                            .is_none()
-                    })
-                    .flat_map(Condition::node_properties)
-                    .filter(|(_, property)| *property != DEFAULT_PRIMARY_KEY)
-                    .map(|(alias, _)| alias.to_string()),
-            ),
         }
+        let local = root
+            .local_node()
+            .filter(|_| hops.is_empty() || !joins.is_empty());
+        after_joins.push(local.is_none());
+        predicate_joins.extend(local.map(str::to_string).into_iter().chain(joins));
     }
     for (root, after_joins) in input.predicates.iter().zip(&after_joins) {
         if let Some(alias) = root.local_node()
             && !after_joins
         {
-            let predicate = super::predicates::bind(root, input, model, &[], None)?;
+            let predicate = bind_tree(root, &context, None)?;
             nodes
                 .get_mut(alias)
                 .ok_or_else(|| {
@@ -313,15 +308,7 @@ where
         .iter()
         .zip(&after_joins)
         .filter(|(_, after_joins)| **after_joins)
-        .map(|(root, _)| {
-            super::predicates::bind(
-                root,
-                input,
-                model,
-                &context.hops,
-                Some((&execution.bindings, &context.denormalized)),
-            )
-        })
+        .map(|(root, _)| bind_tree(root, &context, Some(&execution.bindings)))
         .collect::<Result<_>>()?;
     execution.source = execution.source.filter(predicates);
     if !context.hops.is_empty() {
@@ -758,6 +745,111 @@ pub(super) fn denorm_hop<'a>(
                 })
             })
             .map(|facts| (position, facts))
+    })
+}
+
+fn edge_tag(
+    alias: &str,
+    bound: &BoundFilter,
+    hops: &[Hop],
+    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Option<Predicate> {
+    let (position, facts) = denorm_hop(bound, alias, hops, denormalized)?;
+    let hop = &hops[position];
+    if bound.filter.rhs_column.is_some() || facts.nullable || hop.max_hops != 1 || hop.fk.is_some()
+    {
+        return None;
+    }
+    tag_filter(
+        &format!("e{position}"),
+        &facts.edge_column,
+        &facts.tag_key,
+        &bound.filter,
+    )
+}
+
+fn bind_leaf(
+    condition: Condition,
+    input: &Input,
+    model: &(impl OrbitQueryModel + ?Sized),
+    hops: &[Hop],
+) -> Result<(Column, BoundFilter)> {
+    let (column, owner) = match &condition.target {
+        PredicateTarget::Node(alias) => {
+            let entity = input
+                .entity_of(alias)
+                .and_then(|entity| model.graph().entity_id(entity))
+                .ok_or_else(|| {
+                    QueryError::PipelineInvariant(format!("condition node '{alias}' has no entity"))
+                })?;
+            (
+                Column::new(alias, &condition.property),
+                FilterOwner::Entity(entity),
+            )
+        }
+        PredicateTarget::Relationship(index) => {
+            let (position, hop) = hops
+                .iter()
+                .enumerate()
+                .find(|(_, hop)| hop.input_index == *index)
+                .ok_or_else(|| {
+                    QueryError::PipelineInvariant("condition relationship has no edge scan".into())
+                })?;
+            (
+                Column::new(format!("e{position}"), &condition.property),
+                FilterOwner::Table(&hop.edge_table),
+            )
+        }
+    };
+    Ok((
+        column,
+        bind_filter(&condition.property, condition.filter, &owner, model),
+    ))
+}
+
+fn bind_tree<M: OrbitQueryModel + ?Sized>(
+    root: &BooleanExpression<Condition>,
+    context: &PlanningContext<'_, M>,
+    bindings: Option<&[BindingSource]>,
+) -> Result<Predicate> {
+    let resolve = |column: Column| -> Result<Column> {
+        let Some(bindings) = bindings else {
+            return Ok(column);
+        };
+        bindings
+            .iter()
+            .find(|binding| binding.node == column.source)
+            .and_then(|binding| binding.column(&column.name))
+            .ok_or_else(|| {
+                QueryError::Lowering(format!(
+                    "node '{}' has no visible '{}' column",
+                    column.source, column.name
+                ))
+            })
+    };
+    let expression = root
+        .clone()
+        .try_map(&mut |condition| -> Result<Box<Predicate>> {
+            let node = matches!(condition.target, PredicateTarget::Node(_));
+            let (column, mut bound) =
+                bind_leaf(condition, context.input, context.model, &context.hops)?;
+            if node
+                && bindings.is_some()
+                && let Some(tag) =
+                    edge_tag(&column.source, &bound, &context.hops, &context.denormalized)
+            {
+                return Ok(Box::new(tag));
+            }
+            let column = if node { resolve(column)? } else { column };
+            if let Some((alias, property)) = &bound.filter.rhs_column {
+                let rhs = resolve(Column::new(alias, property))?;
+                bound.filter.rhs_column = Some((rhs.source, rhs.name));
+            }
+            Ok(Box::new(bound.at(column)))
+        })?;
+    Ok(match expression {
+        BooleanExpression::Leaf(predicate) => *predicate,
+        expression => Predicate::Boolean(expression),
     })
 }
 

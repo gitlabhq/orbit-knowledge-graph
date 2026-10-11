@@ -86,12 +86,7 @@ impl Projection {
 }
 
 pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
-    Predicate::Property {
-        column: Column::new(alias, property),
-        filter: bound.filter.clone(),
-        data_type: bound.data_type,
-        in_sort_key: bound.in_sort_key,
-    }
+    bound.at(Column::new(alias, property))
 }
 
 pub fn id_list(alias: &str, column: &str, ids: &[i64]) -> Predicate {
