@@ -1,0 +1,20 @@
+description: >
+  A negated group with a cross-node comparison against a NULL column keeps
+  only the rows where the group is false. Every user has a NULL avatar_url,
+  so the group is NULL for opened merge requests and false for the others.
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE u.id >= 1 AND u.id <= 3
+      AND NOT (u.avatar_url = mr.title AND mr.state = 'opened')
+    RETURN u.username, mr.title LIMIT 20
+
+expect:
+  node_count: 4
+  nodes:
+    MergeRequest:
+      ids: [2002, 2003]
+      absent: [2000, 2001, 9100]
+  edges:
+    AUTHORED: [[2, 2002], [3, 2003]]

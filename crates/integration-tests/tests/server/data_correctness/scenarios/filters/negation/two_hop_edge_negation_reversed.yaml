@@ -1,0 +1,21 @@
+description: >
+  A NOT group over a relationship column and a node column keeps its edge
+  alias when the planner starts from the pinned project at the far end.
+
+query:
+  gql: |
+    MATCH (u:User)-[m:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1000})
+    WHERE NOT (m.source_id = 2 AND g.visibility_level = 'public')
+    RETURN u.username, g.name, p.name LIMIT 20
+
+expect:
+  node_count: 4
+  nodes:
+    User:
+      ids: [1, 6]
+      absent: [2]
+    Project:
+      ids: [1000]
+  edges:
+    MEMBER_OF: [[1, 100], [6, 100]]
+    CONTAINS: [[100, 1000]]

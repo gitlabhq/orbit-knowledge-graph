@@ -1,0 +1,18 @@
+description: The != operator matches the same rows as NOT = and drops NULL values
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"ne":3}},"columns":["weight"]}],"limit":10}
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight != 3
+    RETURN wi.weight LIMIT 10
+
+expect:
+  node_count: 3
+  nodes:
+    WorkItem:
+      ids: [4001, 4003, 4010]
+      filters:
+        weight: { in: [8, 13, 5] }
+      absent: [4000, 4002]

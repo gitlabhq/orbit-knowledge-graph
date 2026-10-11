@@ -1,0 +1,14 @@
+description: NOT over a range keeps the smaller weights and drops NULL weights
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight >= 8
+    RETURN wi.weight LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      ids: [4000, 4010]
+      absent: [4001, 4002, 4003]

@@ -1,0 +1,18 @@
+description: >
+  A NULL weight under a nested NOT IN makes the whole condition NULL, so
+  work item 4002 is dropped. A guard such as weight IS NOT NULL AND weight
+  NOT IN [...] would wrongly keep it.
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010
+      AND NOT (NOT wi.weight IN [3] AND wi.state = 'opened')
+    RETURN wi.weight, wi.state ORDER BY wi.id LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      order: [4000, 4001]
+      absent: [4002, 4003, 4010]

@@ -1,0 +1,18 @@
+description: NOT IN on a denormalized property reads the node table and removes the closed work item
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+    WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed', 'locked']
+    RETURN u, wi.state LIMIT 20
+
+expect:
+  node_count: 3
+  nodes:
+    User:
+      ids: [1]
+    WorkItem:
+      ids: [4000, 4002]
+      absent: [4001]
+  edges:
+    AUTHORED: [[1, 4000], [1, 4002]]

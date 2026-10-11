@@ -1,0 +1,11 @@
+description: GQL rejects the x NOT IN [...] spelling and names the supported form
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.state NOT IN ['closed']
+    RETURN wi.state LIMIT 10
+
+expect:
+  compile_error: "write NOT n.property IN [...] to exclude values"
+  compile_error_not_contains: ["closed"]

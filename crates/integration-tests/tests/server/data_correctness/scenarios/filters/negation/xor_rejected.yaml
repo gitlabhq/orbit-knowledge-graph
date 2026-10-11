@@ -1,0 +1,11 @@
+description: GQL rejects XOR, including inside a negated group
+
+query:
+  gql: |
+    MATCH (wi:WorkItem {id: 4000})
+    WHERE NOT (wi.state = 'closed' XOR wi.weight = 3)
+    RETURN wi.state LIMIT 10
+
+expect:
+  compile_error: "OR and XOR are not supported"
+  compile_error_not_contains: ["Orbit query syntax", "closed"]

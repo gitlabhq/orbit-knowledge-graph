@@ -1,0 +1,24 @@
+description: NOT CONTAINS on a nullable string drops the match and the NULL row
+
+config:
+  redaction:
+    allow:
+      note: [9500, 9501, 9502]
+  extra_seed:
+    gl_note:
+      - { id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: "1/100/1000/" }
+      - { id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: "1/100/1000/" }
+      - { id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+
+query:
+  gql: |
+    MATCH (n:Note)
+    WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id CONTAINS 'abc'
+    RETURN n.discussion_id LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    Note:
+      ids: [9501]
+      absent: [9500, 9502]

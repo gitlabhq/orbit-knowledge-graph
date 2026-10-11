@@ -1,0 +1,21 @@
+description: AND NOT callee.name IN keeps a call whose callee is outside the exclusion list
+
+query:
+  gql: |
+    MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
+    WHERE caller.name = 'compile' AND NOT callee.name IN ['run_query']
+    RETURN caller.name, callee.name LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    Definition:
+      ids: [12000, 12001]
+      filters:
+        name: { in: [compile, helper] }
+      rows:
+        - { id: 12000, name: compile }
+        - { id: 12001, name: helper }
+  edges:
+    CALLS: [[12000, 12001]]
+  referential_integrity: true

@@ -1,0 +1,11 @@
+description: A complemented NOT on a virtual column follows the virtual column operator rules
+
+query:
+  gql: |
+    MATCH (f:File {id: 13000})
+    WHERE NOT f.content = 'secret'
+    RETURN f.name
+
+expect:
+  compile_error: "virtual column"
+  compile_error_not_contains: ["secret"]

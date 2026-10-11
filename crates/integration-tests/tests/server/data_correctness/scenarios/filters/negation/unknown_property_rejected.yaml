@@ -1,0 +1,6 @@
+description: Negated groups validate every referenced property
+query:
+  gql: |
+    MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.missing = 'value') RETURN u.id
+expect:
+  compile_error: does not exist

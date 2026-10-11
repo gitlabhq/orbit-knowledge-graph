@@ -1,0 +1,20 @@
+description: >
+  NOT on a pinned foreign-key target keeps the hop so the target columns
+  stay readable; the opened merge requests in the public project are removed.
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000})
+    WHERE NOT (p.name CONTAINS 'Public' AND mr.state = 'opened')
+    RETURN mr.title LIMIT 20
+
+expect:
+  node_count: 3
+  nodes:
+    Project:
+      ids: [1000]
+    MergeRequest:
+      ids: [2004, 2005]
+      absent: [2000, 2001]
+  edges:
+    IN_PROJECT: [[2004, 1000], [2005, 1000]]

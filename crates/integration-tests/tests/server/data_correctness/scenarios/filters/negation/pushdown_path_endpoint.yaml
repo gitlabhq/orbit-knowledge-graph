@@ -1,0 +1,12 @@
+description: A complemented NOT on a path endpoint is an ordinary filter and removes the internal group
+
+query:
+  gql: |
+    MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+    WHERE g.id IN [100, 102] AND NOT g.visibility_level = 'internal'
+    RETURN p
+
+expect:
+  skip_requirements: ["filter:visibility_level"]
+  path_destinations:
+    Group: [100]

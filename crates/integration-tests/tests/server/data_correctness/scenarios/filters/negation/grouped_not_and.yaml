@@ -1,0 +1,16 @@
+description: Grouping AND makes NOT negate both conditions and includes the closed work item
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id IN [4000, 4001] AND NOT (wi.state = 'closed' AND wi.weight = 3)
+    RETURN wi.state ORDER BY wi.id LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      order: [4000, 4001]
+      rows:
+        - { id: 4000, state: opened }
+        - { id: 4001, state: closed }

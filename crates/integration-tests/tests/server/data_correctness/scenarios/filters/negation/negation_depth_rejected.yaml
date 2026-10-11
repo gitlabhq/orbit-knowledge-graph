@@ -1,0 +1,7 @@
+description: NOT nesting is bounded before recursive lowering
+
+query:
+  gql: "MATCH (wi:WorkItem {id: 4000}) WHERE NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT wi.state = 'closed' RETURN wi.state"
+
+expect:
+  compile_error: "expression nesting is too deep"

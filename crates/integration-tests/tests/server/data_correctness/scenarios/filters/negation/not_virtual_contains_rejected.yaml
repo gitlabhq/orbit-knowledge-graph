@@ -1,0 +1,11 @@
+description: NOT cannot wrap a condition on a virtual column
+
+query:
+  gql: |
+    MATCH (f:File {id: 13000})
+    WHERE NOT f.content CONTAINS 'secret'
+    RETURN f.name
+
+expect:
+  compile_error: "virtual columns cannot be used under NOT"
+  compile_error_not_contains: ["secret"]

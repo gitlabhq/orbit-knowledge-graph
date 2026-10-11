@@ -1,0 +1,17 @@
+description: A complemented NOT on a neighbors center is an ordinary filter and keeps the open work item
+
+query:
+  gql: |
+    MATCH (wi:WorkItem {id: 4000})-[:IN_GROUP]->(n)
+    WHERE NOT wi.state = 'closed'
+    RETURN wi.state, n
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      ids: [4000]
+      filters:
+        state: opened
+  edges:
+    IN_GROUP: [[4000, 100]]

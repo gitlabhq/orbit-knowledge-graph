@@ -1,0 +1,10 @@
+description: Neighbors queries reject NOT over a grouped condition
+
+query:
+  gql: |
+    MATCH (wi:WorkItem {id: 4000})-->(n)
+    WHERE NOT (wi.state = 'closed' AND wi.weight = 8)
+    RETURN n
+
+expect:
+  compile_error: "neighbors queries support NOT only on =, <>, IS NULL, and IS NOT NULL conditions"

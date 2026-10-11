@@ -1,0 +1,34 @@
+description: Traversal pages over a negated list return each remaining membership once and in order
+
+query:
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 101})
+    WHERE NOT u.username IN ['charlie']
+    RETURN u.username ORDER BY u.id PAGE 2
+
+expect:
+  all_pages:
+    node_ids:
+      User: [4, 5, 6]
+      Group: [101]
+    edge_count: 3
+    page_count: 2
+  pages:
+    - node_count: 3
+      nodes:
+        User:
+          order: [4, 5]
+        Group:
+          ids: [101]
+      edges:
+        MEMBER_OF: [[4, 101], [5, 101]]
+      has_more: true
+    - node_count: 2
+      nodes:
+        User:
+          order: [6]
+        Group:
+          ids: [101]
+      edges:
+        MEMBER_OF: [[6, 101]]
+      has_more: false

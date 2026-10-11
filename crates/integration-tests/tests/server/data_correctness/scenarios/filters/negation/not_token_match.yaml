@@ -1,0 +1,14 @@
+description: NOT token_match removes the work item whose title has the token
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT token_match(wi.title, 'login')
+    RETURN wi.title LIMIT 10
+
+expect:
+  node_count: 4
+  nodes:
+    WorkItem:
+      ids: [4001, 4002, 4003, 4010]
+      absent: [4000]

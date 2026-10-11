@@ -1,0 +1,17 @@
+description: Cross-node negation counts each matching merge request once
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE u.id >= 1 AND u.id <= 7
+      AND NOT (NOT u.username = 'alice' AND NOT mr.id IN [2000, 2002])
+    RETURN u{.username}, count(mr) AS mr_count LIMIT 10
+
+expect:
+  groups:
+    u:
+      entity: User
+      ids: [1, 2]
+      rows:
+        - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+        - { entity: User, id: 2, values: { mr_count: 1 }, properties: { username: bob } }

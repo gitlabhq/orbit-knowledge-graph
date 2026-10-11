@@ -1,0 +1,10 @@
+description: Shortest paths reject NOT over a list membership
+
+query:
+  gql: |
+    MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+    WHERE g.id IN [100, 102] AND NOT g.visibility_level IN ['internal']
+    RETURN p
+
+expect:
+  compile_error: "shortest paths support NOT only on =, <>, IS NULL, and IS NOT NULL conditions"
