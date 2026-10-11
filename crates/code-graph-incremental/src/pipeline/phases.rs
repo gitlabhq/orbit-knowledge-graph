@@ -70,7 +70,6 @@ fn workset(
             .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
             && let Ok(content) = read(&repository, path)
         {
-            state.configs.retain(|file| file.path != path);
             state.configs.push(SourceFile {
                 path: path.into(),
                 content,
@@ -394,7 +393,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             }));
         }
         let lang = &context.env.lang;
-        let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.clone()).collect();
+        let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
         let candidates: FxHashSet<_> = crate::index::candidates(&repository, context.max_files)
             .filter(|file| {
                 SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
@@ -412,6 +411,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .iter()
             .map(|file| file.path.as_str())
             .collect();
+        let mut unparsed = Vec::new();
         for file in repository
             .files()
             .filter(|file| !parsed.contains(file.path.as_ref()))
@@ -438,10 +438,9 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 _ if candidates.contains(path) || missing_manifest => "fault_file_read".into(),
                 _ => String::new(),
             };
-            state
-                .trees
-                .push(Tree::unparsed(lang, path, file.size, &reason).into());
+            unparsed.push(Tree::unparsed(lang, path, file.size, &reason).into());
         }
+        state.trees.extend(unparsed);
         Ok(DirtyGraph { state, dirty })
     }
 }

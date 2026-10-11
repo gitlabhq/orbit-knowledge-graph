@@ -733,10 +733,7 @@ impl CodeIndexer {
         let ontology = self.ontology.clone();
         let table_names = self.table_names.clone();
         let span = tracing::Span::current();
-        let legacy_config = match &repository {
-            Repository::Extracted(_) => Some(self.build_pipeline_config(context, cancel.clone())),
-            Repository::IncrementalEngine(_) => None,
-        };
+        let legacy_config = self.build_pipeline_config(context, cancel.clone());
         let progress = NatsHeartbeat {
             runtime: tokio::runtime::Handle::current(),
             notifier: context.progress.clone(),
@@ -767,9 +764,7 @@ impl CodeIndexer {
                 Repository::Extracted(repository) => Ok(Pipeline::run_with_tracer(
                     repository.path(),
                     repository.file_inventory.clone(),
-                    legacy_config.ok_or_else(|| {
-                        code_graph::v2::SinkError("legacy configuration missing".into())
-                    })?,
+                    legacy_config,
                     tracer,
                     Arc::new(IndexerConverter::new(envelope, &ontology, table_names)),
                     on_batch,

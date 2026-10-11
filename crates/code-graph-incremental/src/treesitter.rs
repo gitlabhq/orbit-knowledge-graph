@@ -401,20 +401,26 @@ pub fn parse_with_sentinel(
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);
         c.parser.reset();
+        let mut stopped = None;
         let mut progress = |_: &tree_sitter::ParseState| match sentinel.check() {
             Ok(()) => std::ops::ControlFlow::Continue(()),
-            Err(_) => std::ops::ControlFlow::Break(()),
+            Err(error) => {
+                stopped = Some(error);
+                std::ops::ControlFlow::Break(())
+            }
         };
         let mut input = |offset: usize, _: tree_sitter::Point| &source.as_bytes()[offset..];
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let ts_tree = c
             .parser
             .parse_with_options(&mut input, None, Some(options))
-            .ok_or(Killed {
-                label: "tree-sitter",
-                path: label.to_string(),
-                elapsed: Duration::ZERO,
-                budget: Duration::ZERO,
+            .ok_or_else(|| {
+                stopped.unwrap_or(Killed {
+                    label: "tree-sitter",
+                    path: label.to_string(),
+                    elapsed: Duration::ZERO,
+                    budget: Duration::ZERO,
+                })
             })?;
         sentinel.check()?;
         let tree = from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label);
@@ -435,8 +441,8 @@ mod tests {
     fn parsing_can_cancel_mid_file_and_reuse_the_parser() {
         let checks = Arc::new(AtomicUsize::new(0));
         let observed = checks.clone();
-        let sentinel =
-            crate::sentinel::Sentinel::disabled().with_cancellation(Arc::new(move || {
+        let sentinel = crate::sentinel::Sentinel::new("tree-sitter", "large.py", u64::MAX)
+            .with_cancellation(Arc::new(move || {
                 observed.fetch_add(1, Ordering::Relaxed) > 0
             }));
         let lang = Lang::default();
@@ -445,6 +451,8 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.label, "tree-sitter");
+        assert_eq!(error.path, "large.py");
+        assert_eq!(error.budget, Duration::from_millis(u64::MAX));
         assert!(checks.load(Ordering::Relaxed) >= 2);
         assert!(
             parse(

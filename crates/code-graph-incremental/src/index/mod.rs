@@ -32,7 +32,7 @@ fn millis(value: Option<Duration>) -> u64 {
 }
 
 pub fn candidate_count(repository: &orbit_utils::vfs::Vfs<()>) -> usize {
-    repository.files().filter(|file| is_candidate(file)).count()
+    candidates(repository, 0).count()
 }
 
 fn is_candidate(file: &orbit_utils::vfs::File<'_, ()>) -> bool {
@@ -154,14 +154,16 @@ pub fn run<E: std::fmt::Display>(
             ))
         })?;
         run.check()?;
-        let candidates: Vec<_> = repository
+        let (files, bytes) = repository
             .files()
             .filter(|file| selected.contains(file.path.as_ref()) && owns(family, &file.path))
-            .collect();
+            .fold((0, 0), |(count, bytes), file| {
+                (count + 1, bytes + file.size)
+            });
         result.families.push(FamilyTiming {
             language: (*family).into(),
-            files: candidates.len(),
-            bytes: candidates.iter().map(|file| file.size).sum(),
+            files,
+            bytes,
             elapsed: family_started.elapsed(),
         });
         (options.family_finished)();
