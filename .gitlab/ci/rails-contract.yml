@@ -34,13 +34,10 @@ rails-contract-image:
     policy: pull
   needs: []
   script:
-    - apk add --no-cache bash yq
-    - |
-      if [ -s rails-contract.json ]; then
-        echo "RAILS_CONTRACT_EXPORT_IMAGE=alpine:latest" | tee rails-contract-image.env
-      else
-        echo "RAILS_CONTRACT_EXPORT_IMAGE=$(bash scripts/rails-contract/toolbox-image.sh)" | tee rails-contract-image.env
-      fi
+    - apk add --no-cache yq
+    - image="registry.gitlab.com/gitlab-org/build/cng/gitlab-toolbox-ee@$(yq -r '.gitlab.images.toolbox.digest' e2e/config/versions.yaml)"
+    - if [ -s rails-contract.json ]; then image=alpine:latest; fi
+    - echo "RAILS_CONTRACT_EXPORT_IMAGE=$image" | tee rails-contract-image.env
   artifacts:
     paths:
       - rails-contract.json
@@ -69,12 +66,7 @@ rails-contract-export:
     RAILS_ENV: production
     GITLAB_LICENSE_MODE: test
   script:
-    - |
-      if [ -s rails-contract.json ]; then
-        echo "Using the cached Rails contract for this toolbox image and exporter"
-      else
-        bash scripts/rails-contract/export-in-toolbox.sh rails-contract.json
-      fi
+    - '[ -s rails-contract.json ] || bash scripts/rails-contract/export-in-toolbox.sh rails-contract.json'
   artifacts:
     paths:
       - rails-contract.json

@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
-use ontology::{Ontology, RedactionConfig};
+use ontology::{Ontology, RequiredRole};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -30,16 +30,6 @@ struct ResourceType {
 }
 
 impl Snapshot {
-    fn load(path: &Path) -> Self {
-        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-    }
-
-    fn class_enables(&self, class: &str, ability: &str) -> bool {
-        let mut seen = BTreeSet::new();
-        self.policy_enables(&self.classes[class].policy, ability, &mut seen)
-    }
-
     fn policy_enables<'a>(
         &'a self,
         policy: &'a str,
@@ -61,126 +51,108 @@ impl Snapshot {
 
     fn lowest_role(&self, ability: &str) -> Option<u32> {
         let floors = self.roles.get(ability)?;
-        floors
-            .get("project")
-            .or_else(|| floors.get("group"))
-            .map(|role| access_level(role))
+        let role = floors.get("project").or_else(|| floors.get("group"))?;
+        Some(match role.as_str() {
+            "planner" => 15,
+            _ => serde_json::from_value::<RequiredRole>(role.as_str().into())
+                .unwrap_or_else(|e| panic!("unknown Rails role {role}: {e}"))
+                .as_access_level(),
+        })
     }
-}
 
-fn access_level(role: &str) -> u32 {
-    match role {
-        "guest" => 10,
-        "planner" => 15,
-        "reporter" => 20,
-        "security_manager" => 25,
-        "developer" => 30,
-        "maintainer" => 40,
-        "owner" => 50,
-        other => panic!("unknown Rails role {other}"),
-    }
-}
-
-fn snapshot() -> Option<Snapshot> {
-    let Some(path) = std::env::var_os("RAILS_CONTRACT_SNAPSHOT") else {
-        eprintln!("RAILS_CONTRACT_SNAPSHOT is not set; run `mise run rails-contract:export` first");
-        return None;
-    };
-    Some(Snapshot::load(Path::new(&path)))
-}
-
-fn redaction_configs(ontology: &Ontology) -> Vec<(&str, &RedactionConfig)> {
-    ontology
-        .nodes()
-        .map(|node| {
+    fn violations(&self) -> Vec<String> {
+        let ontology = Ontology::load_embedded().expect("embedded ontology must load");
+        let mut violations = Vec::new();
+        let mut abilities_by_type: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for node in ontology.nodes() {
             let config = node.redaction.as_ref().unwrap_or_else(|| {
                 panic!(
                     "{} has no redaction block, so Rails never checks it",
                     node.name
                 )
             });
-            (node.name.as_str(), config)
-        })
-        .collect()
-}
-
-fn contract_violations(ontology: &Ontology, snapshot: &Snapshot) -> Vec<String> {
-    let mut violations = Vec::new();
-    let mut abilities_by_type: HashMap<&str, BTreeSet<&str>> = HashMap::new();
-    for (node, config) in redaction_configs(ontology) {
-        let ability = config.ability.as_str();
-        abilities_by_type
-            .entry(&config.resource_type)
-            .or_default()
-            .insert(ability);
-        if !ability.starts_with("read_") {
-            violations.push(format!(
-                "{node}: ability {ability:?} is not an explicit read_ ability"
-            ));
-        }
-        let Some(resource_type) = snapshot.resource_types.get(&config.resource_type) else {
-            violations.push(format!(
-                "{node}: resource_type {:?} is not registered in Rails",
-                config.resource_type
-            ));
-            continue;
-        };
-        for class in &resource_type.classes {
-            if !snapshot.class_enables(class, ability) {
-                violations.push(format!("{node}: Rails {class} cannot be granted {ability}"));
+            let (node, ability) = (&node.name, config.ability.as_str());
+            abilities_by_type
+                .entry(&config.resource_type)
+                .or_default()
+                .insert(ability);
+            if !ability.starts_with("read_") {
+                violations.push(format!(
+                    "{node}: ability {ability:?} is not an explicit read_ ability"
+                ));
+            }
+            let Some(resource_type) = self.resource_types.get(&config.resource_type) else {
+                violations.push(format!(
+                    "{node}: resource_type {:?} is not registered in Rails",
+                    config.resource_type
+                ));
+                continue;
+            };
+            for class in &resource_type.classes {
+                if !self.policy_enables(&self.classes[class].policy, ability, &mut BTreeSet::new())
+                {
+                    violations.push(format!("{node}: Rails {class} cannot be granted {ability}"));
+                }
+            }
+            if let Some(rails_floor) = self.lowest_role(ability)
+                && config.required_role.as_access_level() < rails_floor
+            {
+                violations.push(format!(
+                    "{node}: required_role {:?} is below the lowest Rails role for {ability} ({rails_floor})",
+                    config.required_role
+                ));
             }
         }
-        if let Some(rails_floor) = snapshot.lowest_role(ability)
-            && config.required_role.as_access_level() < rails_floor
-        {
-            violations.push(format!(
-                "{node}: required_role {:?} is below the lowest Rails role for {ability} ({rails_floor})",
-                config.required_role
-            ));
+        for (resource_type, abilities) in abilities_by_type {
+            if abilities.len() > 1 {
+                violations.push(format!(
+                    "resource_type {resource_type:?} uses more than one ability: {abilities:?}"
+                ));
+            }
         }
+        violations.sort();
+        violations
     }
-    for (resource_type, abilities) in abilities_by_type {
-        if abilities.len() > 1 {
-            violations.push(format!(
-                "resource_type {resource_type:?} uses more than one ability: {abilities:?}"
-            ));
-        }
-    }
-    violations.sort();
-    violations
+}
+
+fn check(edit: impl FnOnce(&mut Snapshot)) -> Option<String> {
+    let Some(path) = std::env::var_os("RAILS_CONTRACT_SNAPSHOT").map(PathBuf::from) else {
+        eprintln!("RAILS_CONTRACT_SNAPSHOT is not set; run `mise run rails-contract:export` first");
+        return None;
+    };
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut snapshot: Snapshot =
+        serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    edit(&mut snapshot);
+    Some(snapshot.violations().join("\n"))
 }
 
 #[test]
 fn redaction_config_matches_rails() {
-    let Some(snapshot) = snapshot() else { return };
-    let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-    let violations = contract_violations(&ontology, &snapshot);
+    let violations = check(|_| {}).unwrap_or_default();
     assert!(
         violations.is_empty(),
-        "Rails contract violations:\n{}",
-        violations.join("\n")
+        "Rails contract violations:\n{violations}"
     );
 }
 
 #[test]
 fn checker_reports_each_rule() {
-    let Some(mut snapshot) = snapshot() else {
+    let Some(violations) = check(|snapshot| {
+        snapshot.resource_types.remove("note");
+        snapshot
+            .policies
+            .get_mut("ProjectPolicy")
+            .unwrap()
+            .enables
+            .remove("read_build");
+        snapshot.roles.insert(
+            "read_vulnerability".into(),
+            BTreeMap::from([("project".into(), "developer".into())]),
+        );
+    }) else {
         return;
     };
-    let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-    snapshot.resource_types.remove("note");
-    snapshot
-        .policies
-        .get_mut("ProjectPolicy")
-        .unwrap()
-        .enables
-        .remove("read_build");
-    snapshot.roles.insert(
-        "read_vulnerability".into(),
-        BTreeMap::from([("project".into(), "developer".into())]),
-    );
-
-    let violations = contract_violations(&ontology, &snapshot).join("\n");
     for expected in [
         "Note: resource_type \"note\" is not registered in Rails",
         "Job: Rails Ci::Build cannot be granted read_build",
