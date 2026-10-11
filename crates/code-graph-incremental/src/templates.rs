@@ -67,6 +67,16 @@ pub fn repository<E: std::fmt::Display>(
     let run =
         Sentinel::new("run", "", limits.total_ms).with_cancellation(options.cancelled.clone());
     run.check()?;
+    let mut emit = |batches| -> Result<(), Error> {
+        run.check()?;
+        emit(batches).map_err(|error| {
+            Error::Export(arrow::error::ArrowError::ExternalError(
+                error.to_string().into(),
+            ))
+        })?;
+        run.check()?;
+        Ok(())
+    };
     let selected: FxHashSet<_> = crate::pipeline::candidates(&repository, options.max_files)
         .map(|file| file.path.to_string())
         .collect();
@@ -100,13 +110,7 @@ pub fn repository<E: std::fmt::Display>(
             envelope,
             true,
             &|_| true,
-        )?)
-        .map_err(|error| {
-            Error::Export(arrow::error::ArrowError::ExternalError(
-                error.to_string().into(),
-            ))
-        })?;
-        run.check()?;
+        )?)?;
         return Ok(result);
     }
     let first = *families.first_key_value().expect("nonempty families").0;
@@ -150,12 +154,7 @@ pub fn repository<E: std::fmt::Display>(
             *family == first,
             &|path| owns(family, path),
         )?;
-        emit(batches).map_err(|error| {
-            Error::Export(arrow::error::ArrowError::ExternalError(
-                error.to_string().into(),
-            ))
-        })?;
-        run.check()?;
+        emit(batches)?;
         (options.family_finished)();
     }
     Ok(result)

@@ -2,9 +2,53 @@ use super::super::repository::service::test_utils::build_tar_gz;
 use super::*;
 use orbit_utils::vfs::Decision;
 
+use super::super::{
+    arrow_converter::IndexerEnvelope, config::CodeTableNames, pipeline::IndexingReport,
+};
 use arrow::record_batch::RecordBatch;
+use code_graph::v2::{OnBatch, SinkError};
 use orbit_utils::arrow::ArrowUtils;
 use std::sync::Mutex;
+
+struct IndexFixture {
+    ontology: Arc<ontology::Ontology>,
+    tables: Arc<CodeTableNames>,
+    version: chrono::DateTime<chrono::Utc>,
+}
+
+impl IndexFixture {
+    fn new() -> Self {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        Self {
+            tables: Arc::new(CodeTableNames::from_ontology(&ontology).unwrap()),
+            ontology,
+            version: chrono::Utc::now(),
+        }
+    }
+
+    async fn run(
+        &self,
+        files: &[(&str, &[u8])],
+        options: Options,
+        sink: Arc<OnBatch>,
+    ) -> Result<IndexingReport, SinkError> {
+        let repository = load(stream(build_tar_gz(files)), &config()).await.unwrap();
+        run(
+            repository,
+            options,
+            IndexerEnvelope::new(
+                orbit_utils::traversal_path::TraversalPath::new_unchecked("1/42/"),
+                7,
+                "main".into(),
+                "abc123".into(),
+                self.version,
+            ),
+            self.ontology.clone(),
+            self.tables.clone(),
+            sink,
+        )
+    }
+}
 
 fn collected_rows(
     batches: &[(String, RecordBatch)],
@@ -14,84 +58,55 @@ fn collected_rows(
         .iter()
         .filter(|(name, _)| name == table)
         .flat_map(|(_, batch)| {
-            let columns = batch
+            let columns: Vec<_> = batch
                 .schema()
                 .fields()
                 .iter()
                 .zip(batch.columns())
                 .map(|(field, column)| {
-                    if matches!(
-                        field.data_type(),
-                        arrow::datatypes::DataType::Dictionary(_, _)
-                    ) {
-                        arrow::compute::cast(column, &arrow::datatypes::DataType::Utf8).unwrap()
-                    } else {
-                        column.clone()
-                    }
+                    let column = match field.data_type() {
+                        arrow::datatypes::DataType::Dictionary(_, value) => {
+                            arrow::compute::cast(column, value).unwrap()
+                        }
+                        _ => column.clone(),
+                    };
+                    (field.name().clone(), column)
                 })
-                .collect::<Vec<_>>();
-            let fields = batch
-                .schema()
-                .fields()
-                .iter()
-                .zip(&columns)
-                .map(|(field, column)| {
-                    arrow::datatypes::Field::new(
-                        field.name(),
-                        column.data_type().clone(),
-                        field.is_nullable(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let plain =
-                RecordBatch::try_new(Arc::new(arrow::datatypes::Schema::new(fields)), columns)
-                    .unwrap();
-            (0..plain.num_rows())
-                .map(|row| ArrowUtils::extract_row(&plain, row))
-                .collect::<Vec<_>>()
+                .collect();
+            (0..batch.num_rows()).map(move |row| {
+                columns
+                    .iter()
+                    .map(|(name, column)| {
+                        (
+                            name.clone(),
+                            ArrowUtils::extract_value(column.as_ref(), row),
+                        )
+                    })
+                    .collect()
+            })
         })
         .collect()
 }
 
 #[tokio::test]
 async fn archive_indexes_multiple_families_into_server_batches() {
-    use super::super::arrow_converter::IndexerEnvelope;
-    use super::super::config::CodeTableNames;
-    use orbit_utils::traversal_path::TraversalPath;
-
-    let archive = build_tar_gz(&[
+    let files: &[(&str, &[u8])] = &[
         ("root/src/main.py", b"from helper import greet\ngreet()\n"),
         ("root/src/helper.py", b"def greet():\n    pass\n"),
         ("root/web/a.ts", b"export function hello() {}\n"),
         ("root/web/b.js", b"import { hello } from './a';\nhello();\n"),
         ("root/README.md", b"readme"),
         ("root/logo.png", b"image"),
-    ]);
-    let repository = load(stream(archive), &config()).await.unwrap();
-    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let tables = Arc::new(CodeTableNames::from_ontology(&ontology).unwrap());
+    ];
+    let fixture = IndexFixture::new();
+    let tables = &fixture.tables;
     let batches = Arc::new(Mutex::new(Vec::new()));
     let capture = batches.clone();
     let sink = Arc::new(move |table: &str, batch: RecordBatch| {
         capture.lock().unwrap().push((table.to_owned(), batch));
         Ok(())
     });
-    let version = chrono::Utc::now();
-    let result = run(
-        repository,
-        options(),
-        IndexerEnvelope::new(
-            TraversalPath::new_unchecked("1/42/"),
-            7,
-            "main".into(),
-            "abc123".into(),
-            version,
-        ),
-        ontology,
-        tables.clone(),
-        sink,
-    )
-    .unwrap();
+    let result = fixture.run(files, options(), sink).await.unwrap();
     assert_eq!(result.stats.files_indexed, 6);
     assert_eq!(result.stats.files_parsed, 4);
     assert_eq!(result.stats.files_skipped, 1);
@@ -139,7 +154,7 @@ async fn archive_indexes_multiple_families_into_server_batches() {
             versions
                 .values()
                 .iter()
-                .all(|value| *value == version.timestamp_micros())
+                .all(|value| *value == fixture.version.timestamp_micros())
         );
     }
     let edges: Vec<_> = tables
@@ -165,102 +180,58 @@ async fn archive_indexes_multiple_families_into_server_batches() {
 
 #[tokio::test]
 async fn cancelled_run_emits_no_batches() {
-    let repository = load(
-        stream(build_tar_gz(&[("root/file.py", b"def f(): pass")])),
-        &config(),
-    )
-    .await
-    .unwrap();
-    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let tables = Arc::new(super::super::config::CodeTableNames::from_ontology(&ontology).unwrap());
     let mut options = options();
     options.cancelled = Arc::new(|| true);
-    let result = run(
-        repository,
-        options,
-        super::super::arrow_converter::IndexerEnvelope::new(
-            orbit_utils::traversal_path::TraversalPath::new_unchecked("1/42/"),
-            7,
-            "main".into(),
-            "abc".into(),
-            chrono::Utc::now(),
-        ),
-        ontology,
-        tables,
-        Arc::new(|_, _| panic!("cancelled run must not emit")),
-    );
+    let result = IndexFixture::new()
+        .run(
+            &[("root/file.py", b"def f(): pass")],
+            options,
+            Arc::new(|_, _| panic!("cancelled run must not emit")),
+        )
+        .await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn repositories_without_source_files_still_emit_inventory() {
-    let repository = load(
-        stream(build_tar_gz(&[
-            ("root/docs/README.md", b"readme"),
-            ("root/image.png", b"image"),
-        ])),
-        &config(),
-    )
-    .await
-    .unwrap();
-    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let tables = Arc::new(super::super::config::CodeTableNames::from_ontology(&ontology).unwrap());
+    let fixture = IndexFixture::new();
     let batches = Arc::new(Mutex::new(Vec::new()));
     let capture = batches.clone();
-    let result = run(
-        repository,
-        options(),
-        super::super::arrow_converter::IndexerEnvelope::new(
-            orbit_utils::traversal_path::TraversalPath::new_unchecked("1/42/"),
-            7,
-            "main".into(),
-            "abc".into(),
-            chrono::Utc::now(),
-        ),
-        ontology,
-        tables.clone(),
-        Arc::new(move |table, batch| {
-            capture.lock().unwrap().push((table.into(), batch));
-            Ok(())
-        }),
-    )
-    .unwrap();
+    let result = fixture
+        .run(
+            &[
+                ("root/docs/README.md", b"readme"),
+                ("root/image.png", b"image"),
+            ],
+            options(),
+            Arc::new(move |table, batch| {
+                capture.lock().unwrap().push((table.into(), batch));
+                Ok(())
+            }),
+        )
+        .await
+        .unwrap();
     assert_eq!(result.stats.files_parsed, 0);
     assert_eq!(result.stats.files_indexed, 2);
     assert_eq!(result.stats.files_skipped, 1);
     assert_eq!(result.stats.definitions_count, 0);
     assert_eq!(
-        collected_rows(&batches.lock().unwrap(), &tables.file).len(),
+        collected_rows(&batches.lock().unwrap(), &fixture.tables.file).len(),
         2
     );
 }
 
 #[tokio::test]
 async fn sink_failure_aborts_the_run() {
-    let repository = load(
-        stream(build_tar_gz(&[("root/file.py", b"def f(): pass")])),
-        &config(),
-    )
-    .await
-    .unwrap();
-    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let tables = Arc::new(super::super::config::CodeTableNames::from_ontology(&ontology).unwrap());
-    let error = run(
-        repository,
-        options(),
-        super::super::arrow_converter::IndexerEnvelope::new(
-            orbit_utils::traversal_path::TraversalPath::new_unchecked("1/42/"),
-            7,
-            "main".into(),
-            "abc".into(),
-            chrono::Utc::now(),
-        ),
-        ontology,
-        tables,
-        Arc::new(|_, _| Err(code_graph::v2::SinkError("write failed".into()))),
-    )
-    .err()
-    .unwrap();
+    let error = IndexFixture::new()
+        .run(
+            &[("root/file.py", b"def f(): pass")],
+            options(),
+            Arc::new(|_, _| Err(code_graph::v2::SinkError("write failed".into()))),
+        )
+        .await
+        .err()
+        .unwrap();
     assert!(error.to_string().contains("write failed"));
 }
 

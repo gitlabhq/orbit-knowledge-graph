@@ -33,6 +33,34 @@ fn error_nodes(tree: &Tree, env: &Env) -> usize {
         .count()
 }
 
+#[test]
+fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
+    use code_graph_incremental::templates;
+    let root = tempfile::tempdir().unwrap();
+    write_all(
+        root.path(),
+        &[("main.ts", b"export const x = 1;"), ("package.json", b"{}")],
+    );
+    let repository = common::walk(root.path());
+    for path in ["main.ts", "package.json"] {
+        std::fs::remove_file(root.path().join(path)).unwrap();
+    }
+    let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
+    let (context, graph) = templates::index(Context::new(&env), repository)
+        .unwrap()
+        .finish();
+    assert_eq!(context.report.unread_files, ["main.ts", "package.json"]);
+    assert!(
+        graph.state.configs.is_empty(),
+        "unread manifests must not become SourceFile inputs"
+    );
+    assert_eq!(graph.state.trees.len(), 2);
+    for tree in graph.state.trees {
+        let reason = tree.root().tag(env.lang.syms.lookup("reason")).unwrap();
+        assert_eq!(env.lang.syms.resolve(reason), "fault_file_read");
+    }
+}
+
 /// A language parses only when production's classification says Parse for
 /// its files; Haskell and OCaml are configured but never classified so.
 #[test]

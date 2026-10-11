@@ -47,7 +47,7 @@ fn read(repository: &orbit_utils::vfs::Vfs<()>, path: &str) -> std::io::Result<S
 }
 
 fn workset(
-    context: &Context,
+    context: &mut Context,
     mut state: State,
     repository: Sources,
     dirty: FxHashSet<u32>,
@@ -68,12 +68,14 @@ fn workset(
             .parse_files
             .iter()
             .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
-            && let Ok(content) = read(&repository, path)
         {
-            state.configs.push(SourceFile {
-                path: path.into(),
-                content,
-            });
+            match read(&repository, path) {
+                Ok(content) => state.configs.push(SourceFile {
+                    path: path.into(),
+                    content,
+                }),
+                Err(_) => context.report.unread_files.push(path.into()),
+            }
         }
     }
     Ok(Workset {
@@ -197,32 +199,39 @@ where
             repository,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
-        let (outcomes, timings): (Vec<_>, Vec<_>) = items
+        let outcomes: Vec<_> = items
             .into_parallel()
             .map(|item| {
+                let item = item?;
                 let path = item.label().to_string();
                 let started = Instant::now();
                 let outcome = phase.run(env, run, item);
-                (outcome, (path, started.elapsed()))
+                Ok((outcome, path, started.elapsed()))
             })
-            .unzip();
+            .collect();
         context.run.check()?;
         let phase_name = self.0.name();
-        context
-            .report
-            .files
-            .extend(timings.into_iter().map(|(path, elapsed)| FileTiming {
+        let mut items = Vec::with_capacity(outcomes.len());
+        for outcome in outcomes {
+            let (outcome, path, elapsed) = match outcome {
+                Ok(result) => result,
+                Err(path) => {
+                    context.report.unread_files.push(path);
+                    continue;
+                }
+            };
+            context.report.files.push(FileTiming {
                 path,
                 phase: phase_name.to_string(),
                 elapsed,
-            }));
-        let mut items = Vec::with_capacity(outcomes.len());
-        for outcome in outcomes {
+            });
             match outcome {
                 Ok(v) => items.push(v),
                 Err(k) => context.skip(k),
             }
         }
+        context.report.unread_files.sort_unstable();
+        context.report.unread_files.dedup();
         Ok(Workset {
             state,
             items,
@@ -236,23 +245,25 @@ where
 /// pulled one item at a time as workers free up.
 pub trait IntoParallel {
     type Item: Send;
-    fn into_parallel(self) -> impl ParallelIterator<Item = Self::Item>;
+    fn into_parallel(self) -> impl ParallelIterator<Item = Result<Self::Item, String>>;
 }
 
 impl<T: Send> IntoParallel for Vec<T> {
     type Item = T;
-    fn into_parallel(self) -> impl ParallelIterator<Item = T> {
-        self.into_par_iter()
+    fn into_parallel(self) -> impl ParallelIterator<Item = Result<T, String>> {
+        self.into_par_iter().map(Ok)
     }
 }
 
 impl IntoParallel for SourcePaths {
     type Item = SourceFile;
-    fn into_parallel(self) -> impl ParallelIterator<Item = SourceFile> {
-        self.paths.into_par_iter().filter_map(move |path| {
-            let content = read(&self.repository, &path).ok()?;
-            Some(SourceFile { path, content })
-        })
+    fn into_parallel(self) -> impl ParallelIterator<Item = Result<SourceFile, String>> {
+        self.paths
+            .into_par_iter()
+            .map(move |path| match read(&self.repository, &path) {
+                Ok(content) => Ok(SourceFile { path, content }),
+                Err(_) => Err(path),
+            })
     }
 }
 
@@ -394,22 +405,17 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         }
         let lang = &context.env.lang;
         let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
-        let candidates: FxHashSet<_> = super::candidates(&repository, context.max_files)
-            .filter(|file| {
-                SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
-            })
-            .map(|file| file.path.as_ref())
-            .collect();
         let skipped: FxHashMap<_, _> = context
             .report
             .skipped
             .iter()
             .map(|file| (file.path.as_str(), file.label))
             .collect();
-        let manifests: FxHashSet<_> = state
-            .configs
+        let unread: FxHashSet<_> = context
+            .report
+            .unread_files
             .iter()
-            .map(|file| file.path.as_str())
+            .map(String::as_str)
             .collect();
         let mut unparsed = Vec::new();
         for file in repository
@@ -417,15 +423,6 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .filter(|file| !parsed.contains(file.path.as_ref()))
         {
             let path = file.path.as_ref();
-            let missing_manifest = file.keeps()
-                && !manifests.contains(path)
-                && context
-                    .env
-                    .resolve
-                    .config
-                    .parse_files
-                    .iter()
-                    .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()));
             let reason = match file.decision() {
                 orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
                 _ if skipped.contains_key(path) => match skipped[path] {
@@ -435,12 +432,9 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                     _ => "skip_timeout_sentinel",
                 }
                 .into(),
-                _ if candidates.contains(path) || missing_manifest => "fault_file_read".into(),
+                _ if unread.contains(path) => "fault_file_read".into(),
                 _ => String::new(),
             };
-            if reason == "fault_file_read" {
-                context.report.unread_files.push(path.to_owned());
-            }
             unparsed.push(Tree::unparsed(lang, path, file.size, &reason).into());
         }
         state.trees.extend(unparsed);
