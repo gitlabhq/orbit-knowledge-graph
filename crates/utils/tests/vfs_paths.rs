@@ -1,6 +1,6 @@
 use orbit_utils::vfs::{
     Limits, Options, Vfs,
-    sources::{Archive, Changeset, Directory},
+    sources::{Archive, Diff, Directory},
 };
 
 #[test]
@@ -16,8 +16,8 @@ fn native_sources_keep_host_paths_for_lazy_reads() {
         Options::default(),
     )
     .unwrap();
-    let changeset = Vfs::load(
-        Changeset {
+    let diff = Vfs::load(
+        Diff {
             root: root.path(),
             paths: vec![
                 std::path::Path::new("src")
@@ -33,7 +33,7 @@ fn native_sources_keep_host_paths_for_lazy_reads() {
     )
     .unwrap();
     std::fs::write(original, b"after!").unwrap();
-    for vfs in [directory, changeset] {
+    for vfs in [directory, diff] {
         assert_eq!(
             vfs.files()
                 .map(|file| file.path.as_ref())

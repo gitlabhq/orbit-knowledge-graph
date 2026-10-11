@@ -6,7 +6,7 @@ mod directory;
 mod memory;
 
 pub use archive::Archive;
-pub use diff::Changeset;
+pub use diff::Diff;
 pub use directory::Directory;
 pub use memory::Memory;
 
