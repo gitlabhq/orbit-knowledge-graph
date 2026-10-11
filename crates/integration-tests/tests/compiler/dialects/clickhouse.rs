@@ -9,6 +9,23 @@ use ontology::introspection::{
 };
 
 #[test]
+fn reordered_table_declarations_do_not_change_sql() {
+    let base = crate::compiler::setup::embedded_ontology();
+    let overlay = std::sync::Arc::new(integration_testkit::load_ontology_overlay(
+        "reordered_edges",
+    ));
+    let query = r#"{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition","node_ids":[1]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}"#;
+    let context = test_ctx();
+    let sql = |ontology| {
+        compile(query, Frontend::JsonDsl, ontology, &context)
+            .unwrap()
+            .base
+            .render()
+    };
+    assert_eq!(sql(&base), sql(&overlay));
+}
+
+#[test]
 fn compile_to_ast_works() {
     let orbit_query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
     let json = r#"{

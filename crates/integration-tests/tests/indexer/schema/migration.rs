@@ -56,6 +56,22 @@ fn campaign() -> indexer::campaign::CampaignState {
     indexer::campaign::CampaignState::new()
 }
 
+#[test]
+fn reordered_table_declarations_do_not_change_deployed_schema() {
+    let base = ontology::Ontology::load_embedded().unwrap();
+    let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
+    let base_schema = test_schema(&base);
+    let overlay_schema = test_schema(&overlay);
+    assert_eq!(base_schema.tables.len(), overlay_schema.tables.len());
+    assert_eq!(base_schema.views.len(), overlay_schema.views.len());
+    assert!(
+        !overlay_schema
+            .tables
+            .iter()
+            .any(|table| table.name == "gl_code_edge_by_target")
+    );
+}
+
 #[tokio::test]
 async fn fresh_install_creates_tables_and_records_version() {
     let (ctx, ontology, metrics) = setup().await;
