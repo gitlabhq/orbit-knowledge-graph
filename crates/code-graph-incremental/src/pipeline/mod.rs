@@ -101,6 +101,7 @@ impl<I, A: ItemPhase<I>, B: ItemPhase<A::Output>> ItemPhase<I> for Chain<A, B> {
 /// What one run shares across its phases; `run` is the run's total deadline.
 pub struct Context<'e> {
     pub env: &'e Env,
+    pub export_config: &'e crate::export::ExportConfig,
     pub run: Sentinel,
     pub report: Report,
     pub max_files: usize,
@@ -112,6 +113,7 @@ impl<'e> Context<'e> {
     pub fn new(env: &'e Env) -> Self {
         Self {
             env,
+            export_config: crate::export::ExportConfig::embedded(),
             run: Sentinel::new("run", "", env.limits.total_ms),
             report: Report::default(),
             max_files: 0,

@@ -55,6 +55,7 @@ pub fn repository<E: std::fmt::Display>(
     options: Options,
     envelope: &Envelope<'_>,
     ontology: &ontology::Ontology,
+    export_config: &crate::export::ExportConfig,
     mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
 ) -> Result<Report, Error> {
     let limits = Limits {
@@ -102,11 +103,11 @@ pub fn repository<E: std::fmt::Display>(
                 crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
             })
             .collect();
-        emit(crate::export::export_selected(
+        emit(crate::export::export(
             &trees,
             &[],
             &lang,
-            ontology,
+            &crate::export::ExportPlan::from_config(export_config, ontology, &lang)?,
             envelope,
             true,
             &|_| true,
@@ -129,6 +130,7 @@ pub fn repository<E: std::fmt::Display>(
         run.check()?;
         let env = Env::with_limits(*language, limits)?;
         let mut context = Context::new(&env);
+        context.export_config = export_config;
         context.run = run.clone();
         context.max_files = options.max_files;
         context.resolve_timeout_ms = millis(options.cross_file_timeout);
@@ -145,11 +147,11 @@ pub fn repository<E: std::fmt::Display>(
         result.files.extend(context.report.files);
         result.phases.extend(context.report.phases);
         run.check()?;
-        let batches = crate::export::export_selected(
+        let batches = crate::export::export(
             &graph.state.trees,
             &graph.state.edges,
             &env.lang,
-            ontology,
+            &crate::export::ExportPlan::from_config(export_config, ontology, &env.lang)?,
             envelope,
             *family == first,
             &|path| owns(family, path),

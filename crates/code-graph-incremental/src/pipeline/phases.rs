@@ -565,7 +565,19 @@ impl Phase<Displayed> for Export<'_> {
     }
 
     fn run(self, context: &mut Context, Displayed { state }: Displayed) -> Result<Exported, Error> {
-        let tables = export::export(&state, &context.env.lang, self.ontology, &self.envelope)?;
+        let tables = export::export(
+            &state.trees,
+            &state.edges,
+            &context.env.lang,
+            &export::ExportPlan::from_config(
+                context.export_config,
+                self.ontology,
+                &context.env.lang,
+            )?,
+            &self.envelope,
+            true,
+            &|_| true,
+        )?;
         Ok(Exported { state, tables })
     }
 }
