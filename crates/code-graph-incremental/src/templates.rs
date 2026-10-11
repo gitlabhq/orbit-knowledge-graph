@@ -58,12 +58,20 @@ pub fn repository<E: std::fmt::Display>(
     export_config: &crate::export::ExportConfig,
     mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
 ) -> Result<Report, Error> {
+    let defaults = Limits::load()?;
     let limits = Limits {
+        max_files: if options.max_files == 0 {
+            defaults.max_files
+        } else {
+            options.max_files.min(defaults.max_files)
+        },
+        cross_file_resolve_ms: millis(options.cross_file_timeout)
+            .min(defaults.cross_file_resolve_ms),
         file_parse_ms: millis(options.parse_timeout),
         file_rewrite_ms: millis(options.rewrite_timeout),
         file_link_ms: millis(options.link_timeout),
         file_resolve_ms: millis(options.resolve_timeout),
-        ..Limits::load()?
+        ..defaults
     };
     let run =
         Sentinel::new("run", "", limits.total_ms).with_cancellation(options.cancelled.clone());
@@ -78,7 +86,7 @@ pub fn repository<E: std::fmt::Display>(
         run.check()?;
         Ok(())
     };
-    let selected: FxHashSet<_> = crate::pipeline::candidates(&repository, options.max_files)
+    let selected: FxHashSet<_> = crate::pipeline::candidates(&repository, limits.max_files)
         .map(|file| file.path.to_string())
         .collect();
     let mut families = BTreeMap::new();
@@ -128,12 +136,10 @@ pub fn repository<E: std::fmt::Display>(
         .map_err(|error| LoadError::new(error.to_string()))?;
     for (family, language) in &families {
         run.check()?;
-        let env = Env::with_limits(*language, limits)?;
+        let mut env = Env::with_limits(*language, limits)?;
+        env.export_config = export_config.clone();
         let mut context = Context::new(&env);
-        context.export_config = export_config;
         context.run = run.clone();
-        context.max_files = options.max_files;
-        context.resolve_timeout_ms = millis(options.cross_file_timeout);
         let pipeline = pool.install(|| index(context, repository.clone()))?;
         let (context, graph) = pipeline.then(Display)?.finish();
         result.skipped.extend(context.report.skipped);
@@ -151,7 +157,7 @@ pub fn repository<E: std::fmt::Display>(
             &graph.state.trees,
             &graph.state.edges,
             &env.lang,
-            &crate::export::ExportPlan::from_config(export_config, ontology, &env.lang)?,
+            &crate::export::ExportPlan::from_config(&env.export_config, ontology, &env.lang)?,
             envelope,
             *family == first,
             &|path| owns(family, path),

@@ -48,7 +48,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     let mut config = ExportConfig::embedded().clone();
     let specs = ontology
@@ -78,9 +78,8 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         ])
         .collect();
     config.schemas.insert("gl_file".into(), specs);
-    let mut context = Context::new(&env);
-    context.export_config = &config;
-    let error = templates::index(context, sources.clone())
+    env.export_config = config;
+    let error = templates::index(Context::new(&env), sources.clone())
         .unwrap()
         .then(Display)
         .unwrap()
@@ -92,8 +91,6 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         .unwrap();
     assert!(error.to_string().contains("version"));
     for traversal_path in [None, Some("1/2/")] {
-        let mut context = Context::new(&env);
-        context.export_config = &config;
         let mut values = vec![
             ("project_id", Scalar::Int(7)),
             ("branch", Scalar::Str("main")),
@@ -104,7 +101,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         if let Some(path) = traversal_path {
             values.push(("traversal_path", Scalar::Str(path)));
         }
-        let exported = templates::index(context, sources.clone())
+        let exported = templates::index(Context::new(&env), sources.clone())
             .unwrap()
             .then(Display)
             .unwrap()
@@ -136,17 +133,15 @@ fn each_pipeline_uses_its_own_export_config() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     for marker in ["first", "second", ""] {
         let yaml = include_str!("../config/export.yaml").replace(
             "name: traversal_path, type: Utf8, const: \"\"",
             &format!("name: traversal_path, type: Utf8, const: \"{marker}\""),
         );
-        let export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-        let mut context = Context::new(&env);
-        context.export_config = &export_config;
-        let exported = templates::index(context, sources.clone())
+        env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
+        let exported = templates::index(Context::new(&env), sources.clone())
             .unwrap()
             .then(Display)
             .unwrap()
@@ -176,13 +171,11 @@ fn each_pipeline_uses_its_own_export_config() {
 fn custom_export_configs_still_validate_against_the_ontology() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let mut env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
     let yaml = include_str!("../config/export.yaml").replace("name: traversal_path", "name: typo");
-    let export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-    let mut context = Context::new(&env);
-    context.export_config = &export_config;
-    let error = templates::index(context, common::walk(repo.path()))
+    env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
+    let error = templates::index(Context::new(&env), common::walk(repo.path()))
         .unwrap()
         .then(Display)
         .unwrap()
