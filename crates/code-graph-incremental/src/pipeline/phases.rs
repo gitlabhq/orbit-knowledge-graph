@@ -52,7 +52,7 @@ fn workset(
     repository: Sources,
     dirty: FxHashSet<u32>,
 ) -> Result<Workset<SourcePaths>, Error> {
-    let paths: Vec<_> = crate::index::candidates(&repository, context.max_files)
+    let paths: Vec<_> = super::candidates(&repository, context.max_files)
         .filter(|file| {
             SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
         })
@@ -394,7 +394,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         }
         let lang = &context.env.lang;
         let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
-        let candidates: FxHashSet<_> = crate::index::candidates(&repository, context.max_files)
+        let candidates: FxHashSet<_> = super::candidates(&repository, context.max_files)
             .filter(|file| {
                 SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
             })

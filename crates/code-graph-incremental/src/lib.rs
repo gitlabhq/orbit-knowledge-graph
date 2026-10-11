@@ -4,7 +4,6 @@ pub mod edge;
 pub mod env;
 pub mod export;
 pub mod file_tree;
-pub mod index;
 pub mod intern;
 pub mod linker;
 pub mod pipeline;

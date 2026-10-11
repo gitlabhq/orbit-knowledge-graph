@@ -13,7 +13,7 @@ use super::repository::{ByteStream, cache::RepositoryCacheError};
 mod output;
 mod policy;
 mod run;
-pub(super) use code_graph_incremental::index::{Options, Outcome};
+pub(super) use code_graph_incremental::{pipeline::Outcome, templates::Options};
 pub(super) use run::run;
 #[cfg(test)]
 mod tests;

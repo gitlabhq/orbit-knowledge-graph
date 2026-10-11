@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use code_graph::v2::{OnBatch, SinkError};
-use code_graph_incremental::{Envelope, Scalar, index};
+use code_graph_incremental::{Envelope, Scalar, pipeline::Outcome, templates};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -11,16 +11,16 @@ use super::{Repository, output::Output};
 
 pub(in crate::modules::code) fn run(
     repository: Repository,
-    options: index::Options,
+    options: templates::Options,
     envelope: IndexerEnvelope,
     ontology: Arc<ontology::Ontology>,
     tables: Arc<CodeTableNames>,
     on_batch: Arc<OnBatch>,
-) -> Result<index::Outcome, SinkError> {
+) -> Result<Outcome, SinkError> {
     let mut output = Output::new(&envelope, &ontology);
     let cancelled = options.cancelled.clone();
     let mut server_edges = 0;
-    let mut outcome = index::run(
+    let mut outcome = templates::repository(
         repository,
         options,
         &Envelope::new([

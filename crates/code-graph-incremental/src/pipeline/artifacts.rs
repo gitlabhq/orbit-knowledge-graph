@@ -12,6 +12,28 @@ use crate::tree::{Compact, Edge, Tree};
 
 pub type Sources = Arc<Vfs<()>>;
 
+pub fn candidate_count(repository: &Vfs<()>) -> usize {
+    candidates(repository, 0).count()
+}
+
+pub(crate) fn candidates(
+    repository: &Vfs<()>,
+    max_files: usize,
+) -> impl Iterator<Item = &orbit_utils::vfs::File<'static, ()>> {
+    repository
+        .files()
+        .filter(|file| {
+            file.keeps()
+                && crate::treesitter::SupportLang::from_path(&file.path)
+                    .is_some_and(crate::treesitter::SupportLang::has_rules)
+        })
+        .take(if max_files == 0 {
+            usize::MAX
+        } else {
+            max_files
+        })
+}
+
 /// Files changed since the graph was built, already classified.
 pub struct Changes {
     pub changed: Sources,
