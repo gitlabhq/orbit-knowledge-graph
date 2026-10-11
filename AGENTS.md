@@ -14,7 +14,7 @@ Use mise for all tasks.
 | Code-graph integration tests | `mise test:integration:codegraph` |
 | Server integration tests | `mise test:integration:server` |
 | CLI integration tests | `mise test:cli` |
-| Check or fix code | `mise lint:code`, `mise lint:code:fix` |
+| Check or fix code | `mise lint:code`, `mise lint:code:fix`, `mise lint:duckdb-static` (static-fts clippy, slow when cold) |
 | Check docs | `mise lint:docs` |
 | Validate ontology | `mise ontology:validate` |
 | Start or dispatch the server | `mise server:start`, `mise server:dispatch` |

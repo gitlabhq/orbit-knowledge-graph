@@ -88,11 +88,11 @@ To find a check, read the `build.rs` file of the crate that owns the input.
 
 Unit tests live in `#[cfg(test)]` modules next to the code they test. They need no Docker and no external services. Use them for pure logic, such as parsing and name mapping, and test behavior at a higher layer.
 
-Unit tests in `duckdb-client` gated on `static-fts` do not run under `mise test:fast`, because that feature triggers a slow bundled DuckDB build. They run in the `duckdb-client-static-fts-test` CI job, and locally through `mise test:duckdb-static`. `mise lint:duckdb-static` runs the matching clippy check, which `lint-check` also runs in CI.
-
 `mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
 
 In CI the same script uses the `ci` profile in [`.config/nextest.toml`](../../.config/nextest.toml). This profile runs every test even after a failure and retries a failed test. It also flags slow tests and publishes JUnit results.
+
+Unit tests in `duckdb-client` gated on `static-fts` do not run under `mise test:fast`, because that feature triggers a slow bundled DuckDB build. They run in the `duckdb-client-static-fts-test` CI job, and locally through `mise test:duckdb-static`. `mise lint:duckdb-static` runs the matching clippy check, which `lint-check` also runs in CI.
 
 ## Compiler integration tests
 
