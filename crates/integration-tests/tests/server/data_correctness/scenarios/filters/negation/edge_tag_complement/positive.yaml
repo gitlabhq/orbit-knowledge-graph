@@ -15,6 +15,7 @@ query:
     RETURN g{.name}, count(u) AS members LIMIT 10
 
 expect:
+  skip_requirements: ["filter:state"]
   groups:
     g:
       entity: Group

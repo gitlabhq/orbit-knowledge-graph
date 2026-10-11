@@ -14,7 +14,7 @@ query:
 expect:
   sql_contains:
     - "(e0.relationship_kind = 'IN_PROJECT')"
-    - "NOT ((e0.source_kind = 'User') AND (mr.state = 'opened'))"
+    - "NOT ((e0.source_kind = 'User') AND has(e0.source_tags, 'state:opened'))"
   groups:
     p:
       entity: Project

@@ -1,6 +1,7 @@
 description: >
-  A NOT on the far node of a traversal reads that node's table, and the
-  table scan carries the caller's traversal_path filter next to the NOT.
+  A NOT on the far node of a traversal reads that node's table, narrowed to
+  the edge keys. The table scan carries the caller's traversal_path filter,
+  and the NOT applies to the latest row.
 
 query:
   json: |
@@ -13,4 +14,5 @@ query:
 expect:
   compile_only: true
   sql_contains:
-    - "FINAL WHERE (startsWith(g.traversal_path, '1/') AND ((NOT multiSearchAny(lower(g.name), [lower('secret')]))"
+    - "WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _narrow_g))"
+    - "AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')]))"
