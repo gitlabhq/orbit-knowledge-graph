@@ -59,21 +59,21 @@ GQL Page After Returns The Next Page Without Repeats
     [Documentation]    PAGE 1 returns a next_cursor bound to the statement. PAGE 1 AFTER that
     ...                cursor returns the second seeded issue and no id from the first page.
     [Tags]    query-shapes
-    ${budget}=    Remaining Budget
-    Wait Until Keyword Succeeds    ${budget}    2s    Pages Return Each Seeded Issue Once
-
-
-*** Keywords ***
-Pages Return Each Seeded Issue Once
     ${query}=    Set Variable
     ...    MATCH (w:WorkItem {project_id: ${SHAPE_PROJECT_ID}}) RETURN w ORDER BY w.id
+    Wait Until Result Node Ids Contain    ${query} LIMIT 10
+    ...    ${SHAPE_ISSUE_ID}    ${SHAPE_SECOND_ISSUE_ID}
     ${first}=    Orbit Query    ${query} PAGE 1
-    Should Be True    ${first["pagination"]["has_more"]}    page one reports no more rows
-    ${second}=    Orbit Query    ${query} PAGE 1 AFTER '${first["pagination"]["next_cursor"]}'
-    ${ids}=    Evaluate    [n["id"] for page in ($first, $second) for n in page["result"]["nodes"]]
+    ${page}=    Set Variable    ${first["result"]["pagination"]}
+    Should Be True    ${page["has_more"]}    page one reports no more rows: ${page}
+    ${second}=    Orbit Query    ${query} PAGE 1 AFTER '${page["next_cursor"]}'
+    ${ids}=    Evaluate
+    ...    [n["id"] for resp in ($first, $second) for n in resp["result"]["nodes"]]
     ${expected}=    Evaluate    [str($SHAPE_ISSUE_ID), str($SHAPE_SECOND_ISSUE_ID)]
     Should Be Equal    ${ids}    ${expected}    pages returned ${ids}, expected ${expected}
 
+
+*** Keywords ***
 Seed Query Shape Fixture
     ${suffix}=    Random Suffix
     Start Indexing Budget    300
