@@ -3,7 +3,7 @@ pub mod duckdb;
 
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 
-pub use clickhouse::{ClickHouseBindings, EntityLayout, TableLayout};
+pub use clickhouse::{ClickHouseBindings, EntityLayout, PhysicalColumn, TableLayout};
 pub use duckdb::DuckDbBindings;
 
 #[derive(Debug, Clone)]

@@ -12,17 +12,40 @@ use crate::{MaterializedJoin, RelationshipVariantId, VariantRoute};
 use layout::ReorderedCopy;
 
 #[derive(Debug, Clone)]
+pub struct PhysicalColumn {
+    pub storage_type: String,
+    pub default: Option<String>,
+    pub codecs: Vec<String>,
+}
+
+impl From<&layout::Column> for PhysicalColumn {
+    fn from(column: &layout::Column) -> Self {
+        Self {
+            storage_type: column.storage_type.clone(),
+            default: column.default.clone(),
+            codecs: column.options.codecs.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TableLayout {
     pub name: String,
     pub columns: HashSet<String>,
     pub column_types: HashMap<String, ontology::DataType>,
+    pub physical_columns: HashMap<String, PhysicalColumn>,
     pub sort_key: Vec<String>,
+    pub primary_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
     pub path_scopable: bool,
 }
 
 impl TableLayout {
+    pub fn replacement_identity(&self) -> &[String] {
+        &self.sort_key
+    }
+
     fn from_storage(
         table: &layout::Table,
         entity: Option<EntityId>,
@@ -44,6 +67,20 @@ impl TableLayout {
                 .map(|(name, data_type)| (name.clone(), *data_type))
                 .collect(),
             sort_key: table.sort_key.clone(),
+            physical_columns: table
+                .columns
+                .iter()
+                .map(|column| {
+                    (
+                        column.name.trim_matches('`').to_string(),
+                        PhysicalColumn::from(column),
+                    )
+                })
+                .collect(),
+            primary_key: table
+                .primary_key
+                .clone()
+                .unwrap_or_else(|| table.sort_key.clone()),
             entity,
             path_columns,
             path_scopable,
