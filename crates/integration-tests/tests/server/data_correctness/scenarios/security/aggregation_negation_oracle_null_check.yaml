@@ -1,0 +1,16 @@
+description: A complemented NOT IS NULL on a Vulnerability timestamp is no oracle for a Reporter
+
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"detected_at":{"is_not_null":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+  gql: |
+    MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.detected_at IS NULL RETURN p{.id, .name}, count(v) AS c LIMIT 10
+
+expect:
+  empty_aggregation: true
+  nodes:
+    Project:
+      absent: [1000]

@@ -1,0 +1,18 @@
+description: A Security Manager sees the real count for the same NOT, so the Reporter scenarios are not vacuous
+
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 25 }
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"high"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+  gql: |
+    MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'high' RETURN p{.id, .name}, count(v) AS c LIMIT 10
+
+expect:
+  groups:
+    p:
+      entity: Project
+      ids: [1000]
+      rows:
+        - { entity: Project, id: 1000, values: { c: 1 } }

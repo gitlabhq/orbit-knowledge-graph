@@ -1,0 +1,12 @@
+description: A double NOT cannot hide a traversal_path condition
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  gql: |
+    MATCH (p:Project {id: 1000}) WHERE NOT NOT p.traversal_path STARTS WITH '2/' RETURN p.id
+
+expect:
+  compile_error: "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths"
+  compile_error_not_contains: ["1/100/", "2/"]

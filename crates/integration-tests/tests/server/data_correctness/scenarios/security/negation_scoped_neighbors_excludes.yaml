@@ -1,0 +1,20 @@
+description: A complemented NOT on a neighbors center keeps the caller's scope
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF]->(n)
+    WHERE NOT u.state = 'blocked'
+    RETURN u.state, n
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [1]
+      filters:
+        state: active
+  edges:
+    MEMBER_OF: [[1, 100]]

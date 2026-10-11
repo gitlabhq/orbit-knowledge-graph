@@ -1,0 +1,10 @@
+description: A NOT group cannot compare against an administrator-only field on another node
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    WHERE NOT (mr.title = u.first_name AND mr.state = 'opened')
+    RETURN mr.title LIMIT 10
+
+expect:
+  compile_error: "administrator"

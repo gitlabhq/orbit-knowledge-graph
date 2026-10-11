@@ -1,0 +1,17 @@
+description: >
+  A complemented NOT on a path endpoint keeps the caller's scope. Group 102
+  is internal and outside 1/100/, so only the path to group 100 remains.
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  gql: |
+    MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+    WHERE g.id IN [100, 101, 102] AND NOT g.visibility_level = 'private'
+    RETURN p
+
+expect:
+  skip_requirements: ["filter:visibility_level"]
+  path_destinations:
+    Group: [100]
