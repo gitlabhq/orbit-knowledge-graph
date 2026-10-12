@@ -290,6 +290,7 @@ impl RequiredRole {
 /// Defines how this entity should be validated against Rails' RedactionService
 /// to ensure users have permission to view the entity.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RedactionConfig {
     /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
     /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
@@ -309,14 +310,10 @@ pub struct RedactionConfig {
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
     #[serde(default)]
-    pub legacy_ability: Option<String>,
+    pub preferred_ability: Option<String>,
 }
 
 impl RedactionConfig {
-    pub fn legacy_client_ability(&self) -> &str {
-        self.legacy_ability.as_deref().unwrap_or(&self.ability)
-    }
-
     fn default_id_column() -> String {
         "id".to_string()
     }

@@ -307,9 +307,9 @@
           "type": "string",
           "description": "Rails ability to check (e.g., 'read_project'). If not specified, uses the default ability for the resource type."
         },
-        "legacy_ability": {
+        "preferred_ability": {
           "type": "string",
-          "description": "Ability sent to Rails clients that answer one ability for each resource type. Set it when two node types share a resource type with different abilities."
+          "description": "Ability checked instead of ability when the Rails client answers each resource type and ability. Clients that answer one ability for each resource type keep ability."
         },
         "required_role": {
           "type": "string",

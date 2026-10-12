@@ -4,6 +4,7 @@ use orbit_server::redaction::{ResourceAuthorization, ResourceCheck};
 
 pub struct MockRedactionService {
     pub authorizations: HashMap<String, HashMap<i64, bool>>,
+    pub by_ability: bool,
 }
 
 impl Default for MockRedactionService {
@@ -16,6 +17,7 @@ impl MockRedactionService {
     pub fn new() -> Self {
         Self {
             authorizations: HashMap::new(),
+            by_ability: false,
         }
     }
 

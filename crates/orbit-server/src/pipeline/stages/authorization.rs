@@ -5,7 +5,7 @@ use tonic::{Status, Streaming};
 use tracing::info;
 
 use crate::proto::ExecuteQueryMessage;
-use crate::redaction::{RedactionByAbility, RedactionService};
+use crate::redaction::{RedactionByAbility, RedactionService, use_client_abilities};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -37,15 +37,7 @@ impl PipelineStage for AuthorizationStage {
             .server_extensions
             .get::<RedactionByAbility>()
             .is_some_and(|mode| mode.0);
-        if !by_ability {
-            for node in ctx.ontology.nodes() {
-                if let Some(redaction) = &node.redaction {
-                    input
-                        .query_result
-                        .use_ability(&node.name, redaction.legacy_client_ability());
-                }
-            }
-        }
+        use_client_abilities(&mut input.query_result, &ctx.ontology, by_ability);
 
         let resources_to_check = input.query_result.resource_checks();
         let authorizations = if resources_to_check.is_empty() {
@@ -67,7 +59,7 @@ impl PipelineStage for AuthorizationStage {
                     PipelineError::Authorization("stream not available in server_extensions".into())
                 })
                 .inspect_err(|e| obs.record_error(e))?;
-            RedactionService::request_authorization(&resources_to_check, &tx, stream)
+            RedactionService::request_authorization(&resources_to_check, by_ability, &tx, stream)
                 .await
                 .map_err(|e| PipelineError::Authorization(format!("{e:?}")))
                 .inspect_err(|e| obs.record_error(e))?

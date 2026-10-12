@@ -851,7 +851,7 @@ mod tests {
         }
 
         #[test]
-        fn a_legacy_ability_folds_shared_checks_into_one() {
+        fn a_preferred_ability_splits_a_shared_check() {
             let batch = make_batch(vec![
                 ("_orbit_p_id", Arc::new(Int64Array::from(vec![1000]))),
                 (
@@ -864,12 +864,12 @@ mod tests {
             let mut ctx = ResultContext::new();
             ctx.add_node("p", "Project");
             ctx.add_node("b", "Branch");
-            for (entity, ability) in [("Project", "read_project"), ("Branch", "read_code")] {
+            for entity in ["Project", "Branch"] {
                 ctx.add_entity_auth(
                     entity,
                     EntityAuthConfig {
                         resource_type: "project".to_string(),
-                        ability: ability.to_string(),
+                        ability: "read_code".to_string(),
                         auth_id_column: "id".to_string(),
                         owner_entity: None,
                         required_access_level: 20,
@@ -877,12 +877,15 @@ mod tests {
                 );
             }
             let mut result = QueryResult::from_batches(&[batch], &ctx);
-            assert_eq!(result.resource_checks().len(), 2);
+            assert_eq!(result.resource_checks().len(), 1);
 
-            result.use_ability("Project", "read_code");
-            let checks = result.resource_checks();
-            assert_eq!(checks.len(), 1);
-            assert_eq!(checks[0].ability, "read_code");
+            result.use_ability("Project", "read_project");
+            let abilities: Vec<_> = result
+                .resource_checks()
+                .into_iter()
+                .map(|c| c.ability)
+                .collect();
+            assert_eq!(abilities, ["read_code", "read_project"]);
         }
 
         #[test]

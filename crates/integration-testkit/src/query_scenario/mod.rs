@@ -32,7 +32,7 @@ pub use format::{
 };
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
-use orbit_server::redaction::QueryResult;
+use orbit_server::redaction::{QueryResult, use_client_abilities};
 
 /// Parse all YAML scenario files under `root` without executing them.
 /// Catches syntax errors and serde mismatches in `cargo nextest --lib`
@@ -601,6 +601,7 @@ async fn execute_pipeline(
 ) -> serde_json::Value {
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    use_client_abilities(&mut result, ontology, redaction.by_ability);
 
     let checks = result.resource_checks();
     let authorizations = redaction.check(&checks);
@@ -1178,6 +1179,7 @@ fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
         for (resource, ids) in &config.deny {
             svc.deny(resource, ids);
         }
+        svc.by_ability = config.by_ability;
     }
     svc
 }

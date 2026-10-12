@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use ontology::{Ontology, RequiredRole};
+use ontology::{Ontology, RedactionConfig, RequiredRole};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -63,7 +63,6 @@ impl Snapshot {
     fn violations(&self) -> Vec<String> {
         let ontology = Ontology::load_embedded().expect("embedded ontology must load");
         let mut violations = Vec::new();
-        let mut abilities_by_type: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for node in ontology.nodes() {
             let config = node.redaction.as_ref().unwrap_or_else(|| {
                 panic!(
@@ -71,12 +70,11 @@ impl Snapshot {
                     node.name
                 )
             });
-            let (node, ability) = (&node.name, config.ability.as_str());
-            abilities_by_type
-                .entry(&config.resource_type)
-                .or_default()
-                .insert(ability);
-            if !ability.starts_with("read_") {
+            let node = &node.name;
+            let abilities: Vec<&str> = std::iter::once(config.ability.as_str())
+                .chain(config.preferred_ability.as_deref())
+                .collect();
+            for ability in abilities.iter().filter(|a| !a.starts_with("read_")) {
                 violations.push(format!(
                     "{node}: ability {ability:?} is not an explicit read_ ability"
                 ));
@@ -88,30 +86,35 @@ impl Snapshot {
                 ));
                 continue;
             };
-            for class in &resource_type.classes {
-                if !self.policy_enables(&self.classes[class].policy, ability, &mut BTreeSet::new())
-                {
-                    violations.push(format!("{node}: Rails {class} cannot be granted {ability}"));
-                }
-            }
-            if let Some(rails_floor) = self.lowest_role(ability)
-                && config.required_role.as_access_level() < rails_floor
-            {
-                violations.push(format!(
-                    "{node}: required_role {:?} is below the lowest Rails role for {ability} ({rails_floor})",
-                    config.required_role
-                ));
-            }
-        }
-        for (resource_type, abilities) in abilities_by_type {
-            if abilities.len() > 1 {
-                violations.push(format!(
-                    "resource_type {resource_type:?} uses more than one ability: {abilities:?}"
-                ));
+            for ability in abilities {
+                self.check_ability(node, config, resource_type, ability, &mut violations);
             }
         }
         violations.sort();
         violations
+    }
+
+    fn check_ability(
+        &self,
+        node: &str,
+        config: &RedactionConfig,
+        resource_type: &ResourceType,
+        ability: &str,
+        violations: &mut Vec<String>,
+    ) {
+        for class in &resource_type.classes {
+            if !self.policy_enables(&self.classes[class].policy, ability, &mut BTreeSet::new()) {
+                violations.push(format!("{node}: Rails {class} cannot be granted {ability}"));
+            }
+        }
+        if let Some(rails_floor) = self.lowest_role(ability)
+            && config.required_role.as_access_level() < rails_floor
+        {
+            violations.push(format!(
+                "{node}: required_role {:?} is below the lowest Rails role for {ability} ({rails_floor})",
+                config.required_role
+            ));
+        }
     }
 }
 

@@ -825,7 +825,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
-    validate_legacy_redaction_abilities(&ontology)?;
+    validate_shared_resource_type_abilities(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
@@ -1184,16 +1184,18 @@ fn validate_traversal_path_lookups(ontology: &crate::Ontology) -> Result<(), Ont
     Ok(())
 }
 
-fn validate_legacy_redaction_abilities(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+fn validate_shared_resource_type_abilities(
+    ontology: &crate::Ontology,
+) -> Result<(), OntologyError> {
     let mut ability_by_type = std::collections::HashMap::new();
     for redaction in ontology.nodes().filter_map(|node| node.redaction.as_ref()) {
-        let ability = redaction.legacy_client_ability();
+        let ability = redaction.ability.as_str();
         let first = *ability_by_type
             .entry(redaction.resource_type.as_str())
             .or_insert(ability);
         if first != ability {
             return Err(OntologyError::Validation(format!(
-                "resource_type '{}' sends '{first}' and '{ability}' to clients that answer one ability for each resource type; set legacy_ability so they match",
+                "resource_type '{}' uses ability '{first}' and '{ability}'; nodes that share a resource type need one ability, so put the other in preferred_ability",
                 redaction.resource_type
             )));
         }
@@ -1564,12 +1566,12 @@ mod tests {
     use indexmap::IndexMap;
     use std::collections::BTreeMap;
 
-    fn project_and_branch(legacy_ability: Option<&str>) -> Ontology {
+    fn project_and_branch(project_ability: &str) -> Ontology {
         let mut ontology = Ontology::new()
             .with_nodes(["Project", "Branch"])
             .with_redaction("Project", "project", "id")
             .with_redaction("Branch", "project", "project_id");
-        for (node, ability) in [("Project", "read_project"), ("Branch", "read_code")] {
+        for (node, ability) in [("Project", project_ability), ("Branch", "read_code")] {
             let redaction = ontology
                 .nodes
                 .get_mut(node)
@@ -1579,16 +1581,15 @@ mod tests {
                 .unwrap();
             redaction.ability = ability.into();
         }
-        let project = ontology.nodes.get_mut("Project").unwrap();
-        project.redaction.as_mut().unwrap().legacy_ability = legacy_ability.map(Into::into);
         ontology
     }
 
     #[test]
-    fn a_shared_resource_type_needs_one_ability_for_legacy_clients() {
-        let err = validate_legacy_redaction_abilities(&project_and_branch(None)).unwrap_err();
-        assert!(err.to_string().contains("set legacy_ability"), "{err}");
-        validate_legacy_redaction_abilities(&project_and_branch(Some("read_code"))).unwrap();
+    fn nodes_that_share_a_resource_type_need_one_ability() {
+        let err = validate_shared_resource_type_abilities(&project_and_branch("read_project"))
+            .unwrap_err();
+        assert!(err.to_string().contains("preferred_ability"), "{err}");
+        validate_shared_resource_type_abilities(&project_and_branch("read_code")).unwrap();
     }
 
     fn system_note(emits: &[&str]) -> DerivedEntity {

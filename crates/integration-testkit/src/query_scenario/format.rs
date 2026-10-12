@@ -70,6 +70,8 @@ pub struct RedactionConfig {
     pub allow: BTreeMap<String, Vec<i64>>,
     #[serde(default)]
     pub deny: BTreeMap<String, Vec<i64>>,
+    #[serde(default)]
+    pub by_ability: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
