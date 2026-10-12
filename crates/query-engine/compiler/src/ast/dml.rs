@@ -452,20 +452,27 @@ impl Expr {
         }
     }
 
-    /// Combine expressions with AND, ignoring None values.
     pub fn and_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-        exprs
-            .into_iter()
-            .flatten()
-            .reduce(|a, b| Expr::binary(Op::And, a, b))
+        Self::conjoin(exprs.into_iter().flatten().collect())
     }
 
-    /// Combine expressions with OR, ignoring None values.
     pub fn or_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-        exprs
-            .into_iter()
-            .flatten()
-            .reduce(|a, b| Expr::binary(Op::Or, a, b))
+        Self::balanced(Op::Or, exprs.into_iter().flatten().collect())
+    }
+
+    fn balanced(op: Op, mut exprs: Vec<Expr>) -> Option<Expr> {
+        match exprs.len() {
+            0 => None,
+            1 => exprs.pop(),
+            length => {
+                let right = exprs.split_off(length / 2);
+                Some(Self::binary(
+                    op,
+                    Self::balanced(op, exprs)?,
+                    Self::balanced(op, right)?,
+                ))
+            }
+        }
     }
 
     /// Match a column against a set of values.
@@ -501,9 +508,8 @@ impl Expr {
         Expr::binary(Op::And, left, right)
     }
 
-    /// Rebuild an AND chain from conjuncts. Returns None if empty.
     pub fn conjoin(exprs: Vec<Expr>) -> Option<Expr> {
-        exprs.into_iter().reduce(Expr::and)
+        Self::balanced(Op::And, exprs)
     }
 }
 

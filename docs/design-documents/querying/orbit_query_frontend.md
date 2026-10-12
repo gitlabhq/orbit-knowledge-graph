@@ -216,7 +216,8 @@ Syntax errors report line, column, and expected tokens without echoing query tex
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
 Existing compiler limits still apply after lowering.
-Cross-node property comparisons are limited to 100 per query, across all MATCH clauses.
+Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
+An ID selector or IN list counts as one predicate; an ID range counts as two.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
 Custom ID-property spellings remain outside the frontend.
