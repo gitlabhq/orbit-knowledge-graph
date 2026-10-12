@@ -1,7 +1,10 @@
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use super::super::pipeline::IndexingReport;
+use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
+use code_graph_incremental::pipeline::FileTiming;
 use code_graph_incremental::{Envelope, Scalar, export::ExportConfig, templates};
 
 use super::super::{
@@ -21,14 +24,14 @@ pub(in crate::modules::code) fn run(
     use code_graph::v2::error::{AbortPhase, FaultedFile, FileFault, FileSkip, SkippedFile};
     use code_graph::v2::pipeline::{PhaseTimings, PipelineStats};
     let started = std::time::Instant::now();
+    let sizes: HashMap<String, u64> =
+        code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files)
+            .map(|file| (file.path.to_string(), file.size))
+            .collect();
     let mut stats = PipelineStats {
         files_discovered: repository.usage().files,
         bytes_discovered: repository.usage().bytes,
-        files_parsed: code_graph_incremental::pipeline::candidates(
-            &repository,
-            options.limits.max_files,
-        )
-        .count(),
+        files_parsed: sizes.len(),
         files_skipped: repository
             .files()
             .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
@@ -88,6 +91,9 @@ pub(in crate::modules::code) fn run(
         },
     )
     .map_err(|error| SinkError(error.to_string()))?;
+    stats.slowest_files = file_timings(&sizes, &report.files);
+    stats.language_timings = language_timings(&stats.slowest_files);
+    stats.slowest_files.truncate(SLOWEST_FILES);
     stats.phase_timings.total_ms = started.elapsed().as_secs_f64() * 1000.0;
     stats.phase_timings.language_processing_ms = stats.phase_timings.total_ms;
     Ok(IndexingReport {
@@ -120,4 +126,53 @@ pub(in crate::modules::code) fn run(
             })
             .collect(),
     })
+}
+
+const SLOWEST_FILES: usize = 100;
+
+fn file_timings(sizes: &HashMap<String, u64>, timings: &[FileTiming]) -> Vec<FileTimingEntry> {
+    let mut by_path: HashMap<&str, (f64, f64, f64)> = HashMap::new();
+    for timing in timings {
+        let ms = timing.elapsed.as_secs_f64() * 1000.0;
+        let (parse, build, resolve) = by_path.entry(&timing.path).or_default();
+        match timing.phase.as_str() {
+            "parse" => *parse += ms,
+            "resolve" => *resolve += ms,
+            _ => *build += ms,
+        }
+    }
+    let mut files: Vec<_> = by_path
+        .into_iter()
+        .map(|(path, (parse_ms, build_ms, resolve_ms))| FileTimingEntry {
+            path: path.to_owned(),
+            size_bytes: sizes.get(path).copied().unwrap_or(0),
+            parse_ms,
+            resolve_ms,
+            total_ms: parse_ms + build_ms + resolve_ms,
+            language: super::super::metrics::file_language(path),
+        })
+        .collect();
+    files.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
+    files
+}
+
+fn language_timings(files: &[FileTimingEntry]) -> Vec<LanguageTimings> {
+    let mut by_language: BTreeMap<&str, LanguageTimings> = BTreeMap::new();
+    for file in files {
+        let timing = by_language
+            .entry(&file.language)
+            .or_insert_with(|| LanguageTimings {
+                language: file.language.clone(),
+                ..Default::default()
+            });
+        timing.file_count += 1;
+        timing.total_bytes += file.size_bytes;
+        timing.parse_ms += file.parse_ms;
+        timing.resolve_ms += file.resolve_ms;
+        timing.graph_build_ms += file.total_ms - file.parse_ms - file.resolve_ms;
+        timing.total_ms += file.total_ms;
+    }
+    let mut timings: Vec<_> = by_language.into_values().collect();
+    timings.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
+    timings
 }

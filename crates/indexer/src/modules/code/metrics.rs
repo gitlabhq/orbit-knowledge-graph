@@ -261,7 +261,7 @@ impl<T> RecordStageError<T> for Result<T, HandlerError> {
 }
 
 /// Path-based because files skip or fault before parsing. `.ts` is `type_script` here but `java_script` in the timing metrics.
-fn file_language(path: &str) -> String {
+pub(in crate::modules::code) fn file_language(path: &str) -> String {
     detect_language_from_path(path).map_or_else(|| "unknown".to_string(), |l| l.to_string())
 }
 
