@@ -254,10 +254,17 @@ Reindexing the same commit replaces only that revision. Other commits retain the
 
 `local/manifest.duckdb` records revision paths and indexing status. Its key is the checkout path and commit SHA.
 Manifest operations hold a short advisory lock and close their DuckDB connection before parsing starts.
-A separate advisory lock serializes indexing of the same revision, including schema setup and status updates.
-Different revisions can be indexed concurrently. Queries open graph files read-only.
-`orbit sql --all` and MCP queries attach indexed revisions and expose shared temporary views.
+A revision writer holds an exclusive advisory lock through schema setup, graph writes, and status updates.
+Readers hold shared locks until their DuckDB connection closes. Different revisions can be indexed concurrently.
+Locks use the standard library file-lock API, wait at most five seconds, and release when the process exits.
+The lock files remain on disk. The manifest does not track readers or reader leases.
+Queries fail if a selected revision remains busy or incomplete, rather than returning partial results.
+No operation holds the manifest lock while waiting for a revision lock.
+`orbit sql` and MCP queries attach revisions read-only to one in-memory client and expose shared temporary views.
+SQL includes all indexed revisions by default. `--repo` selects the checkout revision and `--db` selects one file.
+`--all` remains an alias for the default. Grep, context, and repo-map stay checkout-scoped.
 The manifest is copied into the query connection and detached so graph reads do not hold its lock.
+Revisions marked `indexing` are included in selection so readers wait for their writer, then check completion metadata.
 
 Orbit Local rebuilds a revision database when its schema or code-index revision changes.
 Repositories are re-indexed as used. Orbit Remote schema versions are unaffected.

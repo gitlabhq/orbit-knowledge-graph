@@ -147,6 +147,8 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let result = orbit_cmd()
         .args([
             "sql",
+            "--repo",
+            repo.path.to_str().unwrap(),
             "-F",
             "json",
             "SELECT DISTINCT commit_sha FROM gl_file",
@@ -172,9 +174,27 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let all = orbit_sql("SELECT DISTINCT commit_sha FROM gl_file", data_dir.path());
     assert_eq!(rows(&all).len(), 2);
     git(&repo.path, &["checkout", "--detach", &first_sha]);
+    let all = orbit_cmd()
+        .args([
+            "sql",
+            "-F",
+            "json",
+            "SELECT DISTINCT commit_sha FROM gl_file",
+        ])
+        .current_dir(&repo.path)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(all.status.success());
+    assert_eq!(
+        rows(&serde_json::from_slice::<Value>(&all.stdout).unwrap()).len(),
+        2
+    );
     let result = orbit_cmd()
         .args([
             "sql",
+            "--repo",
+            repo.path.to_str().unwrap(),
             "-F",
             "json",
             "SELECT DISTINCT commit_sha FROM gl_file",
@@ -186,6 +206,115 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     assert!(result.status.success());
     let result: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(result, json!([{ "commit_sha": first_sha }]));
+}
+
+#[test]
+fn revision_read_locks_block_writers_and_release_when_reader_exits() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let path = manifest[0]["database_path"].as_str().unwrap();
+    let lock = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(format!("{path}.lock"))
+        .unwrap();
+    let mut reader = orbit_cmd()
+        .args(["sql", "SELECT sum(sin(i)) FROM range(1000000000000) t(i)"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match lock.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) => break,
+            Ok(()) => lock.unlock().unwrap(),
+            Err(error) => panic!("{error}"),
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "reader did not acquire its lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!orbit_index(&repo.path, data_dir.path()));
+    assert_eq!(rows(&orbit_sql(FILES_SIMPLE, data_dir.path())).len(), 2);
+    let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    assert!(ok, "{stderr}");
+    reader.kill().unwrap();
+    reader.wait().unwrap();
+    lock.try_lock().expect("reader crash releases shared locks");
+    lock.unlock().unwrap();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+}
+
+#[test]
+fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repos = [create_test_repo(), create_test_repo()];
+    for repo in &repos {
+        assert!(orbit_index(&repo.path, data_dir.path()));
+    }
+    let manifest = orbit_sql(
+        "SELECT database_path FROM _orbit_manifest ORDER BY database_path",
+        data_dir.path(),
+    );
+    let locks: Vec<_> = rows(&manifest)
+        .iter()
+        .map(|row| {
+            std::fs::File::options()
+                .read(true)
+                .write(true)
+                .open(format!("{}.lock", row["database_path"].as_str().unwrap()))
+                .unwrap()
+        })
+        .collect();
+    locks[1].lock().unwrap();
+    let (stdout, stderr, ok) = run_cmd(&["sql", "-F", "json", FILES_SIMPLE], data_dir.path());
+    assert!(!ok);
+    assert!(stdout.is_empty(), "must not return partial rows");
+    assert!(stderr.contains("is busy; retry"), "{stderr}");
+    locks[0]
+        .try_lock()
+        .expect("failed reader releases earlier shared locks");
+    locks[0].unlock().unwrap();
+    let reader = orbit_cmd()
+        .args(["sql", "-F", "json", FILES_SIMPLE])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match locks[0].try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) => break,
+            Ok(()) => locks[0].unlock().unwrap(),
+            Err(error) => panic!("{error}"),
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    assert!(
+        ok,
+        "waiting for a revision must not hold the manifest lock: {stderr}"
+    );
+    locks[1].unlock().unwrap();
+    let output = reader.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        rows(&serde_json::from_slice::<Value>(&output.stdout).unwrap()).len(),
+        4
+    );
+    assert_eq!(rows(&orbit_sql(FILES_SIMPLE, data_dir.path())).len(), 4);
 }
 
 #[test]

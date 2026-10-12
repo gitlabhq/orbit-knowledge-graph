@@ -82,5 +82,5 @@ orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS sym
 
 ## Notes
 
-- `commit_sha` columns matter only with `--all` or `--repo`. `gl_edge` has none, so join to a definition to scope edges.
-- Edges stay inside one repository. Cross-repository questions join through `_orbit_manifest` and need `--all`. The recipe matches on symbol name, so narrow on `im.repo_path` for duplicate names.
+- SQL includes all indexed revisions by default. Use `--repo .` to select the current checkout revision. `gl_edge` has no `commit_sha`, so join to a definition to scope edges.
+- Edges stay inside one repository. Cross-repository questions join through `_orbit_manifest`. The recipe matches on symbol name, so narrow on `im.repo_path` and commit for duplicate names.

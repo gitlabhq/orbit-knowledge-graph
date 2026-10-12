@@ -57,7 +57,7 @@ Edges connect files to their definitions, files to their imports, and definition
 GitLab Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
 against it with `orbit sql`:
 
-1. `orbit sql` opens the current checkout revision read-only. Use `--all` to query all indexed revisions.
+1. `orbit sql` attaches all indexed revisions read-only to one DuckDB client. Use `--repo` to select a checkout revision.
 1. Your SQL runs directly against the graph tables — no DSL compilation,
    no authorization layer.
 1. Results stream back as a table, JSON, NDJSON, or CSV.
@@ -73,6 +73,9 @@ Other indexed commits remain available.
 
 The separate `~/.gitlab/orbit/local/manifest.duckdb` records revision paths and status.
 Manifest writes are short, so indexing one revision does not hold the manifest lock while source files are parsed.
+Readers hold shared advisory locks on their selected revision files. Writers hold exclusive locks.
+Busy revisions cause a query to wait up to five seconds, then fail with a retry message rather than return partial results.
+The operating system releases locks when a process exits.
 Run `orbit list -F json` to see each revision and its database path.
 Set `ORBIT_DATA_DIR` to change the workspace root.
 

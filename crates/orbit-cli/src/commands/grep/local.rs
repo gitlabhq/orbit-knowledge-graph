@@ -6,7 +6,7 @@ use duckdb_client::DuckDbClient;
 use crate::workspace;
 
 pub(super) struct LocalBackend {
-    client: DuckDbClient,
+    client: crate::sql::LocalGraphReader,
     git: workspace::GitInfo,
     paths: Vec<String>,
 }

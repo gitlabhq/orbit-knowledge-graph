@@ -9,6 +9,19 @@ use std::path::{Path, PathBuf};
 
 const META_TABLE: &str = "_orbit_meta";
 
+pub struct LocalGraphReader {
+    client: DuckDbClient,
+    _locks: Vec<std::fs::File>,
+}
+
+impl std::ops::Deref for LocalGraphReader {
+    type Target = DuckDbClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
 pub fn schema_introspection_sql() -> String {
     format!(
         "SELECT table_name, column_name, data_type \
@@ -21,10 +34,11 @@ pub fn schema_introspection_sql() -> String {
     )
 }
 
-pub fn open_graph(db: Option<PathBuf>) -> Result<DuckDbClient> {
+pub fn open_graph(db: Option<PathBuf>) -> Result<LocalGraphReader> {
     let Some(db_path) = db else {
         return open_workspace_graph();
     };
+    let lock = workspace::read_lock_database(&db_path)?;
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Index a repository first \
@@ -43,10 +57,13 @@ pub fn open_graph(db: Option<PathBuf>) -> Result<DuckDbClient> {
             spec::launcher()
         );
     }
-    Ok(client)
+    Ok(LocalGraphReader {
+        client,
+        _locks: vec![lock],
+    })
 }
 
-fn open_workspace_graph() -> Result<DuckDbClient> {
+fn open_workspace_graph() -> Result<LocalGraphReader> {
     let manifest = workspace::Workspace::open_default()?.manifest_path();
     if !manifest.exists() {
         anyhow::bail!(
@@ -54,7 +71,11 @@ fn open_workspace_graph() -> Result<DuckDbClient> {
             spec::launcher()
         );
     }
-    let client = DuckDbClient::open_in_memory()?;
+    let mut reader = LocalGraphReader {
+        client: DuckDbClient::open_in_memory()?,
+        _locks: Vec::new(),
+    };
+    let client = &reader.client;
     let paths = {
         let _lock = workspace::lock_database(&manifest)?;
         client.execute(
@@ -67,17 +88,28 @@ fn open_workspace_graph() -> Result<DuckDbClient> {
         client.execute("CREATE TEMP TABLE _orbit_manifest AS SELECT * FROM orbit_manifest.main._orbit_manifest", &[])?;
         client.execute("DETACH orbit_manifest", &[])?;
         string_column(
-            &client.query_arrow("SELECT DISTINCT database_path FROM _orbit_manifest WHERE status = 'indexed' AND database_path IS NOT NULL ORDER BY database_path")?,
+            &client.query_arrow("SELECT DISTINCT database_path FROM _orbit_manifest WHERE status IN ('indexed', 'indexing') AND database_path IS NOT NULL ORDER BY database_path")?,
             "database_path",
         )
     };
     let mut catalogs = Vec::new();
     for (index, path) in paths.iter().enumerate() {
+        reader
+            ._locks
+            .push(workspace::read_lock_database(Path::new(path))?);
         let catalog = format!("revision_{index}");
         client.execute(
             &format!("ATTACH {} AS {catalog} (READ_ONLY)", sql_lit(path)),
             &[],
         )?;
+        let complete = client.query_arrow(&format!(
+            "SELECT count(*) AS n FROM {catalog}.main._orbit_meta WHERE key = 'indexed_commit'"
+        ))?;
+        anyhow::ensure!(
+            duckdb_client::scalar_i64(&complete) == 1,
+            "revision at {path} is not fully indexed; run `{} index` again",
+            spec::launcher()
+        );
         catalogs.push(catalog);
     }
     let tables = string_column(
@@ -97,7 +129,7 @@ fn open_workspace_graph() -> Result<DuckDbClient> {
         "CREATE MACRO def_name(fqn) AS regexp_replace(fqn, '^.*[:.#/]', '')",
         &[],
     )?;
-    Ok(client)
+    Ok(reader)
 }
 
 pub fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
@@ -114,7 +146,7 @@ pub fn run(
     format: Format,
     db: Option<PathBuf>,
     repo: Option<PathBuf>,
-    all: bool,
+    _all: bool,
 ) -> Result<()> {
     let sql = resolve_sql(query_arg.as_deref(), file)?;
     let sql = sql.trim();
@@ -122,19 +154,17 @@ pub fn run(
         anyhow::bail!("empty SQL query");
     }
 
-    let db = if db.is_none() && !all {
-        workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))
-            .and_then(|top| workspace::git_info(&top))
-            .ok()
-            .map(|git| workspace::resolve_db_path(None, &git))
-            .transpose()?
-            .filter(|path| path.exists())
+    let db = if db.is_none()
+        && let Some(repo) = &repo
+    {
+        let git = workspace::git_info(&workspace::git_toplevel(repo)?)?;
+        Some(workspace::resolve_db_path(None, &git)?)
     } else {
         db
     };
     let client = open_graph(db)?;
-    if !all {
-        scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?;
+    if let Some(repo) = repo {
+        scope_to_checkout(&client, &repo)?;
     }
     let batches = query(&client, sql)?;
 

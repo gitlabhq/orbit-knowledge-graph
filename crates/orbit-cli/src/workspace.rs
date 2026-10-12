@@ -144,7 +144,7 @@ pub fn describe_graph_lock_conflict(error: &anyhow::Error) -> Option<String> {
 
 pub struct IndexedRepo {
     pub git: GitInfo,
-    pub client: DuckDbClient,
+    pub client: crate::sql::LocalGraphReader,
 }
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
@@ -266,6 +266,7 @@ pub fn repo_relative_paths(repo: &Path, paths: &[String]) -> Vec<String> {
 }
 
 fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
+    let _lock = read_lock_database(db)?;
     if !db.exists() {
         return Ok(true);
     }
@@ -442,6 +443,14 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
 }
 
 pub fn lock_database(path: &Path) -> Result<std::fs::File> {
+    acquire_database_lock(path, false)
+}
+
+pub fn read_lock_database(path: &Path) -> Result<std::fs::File> {
+    acquire_database_lock(path, true)
+}
+
+fn acquire_database_lock(path: &Path, shared: bool) -> Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -453,8 +462,26 @@ pub fn lock_database(path: &Path) -> Result<std::fs::File> {
         .read(true)
         .write(true)
         .open(PathBuf::from(lock_path))?;
-    file.lock()?;
-    Ok(file)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let result = if shared {
+            file.try_lock_shared()
+        } else {
+            file.try_lock()
+        };
+        match result {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                anyhow::ensure!(
+                    std::time::Instant::now() < deadline,
+                    "local database {} is busy; retry when its readers or writer finish",
+                    path.display()
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
+    }
 }
 
 pub fn open_manifest(path: &Path) -> Result<DuckDbClient> {

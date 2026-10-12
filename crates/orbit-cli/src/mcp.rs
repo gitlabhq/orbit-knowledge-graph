@@ -123,10 +123,8 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<GetGraphSchemaArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.timed_tool("get_graph_schema", move || {
-            batches_to_json(&sql::query(
-                &sql::open_graph(args.db)?,
-                &sql::schema_introspection_sql(),
-            )?)
+            let reader = sql::open_graph(args.db)?;
+            batches_to_json(&sql::query(&reader, &sql::schema_introspection_sql())?)
         })
         .await
     }

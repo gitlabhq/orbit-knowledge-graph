@@ -347,8 +347,8 @@ fn context_target_help() -> String {
 fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
-         The current checkout's indexed commit scopes the tables, so queries need \
-         no project_id or commit_sha predicates. `{} schema` lists the tables.",
+         Queries include all indexed revisions by default. Use --repo to select \
+         a checkout or --db to select a database. `{} schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
@@ -384,12 +384,11 @@ struct SqlArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Checkout whose commit scopes the tables (default: current directory).
+    /// Query only this checkout's current revision.
     #[arg(long, value_name = "PATH", conflicts_with = "all")]
     repo: Option<PathBuf>,
 
-    /// Query every indexed repository and commit instead of the current
-    /// checkout.
+    /// Query every indexed repository and commit (the default).
     #[arg(long)]
     all: bool,
 

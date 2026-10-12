@@ -120,8 +120,9 @@ orbit sql --file query.sql
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
 | `-f`, `--file` | Read the SQL from a file. |
-| `--db` | Read a specific revision database. Defaults to the current checkout revision when indexed. |
-| `--all` | Query all indexed revision databases. |
+| `--db` | Read a specific revision database. Defaults to all indexed revision databases. |
+| `--repo` | Query only the given checkout's current revision. |
+| `--all` | Query all indexed revision databases (the default). |
 
 ## List indexed repositories
 

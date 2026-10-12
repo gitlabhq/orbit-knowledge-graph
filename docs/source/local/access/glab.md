@@ -100,16 +100,14 @@ glab orbit sql 'SELECT count(*) FROM gl_definition'
 echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit sql -
 ```
 
-Table names resolve to the current checkout: run from inside an indexed
-repository, `gl_definition`, `gl_file`, and the other node tables contain only
-that repository's indexed commit, and `gl_edge` only that commit's edges, so
-queries need no `project_id` or `commit_sha` predicates. Outside an indexed
-checkout the query runs against every indexed commit, with a note on stderr.
+Queries include all indexed revisions through one DuckDB client by default.
+Use `--repo /path/to/repo` to select that checkout's current revision.
+Use `--db /path/to/revision.duckdb` to select one database file.
 
 | Flag | Purpose |
 |------|---------|
-| `--repo` | Scope the tables to another checkout instead of the current directory. |
-| `--all` | Query every indexed repository and commit. |
+| `--repo` | Query only the given checkout's current revision. |
+| `--all` | Query every indexed repository and commit (the default). |
 | `-F`, `--format` | Output format: `table` (default), `json`, `ndjson`, or `csv`. |
 | `--db` | Read a specific revision database. Defaults to the indexed revision databases. |
 
@@ -133,7 +131,7 @@ glab orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Read a specific revision database. Defaults to the current checkout revision when indexed. |
+| `--db` | Read a specific revision database. Defaults to all indexed revision databases. |
 
 ## Run as an MCP server
 
