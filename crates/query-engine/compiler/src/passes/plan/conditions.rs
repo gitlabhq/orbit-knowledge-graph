@@ -31,7 +31,10 @@ pub(super) fn place_conditions(
     for root in &input.predicates {
         let mut untagged = HashSet::new();
         for condition in root.leaves() {
-            if leaf_tag(condition, input, model, hops, denormalized)?.is_none() {
+            let (column, bound) = bind_leaf(condition.clone(), input, model, hops)?;
+            let tagged = matches!(condition.target, PredicateTarget::Node(_))
+                && edge_tag(&column.source, &bound, hops, denormalized).is_some();
+            if !tagged {
                 untagged.extend(
                     condition
                         .node_properties()
@@ -90,20 +93,6 @@ pub(super) fn bind_join_conditions<M: OrbitQueryModel + ?Sized>(
         .filter(|(_, after_joins)| **after_joins)
         .map(|(root, _)| bind_tree(root, context, Some(bindings)))
         .collect()
-}
-
-fn leaf_tag(
-    condition: &Condition,
-    input: &Input,
-    model: &(impl OrbitQueryModel + ?Sized),
-    hops: &[Hop],
-    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-) -> Result<Option<Predicate>> {
-    let PredicateTarget::Node(alias) = &condition.target else {
-        return Ok(None);
-    };
-    let (_, bound) = bind_leaf(condition.clone(), input, model, hops)?;
-    Ok(edge_tag(alias, &bound, hops, denormalized))
 }
 
 fn edge_tag(

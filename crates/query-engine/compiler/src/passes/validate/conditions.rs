@@ -37,18 +37,6 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
         Ok(())
     }
 
-    /// Validate that filter values are compatible with the ontology column type.
-    ///
-    /// For scalar ops (eq, gt, lt, ...) the JSON value must match the column's
-    /// DataType. For `in`, every element of the JSON array must match; the
-    /// first mismatched element returns a `QueryError::Validation` and the
-    /// query is rejected. Ops that carry no value (`is_null`, `is_not_null`)
-    /// are skipped. Filters on unknown entities or fields are skipped —
-    /// `check_ontology` catches those.
-    ///
-    /// Relationship filters are validated against the fixed edge table schema.
-    /// Unknown edge columns are rejected (fail closed) since they would
-    /// produce broken SQL at runtime.
     pub(super) fn check_predicates(&self, input: &Input) -> Result<()> {
         let compares_nodes = input.conditions().any(Condition::compares_aliases);
         if compares_nodes && input.query_type != QueryType::Traversal {
