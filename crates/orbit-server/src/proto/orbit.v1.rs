@@ -32,6 +32,8 @@ pub struct ExecuteQueryRequest {
     pub query_type: i32,
     #[prost(enumeration = "QueryLanguage", tag = "4")]
     pub language: i32,
+    #[prost(bool, tag = "5")]
+    pub redaction_by_ability: bool,
 }
 /// Server-sent final message with query results.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -409,6 +411,8 @@ pub struct ResourceAuthorization {
     pub resource_type: ::prost::alloc::string::String,
     #[prost(map = "int64, bool", tag = "2")]
     pub authorized: ::std::collections::HashMap<i64, bool>,
+    #[prost(string, tag = "3")]
+    pub ability: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListToolsRequest {

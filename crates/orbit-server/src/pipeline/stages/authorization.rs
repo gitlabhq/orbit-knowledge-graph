@@ -5,7 +5,7 @@ use tonic::{Status, Streaming};
 use tracing::info;
 
 use crate::proto::ExecuteQueryMessage;
-use crate::redaction::RedactionService;
+use crate::redaction::{RedactionByAbility, RedactionService};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -24,7 +24,7 @@ impl PipelineStage for AuthorizationStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx
+        let mut input = ctx
             .phases
             .remove::<ExtractionOutput>()
             .ok_or_else(|| {
@@ -32,6 +32,20 @@ impl PipelineStage for AuthorizationStage {
             })
             .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
+
+        let by_ability = ctx
+            .server_extensions
+            .get::<RedactionByAbility>()
+            .is_some_and(|mode| mode.0);
+        if !by_ability {
+            for node in ctx.ontology.nodes() {
+                if let Some(redaction) = &node.redaction {
+                    input
+                        .query_result
+                        .use_ability(&node.name, redaction.legacy_client_ability());
+                }
+            }
+        }
 
         let resources_to_check = input.query_result.resource_checks();
         let authorizations = if resources_to_check.is_empty() {

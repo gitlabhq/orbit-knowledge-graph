@@ -75,6 +75,12 @@ impl ResultContext {
         self.entity_auth.get(entity_type)
     }
 
+    pub fn use_ability(&mut self, entity_type: &str, ability: &str) {
+        if let Some(auth) = self.entity_auth.get_mut(entity_type) {
+            auth.ability = ability.to_string();
+        }
+    }
+
     pub fn entity_auth(&self) -> impl Iterator<Item = (&str, &EntityAuthConfig)> {
         self.entity_auth.iter().map(|(k, v)| (k.as_str(), v))
     }

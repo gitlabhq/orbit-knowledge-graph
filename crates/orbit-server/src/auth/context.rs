@@ -4,6 +4,7 @@ use super::Claims;
 pub struct RequestContext {
     pub claims: Claims,
     pub user_agent: Option<String>,
+    pub redaction_by_ability: bool,
 }
 
 impl RequestContext {

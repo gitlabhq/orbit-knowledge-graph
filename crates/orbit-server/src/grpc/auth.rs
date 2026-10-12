@@ -42,7 +42,11 @@ pub fn extract_request_context<T>(
         .and_then(|v| v.to_str().ok())
         .map(String::from);
 
-    Ok(RequestContext { claims, user_agent })
+    Ok(RequestContext {
+        claims,
+        user_agent,
+        redaction_by_ability: false,
+    })
 }
 
 #[cfg(test)]
@@ -129,6 +133,7 @@ mod tests {
                 license_checksum: None,
             },
             user_agent: user_agent.map(Into::into),
+            redaction_by_ability: false,
         }
     }
 

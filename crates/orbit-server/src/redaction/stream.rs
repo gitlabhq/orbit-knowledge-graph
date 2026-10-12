@@ -68,21 +68,9 @@ impl RedactionService {
         tx: &mpsc::Sender<Result<M, Status>>,
         stream: &mut Streaming<M>,
     ) -> Result<RedactionExchangeResult, RedactionExchangeError> {
-        let mut authorizations = Vec::with_capacity(resources.len());
-        for round in rounds_with_unique_resource_types(resources) {
-            authorizations.extend(Self::exchange(&round, tx, stream).await?);
-        }
-        Ok(RedactionExchangeResult { authorizations })
-    }
-
-    async fn exchange<M: RedactionMessage>(
-        round: &[&ResourceCheck],
-        tx: &mpsc::Sender<Result<M, Status>>,
-        stream: &mut Streaming<M>,
-    ) -> Result<Vec<ResourceAuthorization>, RedactionExchangeError> {
         let result_id = Uuid::new_v4().to_string();
 
-        let proto_resources: Vec<ProtoResourceToAuthorize> = round
+        let proto_resources: Vec<ProtoResourceToAuthorize> = resources
             .iter()
             .map(|r| ProtoResourceToAuthorize {
                 resource_type: r.resource_type.clone(),
@@ -137,49 +125,37 @@ impl RedactionService {
             });
         }
 
-        match_authorizations(round, redaction_response.authorizations)
+        let authorizations = match_authorizations(resources, redaction_response.authorizations)?;
+        Ok(RedactionExchangeResult { authorizations })
     }
-}
-
-fn rounds_with_unique_resource_types(resources: &[ResourceCheck]) -> Vec<Vec<&ResourceCheck>> {
-    let mut rounds: Vec<Vec<&ResourceCheck>> = Vec::new();
-    for check in resources {
-        let open_round = rounds
-            .iter_mut()
-            .find(|round| round.iter().all(|c| c.resource_type != check.resource_type));
-        match open_round {
-            Some(round) => round.push(check),
-            None => rounds.push(vec![check]),
-        }
-    }
-    rounds
 }
 
 fn match_authorizations(
-    round: &[&ResourceCheck],
+    checks: &[ResourceCheck],
     response: Vec<ProtoResourceAuthorization>,
 ) -> Result<Vec<ResourceAuthorization>, RedactionExchangeError> {
-    let mut by_type = HashMap::with_capacity(response.len());
+    let mut answers = HashMap::with_capacity(response.len());
     for auth in response {
-        if by_type.contains_key(&auth.resource_type) {
-            return Err(RedactionExchangeError::DuplicateResourceType(
-                auth.resource_type,
-            ));
+        let key = (auth.resource_type, auth.ability);
+        if answers.contains_key(&key) {
+            return Err(RedactionExchangeError::DuplicateResourceType(key.0));
         }
-        by_type.insert(auth.resource_type, auth.authorized);
+        answers.insert(key, auth.authorized);
     }
 
-    round
+    checks
         .iter()
         .map(|check| {
-            let authorized = by_type
-                .remove(&check.resource_type)
+            let resource_type = check.resource_type.clone();
+            let authorized = answers
+                .remove(&(resource_type.clone(), check.ability.clone()))
+                .or_else(|| answers.remove(&(resource_type.clone(), String::new())))
                 .filter(|authorized| check.ids.iter().all(|id| authorized.contains_key(id)))
                 .ok_or_else(|| RedactionExchangeError::IncompleteResponse {
-                    resource_type: check.resource_type.clone(),
+                    resource_type: resource_type.clone(),
                 })?;
             Ok(ResourceAuthorization {
-                resource_type: check.resource_type.clone(),
+                resource_type,
                 ability: check.ability.clone(),
                 authorized,
             })
@@ -199,66 +175,70 @@ mod tests {
         }
     }
 
-    fn answer(resource_type: &str, ids: &[i64]) -> ProtoResourceAuthorization {
+    fn answer(
+        resource_type: &str,
+        ability: &str,
+        ids: &[(i64, bool)],
+    ) -> ProtoResourceAuthorization {
         ProtoResourceAuthorization {
             resource_type: resource_type.into(),
-            authorized: ids.iter().map(|id| (*id, true)).collect(),
+            ability: ability.into(),
+            authorized: ids.iter().copied().collect(),
         }
     }
 
-    fn round_shape(rounds: &[Vec<&ResourceCheck>]) -> Vec<Vec<(String, String)>> {
-        rounds
-            .iter()
-            .map(|round| {
-                round
-                    .iter()
-                    .map(|c| (c.resource_type.clone(), c.ability.clone()))
-                    .collect()
-            })
-            .collect()
-    }
-
     #[test]
-    fn one_round_when_every_resource_type_is_unique() {
-        let checks = [
-            check("project", "read_project", &[1]),
-            check("merge_request", "read_merge_request", &[2]),
-        ];
-        assert_eq!(rounds_with_unique_resource_types(&checks).len(), 1);
-    }
-
-    #[test]
-    fn a_shared_resource_type_moves_each_extra_ability_to_a_new_round() {
+    fn answers_tagged_with_an_ability_match_their_own_check() {
         let checks = [
             check("project", "read_project", &[1]),
             check("project", "read_code", &[1]),
-            check("merge_request", "read_merge_request", &[2]),
         ];
-        let pair = |t: &str, a: &str| (t.to_string(), a.to_string());
-        assert_eq!(
-            round_shape(&rounds_with_unique_resource_types(&checks)),
+        let matched = match_authorizations(
+            &checks,
             vec![
-                vec![
-                    pair("project", "read_project"),
-                    pair("merge_request", "read_merge_request")
-                ],
-                vec![pair("project", "read_code")],
-            ]
-        );
+                answer("project", "read_code", &[(1, false)]),
+                answer("project", "read_project", &[(1, true)]),
+            ],
+        )
+        .unwrap();
+        let decisions: Vec<_> = matched
+            .iter()
+            .map(|a| (a.ability.as_str(), a.authorized[&1]))
+            .collect();
+        assert_eq!(decisions, [("read_project", true), ("read_code", false)]);
     }
 
     #[test]
-    fn matched_authorizations_carry_the_requested_ability() {
-        let code = check("project", "read_code", &[1, 2]);
-        let matched = match_authorizations(&[&code], vec![answer("project", &[1, 2])]).unwrap();
+    fn an_untagged_answer_matches_the_only_check_for_its_type() {
+        let checks = [check("project", "read_code", &[1, 2])];
+        let matched = match_authorizations(
+            &checks,
+            vec![answer("project", "", &[(1, true), (2, false)])],
+        )
+        .unwrap();
         assert_eq!(matched[0].ability, "read_code");
         assert_eq!(matched[0].authorized.len(), 2);
     }
 
     #[test]
+    fn one_untagged_answer_cannot_serve_two_abilities() {
+        let checks = [
+            check("project", "read_project", &[1]),
+            check("project", "read_code", &[1]),
+        ];
+        let err =
+            match_authorizations(&checks, vec![answer("project", "", &[(1, true)])]).unwrap_err();
+        assert!(matches!(
+            err,
+            RedactionExchangeError::IncompleteResponse { resource_type } if resource_type == "project"
+        ));
+    }
+
+    #[test]
     fn a_missing_resource_type_fails_the_exchange() {
-        let package = check("package", "read_package", &[1]);
-        let err = match_authorizations(&[&package], vec![answer("project", &[1])]).unwrap_err();
+        let checks = [check("package", "read_package", &[1])];
+        let err =
+            match_authorizations(&checks, vec![answer("project", "", &[(1, true)])]).unwrap_err();
         assert!(matches!(
             err,
             RedactionExchangeError::IncompleteResponse { resource_type } if resource_type == "package"
@@ -267,8 +247,9 @@ mod tests {
 
     #[test]
     fn a_missing_id_fails_the_exchange() {
-        let project = check("project", "read_project", &[1, 2]);
-        let err = match_authorizations(&[&project], vec![answer("project", &[1])]).unwrap_err();
+        let checks = [check("project", "read_project", &[1, 2])];
+        let err =
+            match_authorizations(&checks, vec![answer("project", "", &[(1, true)])]).unwrap_err();
         assert!(matches!(
             err,
             RedactionExchangeError::IncompleteResponse { .. }
@@ -276,11 +257,14 @@ mod tests {
     }
 
     #[test]
-    fn a_duplicate_resource_type_fails_the_exchange() {
-        let project = check("project", "read_project", &[1]);
+    fn a_duplicate_answer_fails_the_exchange() {
+        let checks = [check("project", "read_project", &[1])];
         let err = match_authorizations(
-            &[&project],
-            vec![answer("project", &[1]), answer("project", &[1])],
+            &checks,
+            vec![
+                answer("project", "read_project", &[(1, true)]),
+                answer("project", "read_project", &[(1, true)]),
+            ],
         )
         .unwrap_err();
         assert!(matches!(

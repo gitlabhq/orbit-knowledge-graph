@@ -253,6 +253,10 @@ impl QueryResult {
         &self.ctx
     }
 
+    pub fn use_ability(&mut self, entity_type: &str, ability: &str) {
+        self.ctx.use_ability(entity_type, ability);
+    }
+
     pub fn node_aliases(&self) -> Vec<String> {
         self.ctx.nodes().map(|n| n.alias.clone()).collect()
     }
@@ -844,6 +848,41 @@ mod tests {
                 let mut result = QueryResult::from_batches(std::slice::from_ref(&batch), &ctx);
                 assert_eq!(result.apply_authorizations(&authorizations), 1);
             }
+        }
+
+        #[test]
+        fn a_legacy_ability_folds_shared_checks_into_one() {
+            let batch = make_batch(vec![
+                ("_orbit_p_id", Arc::new(Int64Array::from(vec![1000]))),
+                (
+                    "_orbit_p_type",
+                    Arc::new(StringArray::from(vec!["Project"])),
+                ),
+                ("_orbit_b_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_orbit_b_type", Arc::new(StringArray::from(vec!["Branch"]))),
+            ]);
+            let mut ctx = ResultContext::new();
+            ctx.add_node("p", "Project");
+            ctx.add_node("b", "Branch");
+            for (entity, ability) in [("Project", "read_project"), ("Branch", "read_code")] {
+                ctx.add_entity_auth(
+                    entity,
+                    EntityAuthConfig {
+                        resource_type: "project".to_string(),
+                        ability: ability.to_string(),
+                        auth_id_column: "id".to_string(),
+                        owner_entity: None,
+                        required_access_level: 20,
+                    },
+                );
+            }
+            let mut result = QueryResult::from_batches(&[batch], &ctx);
+            assert_eq!(result.resource_checks().len(), 2);
+
+            result.use_ability("Project", "read_code");
+            let checks = result.resource_checks();
+            assert_eq!(checks.len(), 1);
+            assert_eq!(checks[0].ability, "read_code");
         }
 
         #[test]

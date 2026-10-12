@@ -424,6 +424,7 @@ async fn execute(
                     .into_iter()
                     .map(|resource| ResourceAuthorization {
                         resource_type: resource.resource_type,
+                        ability: String::new(),
                         authorized: resource
                             .resource_ids
                             .into_iter()

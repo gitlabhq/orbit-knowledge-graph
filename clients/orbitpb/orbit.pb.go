@@ -559,13 +559,14 @@ func (*ExecuteQueryMessage_Error) isExecuteQueryMessage_Content() {}
 
 // Client-sent initial message to start a query.
 type ExecuteQueryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
-	QueryType     QueryType              `protobuf:"varint,3,opt,name=query_type,json=queryType,proto3,enum=orbit.v1.QueryType" json:"query_type,omitempty"`
-	Language      QueryLanguage          `protobuf:"varint,4,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Query              string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	Format             ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
+	QueryType          QueryType              `protobuf:"varint,3,opt,name=query_type,json=queryType,proto3,enum=orbit.v1.QueryType" json:"query_type,omitempty"`
+	Language           QueryLanguage          `protobuf:"varint,4,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
+	RedactionByAbility bool                   `protobuf:"varint,5,opt,name=redaction_by_ability,json=redactionByAbility,proto3" json:"redaction_by_ability,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ExecuteQueryRequest) Reset() {
@@ -624,6 +625,13 @@ func (x *ExecuteQueryRequest) GetLanguage() QueryLanguage {
 		return x.Language
 	}
 	return QueryLanguage_QUERY_LANGUAGE_JSON
+}
+
+func (x *ExecuteQueryRequest) GetRedactionByAbility() bool {
+	if x != nil {
+		return x.RedactionByAbility
+	}
+	return false
 }
 
 // Server-sent final message with query results.
@@ -2562,6 +2570,7 @@ type ResourceAuthorization struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ResourceType  string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
 	Authorized    map[int64]bool         `protobuf:"bytes,2,rep,name=authorized,proto3" json:"authorized,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	Ability       string                 `protobuf:"bytes,3,opt,name=ability,proto3" json:"ability,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2608,6 +2617,13 @@ func (x *ResourceAuthorization) GetAuthorized() map[int64]bool {
 		return x.Authorized
 	}
 	return nil
+}
+
+func (x *ResourceAuthorization) GetAbility() string {
+	if x != nil {
+		return x.Ability
+	}
+	return ""
 }
 
 type ListToolsRequest struct {
@@ -4239,13 +4255,14 @@ const file_orbit_proto_rawDesc = "" +
 	"\tredaction\x18\x02 \x01(\v2\x1b.orbit.v1.RedactionExchangeH\x00R\tredaction\x126\n" +
 	"\x06result\x18\x03 \x01(\v2\x1c.orbit.v1.ExecuteQueryResultH\x00R\x06result\x123\n" +
 	"\x05error\x18\x04 \x01(\v2\x1b.orbit.v1.ExecuteQueryErrorH\x00R\x05errorB\t\n" +
-	"\acontent\"\xc6\x01\n" +
+	"\acontent\"\xf8\x01\n" +
 	"\x13ExecuteQueryRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x120\n" +
 	"\x06format\x18\x02 \x01(\x0e2\x18.orbit.v1.ResponseFormatR\x06format\x122\n" +
 	"\n" +
 	"query_type\x18\x03 \x01(\x0e2\x13.orbit.v1.QueryTypeR\tqueryType\x123\n" +
-	"\blanguage\x18\x04 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\"\xa0\x01\n" +
+	"\blanguage\x18\x04 \x01(\x0e2\x17.orbit.v1.QueryLanguageR\blanguage\x120\n" +
+	"\x14redaction_by_ability\x18\x05 \x01(\bR\x12redactionByAbility\"\xa0\x01\n" +
 	"\x12ExecuteQueryResult\x12!\n" +
 	"\vresult_json\x18\x01 \x01(\tH\x00R\n" +
 	"resultJson\x12'\n" +
@@ -4381,12 +4398,13 @@ const file_orbit_proto_rawDesc = "" +
 	"\tabilities\x18\x03 \x03(\tR\tabilities\"y\n" +
 	"\x11RedactionResponse\x12\x1b\n" +
 	"\tresult_id\x18\x01 \x01(\tR\bresultId\x12G\n" +
-	"\x0eauthorizations\x18\x02 \x03(\v2\x1f.orbit.v1.ResourceAuthorizationR\x0eauthorizations\"\xcc\x01\n" +
+	"\x0eauthorizations\x18\x02 \x03(\v2\x1f.orbit.v1.ResourceAuthorizationR\x0eauthorizations\"\xe6\x01\n" +
 	"\x15ResourceAuthorization\x12#\n" +
 	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12O\n" +
 	"\n" +
 	"authorized\x18\x02 \x03(\v2/.orbit.v1.ResourceAuthorization.AuthorizedEntryR\n" +
-	"authorized\x1a=\n" +
+	"authorized\x12\x18\n" +
+	"\aability\x18\x03 \x01(\tR\aability\x1a=\n" +
 	"\x0fAuthorizedEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x03R\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"G\n" +

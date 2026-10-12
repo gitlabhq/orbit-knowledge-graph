@@ -5,6 +5,7 @@ use crate::active_schema::SchemaSnapshot;
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
 use crate::proto::{ExecuteQueryMessage, ExecuteQueryResult};
+use crate::redaction::RedactionByAbility;
 use clickhouse_client::ArrowClickHouseClient;
 use nats_client::NatsClient;
 use orbit_billing::{BillingObserver, BillingTracker};
@@ -95,6 +96,7 @@ impl QueryPipelineService {
         render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
     ) -> Result<(), PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
+        let redaction_by_ability = RedactionByAbility(request_context.redaction_by_ability);
         let claims = request_context.claims;
         let schema_obs = OTelPipelineObserver::start();
         let mut obs = MultiObserver::new(vec![
@@ -119,6 +121,7 @@ impl QueryPipelineService {
         server_extensions.insert(claims);
         server_extensions.insert(tx.clone());
         server_extensions.insert(stream);
+        server_extensions.insert(redaction_by_ability);
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
         }

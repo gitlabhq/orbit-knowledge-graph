@@ -401,7 +401,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         &self,
         request: Request<Streaming<ExecuteQueryMessage>>,
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
+        let mut ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
         self.quota
             .check(&QuotaCheckInputs::from(&ctx.claims))
@@ -420,6 +420,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     Some(r) => r,
                     None => return,
                 };
+                ctx.redaction_by_ability = req.redaction_by_ability;
 
                 let formatter = match query_formatter(req.format) {
                     Ok(formatter) => formatter,

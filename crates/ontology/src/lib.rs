@@ -555,6 +555,7 @@ impl Ontology {
             id_column: id_column.into(),
             ability: "read".to_string(),
             required_role: RequiredRole::Reporter,
+            legacy_ability: None,
         });
         self
     }

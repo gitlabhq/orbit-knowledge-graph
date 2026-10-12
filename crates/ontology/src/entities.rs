@@ -308,9 +308,15 @@ pub struct RedactionConfig {
     /// ability is only granted at that level, e.g. `read_vulnerability`.
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
+    #[serde(default)]
+    pub legacy_ability: Option<String>,
 }
 
 impl RedactionConfig {
+    pub fn legacy_client_ability(&self) -> &str {
+        self.legacy_ability.as_deref().unwrap_or(&self.ability)
+    }
+
     fn default_id_column() -> String {
         "id".to_string()
     }

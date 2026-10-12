@@ -128,6 +128,7 @@ message ExecuteQueryRequest {
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
   QueryType query_type = 3;
   QueryLanguage language = 4;
+  bool redaction_by_ability = 5;
 }
 
 // Server-sent final message with query results.
@@ -375,6 +376,7 @@ message RedactionResponse {
 message ResourceAuthorization {
   string resource_type = 1;
   map<int64, bool> authorized = 2;
+  string ability = 3;
 }
 
 // ---------------------------------------------------------------------------
