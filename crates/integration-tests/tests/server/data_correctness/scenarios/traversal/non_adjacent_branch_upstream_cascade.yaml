@@ -1,0 +1,37 @@
+description: A branch resumes an earlier parent whose cascade starts at the pinned user
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "g", "entity": "Group"},
+        {"id": "child", "entity": "Group"},
+        {"id": "p", "entity": "Project"},
+        {"id": "grandchild", "entity": "Group"}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"},
+        {"type": "CONTAINS", "from": "g", "to": "child"},
+        {"type": "CONTAINS", "from": "g", "to": "p"},
+        {"type": "CONTAINS", "from": "child", "to": "grandchild"}
+      ],
+      "limit": 20
+    }
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(child:Group),
+          (g)-[:CONTAINS]->(p:Project), (child)-[:CONTAINS]->(grandchild:Group)
+    RETURN u, g, child, p, grandchild LIMIT 20
+
+expect:
+  node_count: 6
+  total_edge_count: 5
+  referential_integrity: true
+  nodes:
+    User: { ids: [1] }
+    Group: { ids: [100, 200, 300] }
+    Project: { ids: [1000, 1002] }
+  edges:
+    MEMBER_OF: [[1, 100]]
+    CONTAINS: [[100, 200], [100, 1000], [100, 1002], [200, 300]]
