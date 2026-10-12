@@ -402,8 +402,9 @@ pub fn parse_with_sentinel(
         c.ensure(support_lang, lang);
         c.parser.reset();
         let mut stopped = None;
-        let mut progress = |_: &tree_sitter::ParseState| match sentinel.check() {
-            Ok(()) => std::ops::ControlFlow::Continue(()),
+        let mut guard = treesitter_visit::ParseGuard::default().progress();
+        let mut progress = |state: &tree_sitter::ParseState| match sentinel.check() {
+            Ok(()) => guard(state),
             Err(error) => {
                 stopped = Some(error);
                 std::ops::ControlFlow::Break(())

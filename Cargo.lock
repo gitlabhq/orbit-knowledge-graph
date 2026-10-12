@@ -1454,6 +1454,7 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zig",
+ "treesitter-visit",
  "zstd",
 ]
 
