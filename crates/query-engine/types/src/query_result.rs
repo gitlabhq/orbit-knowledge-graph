@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
@@ -270,7 +270,7 @@ impl QueryResult {
     }
 
     pub fn resource_checks(&self) -> Vec<ResourceCheck> {
-        let mut ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
+        let mut ids: BTreeMap<(&str, &str), HashSet<i64>> = BTreeMap::new();
 
         for row in &self.rows {
             for redaction_node in self.ctx.nodes() {
@@ -800,6 +800,51 @@ mod tests {
 
     mod apply_authorizations_tests {
         use super::*;
+
+        #[test]
+        fn rows_match_the_answer_for_their_own_ability() {
+            let batch = make_batch(vec![
+                ("_orbit_p_id", Arc::new(Int64Array::from(vec![1000]))),
+                (
+                    "_orbit_p_type",
+                    Arc::new(StringArray::from(vec!["Project"])),
+                ),
+                ("_orbit_b_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_orbit_b_type", Arc::new(StringArray::from(vec!["Branch"]))),
+            ]);
+            let mut ctx = ResultContext::new();
+            ctx.add_node("p", "Project");
+            ctx.add_node("b", "Branch");
+            for (entity, ability, id_column) in [
+                ("Project", "read_project", "id"),
+                ("Branch", "read_code", "project_id"),
+            ] {
+                ctx.add_entity_auth(
+                    entity,
+                    EntityAuthConfig {
+                        resource_type: "project".to_string(),
+                        ability: ability.to_string(),
+                        auth_id_column: id_column.to_string(),
+                        owner_entity: None,
+                        required_access_level: 20,
+                    },
+                );
+            }
+            let answer = |ability: &str, allowed: bool| ResourceAuthorization {
+                resource_type: "project".to_string(),
+                ability: ability.to_string(),
+                authorized: [(1000, allowed)].into_iter().collect(),
+            };
+            let project_only = [answer("read_project", true), answer("read_code", false)];
+
+            for authorizations in [
+                project_only.to_vec(),
+                project_only.into_iter().rev().collect(),
+            ] {
+                let mut result = QueryResult::from_batches(std::slice::from_ref(&batch), &ctx);
+                assert_eq!(result.apply_authorizations(&authorizations), 1);
+            }
+        }
 
         #[test]
         fn all_authorized_returns_zero_redacted() {

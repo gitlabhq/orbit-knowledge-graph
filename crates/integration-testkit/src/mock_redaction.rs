@@ -19,21 +19,15 @@ impl MockRedactionService {
         }
     }
 
-    pub fn allow(&mut self, resource_type: &str, ids: &[i64]) {
-        let map = self
-            .authorizations
-            .entry(resource_type.to_string())
-            .or_default();
+    pub fn allow(&mut self, key: &str, ids: &[i64]) {
+        let map = self.authorizations.entry(key.to_string()).or_default();
         for id in ids {
             map.insert(*id, true);
         }
     }
 
-    pub fn deny(&mut self, resource_type: &str, ids: &[i64]) {
-        let map = self
-            .authorizations
-            .entry(resource_type.to_string())
-            .or_default();
+    pub fn deny(&mut self, key: &str, ids: &[i64]) {
+        let map = self.authorizations.entry(key.to_string()).or_default();
         for id in ids {
             map.insert(*id, false);
         }
