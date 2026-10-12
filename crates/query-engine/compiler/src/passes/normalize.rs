@@ -56,15 +56,14 @@ pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) 
             }
         }
     }
-    let entities: HashMap<String, String> = input
-        .nodes
-        .iter()
-        .filter_map(|node| Some((node.id.clone(), node.entity.clone()?)))
-        .collect();
+    let nodes = &input.nodes;
     for root in &mut input.predicates {
         root.visit_mut(&mut |predicate| {
             if let PredicateTarget::Node(alias) = &predicate.target
-                && let Some(entity) = entities.get(alias)
+                && let Some(entity) = nodes
+                    .iter()
+                    .find(|node| node.id == *alias)
+                    .and_then(|node| node.entity.as_deref())
             {
                 coerce_filter(
                     &mut predicate.filter,

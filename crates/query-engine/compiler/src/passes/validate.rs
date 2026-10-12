@@ -448,8 +448,8 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     /// Enforce query limits for every frontend, including counts across input fields.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         use crate::query_limits::{
-            MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL, MAX_HOPS_CAP,
-            MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP, MAX_PREDICATES, MAX_REL_TYPES, MAX_RELS_CAP,
+            MAX_COLUMNS, MAX_DEPTH_CAP, MAX_HOPS_CAP, MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP,
+            MAX_PREDICATES, MAX_REL_TYPES, MAX_RELS_CAP,
         };
         const MAX_AGGS_CAP: usize = 10;
         const MAX_GROUP_BY_KEYS: usize = 4;
@@ -594,23 +594,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 }
             }
         }
-        for node in &input.nodes {
-            check_condition_counts(
-                input,
-                &node.filters,
-                &PredicateTarget::Node(node.id.clone()),
-                MAX_FILTERS_PER_NODE,
-            )?;
-        }
-        for (index, rel) in input.relationships.iter().enumerate() {
-            check_condition_counts(
-                input,
-                &rel.filters,
-                &PredicateTarget::Relationship(index),
-                MAX_FILTERS_PER_REL,
-            )?;
-        }
-        Ok(())
+        check_condition_counts(input)
     }
 
     /// Validate that filter values are compatible with the ontology column type.
@@ -746,7 +730,18 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         prop: &str,
         filters: &[InputFilter],
     ) -> Result<()> {
-        let data_type = self.relationship_column_type(input, index, prop)?;
+        let model = self.model.get();
+        let edge_table = input.relationships[index]
+            .types
+            .first()
+            .and_then(|kind| model.relationship_table(kind))
+            .unwrap_or_else(|| model.default_edge_table());
+        let data_type = model.table_column_type(edge_table, prop).ok_or_else(|| {
+            QueryError::Validation(format!(
+                "relationship[{index}] filter on unknown edge column \"{prop}\" \
+                 (table \"{edge_table}\" does not have this column)"
+            ))
+        })?;
         for filter in filters {
             check_condition_column(("", prop), filter)?;
             if filter.rhs_column.is_some() {

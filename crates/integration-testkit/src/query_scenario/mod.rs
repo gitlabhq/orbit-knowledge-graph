@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use format::ExpectedIndex;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
+    SecurityContext,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
@@ -45,11 +46,13 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        let raw =
-            std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-        let _: QueryScenario =
-            orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        read_scenario(file);
     }
+}
+
+fn read_scenario(file: &Path) -> QueryScenario {
+    let raw = std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("{}: {e}", file.display()))
 }
 
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
@@ -123,11 +126,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
 }
 
 async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path) {
-    let raw = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
-    let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("{name}: invalid scenario: {e}"));
-
+    let scenario = read_scenario(file);
     let cfg = &scenario.config;
 
     let needs_fork = !cfg.extra_seed.is_empty();
@@ -341,11 +340,7 @@ async fn run_frontend(
         }
     }
 
-    let response: query_engine::formatters::GraphResponse =
-        serde_json::from_value(resp).expect("response should deserialize");
-    let view = ResponseView::for_query(&compiled.input, response);
-
-    apply_expect(&view, expect, label);
+    assert_response(&compiled.input, resp, expect, label);
 }
 
 fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
@@ -641,26 +636,44 @@ async fn execute_pipeline(
         .await
         .expect("hydration should succeed");
 
-    let mut query_result = hydration_output.query_result;
+    format_output(
+        compiled,
+        hydration_output.query_result,
+        hydration_output.redacted_count,
+        hydration_output.result_context,
+        compiled.base.sql.clone(),
+    )
+}
+
+fn format_output(
+    compiled: &Arc<CompiledQueryContext>,
+    mut query_result: QueryResult,
+    redacted_count: usize,
+    result_context: ResultContext,
+    sql: String,
+) -> serde_json::Value {
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
         &compiled.pagination,
     ));
-
-    let output = PipelineOutput {
+    GraphFormatter.format(&PipelineOutput {
         row_count: query_result.authorized_count(),
-        redacted_count: hydration_output.redacted_count,
+        redacted_count,
         query_type: compiled.query_type.to_string(),
-        raw_query_strings: vec![compiled.base.sql.clone()],
+        raw_query_strings: vec![sql],
         compiled: Arc::clone(compiled),
         query_result,
-        result_context: hydration_output.result_context,
+        result_context,
         execution_log: vec![],
         pagination,
-    };
+    })
+}
 
-    GraphFormatter.format(&output)
+fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
+    let response: query_engine::formatters::GraphResponse =
+        serde_json::from_value(response).expect("response should deserialize");
+    apply_expect(&ResponseView::for_query(input, response), expect, label);
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {

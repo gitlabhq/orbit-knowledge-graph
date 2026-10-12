@@ -9,28 +9,21 @@ pub enum BooleanExpression<T> {
 
 impl<T> BooleanExpression<T> {
     pub fn leaves(&self) -> impl Iterator<Item = &T> {
-        self.polarized_leaves().map(|(leaf, _)| leaf)
+        self.polarized_leaves().into_iter().map(|(leaf, _)| leaf)
     }
 
     pub fn negated_leaves(&self) -> impl Iterator<Item = &T> {
         self.polarized_leaves()
+            .into_iter()
             .filter_map(|(leaf, negated)| negated.then_some(leaf))
     }
 
-    fn polarized_leaves(&self) -> impl Iterator<Item = (&T, bool)> {
-        let mut pending = vec![(self, false)];
-        std::iter::from_fn(move || {
-            while let Some((expression, negated)) = pending.pop() {
-                match expression {
-                    Self::Leaf(leaf) => return Some((leaf, negated)),
-                    Self::And(children) => {
-                        pending.extend(children.iter().rev().map(|child| (child, negated)))
-                    }
-                    Self::Not(child) => pending.push((child, true)),
-                }
-            }
-            None
-        })
+    fn polarized_leaves(&self) -> Vec<(&T, bool)> {
+        self.fold(
+            &|leaf| vec![(leaf, false)],
+            &|children| children.concat(),
+            &|child| child.into_iter().map(|(leaf, _)| (leaf, true)).collect(),
+        )
     }
 
     pub fn try_map<U, E>(
@@ -57,9 +50,9 @@ impl<T> BooleanExpression<T> {
         }
     }
 
-    pub fn fold<R>(
-        &self,
-        leaf: &impl Fn(&T) -> R,
+    pub fn fold<'s, R>(
+        &'s self,
+        leaf: &impl Fn(&'s T) -> R,
         and: &impl Fn(Vec<R>) -> R,
         not: &impl Fn(R) -> R,
     ) -> R {
@@ -97,10 +90,12 @@ impl BooleanExpression<Condition> {
     fn with_polarity(self, negated: bool) -> Self {
         match self {
             Self::Leaf(mut leaf) if negated => {
-                if leaf.complement() {
-                    Self::Leaf(leaf)
-                } else {
-                    Self::Not(Box::new(Self::Leaf(leaf)))
+                match leaf.filter.op.unwrap_or(FilterOp::Eq).complement() {
+                    Some(op) => {
+                        leaf.filter.op = Some(op);
+                        Self::Leaf(leaf)
+                    }
+                    None => Self::Not(Box::new(Self::Leaf(leaf))),
                 }
             }
             Self::Leaf(leaf) => Self::Leaf(leaf),
@@ -151,14 +146,6 @@ pub struct Condition {
 }
 
 impl Condition {
-    fn complement(&mut self) -> bool {
-        let complement = self.filter.op.unwrap_or(FilterOp::Eq).complement();
-        if complement.is_some() {
-            self.filter.op = complement;
-        }
-        complement.is_some()
-    }
-
     pub fn compares_aliases(&self) -> bool {
         match (&self.target, &self.filter.rhs_column) {
             (PredicateTarget::Node(alias), Some((rhs, _))) => alias != rhs,
@@ -241,19 +228,19 @@ impl Input {
                 BooleanExpression::Leaf(condition) if !condition.compares_aliases() => {
                     let filters = match &condition.target {
                         PredicateTarget::Node(alias) => {
-                            &mut self
-                                .node_mut(alias)
-                                .ok_or_else(|| {
-                                    crate::error::QueryError::PipelineInvariant(format!(
-                                        "condition node '{alias}' is not declared"
-                                    ))
-                                })?
-                                .filters
+                            self.node_mut(alias).map(|node| &mut node.filters)
                         }
-                        PredicateTarget::Relationship(index) => {
-                            &mut self.relationships[*index].filters
-                        }
-                    };
+                        PredicateTarget::Relationship(index) => self
+                            .relationships
+                            .get_mut(*index)
+                            .map(|relationship| &mut relationship.filters),
+                    }
+                    .ok_or_else(|| {
+                        crate::error::QueryError::PipelineInvariant(format!(
+                            "condition target {:?} is not declared",
+                            condition.target
+                        ))
+                    })?;
                     filters
                         .entry(condition.property)
                         .or_default()
@@ -268,11 +255,7 @@ impl Input {
     pub(crate) fn lift_negated_filters(&mut self) -> crate::error::Result<()> {
         for index in 0..self.nodes.len() {
             let alias = self.nodes[index].id.clone();
-            let mut entries: Vec<_> = std::mem::take(&mut self.nodes[index].negated_filters)
-                .into_iter()
-                .collect();
-            entries.sort_by(|left, right| left.0.cmp(&right.0));
-            for (property, filters) in entries {
+            for (property, filters) in std::mem::take(&mut self.nodes[index].negated_filters) {
                 let leaves = filters
                     .into_iter()
                     .map(|filter| {

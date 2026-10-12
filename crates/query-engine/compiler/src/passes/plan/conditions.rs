@@ -14,7 +14,7 @@ use query_data_model::OrbitQueryModel;
 
 #[derive(Default)]
 pub(super) struct Placement {
-    pub after_joins: Vec<bool>,
+    pub scans: Vec<Option<String>>,
     pub joined_nodes: HashSet<String>,
 }
 
@@ -47,11 +47,12 @@ pub(super) fn place_conditions(
         }
         let scan = root
             .local_node()
-            .filter(|_| hops.is_empty() || !untagged.is_empty());
-        placement.after_joins.push(scan.is_none());
+            .filter(|_| hops.is_empty() || !untagged.is_empty())
+            .map(str::to_string);
         placement
             .joined_nodes
-            .extend(scan.map(str::to_string).into_iter().chain(untagged));
+            .extend(scan.iter().cloned().chain(untagged));
+        placement.scans.push(scan);
     }
     Ok(placement)
 }
@@ -121,10 +122,8 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         nodes: &mut HashMap<String, NodePlan>,
         placement: &Placement,
     ) -> Result<()> {
-        for (root, after_joins) in self.input.predicates.iter().zip(&placement.after_joins) {
-            if let Some(alias) = root.local_node()
-                && !after_joins
-            {
+        for (root, scan) in self.input.predicates.iter().zip(&placement.scans) {
+            if let Some(alias) = scan {
                 let predicate = self.bind_tree(root, None)?;
                 nodes
                     .get_mut(alias)
@@ -146,8 +145,8 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         self.input
             .predicates
             .iter()
-            .zip(&placement.after_joins)
-            .filter(|(_, after_joins)| **after_joins)
+            .zip(&placement.scans)
+            .filter(|(_, scan)| scan.is_none())
             .map(|(root, _)| self.bind_tree(root, Some(bindings)))
             .collect()
     }

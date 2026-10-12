@@ -1,4 +1,5 @@
 use super::*;
+use crate::schema_limits::{MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL};
 
 impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
     pub(super) fn check_predicate_shape(&self, input: &Input) -> Result<()> {
@@ -86,42 +87,6 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
         Ok(())
     }
 
-    pub(super) fn relationship_column_type(
-        &self,
-        input: &Input,
-        index: usize,
-        property: &str,
-    ) -> Result<DataType> {
-        let model = self.model.get();
-        let edge_table = input.relationships[index]
-            .types
-            .first()
-            .and_then(|kind| model.relationship_table(kind))
-            .unwrap_or_else(|| model.default_edge_table());
-        model
-            .table_column_type(edge_table, property)
-            .ok_or_else(|| {
-                QueryError::Validation(format!(
-                    "relationship[{index}] filter on unknown edge column \"{property}\" \
-                 (table \"{edge_table}\" does not have this column)"
-                ))
-            })
-    }
-
-    fn check_comparison_side(&self, entity: &str, prop: &str) -> Result<()> {
-        if !self.model.get().property_is_filterable(entity, prop) {
-            return Err(QueryError::AllowlistRejected(format!(
-                "filter on \"{prop}\" for {entity}: field is not filterable"
-            )));
-        }
-        if self.virtual_source(entity, prop).is_some() {
-            return Err(QueryError::Validation(format!(
-                "property comparison cannot reference virtual column \"{prop}\" on {entity}"
-            )));
-        }
-        Ok(())
-    }
-
     pub(super) fn check_property_comparison(
         &self,
         input: &Input,
@@ -132,7 +97,16 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
         for (node_id, prop) in [lhs, rhs] {
             let entity = predicate_entity(input, node_id)?;
             self.check_field(entity, prop)?;
-            self.check_comparison_side(entity, prop)?;
+            if !self.model.get().property_is_filterable(entity, prop) {
+                return Err(QueryError::AllowlistRejected(format!(
+                    "filter on \"{prop}\" for {entity}: field is not filterable"
+                )));
+            }
+            if self.virtual_source(entity, prop).is_some() {
+                return Err(QueryError::Validation(format!(
+                    "property comparison cannot reference virtual column \"{prop}\" on {entity}"
+                )));
+            }
             types.push(self.field_type(entity, prop));
         }
         if let [Some(lt), Some(rt)] = types[..]
@@ -153,39 +127,50 @@ fn predicate_entity<'a>(input: &'a Input, alias: &str) -> Result<&'a str> {
     })
 }
 
-pub(super) fn check_condition_counts(
-    input: &Input,
-    filters: &std::collections::HashMap<String, Vec<InputFilter>>,
-    target: &PredicateTarget,
-    maximum: usize,
-) -> Result<()> {
-    let mut counts: std::collections::HashMap<&str, usize> = filters
-        .iter()
-        .map(|(property, filters)| (property.as_str(), filters.len()))
-        .collect();
-    for predicate in input.conditions() {
-        if predicate.target != *target {
-            continue;
+pub(super) fn check_condition_counts(input: &Input) -> Result<()> {
+    let nodes = input.nodes.iter().map(|node| {
+        (
+            PredicateTarget::Node(node.id.clone()),
+            &node.filters,
+            MAX_FILTERS_PER_NODE,
+        )
+    });
+    let relationships = input.relationships.iter().enumerate().map(|(index, rel)| {
+        (
+            PredicateTarget::Relationship(index),
+            &rel.filters,
+            MAX_FILTERS_PER_REL,
+        )
+    });
+    for (target, filters, maximum) in nodes.chain(relationships) {
+        let mut counts: std::collections::HashMap<&str, usize> = filters
+            .iter()
+            .map(|(property, filters)| (property.as_str(), filters.len()))
+            .collect();
+        for predicate in input
+            .conditions()
+            .filter(|predicate| predicate.target == target)
+        {
+            *counts.entry(&predicate.property).or_default() += 1;
         }
-        *counts.entry(&predicate.property).or_default() += 1;
-    }
-    let owner = match target {
-        PredicateTarget::Node(alias) => format!("node \"{alias}\""),
-        PredicateTarget::Relationship(index) => format!("relationship[{index}]"),
-    };
-    if counts.len() > maximum {
-        return Err(QueryError::Validation(format!(
-            "filter property count ({}) for {owner} must not exceed {maximum}",
-            counts.len()
-        )));
-    }
-    if let Some((property, count)) = counts
-        .into_iter()
-        .find(|(_, count)| *count > MAX_FILTER_ENTRIES_PER_PROPERTY)
-    {
-        return Err(QueryError::Validation(format!(
-            "filter entry count ({count}) on property \"{property}\" for {owner} must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}"
-        )));
+        let owner = match &target {
+            PredicateTarget::Node(alias) => format!("node \"{alias}\""),
+            PredicateTarget::Relationship(index) => format!("relationship[{index}]"),
+        };
+        if counts.len() > maximum {
+            return Err(QueryError::Validation(format!(
+                "filter property count ({}) for {owner} must not exceed {maximum}",
+                counts.len()
+            )));
+        }
+        if let Some((property, count)) = counts
+            .into_iter()
+            .find(|(_, count)| *count > MAX_FILTER_ENTRIES_PER_PROPERTY)
+        {
+            return Err(QueryError::Validation(format!(
+                "filter entry count ({count}) on property \"{property}\" for {owner} must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}"
+            )));
+        }
     }
     Ok(())
 }

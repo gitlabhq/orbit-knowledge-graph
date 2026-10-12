@@ -5,13 +5,10 @@ use std::sync::Arc;
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_engine::compiler::{Frontend, compile_local, generate_local_ddl};
-use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
-use query_engine::shared::{PipelineOutput, paginate};
 
-use super::{QueryScenario, apply_expect, seed_preset};
+use super::{assert_response, format_output, read_scenario, seed_preset};
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Seed, discover, scenario_name};
-use crate::visitor::ResponseView;
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     let root = Path::new(root);
@@ -22,10 +19,7 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     files.sort();
     let mut ran = 0;
     for file in files {
-        let raw = std::fs::read_to_string(&file)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
-        let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
-            .unwrap_or_else(|e| panic!("{}: invalid scenario: {e}", file.display()));
+        let scenario = read_scenario(&file);
         if !scenario.config.duckdb {
             continue;
         }
@@ -50,31 +44,15 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
             let batches = database
                 .query_arrow(&sql)
                 .unwrap_or_else(|e| panic!("{label}: {e}\n{sql}"));
-            let mut query_result =
-                QueryResult::from_batches(&batches, &compiled.base.result_context);
-            let pagination = Some(paginate(
-                &mut query_result,
-                &compiled.input,
-                &compiled.pagination,
-            ));
-            let output = PipelineOutput {
-                row_count: query_result.authorized_count(),
-                redacted_count: 0,
-                query_type: compiled.query_type.to_string(),
-                raw_query_strings: vec![sql],
-                compiled: Arc::clone(&compiled),
+            let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+            let response = format_output(
+                &compiled,
                 query_result,
-                result_context: compiled.base.result_context.clone(),
-                execution_log: vec![],
-                pagination,
-            };
-            let response: GraphResponse = serde_json::from_value(GraphFormatter.format(&output))
-                .expect("response should deserialize");
-            apply_expect(
-                &ResponseView::for_query(&compiled.input, response),
-                &scenario.expect,
-                &label,
+                0,
+                compiled.base.result_context.clone(),
+                sql,
             );
+            assert_response(&compiled.input, response, &scenario.expect, &label);
         }
         ran += 1;
     }

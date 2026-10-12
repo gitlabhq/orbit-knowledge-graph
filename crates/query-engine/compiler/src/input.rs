@@ -6,7 +6,7 @@ use ontology::constants::{
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
 
 mod predicates;
@@ -145,7 +145,7 @@ pub struct InputNode {
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
     #[serde(default, rename = "not", deserialize_with = "deserialize_filters")]
-    pub negated_filters: HashMap<String, Vec<InputFilter>>,
+    pub negated_filters: BTreeMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
@@ -164,7 +164,7 @@ impl Default for InputNode {
             entity: None,
             columns: None,
             filters: HashMap::new(),
-            negated_filters: HashMap::new(),
+            negated_filters: BTreeMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
@@ -283,11 +283,10 @@ pub enum FilterOp {
     AnyTokens,
 }
 
-fn deserialize_filters<'de, D>(
-    deserializer: D,
-) -> Result<HashMap<String, Vec<InputFilter>>, D::Error>
+fn deserialize_filters<'de, D, C>(deserializer: D) -> Result<C, D::Error>
 where
     D: Deserializer<'de>,
+    C: FromIterator<(String, Vec<InputFilter>)>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
     raw.into_iter()
