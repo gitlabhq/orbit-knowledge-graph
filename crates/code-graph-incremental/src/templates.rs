@@ -139,42 +139,54 @@ pub fn repository<E: std::fmt::Display>(
                     worker_threads
                 };
                 scope.spawn(move || {
-                    let outcome = (|| -> Result<_, Error> {
-                        run.check()?;
-                        let pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(family_threads)
-                            .stack_size(8 * 1024 * 1024)
-                            .build()
-                            .map_err(|error| LoadError::new(error.to_string()))?;
-                        pool.install(|| {
-                            let (report, batches) = {
-                                let mut env = Env::with_limits(language, limits)?;
-                                env.export_config = export_config.clone();
-                                let mut context = Context::new(&env, repository.clone());
-                                context.run = run.clone();
-                                let (context, graph) = index(context)?.then(Display)?.finish();
-                                let mut report = context.report;
-                                report.unread_files.retain(|path| owns(family, path));
-                                run.check()?;
-                                let batches = crate::export::export(
-                                    &graph.state.trees,
-                                    &graph.state.edges,
-                                    &env.lang,
-                                    &crate::export::ExportPlan::from_config(
-                                        &env.export_config,
-                                        ontology,
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || -> Result<_, Error> {
+                            run.check()?;
+                            let pool = rayon::ThreadPoolBuilder::new()
+                                .num_threads(family_threads)
+                                .stack_size(8 * 1024 * 1024)
+                                .build()
+                                .map_err(|error| LoadError::new(error.to_string()))?;
+                            pool.install(|| {
+                                let (report, batches) = {
+                                    let mut env = Env::with_limits(language, limits)?;
+                                    env.export_config = export_config.clone();
+                                    let mut context = Context::new(&env, repository.clone());
+                                    context.run = run.clone();
+                                    let (context, graph) = index(context)?.then(Display)?.finish();
+                                    let mut report = context.report;
+                                    report.unread_files.retain(|path| owns(family, path));
+                                    run.check()?;
+                                    let batches = crate::export::export(
+                                        &graph.state.trees,
+                                        &graph.state.edges,
                                         &env.lang,
-                                    )?,
-                                    envelope,
-                                    family == first,
-                                    &|path| owns(family, path),
-                                )?;
-                                (report, batches)
-                            };
-                            emit(batches)?;
-                            Ok(report)
+                                        &crate::export::ExportPlan::from_config(
+                                            &env.export_config,
+                                            ontology,
+                                            &env.lang,
+                                        )?,
+                                        envelope,
+                                        family == first,
+                                        &|path| owns(family, path),
+                                    )?;
+                                    (report, batches)
+                                };
+                                emit(batches)?;
+                                Ok(report)
+                            })
+                        },
+                    ))
+                    .unwrap_or_else(|payload| {
+                        Err(Error::Panic {
+                            family,
+                            message: payload
+                                .downcast_ref::<&str>()
+                                .map(|message| message.to_string())
+                                .or_else(|| payload.downcast_ref::<String>().cloned())
+                                .unwrap_or_default(),
                         })
-                    })();
+                    });
                     let _ = sender.send(outcome);
                 });
             }

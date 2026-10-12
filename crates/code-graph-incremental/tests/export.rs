@@ -330,6 +330,33 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
 }
 
 #[test]
+fn a_family_panic_ends_the_run_with_a_typed_error() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), FAMILIES);
+    let ontology = Ontology::load_embedded().unwrap();
+    let emitted = std::sync::atomic::AtomicUsize::new(0);
+    let result = templates::repository(
+        common::walk(repo.path()),
+        templates::Options {
+            concurrent_families: 1,
+            ..options()
+        },
+        &envelope(),
+        &ontology,
+        code_graph_incremental::export::ExportConfig::embedded(),
+        |_| -> Result<(), String> {
+            emitted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            panic!("emit failed");
+        },
+    );
+    let Err(code_graph_incremental::Error::Panic { message, .. }) = result else {
+        panic!("expected a family panic");
+    };
+    assert_eq!(message, "emit failed");
+    assert_eq!(emitted.into_inner(), 1);
+}
+
+#[test]
 fn cross_file_timeout_still_exports_every_family() {
     let repo = tempfile::tempdir().unwrap();
     write_all(
