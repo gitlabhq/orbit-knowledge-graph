@@ -53,7 +53,6 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-zig = "1.1.2"
 tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
-code-graph = { path = "../code-graph" }
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
 

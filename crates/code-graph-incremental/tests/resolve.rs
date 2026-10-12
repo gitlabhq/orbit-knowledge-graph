@@ -1,10 +1,11 @@
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::{Changes, Resolved};
+use code_graph_incremental::pipeline::Resolved;
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, Killed, Limits, State, inventory, templates};
+use code_graph_incremental::{Context, Env, Killed, Limits, State, templates};
+mod common;
 
 const UTILS: &str = "\
 def helper(x):
@@ -36,8 +37,7 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let entries = inventory::walk(root).unwrap().into_inner();
-    let (context, resolved) = templates::index(Context::new(env), root, entries)
+    let (context, resolved) = templates::index(Context::new(env, common::walk(root)))
         .unwrap()
         .finish();
     (resolved, context.report.skipped)
@@ -74,6 +74,84 @@ fn cross_file(env: &Env, state: &State, kind: EdgeKind) -> Vec<(String, String)>
 
 fn pair(a: &str, b: &str) -> (String, String) {
     (a.into(), b.into())
+}
+
+#[test]
+fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("utils.py", UTILS), ("main.py", MAIN)]);
+    let mut env = python_env(Limits::UNLIMITED);
+    let (baseline, _) = resolve_repo(&env, repo.path());
+    let expected = cross_file(&env, &baseline.state, EdgeKind::Calls);
+    assert!(!expected.is_empty());
+    env.limits.cross_file_resolve_ms = 0;
+    let empty_changes = || common::load(orbit_utils::vfs::sources::Memory(vec![]));
+    let (context, degraded) =
+        templates::reindex(Context::new(&env, empty_changes()), baseline.state, vec![])
+            .unwrap()
+            .finish();
+    assert_eq!(context.report.skipped.len(), 1);
+    assert_eq!(context.report.skipped[0].label, "resolve");
+    assert!(!context.report.skipped[0].cancelled);
+    assert_eq!(degraded.state.trees.len(), 2);
+    assert!(!degraded.state.edges.is_empty());
+    assert!(
+        degraded
+            .state
+            .edges
+            .iter()
+            .all(|edge| edge.from_tree == edge.to_tree)
+    );
+    env.limits.cross_file_resolve_ms = u64::MAX;
+    let (context, recovered) =
+        templates::reindex(Context::new(&env, empty_changes()), degraded.state, vec![])
+            .unwrap()
+            .finish();
+    assert!(context.report.skipped.is_empty());
+    assert_eq!(
+        cross_file(&env, &recovered.state, EdgeKind::Calls),
+        expected
+    );
+}
+
+#[test]
+fn resolve_cancellation_and_run_deadline_remain_fatal() {
+    use code_graph_incremental::pipeline::{
+        Canonicalize, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare, Resolve,
+    };
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
+    let env = python_env(Limits::UNLIMITED);
+    for cancelled in [false, true] {
+        let (mut context, graph) = Pipeline::new(Context::new(&env, common::walk(repo.path())), ())
+            .then(Prepare)
+            .unwrap()
+            .then(Each(
+                Parse
+                    .pipe(code_graph_incremental::pipeline::Rewrite)
+                    .pipe(Canonicalize)
+                    .pipe(Link),
+            ))
+            .unwrap()
+            .then(Insert)
+            .unwrap()
+            .finish();
+        context.run = code_graph_incremental::sentinel::Sentinel::new(
+            "run",
+            "",
+            if cancelled { u64::MAX } else { 0 },
+        )
+        .with_cancellation(std::sync::Arc::new(move || cancelled));
+        let error = Pipeline::new(context, graph)
+            .then(Resolve)
+            .err()
+            .expect("run termination must fail");
+        assert!(
+            error
+                .to_string()
+                .contains(if cancelled { "cancelled" } else { "budget" })
+        );
+    }
 }
 
 #[test]
@@ -149,13 +227,12 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     resolved.state.save(&env, snapshot.path()).unwrap();
     let (env, state) = State::load(snapshot.path(), SupportLang::JavaScript).unwrap();
     let (context, resolved) = templates::reindex(
-        Context::new(&env),
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
         state,
-        repo.path(),
-        Changes {
-            changed: vec![],
-            removed: vec![],
-        },
+        vec![],
     )
     .unwrap()
     .finish();
@@ -168,12 +245,12 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
         repo.path(),
         &[("package/package.json", r#"{"main":"second.js"}"#)],
     );
-    let changes = Changes {
-        changed: inventory::classify(repo.path(), ["package/package.json".into()]),
-        removed: vec![],
-    };
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["package/package.json".into()],
+    });
     let (context, resolved) =
-        templates::reindex(Context::new(&env), resolved.state, repo.path(), changes)
+        templates::reindex(Context::new(&env, changes), resolved.state, vec![])
             .unwrap()
             .finish();
     assert!(context.report.skipped.is_empty());
@@ -223,12 +300,12 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
             ("right.js", "export function right() { const value = 2; }"),
         ],
     );
-    let changes = Changes {
-        changed: inventory::classify(repo.path(), ["left.js".into(), "right.js".into()]),
-        removed: vec![],
-    };
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["left.js".into(), "right.js".into()],
+    });
     let (context, resolved) =
-        templates::reindex(Context::new(&env), resolved.state, repo.path(), changes)
+        templates::reindex(Context::new(&env, changes), resolved.state, vec![])
             .unwrap()
             .finish();
     let mut resolved_files: Vec<_> = context
