@@ -5,9 +5,7 @@ use std::time::{Duration, Instant};
 
 use cpu_time::ThreadTime;
 
-use crate::error::LoadError;
-
-#[derive(Clone, Copy, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_files: usize,
     pub cross_file_resolve_ms: u64,
@@ -19,12 +17,6 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn load() -> Result<Self, LoadError> {
-        Ok(orbit_utils::yaml::from_str(include_str!(
-            "../../config/limits.yaml"
-        ))?)
-    }
-
     pub const UNLIMITED: Self = Self {
         max_files: 0,
         cross_file_resolve_ms: u64::MAX,

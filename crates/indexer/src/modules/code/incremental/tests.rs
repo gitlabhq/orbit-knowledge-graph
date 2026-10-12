@@ -255,6 +255,40 @@ fn options() -> Options {
     }
 }
 
+#[test]
+fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
+    let configured = config();
+    let mapped = limits(&configured);
+    assert_eq!(
+        [
+            mapped.file_parse_ms,
+            mapped.file_rewrite_ms,
+            mapped.file_link_ms,
+            mapped.file_resolve_ms,
+            mapped.cross_file_resolve_ms,
+        ],
+        [
+            configured.per_file_parse_timeout_ms,
+            configured.per_file_walk_timeout_ms,
+            configured.per_file_ssa_timeout_ms,
+            configured.per_file_timeout_ms,
+            configured.cross_file_resolve_timeout_ms,
+        ]
+    );
+    assert_eq!(mapped.max_files, configured.max_files);
+
+    let unlimited = limits(&CodeIndexingPipelineConfig {
+        max_files: 0,
+        per_file_timeout_ms: 0,
+        per_file_parse_timeout_ms: 0,
+        per_file_walk_timeout_ms: 0,
+        per_file_ssa_timeout_ms: 0,
+        cross_file_resolve_timeout_ms: 0,
+        ..configured
+    });
+    assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);
+}
+
 #[tokio::test]
 async fn loading_retains_filtered_metadata_and_spills_at_the_memory_limit() {
     let archive = build_tar_gz(&[

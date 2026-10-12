@@ -553,6 +553,7 @@
           "minimum": 0
         },
         "max_files": {
+          "description": "Most files parsed per repository; the rest stay `File` nodes. 0 = no limit.",
           "type": "integer",
           "format": "uint",
           "minimum": 0
@@ -582,28 +583,31 @@
           "minimum": 0
         },
         "per_file_timeout_ms": {
-          "description": "Global per-file resolution timeout in milliseconds.\nApplied to all languages unless the language's own DSL rules\nspecify a different value. 0 = no global timeout.",
+          "description": "Per-file watchdog in milliseconds. It bounds per-file resolution in\nevery language, and the whole file in languages without per-phase\nbudgets (JS, TS, and Rust). The incremental engine passes it as\n`file_resolve_ms` and counts thread CPU time. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "per_file_parse_timeout_ms": {
+          "description": "Thread CPU budget in milliseconds for the tree-sitter parse of one\nfile. Incremental engine: `file_parse_ms`. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "per_file_walk_timeout_ms": {
+          "description": "Thread CPU budget in milliseconds for the AST walk of one file.\nIncremental engine: `file_rewrite_ms`, the rewrite stages. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "per_file_ssa_timeout_ms": {
+          "description": "Thread CPU budget in milliseconds for the SSA pass of one file.\nIncremental engine: `file_link_ms`, the linker fold. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
-          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). 0 = no timeout.",
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0

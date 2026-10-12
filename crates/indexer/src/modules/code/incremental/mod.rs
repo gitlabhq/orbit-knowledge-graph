@@ -30,6 +30,19 @@ impl Drop for CancelLoad {
     }
 }
 
+pub(super) fn limits(config: &CodeIndexingPipelineConfig) -> code_graph_incremental::Limits {
+    let budget = |ms: u64| if ms == 0 { u64::MAX } else { ms };
+    code_graph_incremental::Limits {
+        max_files: config.max_files,
+        file_parse_ms: budget(config.per_file_parse_timeout_ms),
+        file_rewrite_ms: budget(config.per_file_walk_timeout_ms),
+        file_link_ms: budget(config.per_file_ssa_timeout_ms),
+        file_resolve_ms: budget(config.per_file_timeout_ms),
+        cross_file_resolve_ms: budget(config.cross_file_resolve_timeout_ms),
+        ..code_graph_incremental::Limits::UNLIMITED
+    }
+}
+
 pub(super) async fn load(
     stream: ByteStream,
     config: &CodeIndexingPipelineConfig,

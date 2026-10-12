@@ -32,7 +32,7 @@ pub struct FamilyResolve {
 
 impl Env {
     pub fn for_lang(lang_id: SupportLang) -> Result<Self, LoadError> {
-        Self::with_limits(lang_id, Limits::load()?)
+        Self::with_limits(lang_id, Limits::UNLIMITED)
     }
 
     pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Result<Self, LoadError> {

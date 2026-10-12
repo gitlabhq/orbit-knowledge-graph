@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         started.elapsed().as_secs_f64()
     );
     let options = templates::Options {
-        limits: Limits::load()?,
+        limits: Limits::UNLIMITED,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| eprintln!("family finished")),
     };
