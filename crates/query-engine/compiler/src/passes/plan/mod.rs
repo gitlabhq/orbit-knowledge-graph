@@ -1,4 +1,5 @@
 pub mod aggregation;
+mod conditions;
 mod context;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;

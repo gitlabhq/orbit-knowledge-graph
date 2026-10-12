@@ -1,0 +1,306 @@
+use super::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BooleanExpression<T> {
+    Leaf(T),
+    And(Vec<Self>),
+    Not(Box<Self>),
+}
+
+impl<T> BooleanExpression<T> {
+    pub fn leaves(&self) -> impl Iterator<Item = &T> {
+        self.polarized_leaves().map(|(leaf, _)| leaf)
+    }
+
+    pub fn negated_leaves(&self) -> impl Iterator<Item = &T> {
+        self.polarized_leaves()
+            .filter_map(|(leaf, negated)| negated.then_some(leaf))
+    }
+
+    fn polarized_leaves(&self) -> impl Iterator<Item = (&T, bool)> {
+        let mut pending = vec![(self, false)];
+        std::iter::from_fn(move || {
+            while let Some((expression, negated)) = pending.pop() {
+                match expression {
+                    Self::Leaf(leaf) => return Some((leaf, negated)),
+                    Self::And(children) => {
+                        pending.extend(children.iter().rev().map(|child| (child, negated)))
+                    }
+                    Self::Not(child) => pending.push((child, true)),
+                }
+            }
+            None
+        })
+    }
+
+    pub fn try_map<U, E>(
+        self,
+        map: &mut impl FnMut(T) -> Result<U, E>,
+    ) -> Result<BooleanExpression<U>, E> {
+        Ok(match self {
+            Self::Leaf(leaf) => BooleanExpression::Leaf(map(leaf)?),
+            Self::And(children) => BooleanExpression::And(
+                children
+                    .into_iter()
+                    .map(|child| child.try_map(map))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Self::Not(child) => BooleanExpression::Not(Box::new(child.try_map(map)?)),
+        })
+    }
+
+    pub fn visit_mut(&mut self, visit: &mut impl FnMut(&mut T)) {
+        match self {
+            Self::Leaf(leaf) => visit(leaf),
+            Self::And(children) => children.iter_mut().for_each(|child| child.visit_mut(visit)),
+            Self::Not(child) => child.visit_mut(visit),
+        }
+    }
+
+    pub fn fold<R>(
+        &self,
+        leaf: &impl Fn(&T) -> R,
+        and: &impl Fn(Vec<R>) -> R,
+        not: &impl Fn(R) -> R,
+    ) -> R {
+        match self {
+            Self::Leaf(value) => leaf(value),
+            Self::And(children) => and(children
+                .iter()
+                .map(|child| child.fold(leaf, and, not))
+                .collect()),
+            Self::Not(child) => not(child.fold(leaf, and, not)),
+        }
+    }
+
+    pub fn depth(&self) -> usize {
+        self.fold(
+            &|_| 0,
+            &|children| children.into_iter().max().unwrap_or(0) + 1,
+            &|depth| depth + 1,
+        )
+    }
+
+    pub fn conjuncts(self) -> Vec<Self> {
+        match self {
+            Self::And(children) => children,
+            expression => vec![expression],
+        }
+    }
+}
+
+impl BooleanExpression<Condition> {
+    pub fn normalize(self) -> Self {
+        self.with_polarity(false)
+    }
+
+    fn with_polarity(self, negated: bool) -> Self {
+        match self {
+            Self::Leaf(mut leaf) if negated => {
+                if leaf.complement() {
+                    Self::Leaf(leaf)
+                } else {
+                    Self::Not(Box::new(Self::Leaf(leaf)))
+                }
+            }
+            Self::Leaf(leaf) => Self::Leaf(leaf),
+            Self::Not(child) => child.with_polarity(!negated),
+            Self::And(mut children) if children.len() == 1 => {
+                children.pop().expect("one child").with_polarity(negated)
+            }
+            Self::And(children) => {
+                let conjunction = Self::And(
+                    children
+                        .into_iter()
+                        .flat_map(|child| child.with_polarity(false).conjuncts())
+                        .collect(),
+                );
+                if negated {
+                    Self::Not(Box::new(conjunction))
+                } else {
+                    conjunction
+                }
+            }
+        }
+    }
+}
+
+impl FilterOp {
+    pub fn complement(self) -> Option<Self> {
+        match self {
+            Self::Eq => Some(Self::Ne),
+            Self::Ne => Some(Self::Eq),
+            Self::IsNull => Some(Self::IsNotNull),
+            Self::IsNotNull => Some(Self::IsNull),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PredicateTarget {
+    Node(String),
+    Relationship(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Condition {
+    pub target: PredicateTarget,
+    pub property: String,
+    pub filter: InputFilter,
+}
+
+impl Condition {
+    fn complement(&mut self) -> bool {
+        let complement = self.filter.op.unwrap_or(FilterOp::Eq).complement();
+        if complement.is_some() {
+            self.filter.op = complement;
+        }
+        complement.is_some()
+    }
+
+    pub fn compares_aliases(&self) -> bool {
+        match (&self.target, &self.filter.rhs_column) {
+            (PredicateTarget::Node(alias), Some((rhs, _))) => alias != rhs,
+            (PredicateTarget::Relationship(_), rhs) => rhs.is_some(),
+            (PredicateTarget::Node(_), None) => false,
+        }
+    }
+
+    pub fn node_properties(&self) -> impl Iterator<Item = (&str, &str)> {
+        let lhs = match &self.target {
+            PredicateTarget::Node(alias) => Some((alias.as_str(), self.property.as_str())),
+            PredicateTarget::Relationship(_) => None,
+        };
+        lhs.into_iter().chain(
+            self.filter
+                .rhs_column
+                .as_ref()
+                .map(|(alias, property)| (alias.as_str(), property.as_str())),
+        )
+    }
+
+    pub fn references(&self, target: &PredicateTarget) -> bool {
+        self.target == *target
+            || matches!(target, PredicateTarget::Node(alias)
+                if self.node_properties().any(|(node, _)| node == alias))
+    }
+}
+
+impl BooleanExpression<Condition> {
+    pub fn local_node(&self) -> Option<&str> {
+        let mut aliases = self.leaves().map(|condition| match &condition.target {
+            PredicateTarget::Node(alias) if !condition.compares_aliases() => Some(alias.as_str()),
+            _ => None,
+        });
+        let first = aliases.next()??;
+        aliases.all(|alias| alias == Some(first)).then_some(first)
+    }
+}
+
+impl Input {
+    pub fn conditions(&self) -> impl Iterator<Item = &Condition> {
+        self.predicates.iter().flat_map(BooleanExpression::leaves)
+    }
+
+    pub fn references(&self, target: &PredicateTarget) -> bool {
+        self.conditions()
+            .any(|condition| condition.references(target))
+    }
+
+    pub fn node(&self, alias: &str) -> Option<&InputNode> {
+        self.nodes.iter().find(|node| node.id == alias)
+    }
+
+    pub fn node_mut(&mut self, alias: &str) -> Option<&mut InputNode> {
+        self.nodes.iter_mut().find(|node| node.id == alias)
+    }
+
+    pub fn entity_of(&self, alias: &str) -> Option<&str> {
+        self.node(alias)?.entity.as_deref()
+    }
+
+    pub fn has_negation(&self) -> bool {
+        self.predicates
+            .iter()
+            .any(|root| matches!(root, BooleanExpression::Not(_)))
+    }
+
+    pub fn absorb(&mut self, expression: BooleanExpression<Condition>) -> crate::error::Result<()> {
+        if expression.negated_leaves().any(|condition| {
+            std::iter::once(condition.property.as_str())
+                .chain(condition.node_properties().map(|(_, property)| property))
+                .any(|property| property == TRAVERSAL_PATH_COLUMN)
+        }) {
+            return Err(crate::error::QueryError::Validation(
+                "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths".into(),
+            ));
+        }
+        for conjunct in expression.normalize().conjuncts() {
+            match conjunct {
+                BooleanExpression::Leaf(condition) if !condition.compares_aliases() => {
+                    let filters = match &condition.target {
+                        PredicateTarget::Node(alias) => {
+                            &mut self
+                                .node_mut(alias)
+                                .ok_or_else(|| {
+                                    crate::error::QueryError::PipelineInvariant(format!(
+                                        "condition node '{alias}' is not declared"
+                                    ))
+                                })?
+                                .filters
+                        }
+                        PredicateTarget::Relationship(index) => {
+                            &mut self.relationships[*index].filters
+                        }
+                    };
+                    filters
+                        .entry(condition.property)
+                        .or_default()
+                        .push(condition.filter);
+                }
+                root => self.predicates.push(root),
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn lift_negated_filters(&mut self) -> crate::error::Result<()> {
+        for index in 0..self.nodes.len() {
+            let alias = self.nodes[index].id.clone();
+            let mut entries: Vec<_> = std::mem::take(&mut self.nodes[index].negated_filters)
+                .into_iter()
+                .collect();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            for (property, filters) in entries {
+                let leaves = filters
+                    .into_iter()
+                    .map(|filter| {
+                        BooleanExpression::Leaf(Condition {
+                            target: PredicateTarget::Node(alias.clone()),
+                            property: property.clone(),
+                            filter,
+                        })
+                    })
+                    .collect();
+                self.absorb(BooleanExpression::Not(Box::new(BooleanExpression::And(
+                    leaves,
+                ))))?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn remove_relationship(&mut self, index: usize) -> InputRelationship {
+        for root in &mut self.predicates {
+            root.visit_mut(&mut |condition| {
+                if let PredicateTarget::Relationship(position) = &mut condition.target
+                    && *position > index
+                {
+                    *position -= 1;
+                }
+            });
+        }
+        self.relationships.remove(index)
+    }
+}

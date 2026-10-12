@@ -1,0 +1,221 @@
+use super::*;
+
+impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
+    pub(super) fn check_predicate_shape(&self, input: &Input) -> Result<()> {
+        if input
+            .predicates
+            .iter()
+            .any(|root| root.depth() > MAX_PREDICATE_DEPTH)
+        {
+            return Err(QueryError::Validation(format!(
+                "conditions must not nest deeper than {MAX_PREDICATE_DEPTH} levels"
+            )));
+        }
+        if input.conditions().count() > MAX_PREDICATE_LEAVES {
+            return Err(QueryError::Validation(format!(
+                "a query must not combine more than {MAX_PREDICATE_LEAVES} conditions"
+            )));
+        }
+        for predicate in input.conditions() {
+            match &predicate.target {
+                PredicateTarget::Node(_) => {
+                    for (alias, property) in predicate.node_properties() {
+                        let entity = predicate_entity(input, alias)?;
+                        self.check_field(entity, property)?;
+                    }
+                }
+                PredicateTarget::Relationship(index) => {
+                    if input.relationships.get(*index).is_none() {
+                        return Err(QueryError::ReferenceError(
+                            "condition references an undefined relationship".into(),
+                        ));
+                    }
+                }
+            }
+            check_filter_entries(&predicate.property, std::slice::from_ref(&predicate.filter))?;
+        }
+        Ok(())
+    }
+
+    /// Validate that filter values are compatible with the ontology column type.
+    ///
+    /// For scalar ops (eq, gt, lt, ...) the JSON value must match the column's
+    /// DataType. For `in`, every element of the JSON array must match; the
+    /// first mismatched element returns a `QueryError::Validation` and the
+    /// query is rejected. Ops that carry no value (`is_null`, `is_not_null`)
+    /// are skipped. Filters on unknown entities or fields are skipped —
+    /// `check_ontology` catches those.
+    ///
+    /// Relationship filters are validated against the fixed edge table schema.
+    /// Unknown edge columns are rejected (fail closed) since they would
+    /// produce broken SQL at runtime.
+    pub(super) fn check_predicates(&self, input: &Input) -> Result<()> {
+        let compares_nodes = input.conditions().any(Condition::compares_aliases);
+        if compares_nodes && input.query_type != QueryType::Traversal {
+            return Err(QueryError::Validation(
+                "cross-node property comparisons are only supported in traversal queries".into(),
+            ));
+        }
+        let shape = match input.query_type {
+            QueryType::PathFinding => Some("shortest paths"),
+            QueryType::Neighbors => Some("neighbors queries"),
+            _ => None,
+        };
+        if let Some(shape) = shape
+            && input.has_negation()
+        {
+            return Err(QueryError::Validation(format!(
+                "{shape} support NOT only on =, <>, IS NULL, and IS NOT NULL conditions; use a traversal for other negated conditions"
+            )));
+        }
+        for predicate in input
+            .predicates
+            .iter()
+            .flat_map(|root| root.negated_leaves())
+        {
+            self.check_negated(input, predicate)?;
+        }
+        Ok(())
+    }
+
+    fn check_negated(&self, input: &Input, predicate: &Condition) -> Result<()> {
+        for (alias, property) in predicate.node_properties() {
+            let entity = predicate_entity(input, alias)?;
+            if self.virtual_source(entity, property).is_some() {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{property}\" for {entity}: virtual columns cannot be used under NOT"
+                )));
+            }
+            if self
+                .property_id(entity, property)
+                .is_some_and(|property| self.model.get().property_is_hidden(property))
+            {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{property}\" for {entity}: this field cannot be used under NOT"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn relationship_column_type(
+        &self,
+        input: &Input,
+        index: usize,
+        property: &str,
+    ) -> Result<DataType> {
+        let model = self.model.get();
+        let edge_table = input.relationships[index]
+            .types
+            .first()
+            .and_then(|kind| model.relationship_table(kind))
+            .unwrap_or_else(|| model.default_edge_table());
+        model
+            .table_column_type(edge_table, property)
+            .ok_or_else(|| {
+                QueryError::Validation(format!(
+                    "relationship[{index}] filter on unknown edge column \"{property}\" \
+                 (table \"{edge_table}\" does not have this column)"
+                ))
+            })
+    }
+
+    fn check_comparison_side(&self, entity: &str, prop: &str) -> Result<()> {
+        if !self.model.get().property_is_filterable(entity, prop) {
+            return Err(QueryError::AllowlistRejected(format!(
+                "filter on \"{prop}\" for {entity}: field is not filterable"
+            )));
+        }
+        if self.virtual_source(entity, prop).is_some() {
+            return Err(QueryError::Validation(format!(
+                "property comparison cannot reference virtual column \"{prop}\" on {entity}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_property_comparison(
+        &self,
+        input: &Input,
+        lhs: (&str, &str),
+        rhs: (&str, &str),
+    ) -> Result<()> {
+        let mut types = Vec::new();
+        for (node_id, prop) in [lhs, rhs] {
+            let entity = predicate_entity(input, node_id)?;
+            self.check_field(entity, prop)?;
+            self.check_comparison_side(entity, prop)?;
+            types.push(self.field_type(entity, prop));
+        }
+        if let [Some(lt), Some(rt)] = types[..]
+            && lt != rt
+        {
+            return Err(QueryError::Validation(format!(
+                "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
+                lhs.0, lhs.1, rhs.0, rhs.1
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn predicate_entity<'a>(input: &'a Input, alias: &str) -> Result<&'a str> {
+    input.entity_of(alias).ok_or_else(|| {
+        QueryError::ReferenceError(format!("condition references undefined node \"{alias}\""))
+    })
+}
+
+pub(super) fn check_condition_counts(
+    input: &Input,
+    filters: &std::collections::HashMap<String, Vec<InputFilter>>,
+    target: &PredicateTarget,
+    maximum: usize,
+) -> Result<()> {
+    let mut counts: std::collections::HashMap<&str, usize> = filters
+        .iter()
+        .map(|(property, filters)| (property.as_str(), filters.len()))
+        .collect();
+    for predicate in input.conditions() {
+        if predicate.target != *target {
+            continue;
+        }
+        *counts.entry(&predicate.property).or_default() += 1;
+    }
+    let owner = match target {
+        PredicateTarget::Node(alias) => format!("node \"{alias}\""),
+        PredicateTarget::Relationship(index) => format!("relationship[{index}]"),
+    };
+    if counts.len() > maximum {
+        return Err(QueryError::Validation(format!(
+            "filter property count ({}) for {owner} must not exceed {maximum}",
+            counts.len()
+        )));
+    }
+    if let Some((property, count)) = counts
+        .into_iter()
+        .find(|(_, count)| *count > MAX_FILTER_ENTRIES_PER_PROPERTY)
+    {
+        return Err(QueryError::Validation(format!(
+            "filter entry count ({count}) on property \"{property}\" for {owner} must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn check_condition_column(lhs: (&str, &str), filter: &InputFilter) -> Result<()> {
+    let constant = lhs.1.is_empty()
+        || filter
+            .rhs_column
+            .as_ref()
+            .is_some_and(|(alias, property)| (alias.as_str(), property.as_str()) == lhs)
+        || filter.op == Some(FilterOp::In)
+            && filter
+                .value
+                .as_ref()
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(Vec::is_empty);
+    if constant {
+        return Err(QueryError::Validation(CONDITION_COLUMN_RULE.into()));
+    }
+    Ok(())
+}
