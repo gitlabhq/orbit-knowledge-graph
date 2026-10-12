@@ -440,12 +440,18 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     pub fn check_depth(&self, input: &Input) -> Result<()> {
         use crate::schema_limits::{
             MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTERS_PER_NODE,
-            MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP,
-            MAX_REL_TYPES, MAX_RELS_CAP,
+            MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IN_VALUES, MAX_JOIN_PREDICATES, MAX_NODE_IDS,
+            MAX_NODES_CAP, MAX_REL_TYPES, MAX_RELS_CAP,
         };
         const MAX_AGGS_CAP: usize = 10;
         const MAX_GROUP_BY_KEYS: usize = 4;
 
+        if input.join_predicates.len() > MAX_JOIN_PREDICATES {
+            return Err(QueryError::Validation(format!(
+                "cross-node predicate count ({}) must not exceed {MAX_JOIN_PREDICATES}",
+                input.join_predicates.len()
+            )));
+        }
         if input.nodes.len() > MAX_NODES_CAP {
             return Err(QueryError::Validation(format!(
                 "nodes count ({}) must not exceed {MAX_NODES_CAP}",

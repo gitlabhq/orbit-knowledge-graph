@@ -1666,6 +1666,41 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
 }
 
 #[test]
+fn orbit_query_cross_node_predicates_have_a_query_wide_limit() {
+    let ontology = embedded_ontology();
+    let context = test_ctx();
+    for count in [100, 101] {
+        let predicates = vec!["a.id = b.id"; count - 1].join(" AND ");
+        for query in [
+            format!(
+                "MATCH (a:Definition {{id: 1}})-[:CALLS]->(b:Definition) WHERE a.id = b.id AND {predicates} RETURN a.id, b.id"
+            ),
+            format!(
+                "MATCH (a:Definition {{id: 1}})-[:CALLS]->(b:Definition) WHERE a.id = b.id MATCH (a) WHERE ({predicates}) RETURN a.id, b.id"
+            ),
+        ] {
+            for result in [
+                compile(&query, Frontend::Gql, &ontology, &context),
+                compiler::compile_local(&query, Frontend::Gql, &ontology),
+            ] {
+                if count == 100 {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(matches!(error, QueryError::Validation(_)), "{error}");
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("cross-node predicate count (101) must not exceed 100"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#;
     let orbit_query =

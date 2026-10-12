@@ -1,6 +1,3 @@
-// Mirrors of `config/schemas/graph_query.schema.json`, asserted against it by
-// `build.rs`. `include!`d into `build.rs`: no `use` statements or crate paths.
-
 pub const MAX_HOPS_CAP: u32 = 3;
 pub const MAX_DEPTH_CAP: u32 = 3;
 pub const MAX_NODES_CAP: usize = 5;
@@ -12,6 +9,7 @@ pub const MAX_FILTERS_PER_REL: usize = 5;
 pub const MAX_COLUMNS: usize = 50;
 pub const MAX_REL_TYPES: usize = 10;
 pub const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
+pub const MAX_JOIN_PREDICATES: usize = 100;
 pub const MAX_LIMIT: u32 = 1000;
 pub const MAX_IDENTIFIER_LEN: usize = 64;
 pub const MAX_FILTER_STRING_LEN: usize = 1024;
