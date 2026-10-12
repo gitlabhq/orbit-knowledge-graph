@@ -33,8 +33,8 @@ run() {
     fi
 }
 
-apply_navigation() {
-    local nav="data/en-us/navigation.yaml"
+# Replace the GitLab Orbit section of the navigation on stdin with docs/navigation.yaml.
+swap_navigation() {
     awk -v section="$ORBIT_ROOT/docs/navigation.yaml" '
         /^# GITLAB ORBIT$/ {
             print; print ""
@@ -43,7 +43,12 @@ apply_navigation() {
         }
         skip && /^# / { skip = 0 }
         !skip
-    ' "$nav" >"$nav.tmp"
+    '
+}
+
+apply_navigation() {
+    local nav="data/en-us/navigation.yaml"
+    swap_navigation <"$nav" >"$nav.tmp"
     if ! grep -q "^# GITLAB ORBIT$" "$nav.tmp"; then
         rm -f "$nav.tmp"
         echo "ERROR: $nav has no '# GITLAB ORBIT' section to replace."
@@ -53,10 +58,31 @@ apply_navigation() {
     echo "docs-gitlab-com: GitLab Orbit navigation replaced with docs/navigation.yaml."
 }
 
+# An old checkout builds an old side nav next to the new pages, so update it.
+# The navigation swap from an earlier run is the only local change this discards.
+update_site() {
+    local branch=$1 nav="data/en-us/navigation.yaml"
+    if [[ "$(git branch --show-current)" != "$branch" ]]; then
+        return
+    fi
+    if [[ -n "$(git status --porcelain --untracked-files=no -- . ":(exclude)$nav")" ]] ||
+        [[ "$(swap_navigation <"$nav")" != "$(git show "HEAD:$nav" | swap_navigation)" ]]; then
+        echo "WARNING: $DOCS_DIR has local changes. Not updating it."
+        return
+    fi
+    if git fetch --quiet --depth 1 origin "$branch"; then
+        git reset --quiet --hard FETCH_HEAD
+    else
+        echo "WARNING: could not update $DOCS_DIR. Using it as is."
+    fi
+}
+
 prepare_site() {
     local branch=${DOCS_BRANCH:-$(docs_branch)}
     if [[ ! -d $DOCS_DIR/.git ]]; then
         git clone --depth 1 --branch "$branch" "$DOCS_REPO" "$DOCS_DIR"
+    else
+        (cd "$DOCS_DIR" && update_site "$branch")
     fi
     ln -sfn "$ORBIT_ROOT" "$SITE_DIR/orbit"
     cd "$DOCS_DIR"
@@ -107,6 +133,11 @@ build() {
 
 case "${1:-}" in
     serve)
+        # Hugo moves to a random port when 1313 is taken, and the browser keeps showing the old server.
+        if lsof -nP -iTCP:1313 -sTCP:LISTEN >/dev/null 2>&1; then
+            echo "ERROR: port 1313 is in use. Stop the other docs server, then run this again." >&2
+            exit 1
+        fi
         prepare_site
         run make view
         ;;
