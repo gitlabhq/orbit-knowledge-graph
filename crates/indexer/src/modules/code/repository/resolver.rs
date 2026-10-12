@@ -107,6 +107,22 @@ pub enum Repository {
     IncrementalEngine(super::super::incremental::Repository),
 }
 
+impl Repository {
+    pub(in crate::modules::code) fn parseable_files(&self) -> usize {
+        let detected =
+            |path: &str| code_graph::v2::config::detect_language_from_path(path).is_some();
+        match self {
+            Repository::Extracted(repository) => repository
+                .file_inventory
+                .count_by(|e| e.decision == code_graph::v2::Decision::Parse && detected(&e.path)),
+            Repository::IncrementalEngine(repository) => repository
+                .files()
+                .filter(|file| file.keeps() && detected(&file.path))
+                .count(),
+        }
+    }
+}
+
 impl RepositoryResolver {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
@@ -331,6 +347,47 @@ mod tests {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         encoder.write_all(&tar_bytes).unwrap();
         encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn both_engines_count_the_same_parseable_files() {
+        let archive = build_test_tar_gz(
+            &[
+                ("src/main.py", "x = 1\n"),
+                (".gitlab-ci.yml", "a: 1\n"),
+                ("config/app.yaml", "b: 2\n"),
+                ("infra/main.tf", "resource \"a\" \"b\" {}\n"),
+                ("README.md", "readme"),
+                ("logo.png", "image"),
+            ],
+            "abc",
+        );
+        let stream = |bytes: Vec<u8>| -> super::super::ByteStream {
+            Box::pin(futures::stream::once(async move {
+                Ok(bytes::Bytes::from(bytes))
+            }))
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache =
+            LocalRepositoryCache::new(dir.path().into(), u64::MAX, 0, CodeMetrics::default());
+        let extracted = Repository::Extracted(
+            cache
+                .extract_archive(stream(archive.clone()))
+                .await
+                .unwrap(),
+        );
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
+        let loaded = Repository::IncrementalEngine(
+            super::super::super::incremental::load(stream(archive), &config)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(extracted.parseable_files(), 4);
+        assert_eq!(loaded.parseable_files(), 4);
     }
 
     struct LegacyResolver(RepositoryResolver);
