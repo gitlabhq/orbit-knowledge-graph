@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::{Changes, Resolved};
+use code_graph_incremental::pipeline::Resolved;
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Killed, Limits, State, templates};
@@ -37,7 +37,7 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let (context, resolved) = templates::index(Context::new(env), common::walk(root))
+    let (context, resolved) = templates::index(Context::new(env, common::walk(root)))
         .unwrap()
         .finish();
     (resolved, context.report.skipped)
@@ -85,12 +85,9 @@ fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
     let expected = cross_file(&env, &baseline.state, EdgeKind::Calls);
     assert!(!expected.is_empty());
     env.limits.cross_file_resolve_ms = 0;
-    let empty_changes = || Changes {
-        changed: common::load(orbit_utils::vfs::sources::Memory(vec![])),
-        removed: vec![],
-    };
+    let empty_changes = || common::load(orbit_utils::vfs::sources::Memory(vec![]));
     let (context, degraded) =
-        templates::reindex(Context::new(&env), baseline.state, empty_changes())
+        templates::reindex(Context::new(&env, empty_changes()), baseline.state, vec![])
             .unwrap()
             .finish();
     assert_eq!(context.report.skipped.len(), 1);
@@ -107,7 +104,7 @@ fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
     );
     env.limits.cross_file_resolve_ms = u64::MAX;
     let (context, recovered) =
-        templates::reindex(Context::new(&env), degraded.state, empty_changes())
+        templates::reindex(Context::new(&env, empty_changes()), degraded.state, vec![])
             .unwrap()
             .finish();
     assert!(context.report.skipped.is_empty());
@@ -126,7 +123,7 @@ fn resolve_cancellation_and_run_deadline_remain_fatal() {
     write_all(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
     let env = python_env(Limits::UNLIMITED);
     for cancelled in [false, true] {
-        let (mut context, graph) = Pipeline::new(Context::new(&env), common::walk(repo.path()))
+        let (mut context, graph) = Pipeline::new(Context::new(&env, common::walk(repo.path())), ())
             .then(Prepare)
             .unwrap()
             .then(Each(
@@ -230,12 +227,12 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     resolved.state.save(&env, snapshot.path()).unwrap();
     let (env, state) = State::load(snapshot.path(), SupportLang::JavaScript).unwrap();
     let (context, resolved) = templates::reindex(
-        Context::new(&env),
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
         state,
-        Changes {
-            changed: common::load(orbit_utils::vfs::sources::Memory(vec![])),
-            removed: vec![],
-        },
+        vec![],
     )
     .unwrap()
     .finish();
@@ -248,16 +245,14 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
         repo.path(),
         &[("package/package.json", r#"{"main":"second.js"}"#)],
     );
-    let changes = Changes {
-        changed: common::load(orbit_utils::vfs::sources::Diff {
-            root: repo.path(),
-            paths: vec!["package/package.json".into()],
-        }),
-        removed: vec![],
-    };
-    let (context, resolved) = templates::reindex(Context::new(&env), resolved.state, changes)
-        .unwrap()
-        .finish();
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["package/package.json".into()],
+    });
+    let (context, resolved) =
+        templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+            .unwrap()
+            .finish();
     assert!(context.report.skipped.is_empty());
     let mut resolved_files: Vec<_> = context
         .report
@@ -305,16 +300,14 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
             ("right.js", "export function right() { const value = 2; }"),
         ],
     );
-    let changes = Changes {
-        changed: common::load(orbit_utils::vfs::sources::Diff {
-            root: repo.path(),
-            paths: vec!["left.js".into(), "right.js".into()],
-        }),
-        removed: vec![],
-    };
-    let (context, resolved) = templates::reindex(Context::new(&env), resolved.state, changes)
-        .unwrap()
-        .finish();
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["left.js".into(), "right.js".into()],
+    });
+    let (context, resolved) =
+        templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+            .unwrap()
+            .finish();
     let mut resolved_files: Vec<_> = context
         .report
         .files

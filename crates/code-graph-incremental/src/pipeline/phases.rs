@@ -11,8 +11,8 @@ use ontology::Ontology;
 
 use super::{
     Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
-    LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, Sources,
-    State, Workset,
+    LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
+    Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
@@ -24,20 +24,15 @@ use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
 
-impl Phase<Sources> for Prepare {
+impl Phase<()> for Prepare {
     type Output = Workset<SourcePaths>;
 
     fn name(&self) -> Cow<'static, str> {
         "prepare".into()
     }
 
-    fn run(self, context: &mut Context, repository: Sources) -> Result<Self::Output, Error> {
-        workset(
-            context,
-            State::new(context.env),
-            repository,
-            FxHashSet::default(),
-        )
+    fn run(self, context: &mut Context, _: ()) -> Result<Self::Output, Error> {
+        workset(context, State::new(context.env), FxHashSet::default())
     }
 }
 
@@ -49,10 +44,10 @@ fn read(repository: &orbit_utils::vfs::Vfs<()>, path: &str) -> std::io::Result<S
 fn workset(
     context: &mut Context,
     mut state: State,
-    repository: Sources,
     dirty: FxHashSet<u32>,
 ) -> Result<Workset<SourcePaths>, Error> {
-    let paths: Vec<_> = super::candidates(&repository, context.env.limits.max_files)
+    let repository = &context.repository;
+    let paths: Vec<_> = super::candidates(repository, context.env.limits.max_files)
         .filter(|file| {
             SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
         })
@@ -69,7 +64,7 @@ fn workset(
             .iter()
             .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
         {
-            match read(&repository, path) {
+            match read(repository, path) {
                 Ok(content) => state.configs.push(SourceFile {
                     path: path.into(),
                     content,
@@ -80,12 +75,8 @@ fn workset(
     }
     Ok(Workset {
         state,
-        items: SourcePaths {
-            repository: repository.clone(),
-            paths,
-        },
+        items: SourcePaths { paths },
         dirty,
-        repository,
     })
 }
 
@@ -102,19 +93,18 @@ impl Phase<ReindexInput> for Remap {
     }
 
     fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
-        let ReindexInput { mut state, changes } = input;
+        let ReindexInput { mut state, removed } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
-        let dirty_labels: FxHashSet<&str> = changes
-            .removed
+        let dirty_labels: FxHashSet<&str> = removed
             .iter()
             .map(String::as_str)
-            .chain(changes.changed.files().map(|f| f.path.as_ref()))
+            .chain(context.repository.files().map(|f| f.path.as_ref()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        workset(context, state, changes.changed, dirty)
+        workset(context, state, dirty)
     }
 }
 
@@ -196,11 +186,10 @@ where
             state,
             items,
             dirty,
-            repository,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
         let outcomes: Vec<_> = items
-            .into_parallel()
+            .into_parallel(&context.repository)
             .map(|item| {
                 let item = item?;
                 let path = item.label().to_string();
@@ -236,7 +225,6 @@ where
             state,
             items,
             dirty,
-            repository,
         })
     }
 }
@@ -245,22 +233,31 @@ where
 /// pulled one item at a time as workers free up.
 pub trait IntoParallel {
     type Item: Send;
-    fn into_parallel(self) -> impl ParallelIterator<Item = Result<Self::Item, String>>;
+    fn into_parallel(
+        self,
+        repository: &orbit_utils::vfs::Vfs<()>,
+    ) -> impl ParallelIterator<Item = Result<Self::Item, String>>;
 }
 
 impl<T: Send> IntoParallel for Vec<T> {
     type Item = T;
-    fn into_parallel(self) -> impl ParallelIterator<Item = Result<T, String>> {
+    fn into_parallel(
+        self,
+        _: &orbit_utils::vfs::Vfs<()>,
+    ) -> impl ParallelIterator<Item = Result<T, String>> {
         self.into_par_iter().map(Ok)
     }
 }
 
 impl IntoParallel for SourcePaths {
     type Item = SourceFile;
-    fn into_parallel(self) -> impl ParallelIterator<Item = Result<SourceFile, String>> {
+    fn into_parallel(
+        self,
+        repository: &orbit_utils::vfs::Vfs<()>,
+    ) -> impl ParallelIterator<Item = Result<SourceFile, String>> {
         self.paths
             .into_par_iter()
-            .map(move |path| match read(&self.repository, &path) {
+            .map(move |path| match read(repository, &path) {
                 Ok(content) => Ok(SourceFile { path, content }),
                 Err(_) => Err(path),
             })
@@ -391,7 +388,6 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             mut state,
             items,
             mut dirty,
-            repository,
         } = input;
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
@@ -418,7 +414,8 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .map(String::as_str)
             .collect();
         let mut unparsed = Vec::new();
-        for file in repository
+        for file in context
+            .repository
             .files()
             .filter(|file| !parsed.contains(file.path.as_ref()))
         {

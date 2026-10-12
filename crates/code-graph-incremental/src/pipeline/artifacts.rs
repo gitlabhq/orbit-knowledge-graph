@@ -30,15 +30,9 @@ pub fn candidates(
         })
 }
 
-/// Files changed since the graph was built, already classified.
-pub struct Changes {
-    pub changed: Sources,
-    pub removed: Vec<String>,
-}
-
 pub struct ReindexInput {
     pub state: State,
-    pub changes: Changes,
+    pub removed: Vec<String>,
 }
 
 /// The graph so far plus the items still moving through the per-item
@@ -47,11 +41,9 @@ pub struct Workset<C> {
     pub state: State,
     pub items: C,
     pub dirty: FxHashSet<u32>,
-    pub repository: Sources,
 }
 
 pub struct SourcePaths {
-    pub repository: Sources,
     pub paths: Vec<String>,
 }
 
