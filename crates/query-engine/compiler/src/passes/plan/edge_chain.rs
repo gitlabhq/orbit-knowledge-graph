@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use ontology::constants::*;
 
 use super::context::PlanningContext;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use super::{
@@ -43,7 +43,7 @@ pub struct Hop {
 }
 
 pub struct JoinColumns {
-    pub prev_alias: String,
+    pub prev_index: usize,
     pub prev_col: String,
     pub curr_col: String,
 }
@@ -221,7 +221,7 @@ where
         }
     }
 
-    resolve_join_columns(&mut hops);
+    resolve_join_columns(&mut hops)?;
     resolve_cascade_anchors(&mut hops);
 
     resolve_node_flags(&hops, &mut nodes, input);
@@ -397,6 +397,14 @@ fn elide_hops(
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
             if would_be_last
+                || input
+                    .relationships
+                    .iter()
+                    .filter(|relationship| {
+                        relationship.from == fk.target_node || relationship.to == fk.target_node
+                    })
+                    .count()
+                    > 1
                 || input.join_predicates.iter().any(|predicate| {
                     [&predicate.lhs_node, &predicate.rhs_node]
                         .into_iter()
@@ -697,33 +705,50 @@ fn resolve_cascade_anchors(hops: &mut [Hop]) {
     }
 }
 
-fn resolve_join_columns(hops: &mut [Hop]) {
+fn resolve_join_columns(hops: &mut [Hop]) -> Result<()> {
+    let Some(first) = hops.first() else {
+        return Ok(());
+    };
+    let mut reached = HashSet::from([first.from_node.clone(), first.to_node.clone()]);
     for i in 1..hops.len() {
-        let prev_hop = &hops[i - 1];
-        let prev_alias = format!("e{}", i - 1);
-        let (prev_start, prev_end) = prev_hop.direction.edge_columns();
-
+        let next = (i..hops.len())
+            .find(|&index| {
+                reached.contains(&hops[index].from_node) != reached.contains(&hops[index].to_node)
+            })
+            .ok_or_else(|| {
+                QueryError::Validation("relationships must form a connected tree".into())
+            })?;
+        hops[i..=next].rotate_right(1);
         let curr_hop = &hops[i];
         let (start_col, end_col) = curr_hop.direction.edge_columns();
-
-        let (prev_col, curr_col) = if prev_hop.to_node == curr_hop.from_node {
-            (prev_end, start_col)
-        } else if prev_hop.to_node == curr_hop.to_node {
-            (prev_end, end_col)
-        } else if prev_hop.from_node == curr_hop.from_node {
-            (prev_start, start_col)
-        } else if prev_hop.from_node == curr_hop.to_node {
-            (prev_start, end_col)
-        } else {
-            (prev_end, start_col)
-        };
-
-        hops[i].join_prev = Some(JoinColumns {
-            prev_alias,
-            prev_col: prev_col.to_string(),
-            curr_col: curr_col.to_string(),
-        });
+        let join = hops[..i]
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(prev_index, previous)| {
+                let (prev_start, prev_end) = previous.direction.edge_columns();
+                let (prev_col, curr_col) = if previous.to_node == curr_hop.from_node {
+                    (prev_end, start_col)
+                } else if previous.to_node == curr_hop.to_node {
+                    (prev_end, end_col)
+                } else if previous.from_node == curr_hop.from_node {
+                    (prev_start, start_col)
+                } else if previous.from_node == curr_hop.to_node {
+                    (prev_start, end_col)
+                } else {
+                    return None;
+                };
+                Some(JoinColumns {
+                    prev_index,
+                    prev_col: prev_col.into(),
+                    curr_col: curr_col.into(),
+                })
+            });
+        reached.insert(curr_hop.from_node.clone());
+        reached.insert(curr_hop.to_node.clone());
+        hops[i].join_prev = join;
     }
+    Ok(())
 }
 
 fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {

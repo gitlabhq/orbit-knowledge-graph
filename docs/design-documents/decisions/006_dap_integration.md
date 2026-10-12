@@ -187,14 +187,10 @@ branch, which the remote graph does not cover. Flows that already give the
 agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
-Orbit Local `grep` finds definitions using DuckDB FTS with all searchable terms
-required per alternative; single-token alternatives must also appear literally.
-Quoted `a|b` alternatives share one result list using their best score. Results
-order exact-name hits first, then name/path hits, then body-only mentions, BM25
-within each group. Case-insensitive exact symbol-name labels report hits and misses
-within scope before the limit. Results contain Definition IDs, names, kinds, file
-ranges, and match labels; body-only rows add a mention count and the first
-matching line. `context` returns compact file definition maps with
+Orbit Local `grep` scans the working tree like ripgrep and prints every matching
+line as rg does. A line before each enclosing definition's matches names it with
+its callers and callees. Quoted `a|b` alternatives share one result
+list, defining files first. `context` returns compact file definition maps with
 every ID and ten connections per section, with omitted counts, or complete
 definition source and connections. It accepts mixed file, line-range, directory,
 and definition targets and shows test connections in their own section. Line

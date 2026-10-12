@@ -558,10 +558,18 @@
           "minimum": 0
         },
         "max_total_bytes": {
-          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.",
+          "description": "Archive entry bytes, counted before the content filter, above which a\nrepository is skipped entirely (indexed empty, then checkpointed). Bounds\nper-repo disk so fetch/index concurrency can rise without exhausting the\npod volume. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
+        },
+        "source_memory_budget_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source_compress_spill": {
+          "type": "boolean"
         },
         "worker_threads": {
           "type": "integer",
@@ -678,6 +686,8 @@
         "max_file_size_bytes",
         "max_files",
         "max_total_bytes",
+        "source_memory_budget_bytes",
+        "source_compress_spill",
         "worker_threads",
         "max_concurrent_languages",
         "per_file_timeout_ms",
@@ -1512,9 +1522,12 @@
     "FeaturesConfig": {
       "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",
       "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/FeatureScope"
-      }
+      "properties": {
+        "code_graph_incremental": {
+          "$ref": "#/$defs/FeatureScope"
+        }
+      },
+      "additionalProperties": false
     },
     "FeatureScope": {
       "description": "A feature flag scoped to root namespaces: `enabled` toggles it, an empty\n`namespaces` list means every namespace, otherwise only those ids.",

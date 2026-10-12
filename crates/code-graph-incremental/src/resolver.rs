@@ -186,6 +186,9 @@ impl Resolver {
         lookup: &LookupConfig,
         env: &Env,
     ) -> FxHashSet<u32> {
+        if self.visible.is_empty() {
+            return (0..trees.len() as u32).collect();
+        }
         let mut invalidated: FxHashSet<u32> = self
             .reqs
             .iter()
@@ -248,6 +251,9 @@ impl Resolver {
         old_labels: &[String],
         label_to_fi: &FxHashMap<&str, u32>,
     ) -> FxHashSet<u32> {
+        if self.visible.is_empty() {
+            return label_to_fi.values().copied().collect();
+        }
         let n = label_to_fi.len();
         let mut remapped: VisibleMap = (0..n)
             .map(|_| FxHashMap::with_capacity_and_hasher(16, Default::default()))

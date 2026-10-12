@@ -7,6 +7,9 @@ use crate::error::LoadError;
 
 #[derive(Clone, Copy, serde::Deserialize)]
 pub struct Limits {
+    pub max_files: usize,
+    pub cross_file_resolve_ms: u64,
+    pub file_parse_ms: u64,
     pub file_rewrite_ms: u64,
     pub file_link_ms: u64,
     pub file_resolve_ms: u64,
@@ -21,6 +24,9 @@ impl Limits {
     }
 
     pub const UNLIMITED: Self = Self {
+        max_files: 0,
+        cross_file_resolve_ms: u64::MAX,
+        file_parse_ms: u64::MAX,
         file_rewrite_ms: u64::MAX,
         file_link_ms: u64::MAX,
         file_resolve_ms: u64::MAX,
@@ -30,6 +36,7 @@ impl Limits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Killed {
+    pub cancelled: bool,
     pub label: &'static str,
     pub path: String,
     pub elapsed: Duration,
@@ -38,6 +45,9 @@ pub struct Killed {
 
 impl std::fmt::Display for Killed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.cancelled {
+            return write!(f, "{} cancelled", self.label);
+        }
         let (e, b) = (self.elapsed.as_millis(), self.budget.as_millis());
         match self.path.is_empty() {
             true => write!(f, "{} ran {e}ms against a {b}ms budget", self.label),
@@ -59,6 +69,7 @@ pub struct Sentinel {
     budget: Duration,
     label: &'static str,
     path: String,
+    cancelled: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl Sentinel {
@@ -68,6 +79,7 @@ impl Sentinel {
             budget: Duration::from_millis(budget_ms),
             label,
             path: path.to_string(),
+            cancelled: None,
         }
     }
 
@@ -75,11 +87,30 @@ impl Sentinel {
         Self::new("", "", u64::MAX)
     }
 
+    pub fn child(&self, label: &'static str, path: &str, budget_ms: u64) -> Self {
+        let mut child = Self::new(label, path, budget_ms);
+        child.budget = child
+            .budget
+            .min(self.budget.saturating_sub(self.started.elapsed()));
+        child.cancelled = self.cancelled.clone();
+        child
+    }
+
+    pub fn with_cancellation(
+        mut self,
+        cancelled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.cancelled = Some(cancelled);
+        self
+    }
+
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
         let elapsed = self.started.elapsed();
-        if elapsed > self.budget {
+        let cancelled = self.cancelled.as_ref().is_some_and(|cancelled| cancelled());
+        if elapsed > self.budget || cancelled {
             return Err(Killed {
+                cancelled,
                 label: self.label,
                 path: self.path.clone(),
                 elapsed,

@@ -11,4 +11,5 @@ pub mod strings;
 pub mod traversal_path;
 pub mod version;
 pub mod vfs;
+pub mod vfs_policies;
 pub mod yaml;

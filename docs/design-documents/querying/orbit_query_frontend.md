@@ -60,7 +60,9 @@ Schema preparation, result types, and resolution belong only to the GQL frontend
 `compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
-Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
+Its limits are shared Rust constants in `query_limits` for both JSON and GQL.
+The compiler's build script checks matching constraints in the JSON schema.
+The shared validator also enforces the total predicate count, which spans multiple input fields.
 `validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
 Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
@@ -216,6 +218,8 @@ Syntax errors report line, column, and expected tokens without echoing query tex
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
 Existing compiler limits still apply after lowering.
+Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
+An ID selector or IN list counts as one predicate; an ID range counts as two.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
 Custom ID-property spellings remain outside the frontend.

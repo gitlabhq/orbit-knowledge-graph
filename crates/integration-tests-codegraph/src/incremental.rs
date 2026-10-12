@@ -4,12 +4,32 @@
 
 use std::sync::Arc;
 
-use code_graph_incremental::pipeline::{Changes, Display, Emit, Export, Resolved};
+use code_graph_incremental::pipeline::{Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{
-    Context, Env, Envelope, Limits, Pipeline, Scalar, State, inventory, templates,
-};
+use code_graph_incremental::{Context, Env, Envelope, Limits, Pipeline, Scalar, State, templates};
 use ontology::Ontology;
+
+struct FixturePolicy;
+
+impl orbit_utils::vfs::Pass for FixturePolicy {
+    type Tag = ();
+
+    fn metadata(&self, file: &orbit_utils::vfs::File<'_, ()>) -> orbit_utils::vfs::Decision<()> {
+        if file.path.ends_with(".png") || file.path.ends_with(".min.js") {
+            orbit_utils::vfs::Decision::List("excluded_extension")
+        } else {
+            orbit_utils::vfs::Decision::Pending
+        }
+    }
+
+    fn content(&self, file: &orbit_utils::vfs::File<'_, ()>) -> orbit_utils::vfs::Decision<()> {
+        if file.bytes().is_some_and(|bytes| bytes.contains(&0)) {
+            orbit_utils::vfs::Decision::List("binary")
+        } else {
+            orbit_utils::vfs::Decision::Keep(())
+        }
+    }
+}
 
 use super::assertions::{TestCase, TestSuite};
 use super::runner::create_test_db;
@@ -53,11 +73,17 @@ pub fn run_incremental_suite(yaml: &str) {
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
 
-    let inventory = inventory::walk(repo.path())
-        .expect("walk fixtures")
-        .to_vec();
-    let graph = templates::index(Context::new(&env), repo.path(), inventory)
-        .expect("suite exceeded the total budget");
+    let repository = Arc::new(
+        orbit_utils::vfs::Vfs::load(
+            orbit_utils::vfs::sources::Directory(repo.path()),
+            FixturePolicy,
+            Default::default(),
+            Default::default(),
+        )
+        .expect("load fixtures"),
+    );
+    let graph =
+        templates::index(Context::new(&env, repository)).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(graph, &ontology, &suite.tests);
     let mut env = env;
 
@@ -74,11 +100,19 @@ pub fn run_incremental_suite(yaml: &str) {
         let mut changed = write_fixtures(&step.add, repo.path());
         changed.extend(write_fixtures(&step.modify, repo.path()));
         let changed = changed.into_iter().map(|(path, _)| path);
-        let changes = Changes {
-            changed: inventory::classify(repo.path(), changed),
-            removed: step.remove.clone(),
-        };
-        let graph = templates::reindex(Context::new(&env), state, repo.path(), changes)
+        let changes = Arc::new(
+            orbit_utils::vfs::Vfs::load(
+                orbit_utils::vfs::sources::Diff {
+                    root: repo.path(),
+                    paths: changed.collect(),
+                },
+                FixturePolicy,
+                Default::default(),
+                Default::default(),
+            )
+            .expect("load changed fixtures"),
+        );
+        let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
             .expect("suite exceeded the total budget");
         let (next, step_failures) = check(graph, &ontology, &step.tests);
         state = next;

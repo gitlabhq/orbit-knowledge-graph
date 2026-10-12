@@ -2,7 +2,7 @@
 //! running a `Phase`. The artifact's type decides which phases apply:
 //!
 //! ```text
-//! Sources ─Prepare─> Workset<SourcePaths>
+//! () ─Prepare─> Workset<SourcePaths>
 //!   ─Each(Parse+Rewrite+Canonicalize+Link)─> Workset<Vec<LinkedFile>>
 //!   ─Insert─> DirtyGraph ─Resolve─> Resolved ─Display─> Displayed
 //!   ─Export─> Exported ─Emit─> Exported
@@ -101,15 +101,17 @@ impl<I, A: ItemPhase<I>, B: ItemPhase<A::Output>> ItemPhase<I> for Chain<A, B> {
 /// What one run shares across its phases; `run` is the run's total deadline.
 pub struct Context<'e> {
     pub env: &'e Env,
+    pub repository: Sources,
     pub run: Sentinel,
     pub report: Report,
     observers: Vec<Box<dyn Observer>>,
 }
 
 impl<'e> Context<'e> {
-    pub fn new(env: &'e Env) -> Self {
+    pub fn new(env: &'e Env, repository: Sources) -> Self {
         Self {
             env,
+            repository,
             run: Sentinel::new("run", "", env.limits.total_ms),
             report: Report::default(),
             observers: Vec::new(),
@@ -158,6 +160,7 @@ impl<'e> Context<'e> {
 #[derive(Default)]
 pub struct Report {
     pub skipped: Vec<Killed>,
+    pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
     /// How long each file took in each per-file phase, skipped ones included.
     pub files: Vec<FileTiming>,
@@ -171,12 +174,17 @@ pub struct PhaseReport {
 pub struct FileTiming {
     pub path: String,
     pub phase: String,
+    pub language: crate::treesitter::SupportLang,
+    pub bytes: u64,
     pub elapsed: Duration,
 }
 
 /// The file an item of a per-file phase belongs to.
 pub trait Labelled {
     fn label(&self) -> &str;
+    fn bytes(&self) -> u64 {
+        0
+    }
 }
 
 /// Sees the run as it happens; implement only the methods you need.

@@ -101,6 +101,12 @@ pub struct RepositoryResolver {
     cache: Arc<dyn RepositoryCache>,
 }
 
+#[derive(Debug, Clone)]
+pub enum Repository {
+    Extracted(CachedRepository),
+    IncrementalEngine(super::super::incremental::Repository),
+}
+
 impl RepositoryResolver {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
@@ -117,9 +123,17 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<CachedRepository, ResolveError> {
+        namespace_id: Option<i64>,
+        config: &orbit_server_config::CodeIndexingPipelineConfig,
+    ) -> Result<Repository, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
-        self.full_download(project_id, branch, ref_name).await
+        let virtual_config = orbit_server_config::features::enabled_for(
+            orbit_server_config::features::Feature::CodeGraphIncremental,
+            namespace_id,
+        )
+        .then_some(config);
+        self.full_download(project_id, branch, ref_name, virtual_config)
+            .await
     }
 
     async fn full_download(
@@ -127,7 +141,8 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         ref_name: &str,
-    ) -> Result<CachedRepository, ResolveError> {
+        virtual_config: Option<&orbit_server_config::CodeIndexingPipelineConfig>,
+    ) -> Result<Repository, ResolveError> {
         info!(
             project_id,
             branch, ref_name, "downloading repository archive"
@@ -150,7 +165,11 @@ impl RepositoryResolver {
                 }
             };
 
-            match self.cache.extract_archive(archive_stream).await {
+            let repository = match virtual_config {
+                Some(config) => super::super::incremental::load(archive_stream, config).await.map(Repository::IncrementalEngine),
+                None => self.cache.extract_archive(archive_stream).await.map(Repository::Extracted),
+            };
+            match repository {
                 Ok(path) => Step::Done(path),
                 Err(RepositoryCacheError::EmptyArchive) => Step::GiveUp(ResolveError::EmptyRepository {
                     reason: EmptyRepositoryReason::EmptyArchive,
@@ -314,9 +333,36 @@ mod tests {
         encoder.finish().unwrap()
     }
 
+    struct LegacyResolver(RepositoryResolver);
+
+    impl LegacyResolver {
+        async fn resolve(
+            &self,
+            project: i64,
+            branch: &str,
+            commit: Option<&str>,
+        ) -> Result<CachedRepository, ResolveError> {
+            let config = orbit_server_config::AppConfig::embedded_defaults()
+                .engine
+                .handlers
+                .code_indexing_task
+                .pipeline;
+            match self
+                .0
+                .resolve(project, branch, commit, None, &config)
+                .await?
+            {
+                Repository::Extracted(repository) => Ok(repository),
+                Repository::IncrementalEngine(_) => {
+                    panic!("feature defaults must select legacy extraction")
+                }
+            }
+        }
+    }
+
     fn create_resolver(
         service: Arc<ScriptedRepositoryService>,
-    ) -> (tempfile::TempDir, RepositoryResolver) {
+    ) -> (tempfile::TempDir, LegacyResolver) {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let metrics = CodeMetrics::default();
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
@@ -326,7 +372,7 @@ mod tests {
             metrics,
         ));
         let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
-        (temp_dir, resolver)
+        (temp_dir, LegacyResolver(resolver))
     }
 
     #[tokio::test]

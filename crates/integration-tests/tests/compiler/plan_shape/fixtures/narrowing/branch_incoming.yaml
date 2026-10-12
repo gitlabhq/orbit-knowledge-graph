@@ -1,0 +1,40 @@
+# JSON preserves incoming directions; branch_incoming_gql.yaml tests the equivalent GQL query's normalized plan.
+name: JSON incoming branches join and cascade through the shared physical target
+missing_frontends:
+  gql: branch_incoming_gql.yaml checks the same query after GQL arrow normalization and hop reordering.
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1]},
+        {"id": "b", "entity": "Definition"},
+        {"id": "c", "entity": "Definition"},
+        {"id": "d", "entity": "Definition"}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b", "direction": "incoming"},
+        {"type": "CALLS", "from": "b", "to": "c", "direction": "incoming"},
+        {"type": "CALLS", "from": "a", "to": "d", "direction": "incoming"}
+      ]
+    }
+logical:
+  expect:
+    - (EdgeScan CALLS b->a AS e0)
+    - (EdgeScan CALLS c->b AS e1)
+    - (EdgeScan CALLS d->a AS e2)
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON e0.target_id = e2.target_id (Join ON e0.source_id = e1.target_id (_) (_)) (_))
+        - (SemiJoin e2.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+    emitted:
+      expect:
+        - (Join ON e0.target_id = e2.target_id (Join ON e0.source_id = e1.target_id (_) (_)) (_))
+        - (SemiJoin e2.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+  duckdb:
+    planned:
+      expect:
+        - (Join ON e0.target_id = e2.target_id (Join ON e0.source_id = e1.target_id (_) (_)) (_))
+        - (SemiJoin e2.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))

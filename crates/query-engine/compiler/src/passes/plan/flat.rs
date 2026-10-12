@@ -36,10 +36,14 @@ pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
 impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
     fn build(mut self) -> Result<ExecutionPlan> {
         let mut source: Option<PhysicalSource> = None;
-        let mut cascades = Vec::new();
+        let mut cascades: Vec<Option<PhysicalPlan>> = Vec::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
             let membership = self.filter_keys(index)?;
-            let cascade = self.cascade(index, cascades.last().and_then(Option::as_ref));
+            let upstream = hop
+                .join_prev
+                .as_ref()
+                .and_then(|join| cascades[join.prev_index].as_ref());
+            let cascade = self.cascade(index, upstream);
             let edge = self.edge(index, membership, cascade.as_ref())?;
             source = Some(match source {
                 Some(previous) => {
@@ -50,7 +54,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     previous.inner_join(
                         edge,
                         (
-                            Column::new(&join.prev_alias, &join.prev_col),
+                            Column::new(format!("e{}", join.prev_index), &join.prev_col),
                             Column::new(format!("e{index}"), &join.curr_col),
                         ),
                     )
@@ -215,7 +219,10 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
             .join_prev
             .as_ref()
             .filter(|_| hop.cascade_anchor && index > 0)?;
-        let previous = &self.facts.hops[index - 1];
+        let previous = &self.facts.hops[join.prev_index];
+        if previous.max_hops > 1 {
+            return None;
+        }
         let selective =
             [&previous.from_node, &previous.to_node]
                 .into_iter()
@@ -228,7 +235,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         if !selective && upstream.is_none() {
             return None;
         }
-        let alias = format!("{}p", join.prev_alias);
+        let alias = format!("e{}p", join.prev_index);
         let mut predicates =
             self.facts
                 .filtered_edge_predicates(&alias, previous, &mut HashSet::new());

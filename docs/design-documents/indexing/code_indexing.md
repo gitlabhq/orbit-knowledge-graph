@@ -202,6 +202,29 @@ The reason and byte volume of skipped entries are exposed via the `gkg.indexer.c
 
 #### Transform (call graph construction)
 
+##### Incremental engine behind a feature flag
+
+The `code_graph_incremental` feature flag selects VFS archive loading in `RepositoryResolver::resolve`.
+It defaults to off and supports a root-namespace allowlist.
+The enabled path uses the archive source and a separate content policy, without creating an extraction tree.
+Filtered files remain cataloged, but their content is unavailable.
+The policy retains source and resolver inputs. The incremental engine groups source files by language family and reads their bytes and manifests from the VFS.
+
+The code pipeline settings `source_memory_budget_bytes` and `source_compress_spill` control retained content.
+The memory budget defaults to 1 GiB per repository; zero spills all retained content.
+Spill compression defaults to off.
+The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
+
+Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
+File and directory rows are emitted once across language families, including files rejected by the content policy.
+The server reuses the embedded export mapping with ontology-derived output schemas.
+The envelope supplies typed values for extra schema columns and overrides header constants such as traversal path.
+The engine validates mapped columns against the ontology and output schema. Required envelope values must be present.
+The server adds branch relationships and endpoint tags before routing batches through the existing buffered writer.
+Both engines share locking, heartbeats, stale-data cleanup, and checkpoint handling.
+Write failures and cancelled runs do not advance the checkpoint.
+Tree-sitter polls cancellation and the per-file parse deadline while parsing.
+
 ##### Parser architecture
 
 The `code-graph` crate contains the v2 pipeline stack under `src/v2/`. Code indexing uses several parser and analysis backends:

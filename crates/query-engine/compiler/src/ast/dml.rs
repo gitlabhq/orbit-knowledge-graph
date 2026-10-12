@@ -452,20 +452,27 @@ impl Expr {
         }
     }
 
-    /// Combine expressions with AND, ignoring None values.
     pub fn and_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-        exprs
-            .into_iter()
-            .flatten()
-            .reduce(|a, b| Expr::binary(Op::And, a, b))
+        Self::conjoin(exprs.into_iter().flatten().collect())
     }
 
-    /// Combine expressions with OR, ignoring None values.
     pub fn or_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
-        exprs
-            .into_iter()
-            .flatten()
-            .reduce(|a, b| Expr::binary(Op::Or, a, b))
+        Self::balanced(Op::Or, exprs.into_iter().flatten().collect())
+    }
+
+    fn balanced(op: Op, mut exprs: Vec<Expr>) -> Option<Expr> {
+        match exprs.len() {
+            0 => None,
+            1 => exprs.pop(),
+            length => {
+                let right = exprs.split_off(length / 2);
+                Some(Self::binary(
+                    op,
+                    Self::balanced(op, exprs)?,
+                    Self::balanced(op, right)?,
+                ))
+            }
+        }
     }
 
     /// Match a column against a set of values.
@@ -501,9 +508,8 @@ impl Expr {
         Expr::binary(Op::And, left, right)
     }
 
-    /// Rebuild an AND chain from conjuncts. Returns None if empty.
     pub fn conjoin(exprs: Vec<Expr>) -> Option<Expr> {
-        exprs.into_iter().reduce(Expr::and)
+        Self::balanced(Op::And, exprs)
     }
 }
 
@@ -567,6 +573,46 @@ impl TableRef {
         TableRef::Subquery {
             query: Box::new(query),
             alias: alias.into(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boolean_builders_preserve_leaf_order_with_logarithmic_depth() {
+        for count in [0_usize, 1, 3, 16, 1025] {
+            let leaves: Vec<_> = (0..count).map(|index| Expr::int(index as i64)).collect();
+            for (operator, tree) in [
+                (Op::And, Expr::conjoin(leaves.clone())),
+                (
+                    Op::And,
+                    Expr::and_all(leaves.iter().cloned().map(Some).chain([None])),
+                ),
+                (
+                    Op::Or,
+                    Expr::or_all(leaves.iter().cloned().map(Some).chain([None])),
+                ),
+            ] {
+                let mut pending: Vec<_> = tree.as_ref().map(|tree| (tree, 0)).into_iter().collect();
+                let mut actual = Vec::new();
+                let mut depth = 0;
+                while let Some((expression, level)) = pending.pop() {
+                    depth = depth.max(level);
+                    if let Expr::BinaryOp { op, left, right } = expression {
+                        assert_eq!(*op, operator);
+                        pending.push((right, level + 1));
+                        pending.push((left, level + 1));
+                    } else {
+                        actual.push(expression.clone());
+                    }
+                }
+                assert_eq!(actual, leaves);
+                assert_eq!(tree.is_none(), count == 0);
+                assert_eq!(depth, count.next_power_of_two().ilog2());
+            }
         }
     }
 }
