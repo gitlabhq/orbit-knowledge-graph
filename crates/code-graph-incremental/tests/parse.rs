@@ -36,12 +36,27 @@ fn error_nodes(tree: &Tree, env: &Env) -> usize {
 #[test]
 fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     use code_graph_incremental::templates;
+    struct LazyFiles;
+    impl orbit_utils::vfs::Pass for LazyFiles {
+        type Tag = ();
+        fn metadata(&self, _: &orbit_utils::vfs::File<'_, ()>) -> Decision<()> {
+            Decision::Keep(())
+        }
+    }
     let root = tempfile::tempdir().unwrap();
     write_all(
         root.path(),
         &[("main.ts", b"export const x = 1;"), ("package.json", b"{}")],
     );
-    let repository = common::walk(root.path());
+    let repository = std::sync::Arc::new(
+        orbit_utils::vfs::Vfs::load(
+            orbit_utils::vfs::sources::Directory(root.path()),
+            LazyFiles,
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap(),
+    );
     for path in ["main.ts", "package.json"] {
         std::fs::remove_file(root.path().join(path)).unwrap();
     }
