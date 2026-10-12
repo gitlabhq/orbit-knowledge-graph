@@ -7,7 +7,9 @@ use indexer::types::Envelope;
 use integration_testkit::t;
 use orbit_server_config::CodeIndexingPipelineConfig;
 
-use super::helpers::{CodeIndexingDeps, MockGitlabServer, handler_context};
+use super::helpers::{
+    CodeIndexingDeps, MockGitlabServer, both_engines, enable_incremental, handler_context,
+};
 use orbit_utils::traversal_path::TraversalPath;
 
 const PROJECT_ID: i64 = 4242;
@@ -40,9 +42,13 @@ async fn project_indexed(clickhouse: &integration_testkit::TestContext) -> bool 
 }
 
 async fn index_once(
+    incremental: bool,
     pipeline_config: CodeIndexingPipelineConfig,
     add_project: impl FnOnce(&MockGitlabServer),
 ) -> (Result<(), indexer::handler::HandlerError>, bool) {
+    if incremental {
+        enable_incremental(TRAVERSAL_PATH);
+    }
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
         *integration_testkit::GRAPH_SCHEMA_SQL,
@@ -58,10 +64,10 @@ async fn index_once(
     (outcome, project_indexed(&clickhouse).await)
 }
 
-#[tokio::test]
-async fn a_job_too_slow_for_its_budget_never_checkpoints() {
+async fn a_job_too_slow_for_its_budget_never_checkpoints(incremental: bool) {
     // The slow archive takes 3s to start; a 1s budget overruns on any host.
     let (outcome, checkpointed) = index_once(
+        incremental,
         CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
             ..indexer::testkit::test_pipeline_configuration()
@@ -80,9 +86,9 @@ async fn a_job_too_slow_for_its_budget_never_checkpoints() {
     );
 }
 
-#[tokio::test]
-async fn the_same_repository_lands_once_the_work_fits() {
+async fn the_same_repository_lands_once_the_work_fits(incremental: bool) {
     let (outcome, checkpointed) = index_once(
+        incremental,
         CodeIndexingPipelineConfig {
             job_timeout_secs: 30,
             ..indexer::testkit::test_pipeline_configuration()
@@ -98,10 +104,10 @@ async fn the_same_repository_lands_once_the_work_fits() {
     );
 }
 
-#[tokio::test]
-async fn a_repository_over_the_byte_cap_is_checkpointed_instead_of_overrunning() {
+async fn a_repository_over_the_byte_cap_is_checkpointed_instead_of_overrunning(incremental: bool) {
     let oversized = "x".repeat(2_000_000);
     let (outcome, checkpointed) = index_once(
+        incremental,
         CodeIndexingPipelineConfig {
             max_total_bytes: 1_000_000,
             ..indexer::testkit::test_pipeline_configuration()
@@ -118,4 +124,10 @@ async fn a_repository_over_the_byte_cap_is_checkpointed_instead_of_overrunning()
         checkpointed,
         "the checkpoint is what stops the sweep re-dispatching a repository too big to extract"
     );
+}
+
+both_engines! {
+    a_job_too_slow_for_its_budget_never_checkpoints,
+    the_same_repository_lands_once_the_work_fits,
+    a_repository_over_the_byte_cap_is_checkpointed_instead_of_overrunning,
 }
