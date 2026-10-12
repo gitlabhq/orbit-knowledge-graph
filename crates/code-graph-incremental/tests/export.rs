@@ -89,6 +89,56 @@ fn strs(row: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn definition_coordinates_cover_the_same_span_as_bytes() {
+    for (language, path, source, expected) in [
+        (
+            SupportLang::Ruby,
+            "main.rb",
+            "class User\n  def run; end\nend\n",
+            vec![strs(&["User", "1", "3", "1", "4", "0", "29"])],
+        ),
+        (
+            SupportLang::Python,
+            "main.py",
+            "def run():\n    pass\n",
+            vec![strs(&["run", "1", "2", "1", "9", "0", "19"])],
+        ),
+    ] {
+        let repo = tempfile::tempdir().unwrap();
+        write_all(repo.path(), &[(path, source.as_bytes())]);
+        let env = Env::with_limits(language, Limits::UNLIMITED).unwrap();
+        let ontology = Ontology::load_embedded().unwrap();
+        let inventory = inventory::walk(repo.path()).unwrap().into_inner();
+        let exported = templates::index(Context::new(&env), repo.path(), inventory)
+            .unwrap()
+            .then(Display)
+            .unwrap()
+            .then(Export {
+                ontology: &ontology,
+                envelope: envelope(),
+            })
+            .unwrap()
+            .into_value();
+        let actual: Vec<_> = rows(
+            table(&exported, "gl_definition"),
+            &[
+                "name",
+                "start_line",
+                "end_line",
+                "start_char",
+                "end_char",
+                "start_byte",
+                "end_byte",
+            ],
+        )
+        .into_iter()
+        .filter(|row| row[0] == expected[0][0])
+        .collect();
+        assert_eq!(actual, expected, "{language:?}");
+    }
+}
+
+#[test]
 fn every_file_becomes_a_row_with_its_reason() {
     let repo = tempfile::tempdir().unwrap();
     write_all(
@@ -138,7 +188,20 @@ fn every_file_becomes_a_row_with_its_reason() {
             ]),
         ]
     );
-    assert_eq!(column(table(&exported, "gl_directory"), "path"), ["src"]);
+    assert_eq!(
+        column(table(&exported, "gl_directory"), "path"),
+        [".", "src"]
+    );
+    let root_id = column(table(&exported, "gl_directory"), "id")[0].clone();
+    let edges = rows(
+        table(&exported, "gl_edge"),
+        &["source_id", "relationship_kind", "target_id"],
+    );
+    let root_children = edges
+        .iter()
+        .filter(|edge| edge[0] == root_id && edge[1] == "CONTAINS")
+        .count();
+    assert_eq!(root_children, 3);
 }
 
 #[test]
@@ -194,6 +257,7 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
         [
             ("Definition".into(), "CALLS".into(), "Definition".into()),
             ("Definition".into(), "DEFINES".into(), "Definition".into()),
+            ("Directory".into(), "CONTAINS".into(), "File".into()),
             ("File".into(), "DEFINES".into(), "Definition".into()),
             ("File".into(), "IMPORTS".into(), "ImportedSymbol".into()),
             (
@@ -277,10 +341,13 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
         .filter(|(_, n)| *n == 0)
         .map(|(t, _)| t.as_str())
         .collect();
+    assert!(empty.is_empty());
     assert_eq!(
-        empty,
-        ["gl_directory"],
-        "a flat repository has no directories"
+        seen.iter()
+            .find(|(table, _)| table == "gl_directory")
+            .unwrap()
+            .1,
+        1
     );
     assert_eq!(displayed.state.trees.len(), 2);
 }
