@@ -455,7 +455,7 @@ impl CodeIndexer {
                     && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
             }),
             Repository::IncrementalEngine(repository) => {
-                code_graph_incremental::pipeline::candidate_count(repository)
+                code_graph_incremental::pipeline::candidates(repository, 0).count()
             }
         };
         let lane = if parseable <= self.small_repo_max_files {
