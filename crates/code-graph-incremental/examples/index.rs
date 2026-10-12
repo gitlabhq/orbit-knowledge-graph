@@ -27,14 +27,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let options = templates::Options {
         limits: Limits::UNLIMITED,
+        worker_threads: 0,
+        concurrent_families: 2,
+        small_family_files: 0,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| eprintln!("family finished")),
     };
     let selected_files =
         code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files).count();
     let ontology = ontology::Ontology::load_embedded()?;
-    let mut counts = BTreeMap::<String, usize>::new();
-    let mut batch_number = 0;
+    let written = std::sync::Mutex::new((BTreeMap::<String, usize>::new(), 0));
     let report = templates::repository(
         repository,
         options,
@@ -46,6 +48,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &ontology,
         ExportConfig::embedded(),
         |batches: Vec<(String, RecordBatch)>| -> Result<(), Box<dyn std::error::Error>> {
+            let mut written = written.lock().map_err(|error| error.to_string())?;
+            let (counts, batch_number) = &mut *written;
             for (table, batch) in batches {
                 *counts.entry(table.clone()).or_default() += batch.num_rows();
                 let path = output.join(format!("{batch_number:04}-{table}.arrow"));
@@ -53,11 +57,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 writer.write(&batch)?;
                 writer.finish()?;
                 eprintln!("{table}: {} rows", batch.num_rows());
-                batch_number += 1;
+                *batch_number += 1;
             }
             Ok(())
         },
     )?;
+    let (counts, _) = written.into_inner().map_err(|error| error.to_string())?;
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({

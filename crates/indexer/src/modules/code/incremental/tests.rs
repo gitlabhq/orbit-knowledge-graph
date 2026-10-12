@@ -269,6 +269,9 @@ fn config() -> CodeIndexingPipelineConfig {
 fn options() -> Options {
     Options {
         limits: code_graph_incremental::Limits::UNLIMITED,
+        worker_threads: config().worker_threads,
+        concurrent_families: code_graph::v2::PipelineConfig::default().concurrent_languages(),
+        small_family_files: config().small_repo_max_files,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| {}),
     }

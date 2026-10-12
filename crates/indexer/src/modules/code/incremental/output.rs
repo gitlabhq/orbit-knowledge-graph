@@ -4,6 +4,7 @@ use code_graph::v2::SinkError;
 use ontology::Ontology;
 use orbit_utils::arrow::{ArrowUtils, AsRecordBatch, BatchBuilder};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::super::arrow_converter::{
     ConvertedGraphData, IndexerEdgeRow, IndexerEnvelope, build_tag_properties, compute_branch_id,
@@ -13,7 +14,7 @@ use super::super::arrow_converter::{
 pub(super) struct Output<'a> {
     envelope: &'a IndexerEnvelope,
     ontology: &'a Ontology,
-    emitted_branch: bool,
+    emitted_branch: AtomicBool,
 }
 
 fn text(batch: &RecordBatch, column: &str, row: usize) -> Result<String, SinkError> {
@@ -33,12 +34,12 @@ impl<'a> Output<'a> {
         Self {
             envelope,
             ontology,
-            emitted_branch: false,
+            emitted_branch: AtomicBool::new(false),
         }
     }
 
     pub fn convert(
-        &mut self,
+        &self,
         tables: Vec<(String, RecordBatch)>,
     ) -> Result<ConvertedGraphData, SinkError> {
         let mut tables: HashMap<_, _> = tables.into_iter().collect();
@@ -104,7 +105,7 @@ impl<'a> Output<'a> {
                 }
                 .write_row(&mut edges, &())
             };
-        let branch = if self.emitted_branch {
+        let branch = if self.emitted_branch.swap(true, Ordering::Relaxed) {
             BatchBuilder::new(&entity_specs(self.ontology, "Branch"), 0)?.finish()?
         } else {
             edge(
@@ -121,7 +122,6 @@ impl<'a> Output<'a> {
                 "Project",
                 "Branch",
             )?;
-            self.emitted_branch = true;
             convert_branch_row(self.envelope, &entity_specs(self.ontology, "Branch"))?
         };
         for (id, kind, path) in structure {

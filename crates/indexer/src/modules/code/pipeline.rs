@@ -664,6 +664,9 @@ impl CodeIndexer {
         };
         let options = super::incremental::Options {
             limits,
+            worker_threads: legacy_config.worker_threads,
+            concurrent_families: legacy_config.concurrent_languages(),
+            small_family_files: self.small_repo_max_files,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
         };

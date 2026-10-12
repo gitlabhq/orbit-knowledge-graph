@@ -234,6 +234,101 @@ fn strs(row: &[&str]) -> Vec<String> {
     row.iter().map(|s| s.to_string()).collect()
 }
 
+fn options() -> templates::Options {
+    templates::Options {
+        limits: Limits::UNLIMITED,
+        worker_threads: 0,
+        concurrent_families: 2,
+        small_family_files: 0,
+        cancelled: std::sync::Arc::new(|| false),
+        family_finished: std::sync::Arc::new(|| {}),
+    }
+}
+
+const FAMILIES: &[(&str, &[u8])] = &[
+    ("main.py", b"def python_function():\n    pass\n"),
+    ("main.ts", b"export function typescriptFunction() {}"),
+    ("main.rb", b"def ruby_method; end\n"),
+    ("main.go", b"package main\nfunc goFunction() {}\n"),
+];
+
+#[test]
+fn families_follow_the_worker_budget_and_the_family_cap() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), FAMILIES);
+    let ontology = Ontology::load_embedded().unwrap();
+    let main = std::thread::current().id();
+    for (worker_threads, small_family_files, cap, pool) in [(3, 0, 1, 3), (8, 1, 2, 2)] {
+        let finished = Arc::new(AtomicUsize::new(0));
+        let arrivals = Arc::new(Mutex::new((std::collections::HashSet::new(), Vec::new())));
+        let state = Mutex::new((0, 0, 0, Vec::new()));
+        let changed = Condvar::new();
+        templates::repository(
+            common::walk(repo.path()),
+            templates::Options {
+                worker_threads,
+                concurrent_families: cap,
+                small_family_files,
+                cancelled: Arc::new({
+                    let (finished, arrivals) = (finished.clone(), arrivals.clone());
+                    move || {
+                        let thread = std::thread::current().id();
+                        if thread != main && rayon::current_thread_index().is_none() {
+                            let mut arrivals = arrivals.lock().unwrap();
+                            if arrivals.0.insert(thread) {
+                                arrivals.1.push(finished.load(Ordering::SeqCst));
+                            }
+                        }
+                        false
+                    }
+                }),
+                family_finished: Arc::new({
+                    let finished = finished.clone();
+                    move || {
+                        finished.fetch_add(1, Ordering::SeqCst);
+                    }
+                }),
+                ..options()
+            },
+            &envelope(),
+            &ontology,
+            code_graph_incremental::export::ExportConfig::embedded(),
+            |_| -> Result<(), String> {
+                let mut guard = state.lock().unwrap();
+                let (active, _, peak, pools) = &mut *guard;
+                *active += 1;
+                *peak = (*peak).max(*active);
+                pools.push(rayon::current_num_threads());
+                changed.notify_all();
+                let mut guard = changed
+                    .wait_while(guard, |(active, done, _, _)| {
+                        *active < cap && *active + *done < FAMILIES.len()
+                    })
+                    .unwrap();
+                guard.0 -= 1;
+                guard.1 += 1;
+                changed.notify_all();
+                Ok(())
+            },
+        )
+        .unwrap();
+        let (_, done, peak, pools) = state.into_inner().unwrap();
+        assert_eq!(done, FAMILIES.len());
+        assert_eq!(peak, cap);
+        assert_eq!(pools, [pool; 4]);
+        let started = &arrivals.lock().unwrap().1;
+        assert_eq!(started.len(), FAMILIES.len());
+        for (order, finished) in started.iter().enumerate() {
+            assert!(
+                finished + cap > order,
+                "family {order} started after {finished} finished"
+            );
+        }
+    }
+}
+
 #[test]
 fn cross_file_timeout_still_exports_every_family() {
     let repo = tempfile::tempdir().unwrap();
@@ -245,7 +340,7 @@ fn cross_file_timeout_still_exports_every_family() {
         ],
     );
     let ontology = Ontology::load_embedded().unwrap();
-    let mut definitions = Vec::new();
+    let definitions = std::sync::Mutex::new(Vec::new());
     let report = templates::repository(
         common::walk(repo.path()),
         templates::Options {
@@ -253,8 +348,7 @@ fn cross_file_timeout_still_exports_every_family() {
                 cross_file_resolve_ms: 0,
                 ..Limits::UNLIMITED
             },
-            cancelled: std::sync::Arc::new(|| false),
-            family_finished: std::sync::Arc::new(|| {}),
+            ..options()
         },
         &envelope(),
         &ontology,
@@ -262,13 +356,14 @@ fn cross_file_timeout_still_exports_every_family() {
         |batches| -> Result<(), String> {
             for (name, batch) in batches {
                 if name == "gl_definition" {
-                    definitions.extend(column(&batch, "name"));
+                    definitions.lock().unwrap().extend(column(&batch, "name"));
                 }
             }
             Ok(())
         },
     )
     .unwrap();
+    let mut definitions = definitions.into_inner().unwrap();
     definitions.sort();
     assert_eq!(definitions, ["python_function", "typescriptFunction"]);
     assert_eq!(report.skipped.len(), 2);
