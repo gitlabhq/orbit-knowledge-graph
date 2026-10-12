@@ -155,11 +155,11 @@ async fn incremental_flag_records_language_timing_metrics() {
     };
     assert_eq!(
         by_language("gkg.indexer.code.language.files"),
-        BTreeMap::from([("python".to_string(), 2), ("typescript".to_string(), 1)])
+        BTreeMap::from([("python".to_string(), 2), ("javascript".to_string(), 1)])
     );
     assert_eq!(
         by_language("gkg.indexer.code.language.bytes"),
-        BTreeMap::from([("python".to_string(), 55), ("typescript".to_string(), 27)])
+        BTreeMap::from([("python".to_string(), 55), ("javascript".to_string(), 27)])
     );
 }
 

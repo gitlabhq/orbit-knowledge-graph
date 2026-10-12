@@ -516,21 +516,22 @@ impl Phase<DirtyGraph> for Resolve {
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
-        context
-            .report
-            .files
-            .extend(
-                result
-                    .file_timings
-                    .into_iter()
-                    .map(|(fi, elapsed)| FileTiming {
-                        path: state.trees[fi as usize].label.clone(),
-                        phase: "resolve".to_string(),
-                        language: context.env.lang_id,
-                        bytes: 0,
-                        elapsed,
-                    }),
-            );
+        context.report.files.extend(
+            result
+                .file_timings
+                .into_iter()
+                .filter(|(fi, _)| {
+                    SupportLang::from_path(&state.trees[*fi as usize].label)
+                        .is_some_and(|lang| context.env.in_family(lang))
+                })
+                .map(|(fi, elapsed)| FileTiming {
+                    path: state.trees[fi as usize].label.clone(),
+                    phase: "resolve".to_string(),
+                    language: context.env.lang_id,
+                    bytes: 0,
+                    elapsed,
+                }),
+        );
         for k in result.killed {
             context.skip(k);
         }
