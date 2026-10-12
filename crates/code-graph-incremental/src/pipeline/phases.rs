@@ -492,7 +492,25 @@ impl Phase<DirtyGraph> for Resolve {
             &walk.entrypoints,
             env,
             &resolve_budget,
-        )?;
+        );
+        context.run.check()?;
+        let result = match result {
+            Ok(result) => result,
+            Err(killed) if killed.cancelled => return Err(killed.into()),
+            Err(killed) => {
+                state.edges.retain(|edge| edge.from_tree == edge.to_tree);
+                for edge in &mut state.edges {
+                    if edge.kind == crate::tree::EdgeKind::Imports
+                        && edge.call_resolution != crate::tree::CallResolution::Reference
+                    {
+                        edge.call_resolution = crate::tree::CallResolution::Unknown;
+                    }
+                }
+                state.resolver = crate::resolver::Resolver::new(&env.lang);
+                context.skip(killed);
+                return Ok(Resolved { state });
+            }
+        };
         for rsp in &result.resolved_source_paths {
             state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }

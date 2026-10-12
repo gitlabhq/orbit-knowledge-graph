@@ -235,6 +235,52 @@ fn strs(row: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn cross_file_timeout_still_exports_every_family() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[
+            ("main.py", b"def python_function():\n    pass\n"),
+            ("main.ts", b"export function typescriptFunction() {}"),
+        ],
+    );
+    let ontology = Ontology::load_embedded().unwrap();
+    let mut definitions = Vec::new();
+    let report = templates::repository(
+        common::walk(repo.path()),
+        templates::Options {
+            limits: Limits {
+                cross_file_resolve_ms: 0,
+                ..Limits::UNLIMITED
+            },
+            cancelled: std::sync::Arc::new(|| false),
+            family_finished: std::sync::Arc::new(|| {}),
+        },
+        &envelope(),
+        &ontology,
+        code_graph_incremental::export::ExportConfig::embedded(),
+        |batches| -> Result<(), String> {
+            for (name, batch) in batches {
+                if name == "gl_definition" {
+                    definitions.extend(column(&batch, "name"));
+                }
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    definitions.sort();
+    assert_eq!(definitions, ["python_function", "typescriptFunction"]);
+    assert_eq!(report.skipped.len(), 2);
+    assert!(
+        report
+            .skipped
+            .iter()
+            .all(|skip| skip.label == "resolve" && !skip.cancelled)
+    );
+}
+
+#[test]
 fn definition_coordinates_cover_the_same_span_as_bytes() {
     for (language, path, source, expected) in [
         (
