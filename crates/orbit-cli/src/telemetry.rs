@@ -17,7 +17,6 @@ const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
 const MCP_COMMAND: &str = "mcp";
 const MCP_TOOL_CALL_ACTION: &str = "mcp_tool_call";
-const HOOK_GUARD_COMMAND: &str = "hook_guard";
 pub const AGENTS_CONFIGURED_ACTION: &str = "agents_configured";
 pub const AGENTS_REMOVED_ACTION: &str = "agents_removed";
 
@@ -50,6 +49,27 @@ impl TelemetryConfig {
         }
         SnowplowAnalyticsTracker::new(&self.collector_url, self.app_id).ok()
     }
+}
+
+/// Hands one command event to a detached `orbit send-event` child, so a hook that runs on every
+/// tool call returns without waiting on the collector. Does nothing when telemetry is off.
+pub fn spawn_detached_event(command: &str, duration: Duration) {
+    if !resolve_from_env().enabled {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut child = std::process::Command::new(exe);
+    child
+        .args(["send-event", command, "--duration-ms"])
+        .arg(duration.as_millis().to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut child, 0);
+    let _ = child.spawn();
 }
 
 pub fn resolve_from_env() -> TelemetryConfig {
@@ -99,25 +119,6 @@ pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
         cli_version: env!("ORBIT_VERSION").parse().ok(),
     };
     track_outcome(tracker, MCP_TOOL_CALL_ACTION, outcome, coding_agent);
-}
-
-pub fn emit_hook_guard_event<T: AnalyticsTracker + ?Sized>(
-    tracker: &T,
-    action: &str,
-    coding_agent: Option<&str>,
-) {
-    let Ok(command) = HOOK_GUARD_COMMAND.parse() else {
-        return;
-    };
-    let outcome = orbit_cli_command::OrbitCliCommand {
-        command,
-        tool_name: None,
-        success: true,
-        exit_code: None,
-        duration_ms: None,
-        cli_version: env!("ORBIT_VERSION").parse().ok(),
-    };
-    track_outcome(tracker, action, outcome, coding_agent);
 }
 
 pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
@@ -373,11 +374,9 @@ mod tests {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
         emit_command_event(&tracker, "query", 1, Duration::from_millis(42), None);
         emit_tool_call_event(&tracker, "index", true, Duration::from_millis(9), None);
-        emit_hook_guard_event(&tracker, "graph_first_deny", None);
         emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
         let events = tracker.drain();
-        assert_eq!(events[2].action(), "graph_first_deny");
-        assert_eq!(events[3].action(), "agents_configured");
+        assert_eq!(events[2].action(), "agents_configured");
         for event in events {
             assert_contexts_match_iglu_schemas(&event);
         }

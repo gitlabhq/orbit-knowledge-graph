@@ -3,7 +3,6 @@ use crate::sql_format::{self, Format};
 use crate::workspace;
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
-use duckdb_client::search::DEF_DOC_PREFIX;
 use duckdb_client::{DuckDbClient, bool_column, sql_lit, string_column};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -15,10 +14,8 @@ pub fn schema_introspection_sql() -> String {
         "SELECT table_name, column_name, data_type \
          FROM information_schema.columns \
          WHERE table_schema = 'main' \
-           AND table_name NOT LIKE {} \
            AND table_name <> {} \
          ORDER BY table_name, ordinal_position",
-        sql_lit(&format!("{DEF_DOC_PREFIX}%")),
         sql_lit(META_TABLE)
     )
 }
