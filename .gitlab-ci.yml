@@ -71,6 +71,7 @@ include:
   - local: .gitlab/ci/doc-principles-sync.yml
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
+  - local: .gitlab/ci/rails-contract.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'
