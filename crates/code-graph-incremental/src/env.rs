@@ -12,6 +12,7 @@ use crate::treesitter::SupportLang;
 use crate::{rules, treesitter};
 
 pub struct Env {
+    pub export_config: crate::export::ExportConfig,
     pub lang: Lang,
     pub lang_id: SupportLang,
     pub members: Vec<SupportLang>,
@@ -68,6 +69,7 @@ impl Env {
             rules.insert(member, index);
         }
         Ok(Self {
+            export_config: crate::export::ExportConfig::embedded().clone(),
             lang,
             lang_id,
             members,
