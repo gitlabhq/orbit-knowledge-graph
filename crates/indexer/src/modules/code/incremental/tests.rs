@@ -250,7 +250,6 @@ fn config() -> CodeIndexingPipelineConfig {
 fn options() -> Options {
     Options {
         limits: code_graph_incremental::Limits::UNLIMITED,
-        worker_threads: 2,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| {}),
     }

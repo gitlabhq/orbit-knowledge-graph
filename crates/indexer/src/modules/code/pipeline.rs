@@ -695,7 +695,6 @@ impl CodeIndexer {
         };
         let options = super::incremental::Options {
             limits,
-            worker_threads: self.pipeline_config.worker_threads,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
         };

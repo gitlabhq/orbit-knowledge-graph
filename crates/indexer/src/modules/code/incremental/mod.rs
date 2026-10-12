@@ -6,18 +6,19 @@ use orbit_server_config::CodeIndexingPipelineConfig;
 use orbit_utils::vfs::{
     LimitKind, Limits, Options as StorageOptions, SourceError, Vfs, sources::Archive,
 };
+use orbit_utils::vfs_policies::CodePolicy;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::repository::{ByteStream, cache::RepositoryCacheError};
 
 mod output;
+#[cfg(test)]
 mod policy;
 mod run;
 pub(super) use code_graph_incremental::templates::Options;
 pub(super) use run::run;
 #[cfg(test)]
 mod tests;
-use policy::CodePolicy;
 
 pub type Repository = Arc<Vfs<()>>;
 
