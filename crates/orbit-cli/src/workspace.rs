@@ -166,6 +166,102 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     Ok(IndexedRepo { git, client })
 }
 
+/// The repo-relative `files` whose working-tree contents differ from the indexed commit:
+/// modified, added, renamed, or untracked. The graph describes the commit, so its definitions
+/// and line spans do not fit these files. Empty when git cannot answer.
+pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTreeSet<String> {
+    let mut edited = std::collections::BTreeSet::new();
+    if files.is_empty() {
+        return edited;
+    }
+    let git_list = |args: &[&str]| -> Option<Vec<String>> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())?;
+        Some(
+            String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .filter(|field| !field.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    };
+    let Some(status) = git_list(&[
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+        "--ignore-submodules=all",
+    ]) else {
+        return edited;
+    };
+    let mut changed = std::collections::HashSet::new();
+    let mut fields = status.into_iter();
+    while let Some(entry) = fields.next() {
+        let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
+            continue;
+        };
+        if code.contains(['R', 'C']) {
+            fields.next();
+        }
+        changed.insert(path.to_string());
+    }
+    let tracked: std::collections::HashSet<String> = git_list(&["ls-files", "-z"])
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    edited.extend(
+        files
+            .iter()
+            .filter(|file| changed.contains(**file) || !tracked.contains(**file))
+            .map(|file| file.to_string()),
+    );
+    edited
+}
+
+/// Repo-relative forms of `paths` given relative to the current directory, the repo, or absolute.
+/// `a,b` lists are split; `path:120-180` ranges keep only the path; unresolvable entries are kept as
+/// written (trimmed) so globs still work.
+pub fn repo_relative_paths(repo: &Path, paths: &[String]) -> Vec<String> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    paths
+        .iter()
+        .flat_map(|p| p.split(','))
+        .map(str::trim)
+        .map(|path| {
+            path.rsplit_once(':')
+                .filter(|(file, range)| {
+                    !file.is_empty()
+                        && !range.is_empty()
+                        && range.chars().all(|c| c.is_ascii_digit() || c == '-')
+                })
+                .map_or(path, |(file, _)| file)
+        })
+        .filter_map(|path| {
+            let relative = [cwd.join(path), repo.join(path)]
+                .into_iter()
+                .find_map(|candidate| {
+                    let full = dunce::canonicalize(candidate).ok()?;
+                    full.strip_prefix(&root)
+                        .ok()
+                        .map(|r| r.to_string_lossy().replace('\\', "/"))
+                })
+                .unwrap_or_else(|| {
+                    path.trim_start_matches("./")
+                        .trim_end_matches('/')
+                        .to_string()
+                });
+            (!relative.is_empty() && relative != ".").then_some(relative)
+        })
+        .collect()
+}
+
 fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
     if !db.exists() {
         return Ok(true);
@@ -193,7 +289,7 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
 const CODE_INDEX_META_KEY: &str = "code_index_revision";
-const CODE_INDEX_REVISION: &str = "1";
+const CODE_INDEX_REVISION: &str = "4";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
@@ -231,7 +327,7 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     Ok(())
 }
 
-fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
+pub(crate) fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
     if !table_exists(client, "_orbit_meta")? {
         return Ok(None);
     }

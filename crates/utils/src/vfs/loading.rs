@@ -32,6 +32,10 @@ pub enum Put<'a> {
         read: ContentReader,
     },
     Symlink(String),
+    Listed {
+        size: u64,
+        reason: &'static str,
+    },
 }
 
 const ENTRY_SHARDS: usize = 64;
@@ -63,6 +67,7 @@ pub(super) enum Content {
     Spilled { offset: u64, len: u64, raw_len: u64 },
     ReadOnDemand(ContentReader),
     Symlink(String),
+    Excluded,
 }
 
 impl<T: Tag> Loading<T> {
@@ -96,6 +101,7 @@ impl<T: Tag> Loading<T> {
             Put::Bytes(bytes) => bytes.len() as u64,
             Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,
             Put::Symlink(_) => 0,
+            Put::Listed { size, .. } => *size,
         };
         add_capped(
             &self.files,
@@ -115,6 +121,13 @@ impl<T: Tag> Loading<T> {
             self.add_entry(file, Content::Symlink(target));
             return Ok(());
         }
+        if let Put::Listed { reason, .. } = what {
+            self.add_entry(
+                File::new(key, size, Decision::List(reason)),
+                Content::Excluded,
+            );
+            return Ok(());
+        }
         let mut file = File::new(key, size, Decision::Pending);
         file.metadata_decision = match self.limits.file_bytes {
             Some(cap) if size > cap => Decision::List("oversize"),
@@ -130,7 +143,9 @@ impl<T: Tag> Loading<T> {
             (Decision::Pending | Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
                 self.put_bytes(file, read(self.limits.file_bytes.unwrap_or(u64::MAX)))?;
             }
-            (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
+            (_, Put::Symlink(_) | Put::Listed { .. }) => {
+                unreachable!("symlinks and listed entries return above")
+            }
         }
         Ok(())
     }
@@ -209,7 +224,9 @@ impl<T: Tag> Loading<T> {
             if later.file.path != earlier.file.path {
                 return false;
             }
-            std::mem::swap(later, earlier);
+            if !matches!(later.content, Content::Excluded) {
+                std::mem::swap(later, earlier);
+            }
             true
         });
         let duplicate_paths = offered - entries.len();

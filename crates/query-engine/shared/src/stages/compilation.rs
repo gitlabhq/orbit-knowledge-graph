@@ -24,12 +24,12 @@ impl PipelineStage for CompilationStage {
         let data_model = ctx
             .server_extensions
             .get::<Arc<query_data_model::ClickHouseDataModel>>();
-        let compiled = match ctx.phases.get::<compiler::Input>() {
-            Some(input) => match data_model {
+        let compiled = match ctx.phases.get::<compiler::gql::ParsedQuery>() {
+            Some(query) => match data_model {
                 Some(data_model) => {
-                    compiler::gql::compile_query_model(input.clone(), data_model, security_context)
+                    compiler::gql::compile_query_model(query.clone(), data_model, security_context)
                 }
-                None => compiler::gql::compile_query(input.clone(), ontology, security_context),
+                None => compiler::gql::compile_query(query.clone(), ontology, security_context),
             },
             None => match data_model {
                 Some(data_model) => compiler::compile_model(

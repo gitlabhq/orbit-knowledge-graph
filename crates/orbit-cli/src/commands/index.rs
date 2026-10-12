@@ -706,34 +706,7 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
-    let doc_table = duckdb_client::search::def_doc_table(git.project_id);
-    client
-        .load_extension("fts")
-        .context("failed to load the DuckDB fts extension")?;
-    client
-        .execute(
-            &duckdb_client::search::def_doc_sql(&doc_table, ontology)?,
-            &[
-                serde_json::json!(git.project_id),
-                serde_json::json!(git.commit_sha),
-            ],
-        )
-        .context("failed to build the search documents")?;
-    duckdb_client::search::populate_def_doc_sources(
-        &client,
-        &doc_table,
-        ontology,
-        &git.repo_path,
-        git.project_id,
-        &git.commit_sha,
-    )
-    .context("failed to add definition sources to the search documents")?;
-    client
-        .execute(
-            &duckdb_client::search::create_fts_index_sql(&doc_table),
-            &[],
-        )
-        .context("failed to build the search index")?;
+    refresh_git_index(&git.repo_path);
     workspace::set_status(
         &client,
         &key,
@@ -786,15 +759,6 @@ fn clear_project(
     client
         .delete_project(git.project_id, &node_tables, edge_table)
         .context("failed to clear existing project data")?;
-    client
-        .execute(
-            &format!(
-                "DROP TABLE IF EXISTS {}",
-                duckdb_client::search::def_doc_table(git.project_id)
-            ),
-            &[],
-        )
-        .context("failed to clear existing search index")?;
     Ok(())
 }
 
@@ -880,6 +844,19 @@ fn build_index_output(
         database_path: result.database_path.clone(),
         detailed,
     }
+}
+
+/// `orbit grep` asks `git status` which matched files changed since the index. After a fresh
+/// checkout every file's cached stat data is stale and each status re-hashes the whole tree, so
+/// refresh the cache once here.
+fn refresh_git_index(repo: &Path) {
+    let _ = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["update-index", "-q", "--refresh"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 #[cfg(test)]

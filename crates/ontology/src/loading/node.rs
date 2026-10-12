@@ -1066,7 +1066,7 @@ mod tests {
             "nodes/test/test_node.yaml",
             &["id".to_string()],
             &test_etl_settings(),
-            "_gkg_",
+            "_orbit_",
             &EmptyReader,
         )
     }

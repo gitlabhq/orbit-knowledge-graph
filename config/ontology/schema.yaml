@@ -264,7 +264,7 @@ settings:
     # Use exclude to skip noisy or irrelevant columns.
     exclude:
       - {node: Note, columns: [st_diff]}
-  internal_column_prefix: "_gkg_"
+  internal_column_prefix: "_orbit_"
   local_db:
     entities:
       - name: Directory

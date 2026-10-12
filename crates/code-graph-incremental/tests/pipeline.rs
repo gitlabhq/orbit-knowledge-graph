@@ -197,5 +197,5 @@ fn item_phases_pipe_into_one_named_pass() {
 #[test]
 fn limits_load_from_the_shipped_config() {
     let env = Env::for_lang(SupportLang::Python).unwrap();
-    assert!(env.limits.total_ms >= env.limits.file_rewrite_ms);
+    assert_eq!(env.limits.total_ms, Limits::UNLIMITED.total_ms);
 }

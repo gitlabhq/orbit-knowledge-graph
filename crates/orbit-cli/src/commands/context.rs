@@ -54,10 +54,16 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     for (path, start, end) in &targets.ranges {
         render_range(&mut out, &client, &git, &hydrator, path, *start, *end)?;
     }
+    let mut shown: Vec<String> = targets
+        .ranges
+        .iter()
+        .map(|(path, ..)| path.clone())
+        .collect();
     if targets.files.is_empty() && targets.file_ids.is_empty() && targets.ids.is_empty() {
-        print!("{out}");
+        print!("{}{out}", edited_note(&git, &shown));
         return Ok(());
     }
+    shown.extend(targets.files.iter().cloned());
     let (paths, file_ids, ids) = (targets.files, targets.file_ids, targets.ids);
     let files = resolve_files(&client, &git, &paths, &file_ids)?;
     let mut nodes = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
@@ -79,6 +85,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     for (file, file_defs) in outline(&defs) {
         let path = repo_relative(&git.repo_path, &file)?;
+        shown.push(path.clone());
         let content = std::fs::read_to_string(git.repo_path.join(path))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
@@ -94,8 +101,24 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     out.push_str(&relations::render(
         &client, &git, &hydrator, &nodes, &members,
     )?);
-    print!("{out}");
+    print!("{}{out}", edited_note(&git, &shown));
     Ok(())
+}
+
+/// Warns that the graph describes the indexed commit when a shown file has changed since.
+fn edited_note(git: &workspace::GitInfo, shown: &[String]) -> String {
+    let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
+    files.sort_unstable();
+    files.dedup();
+    let edited = workspace::edited_since_index(&git.repo_path, &files);
+    match edited.is_empty() {
+        true => String::new(),
+        false => format!(
+            "note: edited since index {}: {}. Definitions, line spans, and connections come from that commit.\n\n",
+            git.short_sha(),
+            edited.into_iter().collect::<Vec<_>>().join(", ")
+        ),
+    }
 }
 
 #[derive(Default)]
@@ -177,11 +200,19 @@ fn resolve_targets(
                         ],
                         None,
                     )?;
-                    if matches.is_empty() {
+                    matches.sort_by_key(|node| node.id);
+                    let mut found: Vec<i64> = matches.into_iter().map(|node| node.id).collect();
+                    if found.is_empty() {
+                        found = named(client, git, target)?;
+                    }
+                    if found.is_empty() {
                         return Err(error);
                     }
-                    matches.sort_by_key(|node| node.id);
-                    ids.extend(matches.into_iter().map(|node| node.id));
+                    for id in found {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
                 }
             }
         }
@@ -189,8 +220,45 @@ fn resolve_targets(
     Ok(resolved)
 }
 
+const NAMED_MAX: usize = 5;
+
+/// Definitions whose FQN ends with `target`, so a bare name or `Class.method` finds
+/// `pkg.Class.method` and `Class::method` alike.
+fn named(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    target: &str,
+) -> Result<Vec<i64>> {
+    let normalize = "regexp_replace(?3, '::|#|/', '.', 'g')";
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT id, fqn FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+             AND (regexp_replace(fqn, '::|#|/', '.', 'g') = {normalize}
+                  OR ends_with(regexp_replace(fqn, '::|#|/', '.', 'g'), '.' || {normalize}))
+             ORDER BY id"
+        ),
+        &[
+            git.project_id.into(),
+            git.commit_sha.clone().into(),
+            target.to_string().into(),
+        ],
+    )?;
+    let (ids, fqns) = (
+        duckdb_client::i64_column(&batches, "id"),
+        duckdb_client::string_column(&batches, "fqn"),
+    );
+    anyhow::ensure!(
+        ids.len() <= NAMED_MAX,
+        "{target} names {} definitions; pass one of these FQNs: {}",
+        ids.len(),
+        fqns.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
+    );
+    Ok(ids)
+}
+
 fn repo_relative_dir(repo_path: &std::path::Path, path: &str) -> Result<String> {
     let canonical = dunce::canonicalize(repo_path.join(path))
+        .or_else(|_| dunce::canonicalize(std::env::current_dir()?.join(path)))
         .with_context(|| format!("{path} does not exist"))?;
     anyhow::ensure!(canonical.is_dir(), "{path} is not a directory");
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
@@ -329,6 +397,7 @@ fn render_range(
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
     let canonical = dunce::canonicalize(repo_path.join(path))
+        .or_else(|_| dunce::canonicalize(std::env::current_dir()?.join(path)))
         .with_context(|| format!("{path} does not exist"))?;
     anyhow::ensure!(canonical.is_file(), "{path} is not a file");
     let relative = canonical.strip_prefix(repo_path).with_context(|| {

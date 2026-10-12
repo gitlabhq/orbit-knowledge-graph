@@ -225,9 +225,10 @@ impl EntityHandlerConfig {
 pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     pub max_files: usize,
-    /// Post-filter retained bytes above which a repository is skipped entirely
-    /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
-    /// concurrency can rise without exhausting the pod volume. 0 = no limit.
+    /// Archive entry bytes, counted before the content filter, above which a
+    /// repository is skipped entirely (indexed empty, then checkpointed). Bounds
+    /// per-repo disk so fetch/index concurrency can rise without exhausting the
+    /// pod volume. 0 = no limit.
     pub max_total_bytes: u64,
     pub source_memory_budget_bytes: u64,
     pub source_compress_spill: bool,

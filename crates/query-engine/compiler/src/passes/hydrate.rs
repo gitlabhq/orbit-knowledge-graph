@@ -45,7 +45,7 @@ impl HydrationPlan {
 pub struct HydrationTemplate {
     pub entity_type: String,
     /// Used to correlate hydration results back to the base query's
-    /// `_gkg_{alias}_pk` column.
+    /// `_orbit_{alias}_pk` column.
     pub node_alias: String,
     pub destination_table: String,
     /// User-requested columns with virtual columns filtered out, plus

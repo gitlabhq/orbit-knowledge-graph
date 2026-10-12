@@ -6,4 +6,4 @@ file_link_ms: 100
 file_resolve_ms: 100
 cross_file_resolve_ms: 200000
 max_files: 100000000
-total_ms: 300000
+total_ms: 18446744073709551615

@@ -38,12 +38,22 @@ impl<R: Read> Source for Archive<R> {
                 continue;
             }
             let entry_path = entry.path_bytes().into_owned();
-            let entry_path = std::str::from_utf8(&entry_path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            let Some(path) = relative_path(entry_path, &mut root)? else {
+            let utf8 = std::str::from_utf8(&entry_path).is_ok();
+            let entry_path = String::from_utf8_lossy(&entry_path);
+            let Some(path) = relative_path(&entry_path, &mut root)? else {
                 continue;
             };
             if path.is_empty() || kind == EntryType::Directory {
+                continue;
+            }
+            if !utf8 {
+                into.put(
+                    path,
+                    Put::Listed {
+                        size: entry.size(),
+                        reason: "non_utf8_path",
+                    },
+                )?;
                 continue;
             }
             if is_link {
@@ -56,8 +66,16 @@ impl<R: Read> Source for Archive<R> {
                             "archive link has no target",
                         )
                     })?;
-                let target = std::str::from_utf8(&target)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let Ok(target) = std::str::from_utf8(&target) else {
+                    into.put(
+                        path,
+                        Put::Listed {
+                            size: 0,
+                            reason: "non_utf8_link_target",
+                        },
+                    )?;
+                    continue;
+                };
                 let target = if kind == EntryType::Link {
                     let relative = relative_path(target, &mut root)?
                         .ok_or_else(|| std::io::Error::other("archive hard link outside root"))?;
@@ -229,6 +247,79 @@ mod tests {
             vfs.stat("project-main").unwrap_err().kind(),
             ErrorKind::NotFound
         );
+    }
+
+    #[test]
+    fn lists_entries_with_non_utf8_paths_or_link_targets() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = |bytes: &'static [u8]| std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
+        let mut builder = tar::Builder::new(Vec::new());
+        builder
+            .append_data(
+                &mut header(3, EntryType::Regular),
+                "project-main/ok.py",
+                &b"ok\n"[..],
+            )
+            .unwrap();
+        builder
+            .append_data(
+                &mut header(5, EntryType::Regular),
+                raw(b"project-main/caf\xe9.py"),
+                &b"cafe\n"[..],
+            )
+            .unwrap();
+        builder
+            .append_link(
+                &mut header(0, EntryType::Symlink),
+                "project-main/link.py",
+                raw(b"caf\xe9.py"),
+            )
+            .unwrap();
+        let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
+        assert_eq!(paths(&vfs), ["caf\u{fffd}.py", "link.py", "ok.py"]);
+        let decisions: Vec<_> = vfs.files().map(|file| file.decision()).collect();
+        assert!(matches!(decisions[0], Decision::List("non_utf8_path")));
+        assert!(matches!(
+            decisions[1],
+            Decision::List("non_utf8_link_target")
+        ));
+        assert_eq!(
+            vfs.read("link.py").unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+    }
+
+    #[test]
+    fn a_non_utf8_entry_never_replaces_a_file_with_the_same_lossy_name() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = |bytes: &'static [u8]| std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
+        for invalid_first in [true, false] {
+            let mut builder = tar::Builder::new(Vec::new());
+            let invalid = || {
+                (
+                    header(5, EntryType::Regular),
+                    raw(b"project-main/caf\xe9.py"),
+                    &b"cafe\n"[..],
+                )
+            };
+            let real = || {
+                (
+                    header(5, EntryType::Regular),
+                    std::path::Path::new("project-main/caf\u{fffd}.py"),
+                    &b"real\n"[..],
+                )
+            };
+            for (mut header, path, body) in if invalid_first {
+                [invalid(), real()]
+            } else {
+                [real(), invalid()]
+            } {
+                builder.append_data(&mut header, path, body).unwrap();
+            }
+            let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
+            assert_eq!(paths(&vfs), ["caf\u{fffd}.py"]);
+            assert_eq!(&*vfs.read("caf\u{fffd}.py").unwrap(), b"real\n");
+        }
     }
 
     // crates/utils/src/archive.rs::tests::skips_pax_global_and_per_file_headers

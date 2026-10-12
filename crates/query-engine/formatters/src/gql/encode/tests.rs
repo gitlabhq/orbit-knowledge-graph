@@ -157,11 +157,11 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
         json!({"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}, {"id": "g", "entity": "Group"}]}),
         &[("u", "User"), ("g", "Group")],
         vec![
-            column("_gkg_u_id", ints(&[1, 1])),
-            column("_gkg_u_type", strings(&["User", "User"])),
+            column("_orbit_u_id", ints(&[1, 1])),
+            column("_orbit_u_type", strings(&["User", "User"])),
             column("u_username", strings(&["root", "root"])),
-            column("_gkg_g_id", ints(&[22, 22])),
-            column("_gkg_g_type", strings(&["Group", "Group"])),
+            column("_orbit_g_id", ints(&[22, 22])),
+            column("_orbit_g_type", strings(&["Group", "Group"])),
         ],
         Some(page),
     );
@@ -188,8 +188,8 @@ fn node_groups_render_as_nodes() {
                "group_by": ["g"], "aggregations": [{"count": "u", "as": "user_count"}]}),
         &[("g", "Group")],
         vec![
-            column("_gkg_g_id", ints(&[22])),
-            column("_gkg_g_type", strings(&["Group"])),
+            column("_orbit_g_id", ints(&[22])),
+            column("_orbit_g_type", strings(&["Group"])),
             column("g_name", strings(&["Toolbox"])),
             column("user_count", ints(&[3])),
         ],
@@ -213,8 +213,8 @@ fn neighbors_follow_the_stored_edge_direction() {
                "neighbors": {"direction": "both"}}),
         &[("c", "Group")],
         vec![
-            column("_gkg_c_id", ints(&[22, 22])),
-            column("_gkg_c_type", strings(&["Group", "Group"])),
+            column("_orbit_c_id", ints(&[22, 22])),
+            column("_orbit_c_type", strings(&["Group", "Group"])),
             column(neighbor_id_column(), ints(&[1, 2])),
             column(neighbor_type_column(), strings(&["User", "Project"])),
             column(
