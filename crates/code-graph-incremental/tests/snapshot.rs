@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
+use code_graph_incremental::pipeline::SNAPSHOT_VERSION;
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, State, pattern, rules, templates};
 mod common;
@@ -22,7 +22,7 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    templates::index(Context::new(env), common::walk(repo))
+    templates::index(Context::new(env, common::walk(repo)))
         .unwrap()
         .into_value()
         .state
@@ -32,17 +32,18 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
     for path in removed {
         std::fs::remove_file(repo.join(path)).unwrap();
     }
-    let changes = Changes {
-        changed: common::load(orbit_utils::vfs::sources::Diff {
-            root: repo,
-            paths: changed,
-        }),
-        removed: removed.iter().map(|s| s.to_string()).collect(),
-    };
-    templates::reindex(Context::new(env), state, changes)
-        .unwrap()
-        .into_value()
-        .state
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo,
+        paths: changed,
+    });
+    templates::reindex(
+        Context::new(env, changes),
+        state,
+        removed.iter().map(|s| s.to_string()).collect(),
+    )
+    .unwrap()
+    .into_value()
+    .state
 }
 
 fn save_and_load(env: &Env, state: &State) -> (Env, State) {

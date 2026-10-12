@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use code_graph_incremental::pipeline::{Changes, Display, Emit, Export, Resolved};
+use code_graph_incremental::pipeline::{Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Envelope, Limits, Pipeline, Scalar, State, templates};
 use ontology::Ontology;
@@ -83,7 +83,7 @@ pub fn run_incremental_suite(yaml: &str) {
         .expect("load fixtures"),
     );
     let graph =
-        templates::index(Context::new(&env), repository).expect("suite exceeded the total budget");
+        templates::index(Context::new(&env, repository)).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(graph, &ontology, &suite.tests);
     let mut env = env;
 
@@ -100,22 +100,19 @@ pub fn run_incremental_suite(yaml: &str) {
         let mut changed = write_fixtures(&step.add, repo.path());
         changed.extend(write_fixtures(&step.modify, repo.path()));
         let changed = changed.into_iter().map(|(path, _)| path);
-        let changes = Changes {
-            changed: Arc::new(
-                orbit_utils::vfs::Vfs::load(
-                    orbit_utils::vfs::sources::Diff {
-                        root: repo.path(),
-                        paths: changed.collect(),
-                    },
-                    FixturePolicy,
-                    Default::default(),
-                    Default::default(),
-                )
-                .expect("load changed fixtures"),
-            ),
-            removed: step.remove.clone(),
-        };
-        let graph = templates::reindex(Context::new(&env), state, changes)
+        let changes = Arc::new(
+            orbit_utils::vfs::Vfs::load(
+                orbit_utils::vfs::sources::Diff {
+                    root: repo.path(),
+                    paths: changed.collect(),
+                },
+                FixturePolicy,
+                Default::default(),
+                Default::default(),
+            )
+            .expect("load changed fixtures"),
+        );
+        let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
             .expect("suite exceeded the total budget");
         let (next, step_failures) = check(graph, &ontology, &step.tests);
         state = next;

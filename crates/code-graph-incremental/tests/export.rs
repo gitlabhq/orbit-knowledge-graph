@@ -79,7 +79,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         .collect();
     config.schemas.insert("gl_file".into(), specs);
     env.export_config = config;
-    let error = templates::index(Context::new(&env), sources.clone())
+    let error = templates::index(Context::new(&env, sources.clone()))
         .unwrap()
         .then(Display)
         .unwrap()
@@ -101,7 +101,7 @@ fn export_config_emits_typed_metadata_and_envelope_overrides() {
         if let Some(path) = traversal_path {
             values.push(("traversal_path", Scalar::Str(path)));
         }
-        let exported = templates::index(Context::new(&env), sources.clone())
+        let exported = templates::index(Context::new(&env, sources.clone()))
             .unwrap()
             .then(Display)
             .unwrap()
@@ -141,7 +141,7 @@ fn each_pipeline_uses_its_own_export_config() {
             &format!("name: traversal_path, type: Utf8, const: \"{marker}\""),
         );
         env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-        let exported = templates::index(Context::new(&env), sources.clone())
+        let exported = templates::index(Context::new(&env, sources.clone()))
             .unwrap()
             .then(Display)
             .unwrap()
@@ -175,7 +175,7 @@ fn custom_export_configs_still_validate_against_the_ontology() {
     let ontology = Ontology::load_embedded().unwrap();
     let yaml = include_str!("../config/export.yaml").replace("name: traversal_path", "name: typo");
     env.export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
-    let error = templates::index(Context::new(&env), common::walk(repo.path()))
+    let error = templates::index(Context::new(&env, common::walk(repo.path())))
         .unwrap()
         .then(Display)
         .unwrap()
@@ -191,7 +191,7 @@ fn custom_export_configs_still_validate_against_the_ontology() {
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    templates::index(Context::new(&env), common::walk(root))
+    templates::index(Context::new(&env, common::walk(root)))
         .unwrap()
         .then(Display)
         .unwrap()
@@ -300,7 +300,7 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
         write_all(repo.path(), &[(path, source.as_bytes())]);
         let env = Env::with_limits(language, Limits::UNLIMITED).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let exported = templates::index(Context::new(&env), common::walk(repo.path()))
+        let exported = templates::index(Context::new(&env, common::walk(repo.path())))
             .unwrap()
             .then(Display)
             .unwrap()
@@ -496,7 +496,7 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
     let ontology = Ontology::load_embedded().unwrap();
     let mut seen: Vec<(String, usize)> = Vec::new();
 
-    let displayed = templates::index(Context::new(&env), common::walk(repo.path()))
+    let displayed = templates::index(Context::new(&env, common::walk(repo.path())))
         .unwrap()
         .then(Display)
         .unwrap()

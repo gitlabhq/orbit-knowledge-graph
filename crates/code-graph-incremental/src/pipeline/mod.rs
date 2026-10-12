@@ -2,7 +2,7 @@
 //! running a `Phase`. The artifact's type decides which phases apply:
 //!
 //! ```text
-//! Sources ─Prepare─> Workset<SourcePaths>
+//! () ─Prepare─> Workset<SourcePaths>
 //!   ─Each(Parse+Rewrite+Canonicalize+Link)─> Workset<Vec<LinkedFile>>
 //!   ─Insert─> DirtyGraph ─Resolve─> Resolved ─Display─> Displayed
 //!   ─Export─> Exported ─Emit─> Exported
@@ -101,15 +101,17 @@ impl<I, A: ItemPhase<I>, B: ItemPhase<A::Output>> ItemPhase<I> for Chain<A, B> {
 /// What one run shares across its phases; `run` is the run's total deadline.
 pub struct Context<'e> {
     pub env: &'e Env,
+    pub repository: Sources,
     pub run: Sentinel,
     pub report: Report,
     observers: Vec<Box<dyn Observer>>,
 }
 
 impl<'e> Context<'e> {
-    pub fn new(env: &'e Env) -> Self {
+    pub fn new(env: &'e Env, repository: Sources) -> Self {
         Self {
             env,
+            repository,
             run: Sentinel::new("run", "", env.limits.total_ms),
             report: Report::default(),
             observers: Vec::new(),

@@ -61,7 +61,7 @@ fn standard_library_configuration_rejects_invalid_entries_and_legacy_fields() {
 
 fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Canonical>, Vec<Killed>) {
     let sources = common::walk(root);
-    let (context, workset) = Pipeline::new(Context::new(env), sources)
+    let (context, workset) = Pipeline::new(Context::new(env, sources), ())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize)))
