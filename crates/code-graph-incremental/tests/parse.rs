@@ -40,7 +40,7 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
     impl orbit_utils::vfs::Pass for LazyFiles {
         type Tag = ();
         fn metadata(&self, _: &orbit_utils::vfs::File<'_, ()>) -> Decision<()> {
-            Decision::Keep(())
+            Decision::KeepLazy(())
         }
     }
     let root = tempfile::tempdir().unwrap();

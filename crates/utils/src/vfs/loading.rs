@@ -1,6 +1,6 @@
 //! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
 //! Limits count offered files before policy runs. Rejected content is not materialized.
-//! Pending files are read, classified, and stored during loading; metadata-accepted readers stay lazy.
+//! Files are read, classified, and stored during loading unless metadata explicitly requests KeepLazy.
 //! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
@@ -137,10 +137,10 @@ impl<T: Tag> Loading<T> {
             (Decision::List(_), _) => self.add_entry(file, Content::Unavailable),
             (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes))?,
             (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read())?,
-            (Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
+            (Decision::KeepLazy(_), Put::ReadOnDemand { read, .. }) => {
                 self.add_entry(file, Content::ReadOnDemand(read))
             }
-            (Decision::Pending, Put::ReadOnDemand { read, .. }) => {
+            (Decision::Pending | Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
                 self.put_bytes(file, read(self.limits.file_bytes.unwrap_or(u64::MAX)))?;
             }
             (_, Put::Symlink(_) | Put::Listed { .. }) => {

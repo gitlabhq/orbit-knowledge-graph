@@ -10,6 +10,7 @@ pub enum Decision<T> {
     #[default]
     Pending,
     Keep(T),
+    KeepLazy(T),
     List(&'static str),
 }
 
@@ -50,7 +51,7 @@ impl<'a, T: Tag> File<'a, T> {
     }
 
     pub fn keeps(&self) -> bool {
-        matches!(self.decision(), Decision::Keep(_))
+        matches!(self.decision(), Decision::Keep(_) | Decision::KeepLazy(_))
     }
 
     pub(super) fn classify(&self, pass: &dyn Pass<Tag = T>, bytes: &[u8]) -> Decision<T> {
@@ -60,6 +61,7 @@ impl<'a, T: Tag> File<'a, T> {
                 ..self.view()
             }) {
                 Decision::Pending => Decision::Keep(T::default()),
+                Decision::KeepLazy(tag) => Decision::Keep(tag),
                 decision => decision,
             }
         })
