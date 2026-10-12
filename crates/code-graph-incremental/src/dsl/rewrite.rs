@@ -44,7 +44,7 @@ pub(crate) struct Fill<'a> {
     pub lang: &'a Lang,
     pub caps: &'a [Cap],
     pub filters: &'a [Vec<u16>],
-    pub span: (u32, u32),
+    pub matched: Node,
     pub edge_ctx: Option<&'a EdgeCtx<'a>>,
 }
 
@@ -53,7 +53,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
         lang,
         caps,
         filters,
-        span,
+        matched,
         edge_ctx,
     } = *fill;
     match p {
@@ -173,13 +173,6 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     tf.apply_sym(t, lang, src, edge_ctx)
                 }
             };
-            let pos_src = match text {
-                Text::From(slot, _) => caps[*slot as usize].first(),
-                _ => caps[0].first(),
-            }
-            .copied()
-            .unwrap_or(t.root);
-            let src = *t.node(pos_src);
             let at = t.append(
                 parent,
                 Node {
@@ -188,12 +181,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     named: true,
                     synth: true,
                     sym,
-                    start: span.0,
-                    end: span.1,
-                    start_row: src.start_row,
-                    start_col: src.start_col,
-                    end_row: src.end_row,
-                    end_col: src.end_col,
+                    ..matched
                 },
             );
             for k in kids {
@@ -380,12 +368,11 @@ fn apply_structure(
     caps: &[Cap],
     edge_ctx: Option<&EdgeCtx>,
 ) -> bool {
-    let root_node = t.node(target);
     let fill = Fill {
         lang,
         caps,
         filters: &r.filters,
-        span: (root_node.start, root_node.end),
+        matched: *t.node(target),
         edge_ctx,
     };
     match &r.out {
