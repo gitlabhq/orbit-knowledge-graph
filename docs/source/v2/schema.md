@@ -8,79 +8,46 @@ title: What GitLab Orbit indexes
 
 {{< details >}}
 
-- Tier: Free, Premium, Ultimate
+- Tier: Premium, Ultimate
+- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Beta
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
-- GitLab Orbit Remote [introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- GitLab Orbit Remote [changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- GitLab Orbit Local [introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an experiment.
-- GitLab Orbit Local [changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to beta in GitLab 19.1.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
-
-GitLab Orbit indexes two kinds of data into one graph.
+GitLab Orbit indexes two kinds of data into one graph:
 
 - Software development lifecycle (SDLC) objects from GitLab, such as groups, projects, users,
   merge requests, pipelines, work items, and security findings.
-- Source code, such as files, directories, definitions, imports, and calls.
+- Source code on the default branch of each project, such as files, directories, definitions, imports, and calls.
+  GitLab Orbit does not index binary files or other branches.
 
-The server graph on GitLab holds both kinds. It indexes code from the default branch of each project.
-The local graph on your machine holds only code, from the working tree you index.
-For more information, see [How GitLab Orbit works](how-it-works.md).
-
-The graph does not index binary files or other branches.
+The [local graph](local/_index.md#local-tables) on your machine holds only code.
 
 ## Get the live schema
 
-The schema changes between releases. Ask the CLI for the current version.
-
-To list the node types in the server graph, grouped by domain, run this command.
+The schema changes between releases. To list the current node types by domain, run:
 
 ```shell
 glab orbit ontology
 ```
 
-The output starts like this.
-
-```plaintext
-{
-  "schema_version": "0.1",
-  "domains": [
-    {
-      "name": "ci",
-      "description": "Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners.",
-      "node_names": [
-        "Deployment",
-        ...
-```
-
-To show all properties and relationships of one node type, add its name.
-
-```shell
-glab orbit ontology Definition
-```
-
-To list the tables and columns of the local graph, run `glab orbit schema`.
-To show only some tables, add their names.
-
-```shell
-glab orbit schema gl_definition gl_edge
-```
+To show the properties and relationships of one node type, add its name, for example `glab orbit ontology Definition`.
+In a query, `CALL db.schema()` returns the same information.
 
 ## Supported languages
 
-The local graph and the server graph parse code with the same parser.
-Each language gets files, directories, and definitions.
+The remote graph and the local graph use the same parser. Each language gets files, directories, and definitions.
 Most languages also get imports and cross-file calls.
 
 | Language | File extensions |
@@ -114,19 +81,10 @@ Some languages have limits:
 - YAML: anchors and aliases. Mapping keys become definitions only in GitLab CI, ArgoCD,
   Helm, and Docker Compose files. No cross-file references.
 
+The JavaScript parser also reads Vue, GraphQL, and JSON files.
 Files in other languages still get a `File` node, with no definitions.
 
 ## Node types
-
-{{< details >}}
-
-- Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
-
-{{< /details >}}
-
-The table is generated from the ontology in `config/ontology/`.
 
 <!-- Generated by mise docs:generate. Do not edit by hand. -->
 <!-- BEGIN GENERATED: schema-nodes -->
@@ -223,16 +181,6 @@ Entities related to source code structure, definitions, and imports.
 
 ## Relationships
 
-{{< details >}}
-
-- Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
-
-{{< /details >}}
-
-The table is generated from the ontology in `config/ontology/`.
-
 <!-- Generated by mise docs:generate. Do not edit by hand. -->
 <!-- BEGIN GENERATED: schema-edges -->
 
@@ -305,14 +253,6 @@ A class that extends a base class is the source node. The base class is the targ
 
 ## Properties resolved at query time
 
-{{< details >}}
-
-- Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
-
-{{< /details >}}
-
 Some properties are not stored in the graph.
 The server fetches them from the repository when your query asks for them.
 
@@ -332,39 +272,13 @@ Use these properties to read code without a separate call to the GitLab API.
   This prevents precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
 - On the server, a `Definition` ID is a content hash scoped to the project and branch.
   The same function in two projects has two different IDs.
-- All nodes have a `traversal_path` property. The server uses it to filter results to the
-  entities that you can access. For more information, see [Security](security.md).
-
-## The local graph
-
-The local graph stores code nodes in DuckDB tables.
-Each node type has its own table. All relationships are in one edge table.
-
-| Table | Node type or content |
-|-------|----------------------|
-| `gl_directory` | `Directory` |
-| `gl_file` | `File` |
-| `gl_definition` | `Definition` |
-| `gl_imported_symbol` | `ImportedSymbol` |
-| `gl_edge` | All relationships, with `source_kind`, `relationship_kind`, and `target_kind` columns |
-| `_orbit_manifest` | One row for each indexed repository, with its branch, commit, and status |
-
-The local graph uses these relationships: `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, and `EXTENDS`.
-It has no `Branch`, `Project`, or SDLC nodes.
-
-The local tables differ from the server graph in these ways:
-
-- `project_id` comes from the absolute path of the checkout. It is not a GitLab project ID.
-- A `Definition` ID comes from the file path. The same function in two indexed repositories has two different IDs.
-- `File.reason` tells why the indexer skipped a file or could not parse it, such as
-  `skip_excluded_extension` or `fault_invalid_utf8`. It is empty for files that parsed correctly.
-- `Definition.definition_type` and `ImportedSymbol.import_type` values are capitalized and
-  specific to the language, such as `Class`, `Method`, `NamedImport`, or `CjsRequire`.
-- `ImportedSymbol.identifier_name` is empty for wildcard and side-effect imports.
+- GitLab checks your access to each entity before it returns a result.
+  For more information, see [Security](security.md).
 
 ## Related topics
 
 - [How GitLab Orbit works](how-it-works.md)
-- [Query language](queries/query-language.md)
+- [Cypher query language](queries/cypher.md)
+- [GitLab Orbit Local](local/_index.md)
 - [CLI](cli.md)
 - [Use cases](use-cases.md)
