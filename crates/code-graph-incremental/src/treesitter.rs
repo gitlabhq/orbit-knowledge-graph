@@ -416,6 +416,7 @@ pub fn parse_with_sentinel(
             .parse_with_options(&mut input, None, Some(options))
             .ok_or_else(|| {
                 stopped.unwrap_or(Killed {
+                    cancelled: false,
                     label: "tree-sitter",
                     path: label.to_string(),
                     elapsed: Duration::ZERO,
@@ -451,6 +452,8 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.label, "tree-sitter");
+        assert!(error.cancelled);
+        assert_eq!(error.to_string(), "tree-sitter cancelled");
         assert_eq!(error.path, "large.py");
         assert_eq!(error.budget, Duration::from_millis(u64::MAX));
         assert!(checks.load(Ordering::Relaxed) >= 2);
