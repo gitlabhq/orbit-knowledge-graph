@@ -778,7 +778,30 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
         for (i, rel) in input.relationships.iter().enumerate() {
             let model = self.model.get();
-            let edge_tables = model.relationship_tables(&rel.types);
+            let mut edge_tables = Vec::new();
+            let from = input
+                .nodes
+                .iter()
+                .find(|node| node.id == rel.from)
+                .and_then(|node| node.entity.as_deref());
+            let to = input
+                .nodes
+                .iter()
+                .find(|node| node.id == rel.to)
+                .and_then(|node| node.entity.as_deref());
+            if rel.hops.max == 1
+                && let Some((from, to)) = from.zip(to)
+            {
+                if rel.direction != crate::input::Direction::Incoming {
+                    edge_tables.extend(model.relationship_tables_between(&rel.types, from, to));
+                }
+                if rel.direction != crate::input::Direction::Outgoing {
+                    edge_tables.extend(model.relationship_tables_between(&rel.types, to, from));
+                }
+            }
+            if edge_tables.is_empty() {
+                edge_tables = model.relationship_tables(&rel.types);
+            }
             for (prop, filters) in &rel.filters {
                 if prop.starts_with('_') {
                     return Err(QueryError::Validation(format!(

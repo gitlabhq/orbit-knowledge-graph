@@ -1,0 +1,22 @@
+description: Reordered edges exclude source tombstones and rows outside authorized namespaces
+config:
+  ontology_overlay: reordered_edges
+  extra_seed:
+    gl_code_edge:
+      - {source_id: 12000, source_kind: Definition, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", project_id: 1000, branch: main, _version: "2099-01-01 00:00:00", _deleted: true}
+    gl_code_edge_by_target:
+      - {source_id: 12000, source_kind: Definition, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "2/200/2000/", project_id: 2000, branch: main, _deleted: false}
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","columns":["name"]},{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":10}
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 12001}) RETURN caller.name, callee.name LIMIT 10
+expect:
+  sql_contains: [gl_code_edge_by_target]
+  node_count: 0
+  nodes:
+    Definition:
+      ids: []
+  edges:
+    CALLS: []
+  total_edge_count: 0

@@ -425,8 +425,8 @@ async fn indexes_calls_and_extends_edges() {
     // Both edges land in gl_code_edge per ontology routing
     // (the schema version prefix is added at runtime).
     let ontology = integration_testkit::load_ontology();
-    let calls_table = ontology.edge_table_for_relationship("CALLS");
-    let extends_table = ontology.edge_table_for_relationship("EXTENDS");
+    let calls_table = ontology.edge_table_for_relationship("CALLS").unwrap();
+    let extends_table = ontology.edge_table_for_relationship("EXTENDS").unwrap();
     assert!(
         calls_table.ends_with("gl_code_edge"),
         "CALLS must route to gl_code_edge, got {calls_table}"
@@ -1061,7 +1061,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
             "SELECT source_id FROM {} \
              WHERE relationship_kind = 'DEFINES' \
              AND source_id IN (SELECT id FROM {} WHERE project_id = {project_id})",
-            ontology.edge_table_for_relationship("DEFINES"),
+            ontology.edge_table_for_relationship("DEFINES").unwrap(),
             t("gl_definition")
         ))
         .await;
@@ -1391,7 +1391,7 @@ async fn edges_from_directories_that_no_longer_exist(
     clickhouse: &integration_testkit::TestContext,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \
@@ -1435,7 +1435,7 @@ async fn insert_stale_canary_edge(
     source_id: i64,
 ) {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     // The shared edge table carries no project column, so the cleanup resolves
     // ownership through the code node tables. A canary sourced from anything
     // other than a real directory id would fall outside the predicate.
@@ -1454,7 +1454,7 @@ async fn count_canary_edges(
     source_id: i64,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT target_id FROM {edge_table} FINAL \
@@ -1708,7 +1708,7 @@ async fn assert_contains_edge_between_directory_and_file(
     file_path: &str,
 ) {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT e.source_id FROM {edge_table} AS e FINAL \
@@ -1778,7 +1778,9 @@ async fn count_active_edges(
     relationship_kind: &str,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship(relationship_kind);
+    let edge_table = ontology
+        .edge_table_for_relationship(relationship_kind)
+        .unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \

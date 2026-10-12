@@ -15,7 +15,7 @@ use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_aliased_tables};
 #[cfg(test)]
 use ontology::Ontology;
-use query_data_model::RelationalMapping;
+use query_data_model::{GitLabPolicy, RelationalMapping};
 
 pub fn check_ast(
     node: &Node,
@@ -38,10 +38,34 @@ fn check_query(
         let columns: Vec<_> = model
             .query_backend()
             .table_path_columns(table)
-            .map(|columns| columns.iter().map(|column| column.name.as_str()).collect())
-            .unwrap_or_else(|| vec![TRAVERSAL_PATH_COLUMN]);
-        for column in columns {
-            if !has_valid_column_path_filter(q.where_clause.as_ref(), alias, column, ctx) {
+            .filter(|columns| !columns.is_empty())
+            .map(|columns| {
+                columns
+                    .iter()
+                    .map(|column| {
+                        let floor = column
+                            .entity
+                            .and_then(|entity| {
+                                model.query_authorization().required_access_level(entity)
+                            })
+                            .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+                        (column.name.as_str(), floor)
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                vec![(
+                    TRAVERSAL_PATH_COLUMN,
+                    model.table_minimum_access_level(table),
+                )]
+            });
+        for (column, floor) in columns {
+            if !has_valid_column_path_filter(
+                q.where_clause.as_ref(),
+                alias,
+                column,
+                &ctx.paths_at_least(floor),
+            ) {
                 return Err(QueryError::Security(format!(
                     "post-check failed: alias '{alias}' missing valid {column} filter"
                 )));
@@ -56,7 +80,7 @@ fn has_valid_column_path_filter(
     expr: Option<&Expr>,
     alias: &str,
     path_column: &str,
-    ctx: &SecurityContext,
+    paths: &[&orbit_utils::traversal_path::TraversalPath],
 ) -> bool {
     let Some(expr) = expr else { return false };
     match expr {
@@ -70,16 +94,16 @@ fn has_valid_column_path_filter(
             left,
             right,
         } => {
-            has_valid_column_path_filter(Some(left), alias, path_column, ctx)
-                || has_valid_column_path_filter(Some(right), alias, path_column, ctx)
+            has_valid_column_path_filter(Some(left), alias, path_column, paths)
+                || has_valid_column_path_filter(Some(right), alias, path_column, paths)
         }
         Expr::BinaryOp {
             op: Op::Or,
             left,
             right,
         } => {
-            has_valid_column_path_filter(Some(left), alias, path_column, ctx)
-                && has_valid_column_path_filter(Some(right), alias, path_column, ctx)
+            has_valid_column_path_filter(Some(left), alias, path_column, paths)
+                && has_valid_column_path_filter(Some(right), alias, path_column, paths)
         }
         Expr::FuncCall {
             name: Function::StartsWith,
@@ -96,10 +120,7 @@ fn has_valid_column_path_filter(
                 | Expr::Param {
                     value: Value::String(path),
                     ..
-                } => ctx
-                    .traversal_paths
-                    .iter()
-                    .any(|tp| path.starts_with(tp.path.as_str())),
+                } => paths.iter().any(|tp| path.starts_with(tp.as_str())),
                 _ => false,
             }
         }
@@ -132,6 +153,33 @@ mod tests {
             limit: Some(10),
             ..Default::default()
         }))
+    }
+
+    #[test]
+    fn rejects_paths_below_the_entity_role_floor() {
+        let ontology = Ontology::new()
+            .with_nodes(["Vulnerability"])
+            .with_redaction("Vulnerability", "vulnerabilities", "id")
+            .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager);
+        let context = SecurityContext::new_with_roles(
+            1,
+            vec![
+                crate::AuthorizedPath::new("1/100/", 20),
+                crate::AuthorizedPath::new("1/200/", 30),
+            ],
+        )
+        .unwrap();
+        for (path, accepted) in [("1/100/", false), ("1/200/", true)] {
+            let node = Node::Query(Box::new(Query {
+                from: TableRef::scan("gl_vulnerability", "v"),
+                where_clause: Some(Expr::func(
+                    Function::StartsWith,
+                    vec![Expr::col("v", TRAVERSAL_PATH_COLUMN), Expr::string(path)],
+                )),
+                ..Default::default()
+            }));
+            assert_eq!(check(&node, &context, &ontology).is_ok(), accepted);
+        }
     }
 
     #[test]

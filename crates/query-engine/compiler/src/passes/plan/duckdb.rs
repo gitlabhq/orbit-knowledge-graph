@@ -5,8 +5,8 @@ use query_data_model::DuckDbDataModel;
 
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalSource};
-use super::requirements::{Column, node_outputs, node_predicates, property_filter};
-use super::{Aggregation, HydrationCompileOptions, HydrationStrategy, QueryPlan, Traversal};
+use super::requirements::{Column, Predicate, node_outputs, node_predicates, property_filter};
+use super::{HydrationCompileOptions, HydrationStrategy, QueryPlan};
 use crate::input::QueryType;
 use crate::{Input, QueryError, Result};
 
@@ -24,10 +24,9 @@ pub fn plan(
             plan.operation.center_tp_lookup = None;
             QueryPlan::Neighbors(plan)
         }),
-        QueryType::PathFinding => super::pathfinding::plan_pathfinding(context).map(|mut plan| {
-            plan.operation.scoped_by_tp = false;
-            QueryPlan::PathFinding(plan)
-        }),
+        QueryType::PathFinding => {
+            super::pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)
+        }
         QueryType::Hydration => {
             super::hydration::plan_hydration(context, hydration_options).map(QueryPlan::Hydration)
         }
@@ -75,15 +74,22 @@ fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryP
         source = Some(match source {
             None => edge,
             Some(previous) => {
-                let (left, right) = current
-                    .iter()
-                    .find_map(|(node, column)| {
-                        endpoints
-                            .get(*node)
-                            .map(|previous| (previous.clone(), column.clone()))
-                    })
+                let mut equalities = current.iter().filter_map(|(node, column)| {
+                    endpoints
+                        .get(*node)
+                        .map(|previous| (previous.clone(), column.clone()))
+                });
+                let endpoints = equalities
+                    .next()
                     .ok_or_else(|| QueryError::Lowering("disconnected traversal".into()))?;
-                previous.inner_join(edge, (left, right))
+                PhysicalSource::Join {
+                    endpoints,
+                    predicates: equalities
+                        .map(|(left, right)| Predicate::ColumnsEqual { left, right })
+                        .collect(),
+                    left: Box::new(previous),
+                    right: Box::new(edge),
+                }
             }
         });
         for (node, column) in current {
@@ -122,7 +128,14 @@ fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryP
             }
         });
         outputs.extend(node_outputs(node));
-        bindings.push(BindingSource::table(&node.alias));
+        let endpoint = endpoints.get(&node.alias);
+        bindings.push(BindingSource {
+            node: node.alias.clone(),
+            alias: endpoint.map_or_else(|| node.alias.clone(), |column| column.source.clone()),
+            column: endpoint
+                .map_or_else(|| DEFAULT_PRIMARY_KEY.into(), |column| column.name.clone()),
+            joined: true,
+        });
     }
     let execution = ExecutionPlan {
         source: source.ok_or_else(|| QueryError::Lowering("query has no nodes".into()))?,
@@ -130,10 +143,5 @@ fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryP
         outputs,
         bindings,
     };
-    Ok(if context.aggregate() {
-        let result = context.aggregation(&execution);
-        QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
-    } else {
-        QueryPlan::Traversal(context.finish(Traversal { execution }))
-    })
+    Ok(context.finish_execution(execution))
 }

@@ -21,6 +21,10 @@ impl Column {
 
 #[derive(Clone)]
 pub enum Predicate {
+    ColumnsEqual {
+        left: Column,
+        right: Column,
+    },
     Property {
         column: Column,
         filter: InputFilter,

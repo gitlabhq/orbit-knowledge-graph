@@ -90,7 +90,7 @@ fn build_node_plan(
     let transform_declaration =
         TransformDeclaration::from_node_entity_and_edge_mappings(node, pipeline.transform.edges());
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -128,7 +128,7 @@ fn build_edge_plan(
 
     let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -157,7 +157,7 @@ fn build_derived_plan(
     let spec = compile_extract_spec(&extract_declaration)?;
 
     let transform_declaration = TransformDeclaration::Rust(name.clone());
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,

@@ -6,6 +6,7 @@ config:
       - {id: 11000, path: "crates/compiler/src/lib.rs", project_id: 1000, branch: main, traversal_path: "1/100/1000/"}
     gl_edge:
       - {source_id: 11000, source_kind: File, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _deleted: false}
+      - {source_id: 11001, source_kind: File, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "2/200/2000/", _deleted: false}
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["name"]},{"id":"file","entity":"File","columns":["path"]}],"relationships":[{"type":"CALLS","from":"callee","to":"file","direction":"incoming"}],"limit":10}

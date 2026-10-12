@@ -34,8 +34,9 @@ physical:
   duckdb:
     planned:
       expect:
-        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=false tables=[gl_edge] relationships=[CALLS] ... (_) (_))
+        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_edge] relationships=[CALLS] ... (_) (_))
     emitted:
       expect:
         - (CTE _ (_))
         - (Scan Table(gl_edge) ...)
+        - (Join ON (f.end_id = b.end_id) AND (f.traversal_path = b.traversal_path) (_) (_))

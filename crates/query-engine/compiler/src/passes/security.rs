@@ -86,7 +86,7 @@ fn apply_to_query(
                     let eligible = ctx.paths_at_least(min_role);
                     Some(build_column_path_filter(alias, &column.name, &eligible))
                 }))
-                .unwrap_or_else(|| Expr::lit(true)),
+                .unwrap_or_else(|| Expr::lit(false)),
                 None => build_path_filter(
                     alias,
                     &ctx.paths_at_least(model.table_minimum_access_level(table)),

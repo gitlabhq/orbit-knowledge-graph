@@ -7,10 +7,7 @@ use super::context::PlanningContext;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-use super::{
-    Aggregation, BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
-    QueryPlan, Traversal,
-};
+use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, QueryPlan};
 use query_data_model::OrbitQueryModel;
 
 pub struct Hop {
@@ -191,21 +188,28 @@ pub(super) fn plan(
     let model = context.model;
     let mut hops = build_hops(input, model)?;
     for hop in &mut hops {
-        let mut equality_columns = vec![
-            RELATIONSHIP_KIND_COLUMN,
-            SOURCE_KIND_COLUMN,
-            TARGET_KIND_COLUMN,
-        ];
+        if hop.max_hops > 1 {
+            continue;
+        }
+        let mut equality_columns = Vec::new();
+        if hop.rel_types.len() == 1 && hop.rel_types[0] != "*" {
+            equality_columns.push(RELATIONSHIP_KIND_COLUMN);
+        }
         for (alias, column) in [
             (&hop.from_node, hop.direction.edge_columns().0),
             (&hop.to_node, hop.direction.edge_columns().1),
         ] {
-            if input
-                .nodes
-                .iter()
-                .any(|node| &node.id == alias && !node.node_ids.is_empty())
-            {
-                equality_columns.push(column);
+            if let Some(node) = input.nodes.iter().find(|node| &node.id == alias) {
+                if node.node_ids.len() == 1 {
+                    equality_columns.push(column);
+                }
+                if node.entity.is_some() {
+                    equality_columns.push(if column == SOURCE_ID_COLUMN {
+                        SOURCE_KIND_COLUMN
+                    } else {
+                        TARGET_KIND_COLUMN
+                    });
+                }
             }
         }
         hop.edge_table =
@@ -273,12 +277,7 @@ pub(super) fn plan(
             .entry(target)
             .or_insert((holder, column));
     }
-    Ok(if input.query_type == QueryType::Aggregation {
-        let result = context.aggregation(&execution);
-        QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
-    } else {
-        QueryPlan::Traversal(context.finish(Traversal { execution }))
-    })
+    Ok(context.finish_execution(execution))
 }
 
 pub(super) fn build_hops<M>(input: &Input, model: &M) -> Result<Vec<Hop>>
@@ -306,6 +305,9 @@ where
                 .find(|node| node.id == rel.to)
                 .and_then(|node| node.entity.as_deref());
             let mut tables = match from_entity.zip(to_entity) {
+                _ if rel.hops.max > 1 && crate::passes::normalize::is_wildcard(&rel.types) => {
+                    vec![model.default_edge_table().to_string()]
+                }
                 Some((from, to)) if rel.hops.max == 1 => {
                     let mut tables = Vec::new();
                     if rel.direction != Direction::Incoming {
@@ -319,7 +321,11 @@ where
                 _ => model.relationship_tables(&rel.types),
             };
             if tables.is_empty() {
-                tables = model.relationship_tables(&rel.types);
+                if crate::passes::normalize::is_wildcard(&rel.types) {
+                    tables.push(model.default_edge_table().to_string());
+                } else {
+                    tables = model.relationship_tables(&rel.types);
+                }
             }
             tables.sort();
             tables.dedup();

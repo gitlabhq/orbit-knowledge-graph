@@ -1,10 +1,13 @@
-description: A pinned callee returns the caller through canonical or reordered edge storage
+description: A pinned callee reads the reordered edge table
+config:
+  ontology_overlay: reordered_edges
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","columns":["name"]},{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":10}
   gql: |
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 12001}) RETURN caller.name, callee.name LIMIT 10
 expect:
+  sql_contains: [gl_code_edge_by_target]
   node_count: 2
   nodes:
     Definition:

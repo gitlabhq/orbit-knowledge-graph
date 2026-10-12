@@ -614,7 +614,7 @@ fn multi_table_code_edge_routes_to_code_table() {
 }
 
 #[test]
-fn multi_table_wildcard_rejects_unsupported_traversal_scan() {
+fn multi_table_wildcard_keeps_the_default_table_scan() {
     let orbit_query = "MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25";
     let json = r#"{
         "query_type": "traversal",
@@ -625,11 +625,8 @@ fn multi_table_wildcard_rejects_unsupported_traversal_scan() {
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let error = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap_err();
-    assert!(
-        error.to_string().contains("multiple edge tables"),
-        "{error}"
-    );
+    let compiled = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
+    assert!(compiled.base.render().contains("FROM gl_edge"));
 }
 
 #[test]
