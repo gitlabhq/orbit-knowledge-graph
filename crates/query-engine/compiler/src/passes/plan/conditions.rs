@@ -1,16 +1,112 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::context::PlanningContext;
 use super::edge_chain::denorm_hop;
 use super::helpers::{FilterOwner, bind_filter};
 use super::physical::BindingSource;
 use super::requirements::{Column, Predicate, tag_filter};
-use super::{BoundFilter, DenormalizedKey, DenormalizedProperty, Hop};
+use super::{BoundFilter, DenormalizedKey, DenormalizedProperty, Hop, NodePlan};
 use crate::error::{QueryError, Result};
 use crate::input::{BooleanExpression, Condition, Input, PredicateTarget};
 use query_data_model::OrbitQueryModel;
 
-pub(super) fn edge_tag(
+pub(super) struct Placement {
+    pub after_joins: Vec<bool>,
+    pub joined_nodes: HashSet<String>,
+}
+
+pub(super) fn place_conditions(
+    input: &Input,
+    model: &(impl OrbitQueryModel + ?Sized),
+    hops: &[Hop],
+    nodes: &HashMap<String, NodePlan>,
+    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Result<Placement> {
+    let mut placement = Placement {
+        after_joins: Vec::new(),
+        joined_nodes: HashSet::new(),
+    };
+    for root in &input.predicates {
+        let mut untagged = HashSet::new();
+        for condition in root.leaves() {
+            if leaf_tag(condition, input, model, hops, denormalized)?.is_none() {
+                untagged.extend(
+                    condition
+                        .node_properties()
+                        .filter(|(_, property)| *property != DEFAULT_PRIMARY_KEY)
+                        .map(|(alias, _)| alias.to_string()),
+                );
+            } else if let PredicateTarget::Node(alias) = &condition.target
+                && nodes[alias].has_untagged_filter(hops, denormalized)
+            {
+                placement.joined_nodes.insert(alias.clone());
+            }
+        }
+        let scan = root
+            .local_node()
+            .filter(|_| hops.is_empty() || !untagged.is_empty());
+        placement.after_joins.push(scan.is_none());
+        placement
+            .joined_nodes
+            .extend(scan.map(str::to_string).into_iter().chain(untagged));
+    }
+    Ok(placement)
+}
+
+pub(super) fn bind_scan_conditions<M: OrbitQueryModel + ?Sized>(
+    context: &PlanningContext<'_, M>,
+    nodes: &mut HashMap<String, NodePlan>,
+    placement: &Placement,
+) -> Result<()> {
+    for (root, after_joins) in context.input.predicates.iter().zip(&placement.after_joins) {
+        if let Some(alias) = root.local_node()
+            && !after_joins
+        {
+            let predicate = bind_tree(root, context, None)?;
+            nodes
+                .get_mut(alias)
+                .ok_or_else(|| {
+                    QueryError::PipelineInvariant(format!("node '{alias}' has no plan"))
+                })?
+                .predicates
+                .push(predicate);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn bind_join_conditions<M: OrbitQueryModel + ?Sized>(
+    context: &PlanningContext<'_, M>,
+    bindings: &[BindingSource],
+    placement: &Placement,
+) -> Result<Vec<Predicate>> {
+    context
+        .input
+        .predicates
+        .iter()
+        .zip(&placement.after_joins)
+        .filter(|(_, after_joins)| **after_joins)
+        .map(|(root, _)| bind_tree(root, context, Some(bindings)))
+        .collect()
+}
+
+fn leaf_tag(
+    condition: &Condition,
+    input: &Input,
+    model: &(impl OrbitQueryModel + ?Sized),
+    hops: &[Hop],
+    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Result<Option<Predicate>> {
+    let PredicateTarget::Node(alias) = &condition.target else {
+        return Ok(None);
+    };
+    let (_, bound) = bind_leaf(condition.clone(), input, model, hops)?;
+    Ok(edge_tag(alias, &bound, hops, denormalized))
+}
+
+fn edge_tag(
     alias: &str,
     bound: &BoundFilter,
     hops: &[Hop],
@@ -30,7 +126,7 @@ pub(super) fn edge_tag(
     )
 }
 
-pub(super) fn bind_leaf(
+fn bind_leaf(
     condition: Condition,
     input: &Input,
     model: &(impl OrbitQueryModel + ?Sized),
@@ -69,54 +165,63 @@ pub(super) fn bind_leaf(
     ))
 }
 
-pub(super) fn bind_tree<M: OrbitQueryModel + ?Sized>(
+fn bind_tree<M: OrbitQueryModel + ?Sized>(
     root: &BooleanExpression<Condition>,
     context: &PlanningContext<'_, M>,
     bindings: Option<&[BindingSource]>,
 ) -> Result<Predicate> {
-    let resolve = |column: Column| -> Result<Column> {
-        let Some(bindings) = bindings else {
-            return Ok(column);
-        };
-        bindings
-            .iter()
-            .find(|binding| binding.node == column.source)
-            .and_then(|binding| binding.column(&column.name))
-            .ok_or_else(|| {
-                QueryError::Lowering(format!(
-                    "node '{}' has no visible '{}' column",
-                    column.source, column.name
-                ))
-            })
-    };
     let expression = root
         .clone()
-        .try_map(&mut |condition| -> Result<Box<Predicate>> {
-            let node = matches!(condition.target, PredicateTarget::Node(_));
-            let (column, mut bound) =
-                bind_leaf(condition, context.input, context.model, &context.hops)?;
-            if node
-                && bindings.is_some()
-                && let Some(tag) =
-                    edge_tag(&column.source, &bound, &context.hops, &context.denormalized)
-            {
-                return Ok(Box::new(match resolve(column) {
-                    Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
-                        BooleanExpression::Leaf(Box::new(bound.at(column))),
-                        BooleanExpression::Leaf(Box::new(tag)),
-                    ])),
-                    Err(_) => tag,
-                }));
-            }
-            let column = if node { resolve(column)? } else { column };
-            if let Some((alias, property)) = &bound.filter.rhs_column {
-                let rhs = resolve(Column::new(alias, property))?;
-                bound.filter.rhs_column = Some((rhs.source, rhs.name));
-            }
-            Ok(Box::new(bound.at(column)))
-        })?;
+        .try_map(&mut |condition| bind_condition(condition, context, bindings).map(Box::new))?;
     Ok(match expression {
         BooleanExpression::Leaf(predicate) => *predicate,
         expression => Predicate::Boolean(expression),
     })
+}
+
+fn bind_condition<M: OrbitQueryModel + ?Sized>(
+    condition: Condition,
+    context: &PlanningContext<'_, M>,
+    bindings: Option<&[BindingSource]>,
+) -> Result<Predicate> {
+    let node = matches!(condition.target, PredicateTarget::Node(_));
+    let (column, mut bound) = bind_leaf(condition, context.input, context.model, &context.hops)?;
+    if node
+        && bindings.is_some()
+        && let Some(tag) = edge_tag(&column.source, &bound, &context.hops, &context.denormalized)
+    {
+        return Ok(match resolve_column(bindings, column) {
+            Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
+                BooleanExpression::Leaf(Box::new(bound.at(column))),
+                BooleanExpression::Leaf(Box::new(tag)),
+            ])),
+            Err(_) => tag,
+        });
+    }
+    let column = if node {
+        resolve_column(bindings, column)?
+    } else {
+        column
+    };
+    if let Some((alias, property)) = &bound.filter.rhs_column {
+        let rhs = resolve_column(bindings, Column::new(alias, property))?;
+        bound.filter.rhs_column = Some((rhs.source, rhs.name));
+    }
+    Ok(bound.at(column))
+}
+
+fn resolve_column(bindings: Option<&[BindingSource]>, column: Column) -> Result<Column> {
+    let Some(bindings) = bindings else {
+        return Ok(column);
+    };
+    bindings
+        .iter()
+        .find(|binding| binding.node == column.source)
+        .and_then(|binding| binding.column(&column.name))
+        .ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "node '{}' has no visible '{}' column",
+                column.source, column.name
+            ))
+        })
 }

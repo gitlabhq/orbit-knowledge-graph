@@ -3,9 +3,8 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use super::conditions::{bind_leaf, bind_tree, edge_tag};
+use super::conditions::{bind_join_conditions, bind_scan_conditions, place_conditions};
 use super::context::PlanningContext;
-use super::requirements::Predicate;
 use crate::error::Result;
 use crate::input::*;
 
@@ -132,6 +131,16 @@ impl NodePlan {
         })
     }
 
+    pub fn has_untagged_filter(
+        &self,
+        hops: &[Hop],
+        denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+    ) -> bool {
+        self.filters
+            .iter()
+            .any(|(_, filter)| denorm_hop(filter, &self.alias, hops, denormalized).is_none())
+    }
+
     pub fn is_id_pinned_only(&self) -> bool {
         !self.node_ids.is_empty() && self.filters.is_empty() && self.id_range.is_none()
     }
@@ -204,56 +213,8 @@ where
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
     let denormalized = super::denormalized_facts(input, model);
-    let tagged = |condition: &Condition| -> Result<Option<Predicate>> {
-        let (column, bound) = bind_leaf(condition.clone(), input, model, &hops)?;
-        Ok(match condition.target {
-            PredicateTarget::Node(_) => edge_tag(&column.source, &bound, &hops, &denormalized),
-            PredicateTarget::Relationship(_) => None,
-        })
-    };
-    let mut after_joins = Vec::new();
-    let mut predicate_joins = HashSet::new();
-    for root in &input.predicates {
-        let mut joins = HashSet::new();
-        for condition in root.leaves() {
-            if tagged(condition)?.is_none() {
-                joins.extend(
-                    condition
-                        .node_properties()
-                        .filter(|(_, property)| *property != DEFAULT_PRIMARY_KEY)
-                        .map(|(alias, _)| alias.to_string()),
-                );
-            } else if let PredicateTarget::Node(alias) = &condition.target
-                && nodes[alias]
-                    .filters
-                    .iter()
-                    .any(|(_, filter)| denorm_hop(filter, alias, &hops, &denormalized).is_none())
-            {
-                predicate_joins.insert(alias.clone());
-            }
-        }
-        let local = root
-            .local_node()
-            .filter(|_| hops.is_empty() || !joins.is_empty());
-        after_joins.push(local.is_none());
-        predicate_joins.extend(local.map(str::to_string).into_iter().chain(joins));
-    }
-    for (root, after_joins) in input.predicates.iter().zip(&after_joins) {
-        if let Some(alias) = root.local_node()
-            && !after_joins
-        {
-            let predicate = bind_tree(root, &context, None)?;
-            nodes
-                .get_mut(alias)
-                .ok_or_else(|| {
-                    crate::error::QueryError::PipelineInvariant(format!(
-                        "node '{alias}' has no plan"
-                    ))
-                })?
-                .predicates
-                .push(predicate);
-        }
-    }
+    let placement = place_conditions(input, model, &hops, &nodes, &denormalized)?;
+    bind_scan_conditions(&context, &mut nodes, &placement)?;
 
     let (mut hops, elided_fks) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input, model)
@@ -273,7 +234,7 @@ where
                 &hops,
                 &denormalized,
                 table_scans.contains(&node_plan.alias),
-                predicate_joins.contains(&node_plan.alias),
+                placement.joined_nodes.contains(&node_plan.alias),
             );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
@@ -283,7 +244,7 @@ where
     resolve_join_columns(&mut hops)?;
     resolve_cascade_anchors(&mut hops);
 
-    resolve_node_flags(&hops, &mut nodes, input, &predicate_joins);
+    resolve_node_flags(&hops, &mut nodes, input, &placement.joined_nodes);
 
     if input.query_type == QueryType::Aggregation {
         let group_by_nodes: HashSet<&str> =
@@ -309,14 +270,8 @@ where
     } else {
         super::flat::plan(&context)?
     };
-    let predicates = input
-        .predicates
-        .iter()
-        .zip(&after_joins)
-        .filter(|(_, after_joins)| **after_joins)
-        .map(|(root, _)| bind_tree(root, &context, Some(&execution.bindings)))
-        .collect::<Result<_>>()?;
-    execution.source = execution.source.filter(predicates);
+    let conditions = bind_join_conditions(&context, &execution.bindings, &placement)?;
+    execution.source = execution.source.filter(conditions);
     if !context.hops.is_empty() {
         context.node_edge_mappings = execution
             .bindings
@@ -706,12 +661,7 @@ fn determine_hydration(
 
     // Skip the node table only when every filter is carried by a hop's edge
     // tag; an uncovered filter stays on the node table so it isn't dropped.
-    let has_uncovered_filter = node_plan
-        .filters
-        .iter()
-        .any(|(_, filter)| denorm_hop(filter, alias, hops, denormalized).is_none());
-
-    if has_uncovered_filter {
+    if node_plan.has_untagged_filter(hops, denormalized) {
         HydrationStrategy::FilterOnly
     } else if requires_table_scan {
         HydrationStrategy::Join
