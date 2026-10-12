@@ -25,7 +25,7 @@ const SIG_REGEX: &str = concat!(
     r"|interface|namespace|object|fun|record)\s+[A-Za-z_$<({]"
 );
 
-const TYPE_KINDS: &[&str] = &[
+pub(crate) const TYPE_KINDS: &[&str] = &[
     "Class",
     "Struct",
     "Enum",
@@ -42,7 +42,7 @@ const TYPE_KINDS: &[&str] = &[
     "AnnotationClass",
 ];
 
-const CALLABLE_KINDS: &[&str] = &[
+pub(crate) const CALLABLE_KINDS: &[&str] = &[
     "Method",
     "Function",
     "AssociatedFunction",
@@ -59,7 +59,8 @@ const CALLABLE_KINDS: &[&str] = &[
     "Macro",
 ];
 
-const MEMBER_EXTRA_KINDS: &[&str] = &["Field", "Attribute", "Property", "ComputedProperty"];
+pub(crate) const MEMBER_EXTRA_KINDS: &[&str] =
+    &["Field", "Attribute", "Property", "ComputedProperty"];
 
 /// Types treated as containers for `class` / `extends` / `overview` lookups.
 const CONTAINER_KINDS: &[&str] = &[
