@@ -333,7 +333,7 @@ impl CodeIndexer {
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
         let lane = self
-            .acquire_indexing_lane(&repository, lock.time_left())
+            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
             .await?;
 
         let indexed = clock
@@ -444,6 +444,7 @@ impl CodeIndexer {
         &self,
         repository: &Repository,
         within: Duration,
+        cancel: &CancellationToken,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
         let lane = if repository.parseable_files() <= self.small_repo_max_files {
@@ -452,7 +453,15 @@ impl CodeIndexer {
             &self.big_indexing_slots
         };
         let queued = Instant::now();
-        match tokio::time::timeout(within, acquire(lane, "indexing")).await {
+        let permit = tokio::select! {
+            permit = tokio::time::timeout(within, acquire(lane, "indexing")) => permit,
+            () = lock_lost(cancel) => {
+                return Err(IndexError::NoLane {
+                    waited: queued.elapsed(),
+                });
+            }
+        };
+        match permit {
             Ok(permit) => {
                 self.metrics
                     .record_slot_wait("indexing_lane_wait", queued.elapsed());
@@ -830,6 +839,12 @@ async fn acquire(
             .map(Some)
             .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
         None => Ok(None),
+    }
+}
+
+async fn lock_lost(cancel: &CancellationToken) {
+    while !cancel.is_cancelled() {
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 

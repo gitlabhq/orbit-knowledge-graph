@@ -777,6 +777,34 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn losing_the_lock_while_queued_for_a_lane_stops_the_wait() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let _lanes = ctx.pipeline.occupy_small_indexing_lanes().await;
+        ctx.mock_locks.steal_leases();
+
+        let started = tokio::time::Instant::now();
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        assert!(started.elapsed() < ctx.handler.lock_ttl);
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("the refunded attempt is saved");
+        assert_eq!(checkpoint.attempts, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn no_free_indexing_lane_backs_off_without_counting_an_attempt() {
         let ctx = TestContext::new();
         ctx.mock_repo.set_archive(
