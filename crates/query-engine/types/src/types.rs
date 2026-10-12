@@ -10,5 +10,6 @@ pub struct ResourceCheck {
 #[derive(Debug, Clone)]
 pub struct ResourceAuthorization {
     pub resource_type: String,
+    pub ability: String,
     pub authorized: HashMap<i64, bool>,
 }

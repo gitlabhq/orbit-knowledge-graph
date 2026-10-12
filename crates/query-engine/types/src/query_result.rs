@@ -381,7 +381,7 @@ fn is_authorized(
     };
     let Some(auth) = authorizations
         .iter()
-        .find(|a| a.resource_type == auth_config.resource_type)
+        .find(|a| a.resource_type == auth_config.resource_type && a.ability == auth_config.ability)
     else {
         return false;
     };
@@ -499,10 +499,12 @@ mod tests {
         vec![
             ResourceAuthorization {
                 resource_type: "user".to_string(),
+                ability: "read_user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             },
             ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read".to_string(),
                 authorized: [(100, true), (200, true), (300, true)]
                     .into_iter()
                     .collect(),
@@ -814,10 +816,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read".to_string(),
                     authorized: [(100, true), (200, false), (300, true)]
                         .into_iter()
                         .collect(),
@@ -840,10 +844,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, false), (2, true), (3, false)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
                         .collect(),
@@ -884,6 +890,7 @@ mod tests {
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "user".to_string(),
+                ability: "read_user".to_string(),
                 authorized: [(1, true), (2, true), (3, true)].into_iter().collect(),
             }];
 
@@ -900,10 +907,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read".to_string(),
                     authorized: [(100, true), (200, true), (300, true)]
                         .into_iter()
                         .collect(),
@@ -962,10 +971,12 @@ mod tests {
             let authorizations = vec![
                 ResourceAuthorization {
                     resource_type: "user".to_string(),
+                    ability: "read_user".to_string(),
                     authorized: [(1, true)].into_iter().collect(),
                 },
                 ResourceAuthorization {
                     resource_type: "project".to_string(),
+                    ability: "read_code".to_string(),
                     authorized: [(1000, true)].into_iter().collect(),
                 },
             ];
@@ -1017,6 +1028,7 @@ mod tests {
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read_code".to_string(),
                 authorized: [(1000, true)].into_iter().collect(),
             }];
 
@@ -1064,6 +1076,7 @@ mod tests {
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read_code".to_string(),
                 authorized: [(1000, true)].into_iter().collect(),
             }];
 

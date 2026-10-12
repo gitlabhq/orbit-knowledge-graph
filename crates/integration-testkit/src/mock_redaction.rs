@@ -47,18 +47,18 @@ impl MockRedactionService {
                     .ids
                     .iter()
                     .map(|id| {
-                        let allowed = self
-                            .authorizations
-                            .get(&check.resource_type)
-                            .and_then(|m| m.get(id))
-                            .copied()
-                            .unwrap_or(false);
+                        let decision = |key: &str| self.authorizations.get(key)?.get(id).copied();
+                        let allowed =
+                            decision(&format!("{}:{}", check.resource_type, check.ability))
+                                .or_else(|| decision(&check.resource_type))
+                                .unwrap_or(false);
                         (*id, allowed)
                     })
                     .collect();
 
                 ResourceAuthorization {
                     resource_type: check.resource_type.clone(),
+                    ability: check.ability.clone(),
                     authorized,
                 }
             })

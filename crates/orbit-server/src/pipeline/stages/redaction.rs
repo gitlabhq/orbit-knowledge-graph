@@ -97,6 +97,7 @@ mod tests {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             let auth = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
+                ability: "read".to_string(),
                 authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
             }];
             let mut ctx = seed_ctx(frontend, auth);
