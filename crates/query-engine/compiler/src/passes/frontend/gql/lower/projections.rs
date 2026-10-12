@@ -5,6 +5,7 @@ use crate::input::{
     AggExpr, ColumnSelection, DynamicColumnMode, InputAggSort, InputAggregationMetric,
     InputGroupByKey, InputOrderBy, PropertyRef, QueryType, TargetRef,
 };
+use crate::query_limits::MAX_COLUMNS;
 
 use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, Target};
 use super::super::errors::invalid;
@@ -171,6 +172,14 @@ impl Lowering {
                             return Err(invalid(span, "duplicate or overlapping node projection"));
                         }
                         match &mut input_node.columns {
+                            Some(ColumnSelection::List(columns))
+                                if columns.len() == MAX_COLUMNS =>
+                            {
+                                return Err(invalid(
+                                    span,
+                                    &format!("a node projects at most {MAX_COLUMNS} properties"),
+                                ));
+                            }
                             Some(ColumnSelection::List(columns))
                                 if !columns.contains(&property) =>
                             {
