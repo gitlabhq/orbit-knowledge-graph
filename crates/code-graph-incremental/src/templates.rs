@@ -19,8 +19,6 @@ pub struct Options {
 }
 
 const SMALL_FAMILY_FILES: usize = 650;
-const SMALL_FAMILY_THREADS: usize = 4;
-const LARGE_FAMILY_THREADS: usize = 16;
 
 pub fn index<'e>(context: Context<'e>, sources: Sources) -> Result<Pipeline<'e, Resolved>, Error> {
     Pipeline::new(context, sources)
@@ -116,6 +114,7 @@ pub fn repository<E: std::fmt::Display>(
             .map_or(first, SupportLang::family)
             == family
     };
+    let system_threads = std::thread::available_parallelism().map_or(1, usize::from);
     std::thread::scope(|scope| -> Result<(), Error> {
         let (sender, receiver) = std::sync::mpsc::sync_channel(0);
         for (family, (language, file_count)) in families {
@@ -126,13 +125,13 @@ pub fn repository<E: std::fmt::Display>(
             scope.spawn(move || {
                 let outcome = (|| -> Result<_, Error> {
                     run.check()?;
-                    let threads = if file_count < SMALL_FAMILY_FILES {
-                        SMALL_FAMILY_THREADS
+                    let family_threads = if file_count < SMALL_FAMILY_FILES {
+                        (system_threads / 4).max(2)
                     } else {
-                        LARGE_FAMILY_THREADS
+                        system_threads
                     };
                     let pool = rayon::ThreadPoolBuilder::new()
-                        .num_threads(threads)
+                        .num_threads(family_threads)
                         .stack_size(8 * 1024 * 1024)
                         .build()
                         .map_err(|error| LoadError::new(error.to_string()))?;
