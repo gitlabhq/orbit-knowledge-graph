@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use super::conditions::{bind_join_conditions, bind_scan_conditions, place_conditions};
+use super::conditions::place_conditions;
 use super::context::PlanningContext;
 use crate::error::Result;
 use crate::input::*;
@@ -214,7 +214,7 @@ where
     let mut nodes = build_node_plans(input, model);
     let denormalized = super::denormalized_facts(input, model);
     let placement = place_conditions(input, model, &hops, &nodes, &denormalized)?;
-    bind_scan_conditions(&context, &mut nodes, &placement)?;
+    context.bind_scan_conditions(&mut nodes, &placement)?;
 
     let (mut hops, elided_fks) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input, model)
@@ -270,7 +270,7 @@ where
     } else {
         super::flat::plan(&context)?
     };
-    let conditions = bind_join_conditions(&context, &execution.bindings, &placement)?;
+    let conditions = context.bind_join_conditions(&execution.bindings, &placement)?;
     execution.source = execution.source.filter(conditions);
     if !context.hops.is_empty() {
         context.node_edge_mappings = execution

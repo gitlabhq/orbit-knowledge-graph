@@ -12,6 +12,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{BooleanExpression, Condition, Input, PredicateTarget};
 use query_data_model::OrbitQueryModel;
 
+#[derive(Default)]
 pub(super) struct Placement {
     pub after_joins: Vec<bool>,
     pub joined_nodes: HashSet<String>,
@@ -24,10 +25,7 @@ pub(super) fn place_conditions(
     nodes: &HashMap<String, NodePlan>,
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> Result<Placement> {
-    let mut placement = Placement {
-        after_joins: Vec::new(),
-        joined_nodes: HashSet::new(),
-    };
+    let mut placement = Placement::default();
     for root in &input.predicates {
         let mut untagged = HashSet::new();
         for condition in root.leaves() {
@@ -56,43 +54,6 @@ pub(super) fn place_conditions(
             .extend(scan.map(str::to_string).into_iter().chain(untagged));
     }
     Ok(placement)
-}
-
-pub(super) fn bind_scan_conditions<M: OrbitQueryModel + ?Sized>(
-    context: &PlanningContext<'_, M>,
-    nodes: &mut HashMap<String, NodePlan>,
-    placement: &Placement,
-) -> Result<()> {
-    for (root, after_joins) in context.input.predicates.iter().zip(&placement.after_joins) {
-        if let Some(alias) = root.local_node()
-            && !after_joins
-        {
-            let predicate = bind_tree(root, context, None)?;
-            nodes
-                .get_mut(alias)
-                .ok_or_else(|| {
-                    QueryError::PipelineInvariant(format!("node '{alias}' has no plan"))
-                })?
-                .predicates
-                .push(predicate);
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn bind_join_conditions<M: OrbitQueryModel + ?Sized>(
-    context: &PlanningContext<'_, M>,
-    bindings: &[BindingSource],
-    placement: &Placement,
-) -> Result<Vec<Predicate>> {
-    context
-        .input
-        .predicates
-        .iter()
-        .zip(&placement.after_joins)
-        .filter(|(_, after_joins)| **after_joins)
-        .map(|(root, _)| bind_tree(root, context, Some(bindings)))
-        .collect()
 }
 
 fn edge_tag(
@@ -154,49 +115,87 @@ fn bind_leaf(
     ))
 }
 
-fn bind_tree<M: OrbitQueryModel + ?Sized>(
-    root: &BooleanExpression<Condition>,
-    context: &PlanningContext<'_, M>,
-    bindings: Option<&[BindingSource]>,
-) -> Result<Predicate> {
-    let expression = root
-        .clone()
-        .try_map(&mut |condition| bind_condition(condition, context, bindings).map(Box::new))?;
-    Ok(match expression {
-        BooleanExpression::Leaf(predicate) => *predicate,
-        expression => Predicate::Boolean(expression),
-    })
-}
+impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
+    pub(super) fn bind_scan_conditions(
+        &self,
+        nodes: &mut HashMap<String, NodePlan>,
+        placement: &Placement,
+    ) -> Result<()> {
+        for (root, after_joins) in self.input.predicates.iter().zip(&placement.after_joins) {
+            if let Some(alias) = root.local_node()
+                && !after_joins
+            {
+                let predicate = self.bind_tree(root, None)?;
+                nodes
+                    .get_mut(alias)
+                    .ok_or_else(|| {
+                        QueryError::PipelineInvariant(format!("node '{alias}' has no plan"))
+                    })?
+                    .predicates
+                    .push(predicate);
+            }
+        }
+        Ok(())
+    }
 
-fn bind_condition<M: OrbitQueryModel + ?Sized>(
-    condition: Condition,
-    context: &PlanningContext<'_, M>,
-    bindings: Option<&[BindingSource]>,
-) -> Result<Predicate> {
-    let node = matches!(condition.target, PredicateTarget::Node(_));
-    let (column, mut bound) = bind_leaf(condition, context.input, context.model, &context.hops)?;
-    if node
-        && bindings.is_some()
-        && let Some(tag) = edge_tag(&column.source, &bound, &context.hops, &context.denormalized)
-    {
-        return Ok(match resolve_column(bindings, column) {
-            Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
-                BooleanExpression::Leaf(Box::new(bound.at(column))),
-                BooleanExpression::Leaf(Box::new(tag)),
-            ])),
-            Err(_) => tag,
-        });
+    pub(super) fn bind_join_conditions(
+        &self,
+        bindings: &[BindingSource],
+        placement: &Placement,
+    ) -> Result<Vec<Predicate>> {
+        self.input
+            .predicates
+            .iter()
+            .zip(&placement.after_joins)
+            .filter(|(_, after_joins)| **after_joins)
+            .map(|(root, _)| self.bind_tree(root, Some(bindings)))
+            .collect()
     }
-    let column = if node {
-        resolve_column(bindings, column)?
-    } else {
-        column
-    };
-    if let Some((alias, property)) = &bound.filter.rhs_column {
-        let rhs = resolve_column(bindings, Column::new(alias, property))?;
-        bound.filter.rhs_column = Some((rhs.source, rhs.name));
+
+    fn bind_tree(
+        &self,
+        root: &BooleanExpression<Condition>,
+        bindings: Option<&[BindingSource]>,
+    ) -> Result<Predicate> {
+        let expression = root
+            .clone()
+            .try_map(&mut |condition| self.bind_condition(condition, bindings).map(Box::new))?;
+        Ok(match expression {
+            BooleanExpression::Leaf(predicate) => *predicate,
+            expression => Predicate::Boolean(expression),
+        })
     }
-    Ok(bound.at(column))
+
+    fn bind_condition(
+        &self,
+        condition: Condition,
+        bindings: Option<&[BindingSource]>,
+    ) -> Result<Predicate> {
+        let node = matches!(condition.target, PredicateTarget::Node(_));
+        let (column, mut bound) = bind_leaf(condition, self.input, self.model, &self.hops)?;
+        if node
+            && bindings.is_some()
+            && let Some(tag) = edge_tag(&column.source, &bound, &self.hops, &self.denormalized)
+        {
+            return Ok(match resolve_column(bindings, column) {
+                Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
+                    BooleanExpression::Leaf(Box::new(bound.at(column))),
+                    BooleanExpression::Leaf(Box::new(tag)),
+                ])),
+                Err(_) => tag,
+            });
+        }
+        let column = if node {
+            resolve_column(bindings, column)?
+        } else {
+            column
+        };
+        if let Some((alias, property)) = &bound.filter.rhs_column {
+            let rhs = resolve_column(bindings, Column::new(alias, property))?;
+            bound.filter.rhs_column = Some((rhs.source, rhs.name));
+        }
+        Ok(bound.at(column))
+    }
 }
 
 fn resolve_column(bindings: Option<&[BindingSource]>, column: Column) -> Result<Column> {
