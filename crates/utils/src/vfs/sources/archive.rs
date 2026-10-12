@@ -38,8 +38,10 @@ impl<R: Read> Source for Archive<R> {
                 continue;
             }
             let entry_path = entry.path_bytes().into_owned();
-            let entry_path = std::str::from_utf8(&entry_path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let Ok(entry_path) = std::str::from_utf8(&entry_path) else {
+                warn!(path = %String::from_utf8_lossy(&entry_path), "skipping archive entry with a non-UTF-8 path");
+                continue;
+            };
             let Some(path) = relative_path(entry_path, &mut root)? else {
                 continue;
             };
@@ -56,8 +58,10 @@ impl<R: Read> Source for Archive<R> {
                             "archive link has no target",
                         )
                     })?;
-                let target = std::str::from_utf8(&target)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let Ok(target) = std::str::from_utf8(&target) else {
+                    warn!(path, "skipping archive link with a non-UTF-8 target");
+                    continue;
+                };
                 let target = if kind == EntryType::Link {
                     let relative = relative_path(target, &mut root)?
                         .ok_or_else(|| std::io::Error::other("archive hard link outside root"))?;
@@ -229,6 +233,36 @@ mod tests {
             vfs.stat("project-main").unwrap_err().kind(),
             ErrorKind::NotFound
         );
+    }
+
+    #[test]
+    fn skips_entries_with_non_utf8_paths_or_link_targets() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = |bytes: &'static [u8]| std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
+        let mut builder = tar::Builder::new(Vec::new());
+        builder
+            .append_data(
+                &mut header(3, EntryType::Regular),
+                "project-main/ok.py",
+                &b"ok\n"[..],
+            )
+            .unwrap();
+        builder
+            .append_data(
+                &mut header(5, EntryType::Regular),
+                raw(b"project-main/caf\xe9.py"),
+                &b"cafe\n"[..],
+            )
+            .unwrap();
+        builder
+            .append_link(
+                &mut header(0, EntryType::Symlink),
+                "project-main/link.py",
+                raw(b"caf\xe9.py"),
+            )
+            .unwrap();
+        let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
+        assert_eq!(paths(&vfs), ["ok.py"]);
     }
 
     // crates/utils/src/archive.rs::tests::skips_pax_global_and_per_file_headers
