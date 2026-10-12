@@ -218,17 +218,18 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
                 })?
                 .property(property)
         };
-        for jp in &input.join_predicates {
-            let pred = sql::comparison(
-                column(&jp.lhs_node, &jp.lhs_prop)?,
-                jp.op,
-                column(&jp.rhs_node, &jp.rhs_prop)?,
-            )?;
-            q.where_clause = Some(match q.where_clause.take() {
-                Some(existing) => Expr::and(existing, pred),
-                None => pred,
-            });
-        }
+        let predicates = input
+            .join_predicates
+            .iter()
+            .map(|jp| {
+                sql::comparison(
+                    column(&jp.lhs_node, &jp.lhs_prop)?,
+                    jp.op,
+                    column(&jp.rhs_node, &jp.rhs_prop)?,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        q.where_clause = Expr::and_all([q.where_clause.take(), Expr::conjoin(predicates)]);
     }
 
     let edges = plan

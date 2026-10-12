@@ -1,0 +1,60 @@
+name: A non-adjacent branch inherits its parent's upstream cascade
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1]},
+        {"id": "b", "entity": "Definition"},
+        {"id": "c", "entity": "Definition"},
+        {"id": "d", "entity": "Definition"},
+        {"id": "e", "entity": "Definition"}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"},
+        {"type": "CALLS", "from": "b", "to": "d"},
+        {"type": "CALLS", "from": "c", "to": "e"}
+      ]
+    }
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
+          (b)-[:CALLS]->(d:Definition), (c)-[:CALLS]->(e:Definition)
+    RETURN a, b, c, d, e
+logical:
+  expect:
+    - (EdgeScan CALLS a->b AS e0)
+    - (EdgeScan CALLS b->c AS e1)
+    - (EdgeScan CALLS b->d AS e2)
+    - (EdgeScan CALLS c->e AS e3)
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON e1.target_id = e3.source_id (_) (_))
+        - |
+          (SemiJoin e3.source_id IN subquery (_)
+            (Project e1p.target_id AS target_id
+              (SemiJoin e1p.source_id IN subquery
+                (Filter ... (Scan Table(gl_code_edge) AS e1p))
+                (Project e0p.target_id AS target_id
+                  (Filter e0p.source_id = 1, ... (Scan Table(gl_code_edge) AS e0p))))))
+    emitted:
+      expect:
+        - |
+          (SemiJoin e3.source_id IN subquery (_)
+            (Project e1p.target_id AS target_id
+              (SemiJoin e1p.source_id IN subquery
+                (Filter ... (Scan Table(gl_code_edge) AS e1p))
+                (Project e0p.target_id AS target_id
+                  (Filter e0p.source_id = 1, ... (Scan Table(gl_code_edge) AS e0p))))))
+  duckdb:
+    planned:
+      expect:
+        - (Join ON e1.target_id = e3.source_id (_) (_))
+        - |
+          (SemiJoin e3.source_id IN subquery (_)
+            (Project e1p.target_id AS target_id
+              (SemiJoin e1p.source_id IN subquery (_)
+                (Project e0p.target_id AS target_id
+                  (Filter e0p.source_id = 1, ... (_))))))

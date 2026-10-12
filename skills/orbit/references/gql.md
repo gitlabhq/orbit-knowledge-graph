@@ -48,6 +48,13 @@ center node, and a shortest path needs both endpoints bounded.
 
 ## Predicates
 
+Use at most 16 predicates per query, across all MATCH clauses. Count each
+inline property, WHERE comparison, and relationship filter, including repeats.
+An ID selector or IN list counts as one predicate; an ID range counts as two.
+Relationship patterns do not count. Existing list-size limits still apply.
+If the query exceeds the limit, remove redundant conditions or simplify it.
+Adding another MATCH clause does not reset the count.
+
 `WHERE` combines predicates with `AND`. Supported forms:
 
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`.
