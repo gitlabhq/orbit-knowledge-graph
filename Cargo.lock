@@ -3935,6 +3935,7 @@ dependencies = [
  "clickhouse",
  "clickhouse-client",
  "code-graph",
+ "code-graph-incremental",
  "datafusion",
  "flate2",
  "futures",

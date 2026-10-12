@@ -18,6 +18,81 @@ use super::helpers::*;
 use orbit_utils::traversal_path::TraversalPath;
 
 #[tokio::test]
+async fn incremental_flag_indexes_archives_and_replaces_stale_definitions() {
+    use orbit_server_config::features::{Feature, FeatureScope, FeaturesConfig};
+    orbit_server_config::features::init(FeaturesConfig::from_iter([(
+        Feature::CodeGraphIncremental,
+        FeatureScope {
+            enabled: true,
+            namespaces: vec![2790],
+        },
+    )]));
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    let project = 2790;
+    let traversal = "1/2790/";
+    mock.add_project(
+        project,
+        "main",
+        &[
+            ("src/main.py", "from helper import greet\ngreet()\n"),
+            ("src/helper.py", "def greet():\n    pass\n"),
+            ("web/a.ts", "export function hello() {}\n"),
+            ("web/b.js", "import { hello } from './a';\nhello();\n"),
+            ("README.md", "readme"),
+            ("logo.png", "image"),
+        ],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(&handler, &clickhouse, project, "first", 1, traversal).await;
+    assert_code_indexed(&clickhouse, project).await;
+    for (kind, source, target, count) in [
+        ("IN_PROJECT", "Branch", "Project", 1),
+        ("CONTAINS", "Project", "Branch", 1),
+        ("CONTAINS", "Branch", "Directory", 2),
+        ("ON_BRANCH", "File", "Branch", 6),
+    ] {
+        assert_edge_count_for_traversal_path(
+            &clickhouse,
+            kind,
+            source,
+            target,
+            &TraversalPath::new_unchecked(traversal),
+            count,
+        )
+        .await;
+    }
+    let files = active_file_rows(&clickhouse, project).await;
+    assert_eq!(files.len(), 6);
+    assert_eq!(
+        files
+            .iter()
+            .map(|row| &row.0)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        6
+    );
+    assert_eq!(std::fs::read_dir(deps.cache_dir_path()).unwrap().count(), 0);
+    assert_contains_edge_between_directory_and_file(&clickhouse, project, "web", "web/a.ts").await;
+    mock.add_project(
+        project,
+        "main",
+        &[("replacement.py", "def replacement():\n    pass\n")],
+    );
+    index_code(&handler, &clickhouse, project, "second", 2, traversal).await;
+    let files = active_file_rows(&clickhouse, project).await;
+    assert_eq!(
+        files.iter().map(|row| row.0.as_str()).collect::<Vec<_>>(),
+        ["replacement.py"]
+    );
+}
+
+#[tokio::test]
 async fn indexes_repository() {
     let project_id: i64 = 1;
     let commit_sha = "abc123";
