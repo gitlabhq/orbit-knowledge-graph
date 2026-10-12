@@ -173,13 +173,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     tf.apply_sym(t, lang, src, edge_ctx)
                 }
             };
-            let pos_src = match text {
-                Text::From(slot, _) => caps[*slot as usize].first(),
-                _ => caps[0].first(),
-            }
-            .copied()
-            .unwrap_or(t.root);
-            let src = *t.node(pos_src);
+            let src = *t.node(pl.target);
             let at = t.append(
                 parent,
                 Node {

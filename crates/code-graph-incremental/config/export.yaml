@@ -44,11 +44,11 @@ header:
 
 entities:
   Directory:
-    source: __dir
+    source: __dir|__root
     id: { seed: dir, columns: [path] }
     columns:
-      - { name: path, type: Utf8, from: tree_path("/") }
-      - { name: name, type: Utf8 }
+      - { name: path, type: Utf8, from: tree_path("/")|default(".") }
+      - { name: name, type: Utf8, from: default(".") }
 
   File:
     source: __source_file

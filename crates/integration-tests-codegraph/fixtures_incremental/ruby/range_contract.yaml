@@ -1,0 +1,30 @@
+name: "Ruby range contract: bytes 0-indexed, lines and chars 1-indexed"
+
+fixtures:
+  - path: lib/user.rb
+    content: |
+      class User
+        def name
+          "u"
+        end
+      end
+
+tests:
+  - name: Ruby class starts at `class` keyword on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/user.rb' AND d.name = 'User'
+        AND d.definition_type = 'Class'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }
+
+  - name: Ruby method is 1-indexed start and end
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/user.rb' AND d.name = 'name'
+      RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 2, el: 4, sc: 3, ec: 6, sb: 13 } }
