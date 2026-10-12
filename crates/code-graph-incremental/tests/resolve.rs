@@ -77,6 +77,87 @@ fn pair(a: &str, b: &str) -> (String, String) {
 }
 
 #[test]
+fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("utils.py", UTILS), ("main.py", MAIN)]);
+    let mut env = python_env(Limits::UNLIMITED);
+    let (baseline, _) = resolve_repo(&env, repo.path());
+    let expected = cross_file(&env, &baseline.state, EdgeKind::Calls);
+    assert!(!expected.is_empty());
+    env.limits.cross_file_resolve_ms = 0;
+    let empty_changes = || Changes {
+        changed: common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        removed: vec![],
+    };
+    let (context, degraded) =
+        templates::reindex(Context::new(&env), baseline.state, empty_changes())
+            .unwrap()
+            .finish();
+    assert_eq!(context.report.skipped.len(), 1);
+    assert_eq!(context.report.skipped[0].label, "resolve");
+    assert!(!context.report.skipped[0].cancelled);
+    assert_eq!(degraded.state.trees.len(), 2);
+    assert!(!degraded.state.edges.is_empty());
+    assert!(
+        degraded
+            .state
+            .edges
+            .iter()
+            .all(|edge| edge.from_tree == edge.to_tree)
+    );
+    env.limits.cross_file_resolve_ms = u64::MAX;
+    let (context, recovered) =
+        templates::reindex(Context::new(&env), degraded.state, empty_changes())
+            .unwrap()
+            .finish();
+    assert!(context.report.skipped.is_empty());
+    assert_eq!(
+        cross_file(&env, &recovered.state, EdgeKind::Calls),
+        expected
+    );
+}
+
+#[test]
+fn resolve_cancellation_and_run_deadline_remain_fatal() {
+    use code_graph_incremental::pipeline::{
+        Canonicalize, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare, Resolve,
+    };
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
+    let env = python_env(Limits::UNLIMITED);
+    for cancelled in [false, true] {
+        let (mut context, graph) = Pipeline::new(Context::new(&env), common::walk(repo.path()))
+            .then(Prepare)
+            .unwrap()
+            .then(Each(
+                Parse
+                    .pipe(code_graph_incremental::pipeline::Rewrite)
+                    .pipe(Canonicalize)
+                    .pipe(Link),
+            ))
+            .unwrap()
+            .then(Insert)
+            .unwrap()
+            .finish();
+        context.run = code_graph_incremental::sentinel::Sentinel::new(
+            "run",
+            "",
+            if cancelled { u64::MAX } else { 0 },
+        )
+        .with_cancellation(std::sync::Arc::new(move || cancelled));
+        let error = Pipeline::new(context, graph)
+            .then(Resolve)
+            .err()
+            .expect("run termination must fail");
+        assert!(
+            error
+                .to_string()
+                .contains(if cancelled { "cancelled" } else { "budget" })
+        );
+    }
+}
+
+#[test]
 fn imports_and_calls_resolve_across_files() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("utils.py", UTILS), ("main.py", MAIN)]);
