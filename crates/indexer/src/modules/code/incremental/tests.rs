@@ -339,6 +339,14 @@ async fn loading_retains_filtered_metadata_and_spills_at_the_memory_limit() {
 }
 
 #[tokio::test]
+async fn default_loading_keeps_no_source_resident() {
+    let archive = build_tar_gz(&[("root/src/main.rs", b"fn main() {}")]);
+    let repository = load(stream(archive), &config()).await.unwrap();
+    assert_eq!(repository.usage().resident, 0);
+    assert_eq!(repository.usage().spilled, 12);
+}
+
+#[tokio::test]
 async fn loading_distinguishes_empty_archives_and_total_byte_limits() {
     let mut config = config();
     config.max_total_bytes = 4;
