@@ -59,15 +59,24 @@ impl std::error::Error for Killed {}
 #[derive(Clone, Copy)]
 enum Clock {
     Wall(Instant),
-    Thread(Duration),
+    Thread(Instant, Duration),
 }
 
 impl Clock {
     fn elapsed(&self) -> Duration {
         match self {
-            Self::Wall(started) => started.elapsed(),
-            Self::Thread(started) => ThreadTime::now().as_duration().saturating_sub(*started),
+            Self::Wall(started) | Self::Thread(started, _) => started.elapsed(),
         }
+    }
+
+    fn over(&self, budget: Duration) -> Option<Duration> {
+        let wall = self.elapsed();
+        let spent = match self {
+            _ if wall <= budget => return None,
+            Self::Wall(_) => wall,
+            Self::Thread(_, cpu) => ThreadTime::now().as_duration().saturating_sub(*cpu),
+        };
+        (spent > budget).then_some(spent)
     }
 }
 
@@ -106,7 +115,7 @@ impl Sentinel {
     }
 
     pub fn on_thread_cpu(mut self) -> Self {
-        self.started = Clock::Thread(ThreadTime::now().as_duration());
+        self.started = Clock::Thread(Instant::now(), ThreadTime::now().as_duration());
         self
     }
 
@@ -120,14 +129,14 @@ impl Sentinel {
 
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
-        let elapsed = self.started.elapsed();
+        let over = self.started.over(self.budget);
         let cancelled = self.cancelled.as_ref().is_some_and(|cancelled| cancelled());
-        if elapsed > self.budget || cancelled {
+        if over.is_some() || cancelled {
             return Err(Killed {
                 cancelled,
                 label: self.label,
                 path: self.path.clone(),
-                elapsed,
+                elapsed: over.unwrap_or_else(|| self.started.elapsed()),
                 budget: self.budget,
             });
         }
