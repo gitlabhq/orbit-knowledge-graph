@@ -121,6 +121,13 @@ pub(in crate::modules::code) fn run(
                     }
                     .into(),
                 ],
+                error @ Error::Panic { .. } => vec![
+                    CodeGraphError::Internal {
+                        context: "panic".into(),
+                        message: error.to_string(),
+                    }
+                    .into(),
+                ],
                 error => vec![
                     CodeGraphError::ArrowConversion {
                         message: error.to_string(),

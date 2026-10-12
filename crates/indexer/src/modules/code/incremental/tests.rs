@@ -236,6 +236,25 @@ async fn tables_over_the_batch_byte_budget_index_the_same_rows() {
 }
 
 #[tokio::test]
+async fn a_family_panic_is_a_fatal_error() {
+    let report = IndexFixture::new()
+        .run(
+            &[("root/file.py", b"def f(): pass")],
+            options(),
+            Arc::new(|_, _| panic!("sink panicked")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.errors.len(), 1);
+    assert!(report.errors[0].fatal);
+    assert!(
+        report.errors[0].to_string().contains("panic"),
+        "{}",
+        report.errors[0]
+    );
+}
+
+#[tokio::test]
 async fn cancelled_run_emits_no_batches_and_no_errors() {
     let mut options = options();
     options.cancelled = Arc::new(|| true);
