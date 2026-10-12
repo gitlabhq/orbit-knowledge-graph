@@ -131,24 +131,23 @@ pub(in crate::modules::code) fn run(
 const SLOWEST_FILES: usize = 100;
 
 fn file_timings(sizes: &HashMap<String, u64>, timings: &[FileTiming]) -> Vec<FileTimingEntry> {
-    let mut by_path: HashMap<&str, (f64, f64, f64)> = HashMap::new();
+    let mut by_path: HashMap<&str, (f64, f64)> = HashMap::new();
     for timing in timings {
         let ms = timing.elapsed.as_secs_f64() * 1000.0;
-        let (parse, build, resolve) = by_path.entry(&timing.path).or_default();
+        let (parse, resolve) = by_path.entry(&timing.path).or_default();
         match timing.phase.as_str() {
-            "parse" => *parse += ms,
             "resolve" => *resolve += ms,
-            _ => *build += ms,
+            _ => *parse += ms,
         }
     }
     let mut files: Vec<_> = by_path
         .into_iter()
-        .map(|(path, (parse_ms, build_ms, resolve_ms))| FileTimingEntry {
+        .map(|(path, (parse_ms, resolve_ms))| FileTimingEntry {
             path: path.to_owned(),
             size_bytes: sizes.get(path).copied().unwrap_or(0),
             parse_ms,
             resolve_ms,
-            total_ms: parse_ms + build_ms + resolve_ms,
+            total_ms: parse_ms + resolve_ms,
             language: super::super::metrics::file_language(path),
         })
         .collect();
@@ -169,7 +168,6 @@ fn language_timings(files: &[FileTimingEntry]) -> Vec<LanguageTimings> {
         timing.total_bytes += file.size_bytes;
         timing.parse_ms += file.parse_ms;
         timing.resolve_ms += file.resolve_ms;
-        timing.graph_build_ms += file.total_ms - file.parse_ms - file.resolve_ms;
         timing.total_ms += file.total_ms;
     }
     let mut timings: Vec<_> = by_language.into_values().collect();

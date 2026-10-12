@@ -226,6 +226,13 @@ async fn reports_file_and_language_timings() {
         .collect();
     assert!(languages.contains(&("python", 2, 55)), "{languages:?}");
     assert!(languages.contains(&("type_script", 1, 27)), "{languages:?}");
+    assert!(
+        report
+            .stats
+            .language_timings
+            .iter()
+            .all(|timing| timing.parse_ms > 0.0)
+    );
 }
 
 #[tokio::test]
