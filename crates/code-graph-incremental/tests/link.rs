@@ -31,7 +31,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 
 fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
     let sources = common::walk(root);
-    Pipeline::new(Context::new(env), sources)
+    Pipeline::new(Context::new(env, sources), ())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))

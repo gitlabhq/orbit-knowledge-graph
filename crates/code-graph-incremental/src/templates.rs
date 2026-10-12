@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::pipeline::{
-    Canonicalize, Changes, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline,
-    Prepare, ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, Sources, State,
+    Canonicalize, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
+    ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, State,
 };
 use crate::sentinel::Sentinel;
 use crate::treesitter::SupportLang;
@@ -20,8 +20,8 @@ pub struct Options {
 
 const SMALL_FAMILY_FILES: usize = 650;
 
-pub fn index<'e>(context: Context<'e>, sources: Sources) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, sources)
+pub fn index<'e>(context: Context<'e>) -> Result<Pipeline<'e, Resolved>, Error> {
+    Pipeline::new(context, ())
         .then(Prepare)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
@@ -31,9 +31,9 @@ pub fn index<'e>(context: Context<'e>, sources: Sources) -> Result<Pipeline<'e, 
 pub fn reindex<'e>(
     context: Context<'e>,
     state: State,
-    changes: Changes,
+    removed: Vec<String>,
 ) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, ReindexInput { state, changes })
+    Pipeline::new(context, ReindexInput { state, removed })
         .then(Remap)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
@@ -137,9 +137,9 @@ pub fn repository<E: std::fmt::Display>(
                         .map_err(|error| LoadError::new(error.to_string()))?;
                     let mut env = Env::with_limits(language, limits)?;
                     env.export_config = export_config.clone();
-                    let mut context = Context::new(&env);
+                    let mut context = Context::new(&env, repository.clone());
                     context.run = run.clone();
-                    let pipeline = pool.install(|| index(context, repository.clone()))?;
+                    let pipeline = pool.install(|| index(context))?;
                     let (context, graph) = pipeline.then(Display)?.finish();
                     let mut report = context.report;
                     report.unread_files.retain(|path| owns(family, path));

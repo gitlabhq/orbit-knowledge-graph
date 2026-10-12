@@ -17,7 +17,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 
 fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
     let sources = common::walk(root);
-    Pipeline::new(Context::new(env), sources)
+    Pipeline::new(Context::new(env, sources), ())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse))
@@ -61,7 +61,7 @@ fn unread_sources_and_manifests_remain_in_the_graph_and_report() {
         std::fs::remove_file(root.path().join(path)).unwrap();
     }
     let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
-    let (context, graph) = templates::index(Context::new(&env), repository)
+    let (context, graph) = templates::index(Context::new(&env, repository))
         .unwrap()
         .finish();
     assert_eq!(context.report.unread_files, ["main.ts", "package.json"]);
