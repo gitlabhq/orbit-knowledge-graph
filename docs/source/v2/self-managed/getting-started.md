@@ -9,27 +9,24 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 {{< details >}}
 
 - Tier: Premium, Ultimate
+- Add-on: GitLab Orbit
 - Offering: GitLab Self-Managed
-- Status: Beta
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
-
-GitLab Orbit depends on three systems that it does not install: ClickHouse, Kubernetes, and NATS.
-The remaining setup steps require all three systems to exist and be reachable.
-
 ## Prerequisites
 
+GitLab Orbit does not install ClickHouse, Kubernetes, or NATS. They must exist and be reachable first.
+
+<!-- TODO(GA): confirm the minimum GitLab version at GA. -->
 - GitLab 19.2.2 or later.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
@@ -39,7 +36,7 @@ The remaining setup steps require all three systems to exist and be reachable.
 
 ## Installation order
 
-Each step depends on the step before it. Install the components in this order:
+Each step depends on the step before it:
 
 1. Set up ClickHouse for GitLab and run the GitLab ClickHouse migrations.
 1. Install NATS on the cluster with JetStream turned on.
@@ -52,17 +49,13 @@ Steps 1 to 3 do not depend on GitLab Orbit. You can verify each one on its own.
 
 ## ClickHouse
 
-GitLab Orbit requires ClickHouse 26.2 or later, because the graph uses full-text indexes and materialized
-common table expressions introduced in that release. GitLab supports any 25.x or 26.x release, so a 25.x
-release serves the rest of GitLab but not GitLab Orbit. All other GitLab requirements for ClickHouse are
-unchanged.
+GitLab Orbit requires ClickHouse 26.2 or later for full-text indexes and materialized common table expressions.
+The rest of GitLab also runs on 25.x releases, so check the version even if ClickHouse already serves GitLab.
 
-Set up ClickHouse for GitLab first. For more information, see
-[ClickHouse](https://docs.gitlab.com/integration/clickhouse/). Complete every step on that page, including
+[Set up ClickHouse for GitLab](https://docs.gitlab.com/integration/clickhouse/) first, including
 [Run ClickHouse migrations](https://docs.gitlab.com/integration/clickhouse/#run-clickhouse-migrations) and
 [Enable ClickHouse for analytics](https://docs.gitlab.com/integration/clickhouse/#enable-clickhouse-for-analytics).
-Those migrations create the data lake tables that replication writes into. Without these tables, Siphon has
-no target to write to and replication fails.
+The migrations create the data lake tables that Siphon writes into. Without them, replication fails.
 
 GitLab Orbit uses two databases:
 
@@ -71,18 +64,15 @@ GitLab Orbit uses two databases:
 | `gitlab_clickhouse_main_production` | GitLab, Siphon | GitLab, the GitLab Orbit indexer and dispatcher |
 | `orbit` | The GitLab Orbit dispatcher (schema) and indexer (data) | All three GitLab Orbit components |
 
-The two databases can be on separate ClickHouse instances. If they are, give GitLab, Siphon, and
-GitLab Orbit credentials for the instance that holds the database each one uses.
-
-The `gitlab_clickhouse_main_production` database exists after ClickHouse setup is complete. You create the
-`orbit` database when you set up GitLab Orbit. GitLab Orbit does not create it at startup.
+The data lake database exists after ClickHouse setup. You create the `orbit` database in
+[Set up GitLab Orbit](orbit-setup.md#create-the-clickhouse-database-and-identities).
+The two databases can be on separate ClickHouse instances. Give each component credentials for the instance
+that holds the database it uses.
 
 ### High availability
 
-GitLab Orbit can run on a ClickHouse cluster with several replicas behind one load balancer.
-The cluster needs ClickHouse Keeper with a quorum of three nodes and at least two ClickHouse replicas.
-An HTTP load balancer sits in front of the replicas.
-For the ClickHouse side, see
+GitLab Orbit can run on a ClickHouse cluster with ClickHouse Keeper (a quorum of three nodes) and
+at least two replicas behind an HTTP load balancer. For the ClickHouse side, see
 [HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
 
 Create both databases with the `Replicated` database engine, on the cluster:
@@ -101,15 +91,14 @@ Then tell each writer that the cluster is replicated:
 | GitLab Orbit | `clickhouse.ha.enabled: true` in the Helm values. When only one database sits on the cluster, set `replicated: true` on that connection instead. |
 
 With the switch on, GitLab Orbit creates `Replicated*MergeTree` tables, writes with a majority quorum, reads
-with sequential consistency, and retries the transient quorum and Keeper errors.
+with sequential consistency, and retries transient quorum and Keeper errors.
 One replica can leave the cluster while indexing and queries continue.
 Leave the switch off on a single node and on ClickHouse Cloud.
 
 ClickHouse 26.7 and later reject the GitLab migrations that create `AggregatingMergeTree` tables with
-columns outside the sorting key.
-Until [issue 627691](https://gitlab.com/gitlab-org/gitlab/-/work_items/627691) updates those migrations,
-set `allow_dimensions_outside_sorting_key` to `1` in the server `merge_tree` settings before you run the
-GitLab migrations on those releases:
+columns outside the sorting key. Until [issue 627691](https://gitlab.com/gitlab-org/gitlab/-/work_items/627691)
+updates those migrations, set `allow_dimensions_outside_sorting_key` in the server `merge_tree` settings
+before you run the GitLab migrations on those releases:
 
 ```xml
 <merge_tree>
@@ -119,59 +108,51 @@ GitLab migrations on those releases:
 
 ### Sizing and settings
 
-Provision at least 8 CPU and 32 GiB of memory for ClickHouse. ClickHouse saturates 8 cores while the graph
-builds.
+- CPU and memory: at least 8 CPU and 32 GiB. ClickHouse saturates 8 cores while the graph builds.
+- Storage: at least the size of the GitLab PostgreSQL database.
+- Spilling to disk: a ClickHouse instance that you run yourself sets `max_bytes_before_external_sort` and
+  `max_bytes_before_external_group_by` to `0`, so a large sort holds its whole result in memory and the
+  server runs out of memory. ClickHouse Cloud sets both to half of available memory.
+  Set both in the `default` profile. These values suit a 32 GiB instance, with 8 GiB for each threshold
+  and 20 GiB for the memory ceiling:
 
-Provision at least as much ClickHouse storage as the size of the GitLab PostgreSQL database.
-
-A ClickHouse instance you run yourself sets `max_bytes_before_external_sort` and
-`max_bytes_before_external_group_by` to `0`, which turns off spilling to disk. ClickHouse Cloud sets both to
-half of available memory. Without spilling, a large sort holds the whole result in memory and the server
-runs out of memory. Set both in the `default` profile. The following values suit a 32 GiB instance, with
-8 GiB for each threshold and 20 GiB for the memory ceiling:
-
-```xml
-<profiles>
-  <default>
-    <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
-    <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
-    <max_memory_usage>21474836480</max_memory_usage>
-  </default>
-</profiles>
-```
+  ```xml
+  <profiles>
+    <default>
+      <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
+      <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
+      <max_memory_usage>21474836480</max_memory_usage>
+    </default>
+  </profiles>
+  ```
 
 ## Kubernetes
 
-GitLab Orbit requires Kubernetes 1.33 or later, with the `ImageVolume` feature gate turned on and supported
+GitLab Orbit requires Kubernetes 1.33 or later, with the [`ImageVolume` feature gate](https://kubernetes.io/docs/tasks/configure-pod-container/image-volumes/) turned on and supported
 by the container runtime.
 
-GitLab Orbit can run on a separate cluster from GitLab. That cluster must reach GitLab, PostgreSQL,
-ClickHouse, and NATS, and GitLab must reach that cluster.
+On a separate cluster from GitLab, the cluster must reach GitLab, PostgreSQL, ClickHouse, and NATS,
+and GitLab must reach the cluster.
 
 ## NATS
 
-Siphon publishes every changed row to a NATS JetStream stream, and both Siphon and GitLab Orbit read from
-that stream. NATS requires JetStream turned on and a persistent volume.
+Siphon publishes every changed row to a NATS JetStream stream, and both Siphon and GitLab Orbit read from it.
+NATS requires JetStream turned on and a persistent volume.
 
 Set the NATS server `max_payload` to 64 MB. The default of 1 MB is smaller than some GitLab rows. Siphon
 reads the server value to decide when a row is too large to send.
 
 ## Object storage (optional)
 
-Siphon stores snapshot events in an object store, along with any row that is still too large after you
-raise `max_payload`. By default, Siphon uses a NATS JetStream object store bucket, so no additional service
-is required. To keep that traffic off the JetStream volume, or to apply a separate retention policy,
-configure an S3-compatible or Google Cloud Storage bucket instead.
-
-GitLab Orbit uses no object storage. The graph is stored in ClickHouse and can be rebuilt by indexing
-again. The indexer requires node-local disk for repository checkouts. The chart sizes this disk with
-ephemeral storage requests.
+GitLab Orbit uses no object storage. Siphon stores snapshot events, and rows that are too large for the stream,
+in a NATS JetStream object store bucket by default. To keep that traffic off the JetStream volume, or to apply
+a separate retention policy, use an S3-compatible or Google Cloud Storage bucket instead.
+For more information, see [object storage for large rows](data-replication.md#object-storage-for-large-rows).
 
 ## Shared configuration values
 
-Choose each of these values once, and use the same value in every component that reads it. No component
-validates these values against the others. If they do not match, the affected component starts but
-processes no data.
+Use the same value in every component that reads it. No component checks these values against the others.
+If they do not match, the affected component starts but processes no data.
 
 | Value | Used by | Example |
 |-------|---------|---------|
