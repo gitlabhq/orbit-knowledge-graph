@@ -1616,7 +1616,7 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
 /// Cross-file edges for one file that the import pass cannot produce:
 /// inheritance, decorators, destructuring, and member calls on imported types.
 fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
-    let file = Sentinel::new("resolve", &ctx.trees[fi].label, ctx.file_resolve_ms);
+    let file = Sentinel::new("resolve", &ctx.trees[fi].label, ctx.file_resolve_ms).on_thread_cpu();
     let mut out = Vec::new();
     let root = ctx.corpus.jump(fi as u32, 0);
     let local = |n: Cursor| {

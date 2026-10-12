@@ -3,6 +3,8 @@
 
 use std::time::{Duration, Instant};
 
+use cpu_time::ThreadTime;
+
 use crate::error::LoadError;
 
 #[derive(Clone, Copy, serde::Deserialize)]
@@ -62,10 +64,25 @@ impl std::fmt::Display for Killed {
 
 impl std::error::Error for Killed {}
 
+#[derive(Clone, Copy)]
+enum Clock {
+    Wall(Instant),
+    Thread(Duration),
+}
+
+impl Clock {
+    fn elapsed(&self) -> Duration {
+        match self {
+            Self::Wall(started) => started.elapsed(),
+            Self::Thread(started) => ThreadTime::now().as_duration().saturating_sub(*started),
+        }
+    }
+}
+
 /// `u64::MAX` means no deadline.
 #[derive(Clone)]
 pub struct Sentinel {
-    started: Instant,
+    started: Clock,
     budget: Duration,
     label: &'static str,
     path: String,
@@ -75,7 +92,7 @@ pub struct Sentinel {
 impl Sentinel {
     pub fn new(label: &'static str, path: &str, budget_ms: u64) -> Self {
         Self {
-            started: Instant::now(),
+            started: Clock::Wall(Instant::now()),
             budget: Duration::from_millis(budget_ms),
             label,
             path: path.to_string(),
@@ -94,6 +111,11 @@ impl Sentinel {
             .min(self.budget.saturating_sub(self.started.elapsed()));
         child.cancelled = self.cancelled.clone();
         child
+    }
+
+    pub fn on_thread_cpu(mut self) -> Self {
+        self.started = Clock::Thread(ThreadTime::now().as_duration());
+        self
     }
 
     pub fn with_cancellation(

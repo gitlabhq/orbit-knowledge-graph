@@ -279,7 +279,9 @@ impl ItemPhase<SourceFile> for Parse {
 
     fn run(&self, env: &Env, run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
-        let budget = run.child("tree-sitter", &file.path, env.limits.file_parse_ms);
+        let budget = run
+            .child("tree-sitter", &file.path, env.limits.file_parse_ms)
+            .on_thread_cpu();
         treesitter::parse_with_sentinel(&file.content, grammar, &env.lang, &file.path, &budget)
             .map(Parsed)
     }
@@ -301,7 +303,8 @@ impl ItemPhase<Parsed> for Rewrite {
         run: &Sentinel,
         Parsed(mut tree): Parsed,
     ) -> Result<Rewritten, Killed> {
-        let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
+        let budget =
+            Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms).on_thread_cpu();
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
