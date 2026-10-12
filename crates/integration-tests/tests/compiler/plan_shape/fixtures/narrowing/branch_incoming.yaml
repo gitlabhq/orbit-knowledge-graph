@@ -1,6 +1,6 @@
 name: Incoming branches join and cascade through the shared physical target
 missing_frontends:
-  gql: GQL normalizes incoming edges and selects a different order; the paired incoming query scenario checks equivalent results.
+  gql: GQL supports this query but normalizes arrows to outgoing edges, changing hop order and aliases. The non_adjacent_branch_incoming result scenario covers both frontends.
 query:
   json: |
     {

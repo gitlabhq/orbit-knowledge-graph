@@ -576,3 +576,43 @@ impl TableRef {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boolean_builders_preserve_leaf_order_with_logarithmic_depth() {
+        for count in [0_usize, 1, 3, 16, 1025] {
+            let leaves: Vec<_> = (0..count).map(|index| Expr::int(index as i64)).collect();
+            for (operator, tree) in [
+                (Op::And, Expr::conjoin(leaves.clone())),
+                (
+                    Op::And,
+                    Expr::and_all(leaves.iter().cloned().map(Some).chain([None])),
+                ),
+                (
+                    Op::Or,
+                    Expr::or_all(leaves.iter().cloned().map(Some).chain([None])),
+                ),
+            ] {
+                let mut pending: Vec<_> = tree.as_ref().map(|tree| (tree, 0)).into_iter().collect();
+                let mut actual = Vec::new();
+                let mut depth = 0;
+                while let Some((expression, level)) = pending.pop() {
+                    depth = depth.max(level);
+                    if let Expr::BinaryOp { op, left, right } = expression {
+                        assert_eq!(*op, operator);
+                        pending.push((right, level + 1));
+                        pending.push((left, level + 1));
+                    } else {
+                        actual.push(expression.clone());
+                    }
+                }
+                assert_eq!(actual, leaves);
+                assert_eq!(tree.is_none(), count == 0);
+                assert_eq!(depth, count.next_power_of_two().ilog2());
+            }
+        }
+    }
+}
