@@ -740,6 +740,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     continue;
                 };
                 for filter in filters {
+                    if is_traversal_path_filter {
+                        Self::check_traversal_path_filter(
+                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                            filter,
+                        )?;
+                    }
                     if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
                         let rhs_entity = input
                             .nodes
@@ -764,12 +770,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                             }
                         }
                         continue;
-                    }
-                    if is_traversal_path_filter {
-                        Self::check_traversal_path_filter(
-                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                            filter,
-                        )?;
                     }
                     self.check_one_filter(entity, prop, filter, data_type)?;
                 }
