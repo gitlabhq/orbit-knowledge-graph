@@ -583,10 +583,12 @@ fn expand(
     per_file: Vec<Vec<Edge>>,
     cross_edges: &mut Vec<Edge>,
 ) -> Result<(), Killed> {
-    ctx.run.check()?;
+    let deadline = ctx.run.check();
     let wave1: Vec<Edge> = reqs
         .par_iter()
-        .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+        .filter(|r| {
+            deadline.is_ok() && (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+        })
         .flat_map(|req| resolve_one_import(ctx, req))
         .chain(per_file.into_par_iter().flatten())
         .filter(|e| {
@@ -600,6 +602,7 @@ fn expand(
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
     cross_edges.extend(&wave1);
+    deadline?;
     ctx.run.check()?;
 
     // Wildcard references come from the linker and from wave 1's unbound
@@ -654,7 +657,6 @@ fn expand(
         .filter(|e| e.kind == EdgeKind::Calls)
         .map(call_key)
         .collect();
-    let mut type_edges: Vec<Edge> = Vec::new();
     while !wave.is_empty() {
         ctx.run.check()?;
         wave = wave
@@ -664,9 +666,8 @@ fn expand(
             .into_iter()
             .filter(|e| seen.insert(call_key(e)))
             .collect();
-        type_edges.extend(&wave);
+        cross_edges.extend(&wave);
     }
-    cross_edges.extend(type_edges);
     Ok(())
 }
 
