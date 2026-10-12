@@ -60,6 +60,7 @@ languages:
     fqn_separator: "::"
     package_markers: [package.json]
     index_names: [index]
+    file_budget: watchdog
 
   kotlin:
     extensions: [kt, kts]
@@ -101,6 +102,7 @@ languages:
     grammar: tree-sitter-rust
     fqn_separator: "::"
     index_names: [mod, lib, main]
+    file_budget: watchdog
 
   scala:
     extensions: [scala, sc]
@@ -119,6 +121,7 @@ languages:
     fqn_separator: "::"
     package_markers: [package.json]
     index_names: [index]
+    file_budget: watchdog
 
   tsx:
     extensions: [tsx]
@@ -127,6 +130,7 @@ languages:
     fqn_separator: "::"
     package_markers: [package.json]
     index_names: [index]
+    file_budget: watchdog
 
   zig:
     extensions: [zig]

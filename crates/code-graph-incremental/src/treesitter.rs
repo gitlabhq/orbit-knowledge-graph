@@ -48,6 +48,16 @@ pub struct LangEntry {
     index_names: Vec<String>,
     #[serde(default, rename = "source_root")]
     _source_root: Option<String>,
+    #[serde(default)]
+    file_budget: FileBudget,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileBudget {
+    #[default]
+    Phases,
+    Watchdog,
 }
 
 impl LangEntry {
@@ -164,6 +174,10 @@ impl SupportLang {
             .fqn_separator
             .as_deref()
             .unwrap_or(".")
+    }
+
+    pub fn file_budget(&self) -> FileBudget {
+        LANG_CONFIG.languages[self].file_budget
     }
 
     pub fn index_names(&self) -> &[String] {
