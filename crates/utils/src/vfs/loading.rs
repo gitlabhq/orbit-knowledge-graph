@@ -9,7 +9,6 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
@@ -218,7 +217,7 @@ impl<T: Tag> Loading<T> {
             .into_iter()
             .flat_map(|shard| shard.into_inner().unwrap_or_else(|e| e.into_inner()))
             .collect();
-        entries.par_sort_by(|a, b| a.file.path.cmp(&b.file.path));
+        entries.sort_by(|a, b| a.file.path.cmp(&b.file.path));
         let offered = entries.len();
         entries.dedup_by(|later, earlier| {
             if later.file.path != earlier.file.path {
