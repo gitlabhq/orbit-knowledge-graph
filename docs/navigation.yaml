@@ -1,0 +1,43 @@
+# The GitLab Orbit section of the docs.gitlab.com global navigation.
+# Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
+# scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
+# checkout with this file, so `mise docs:serve` and `docs_hugo_build` show these pages.
+
+- title: GitLab Orbit
+  url: 'orbit/'
+  submenu:
+    - title: Quickstart
+      url: 'orbit/quickstart/'
+      submenu:
+        - title: Start a free trial
+          url: 'orbit/trial/'
+    - title: Use cases
+      url: 'orbit/use-cases/'
+    - title: Connect your agent
+      url: 'orbit/agents/'
+      submenu:
+        - title: GitLab Orbit CLI
+          url: 'orbit/cli/'
+          submenu:
+            - title: GitLab Orbit Local
+              url: 'orbit/local/'
+        - title: GitLab Duo
+          url: 'orbit/agents/duo/'
+        - title: MCP servers
+          url: 'orbit/agents/mcp/'
+    - title: Queries
+      url: 'orbit/queries/'
+      submenu:
+        - title: Cypher query language
+          url: 'orbit/queries/cypher/'
+        - title: REST API
+          url: 'orbit/queries/api/'
+    - title: How it works
+      url: 'orbit/how-it-works/'
+      submenu:
+        - title: What GitLab Orbit indexes
+          url: 'orbit/schema/'
+        - title: Security
+          url: 'orbit/security/'
+    - title: Troubleshooting
+      url: 'orbit/troubleshooting/'
