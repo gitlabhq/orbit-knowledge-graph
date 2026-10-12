@@ -113,6 +113,48 @@ fn concurrent_readers() {
 }
 
 #[test]
+fn search_hook_recognizes_the_separate_manifest() {
+    use std::io::Write;
+
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let invoke = || {
+        let mut child = orbit_cmd()
+            .args(["hook-guard", "search"])
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .env("ORBIT_TELEMETRY_DISABLED", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        writeln!(
+            child.stdin.take().unwrap(),
+            "{}",
+            json!({
+                "cwd": repo.path,
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "hello"}
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        output.stdout
+    };
+    assert!(invoke().is_empty());
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    assert!(!data_dir.path().join("graph.duckdb").exists());
+    let output: Value = serde_json::from_slice(&invoke()).unwrap();
+    assert_eq!(output["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    assert!(
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("orbit")
+    );
+}
+
+#[test]
 fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();

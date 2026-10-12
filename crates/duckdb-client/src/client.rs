@@ -74,9 +74,6 @@ impl DuckDbClient {
         Self::open_once(Path::new(":memory:"), duckdb::AccessMode::ReadWrite)
     }
 
-    /// The DDL is typically generated from the ontology via
-    /// `generate_local_tables` + `emit_duckdb_create_table`, with the
-    /// manifest DDL appended via the `external_ddl` parameter.
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
         self.conn
             .execute_batch(ddl)
@@ -122,8 +119,6 @@ impl DuckDbClient {
         Ok(batches)
     }
 
-    /// In local mode each DB file is one project, so a full truncate is the
-    /// correct reset before re-indexing. The manifest table is preserved.
     pub fn delete_all_data(&self, tables: &[&str]) -> Result<()> {
         for table in tables {
             self.conn

@@ -718,16 +718,14 @@ mod tests {
     #[test]
     fn record_git_info_failure_writes_error_row() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
-        let client = DuckDbClient::open(&db).unwrap();
-        client.initialize_schema(LOCAL_DDL).unwrap();
-        drop(client);
+        let db = tmp.path().join("manifest.duckdb");
 
         let repo = tmp.path().join("unopenable");
         std::fs::create_dir_all(&repo).unwrap();
         record_git_info_failure(&db, &repo, "failed to get current branch");
 
         let client = DuckDbClient::open(&db).unwrap();
+        assert!(!table_exists(&client, "gl_file").unwrap());
         let rows = client
             .query_arrow("SELECT CAST(status AS VARCHAR), error_message FROM _orbit_manifest")
             .unwrap();
