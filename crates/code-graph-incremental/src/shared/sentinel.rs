@@ -36,6 +36,7 @@ impl Limits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Killed {
+    pub cancelled: bool,
     pub label: &'static str,
     pub path: String,
     pub elapsed: Duration,
@@ -44,6 +45,9 @@ pub struct Killed {
 
 impl std::fmt::Display for Killed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.cancelled {
+            return write!(f, "{} cancelled", self.label);
+        }
         let (e, b) = (self.elapsed.as_millis(), self.budget.as_millis());
         match self.path.is_empty() {
             true => write!(f, "{} ran {e}ms against a {b}ms budget", self.label),
@@ -103,8 +107,10 @@ impl Sentinel {
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
         let elapsed = self.started.elapsed();
-        if elapsed > self.budget || self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
+        let cancelled = self.cancelled.as_ref().is_some_and(|cancelled| cancelled());
+        if elapsed > self.budget || cancelled {
             return Err(Killed {
+                cancelled,
                 label: self.label,
                 path: self.path.clone(),
                 elapsed,
