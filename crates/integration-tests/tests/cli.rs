@@ -528,6 +528,34 @@ fn index_db_flag_writes_to_custom_path() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
     );
+    let client = duckdb_client::DuckDbClient::open(&db_path).unwrap();
+    client
+        .execute(
+            "UPDATE _orbit_meta SET value = 'outdated' WHERE key = 'local_ddl'",
+            &[],
+        )
+        .unwrap();
+    drop(client);
+    let before = std::fs::read(&db_path).unwrap();
+    let output = orbit_cmd()
+        .args([
+            "index",
+            repo.path.to_str().unwrap(),
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .env("ORBIT_DATA_DIR", workspace_dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
+    );
+    assert_eq!(
+        std::fs::read(&db_path).unwrap(),
+        before,
+        "ownership rejection must preserve an outdated database"
+    );
 }
 
 #[test]

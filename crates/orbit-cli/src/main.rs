@@ -835,9 +835,9 @@ async fn dispatch(
             file,
             format,
             repo,
-            all,
+            all: _,
             db,
-        }) => sql::run(query, file, format, db, repo, all),
+        }) => sql::run(query, file, format, db, repo),
         Commands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
         Commands::List(ListArgs { format, db }) => list::run(format, db),
         Commands::Mcp(McpArgs {

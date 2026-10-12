@@ -342,10 +342,10 @@ pub(crate) fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<Str
         .next())
 }
 
-fn table_exists(client: &DuckDbClient, name: &str) -> Result<bool> {
+pub(crate) fn table_exists(client: &DuckDbClient, name: &str) -> Result<bool> {
     let batches = client
         .query_arrow_json(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.tables WHERE table_name = ?1",
+            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ?1",
             &[json!(name)],
         )
         .context("failed to query information_schema")?;

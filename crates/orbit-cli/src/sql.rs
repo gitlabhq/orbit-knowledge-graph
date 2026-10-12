@@ -146,7 +146,6 @@ pub fn run(
     format: Format,
     db: Option<PathBuf>,
     repo: Option<PathBuf>,
-    _all: bool,
 ) -> Result<()> {
     let sql = resolve_sql(query_arg.as_deref(), file)?;
     let sql = sql.trim();

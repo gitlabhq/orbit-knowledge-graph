@@ -572,10 +572,9 @@ impl LocalIndexer {
         })?;
         let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
         let _revision_lock = workspace::lock_database(&db_path)?;
-        workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
-        {
-            let client = duckdb_client::DuckDbClient::open(&db_path)?;
-            let revision = format!("{}:{}", git.project_id, git.commit_sha);
+        let revision = format!("{}:{}", git.project_id, git.commit_sha);
+        if db_path.exists() {
+            let client = duckdb_client::DuckDbClient::open_read_only(&db_path)?;
             if let Some(owner) = workspace::stored_meta(&client, "revision")? {
                 anyhow::ensure!(
                     owner == revision,
@@ -583,6 +582,10 @@ impl LocalIndexer {
                     db_path.display()
                 );
             }
+        }
+        workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+        {
+            let client = duckdb_client::DuckDbClient::open(&db_path)?;
             client.execute(
                 "INSERT INTO _orbit_meta (key, value) VALUES ('revision', ?1) ON CONFLICT DO NOTHING",
                 &[revision.into()],
@@ -594,14 +597,13 @@ impl LocalIndexer {
             git.branch,
             git.short_sha()
         );
-        self.record_status(&key, &git, workspace::RepoStatus::Indexing, None, &db_path)?;
+        self.record_status(&git, workspace::RepoStatus::Indexing, None, &db_path)?;
 
         let mut pipeline_config = self.pipeline_config.clone();
         pipeline_config.progress = reporter.repository_started(&git);
         let result =
             index_repo(&git, &db_path, &self.ontology, pipeline_config).inspect_err(|error| {
                 let recorded = self.record_status(
-                    &key,
                     &git,
                     workspace::RepoStatus::Error,
                     Some(&error.to_string()),
@@ -611,7 +613,7 @@ impl LocalIndexer {
                     tracing::warn!("failed to record error status in manifest: {manifest_error}");
                 }
             })?;
-        self.record_status(&key, &git, workspace::RepoStatus::Indexed, None, &db_path)?;
+        self.record_status(&git, workspace::RepoStatus::Indexed, None, &db_path)?;
         Ok(build_index_output(
             &repository_name(&git),
             &key,
@@ -622,7 +624,6 @@ impl LocalIndexer {
 
     fn record_status(
         &self,
-        key: &str,
         git: &GitInfo,
         status: workspace::RepoStatus,
         error: Option<&str>,
@@ -632,7 +633,7 @@ impl LocalIndexer {
         let client = workspace::open_manifest(&self.manifest_path)?;
         workspace::set_status(
             &client,
-            key,
+            &git.repo_path.to_string_lossy(),
             git.project_id,
             status,
             error,

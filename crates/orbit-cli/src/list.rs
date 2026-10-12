@@ -51,22 +51,12 @@ fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
     let _lock = workspace::lock_database(db_path)?;
     let client = duckdb_client::DuckDbClient::open_read_only(db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
-    if !manifest_exists(&client)? {
+    if !workspace::table_exists(&client, "_orbit_manifest")? {
         return Ok(Vec::new());
     }
     client
         .query_arrow(MANIFEST_QUERY)
         .context("failed to read _orbit_manifest")
-}
-
-fn manifest_exists(client: &duckdb_client::DuckDbClient) -> Result<bool> {
-    let batches = client
-        .query_arrow(
-            "SELECT 1 FROM information_schema.tables \
-             WHERE table_schema = 'main' AND table_name = '_orbit_manifest'",
-        )
-        .context("failed to check for _orbit_manifest")?;
-    Ok(batches.iter().any(|b| b.num_rows() > 0))
 }
 
 #[cfg(test)]
