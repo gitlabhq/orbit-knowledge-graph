@@ -1471,6 +1471,40 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
 }
 
 #[test]
+fn orbit_query_caps_reject_during_lowering() {
+    let nodes: Vec<String> = (0..4_000).map(|i| format!("(a{i})")).collect();
+    let properties: Vec<String> = (0..51).map(|i| format!("u.c{i}")).collect();
+    for (query, first_rejected, message) in [
+        (
+            format!("MATCH {} RETURN a0", nodes.join(",")),
+            "(a5)",
+            "a query declares at most 5 nodes",
+        ),
+        (
+            format!("MATCH (u:User) RETURN {}", properties.join(", ")),
+            "u.c50",
+            "a node projects at most 50 properties",
+        ),
+    ] {
+        let column = query.find(first_rejected).unwrap() + 1;
+        let expected = format!("line 1, column {column}: {message}");
+        let error = compiler::passes::frontend::gql::parse(&query).unwrap_err();
+        assert!(
+            matches!(&error, QueryError::Validation(m) if *m == expected),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn orbit_query_rejects_traversal_path_column_comparisons() {
+    let context = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
+    let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
+    assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
+}
+
+#[test]
 fn orbit_query_schema_caps_reject_with_the_json_category() {
     let cases = [
         (
