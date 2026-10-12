@@ -118,7 +118,7 @@ async fn grpc_plaintext_client_rejected_by_tls_server() {
 }
 
 #[tokio::test]
-async fn legacy_gkg_service_path_reaches_the_service() {
+async fn legacy_orbit_service_path_reaches_the_service() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
 

@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 103
+  scope: none
+  note: >-
+    The internal result column prefix changes from _gkg_ to _orbit_. The prefix
+    names only query-time result aliases; no table column, extract SQL, transform
+    output, or DDL uses it, so every indexed row is byte-identical.
 - version: 102
   scope: none
   note: >-

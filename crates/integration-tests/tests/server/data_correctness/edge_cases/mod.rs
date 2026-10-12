@@ -400,8 +400,8 @@ pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
 
 pub(super) async fn non_default_redaction_id_entity_traversal(ctx: &TestContext) {
     // MergeRequestDiff uses id_column=merge_request_id (not "id").
-    // In edge-only mode, enforce.rs emits _gkg_d_pk via Expr::col(&node.id, "id")
-    // which references a node table not in FROM. The fix pre-emits _gkg_d_pk
+    // In edge-only mode, enforce.rs emits _orbit_d_pk via Expr::col(&node.id, "id")
+    // which references a node table not in FROM. The fix pre-emits _orbit_d_pk
     // in lower using the edge column.
     let resp = run_query(
         ctx,

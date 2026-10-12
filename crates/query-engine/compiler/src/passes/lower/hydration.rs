@@ -121,7 +121,7 @@ fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
 }
 
 fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let lambda_param = "_gkg_path";
+    let lambda_param = "_orbit_path";
     Expr::func(
         Function::ArrayExists,
         vec![

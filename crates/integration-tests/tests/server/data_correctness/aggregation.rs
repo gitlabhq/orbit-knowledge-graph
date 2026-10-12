@@ -625,9 +625,9 @@ pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
 
 pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &TestContext) {
     // MergeRequestDiff has redaction.id_column = merge_request_id. When it's
-    // the group_by node, enforce.rs emits a separate `_gkg_d_pk` column
-    // alongside `_gkg_d_id`. Both must land in GROUP BY. Regression guard
-    // for the ClickHouse side of the compiler fix that added `_gkg_*_pk` to
+    // the group_by node, enforce.rs emits a separate `_orbit_d_pk` column
+    // alongside `_orbit_d_id`. Both must land in GROUP BY. Regression guard
+    // for the ClickHouse side of the compiler fix that added `_orbit_*_pk` to
     // the GROUP BY clause for aggregations.
     let resp = run_query(
         ctx,

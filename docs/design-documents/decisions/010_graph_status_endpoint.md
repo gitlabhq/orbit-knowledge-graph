@@ -13,6 +13,14 @@ Accepted
 
 2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
 
+## Update: last completed time (2026-10-11)
+
+`GetIndexingStatus` returns `last_completed_at` per path, and `GetGraphStatus` sets it
+again on `indexing`. The value is the oldest `indexed_at` across the
+SDLC plans of the root, because each successful run sets `indexed_at`. A plan that stops
+completing keeps the time from moving. The field is absent until each plan has completed
+once.
+
 ## Update: `GetIndexingStatus` and `GetItemCounts` (2026-09-27)
 
 Two RPCs expose the services directly, for the Rails status pages.
@@ -51,7 +59,7 @@ Both take many scopes in one call.
   change or a new row is visible on the next call.
 - `indexing.state` comes from the scope phase, `sdlc_indexing` from the plans, and
   `code_indexing` from project coverage: ready → `indexed`, syncing → `backfilling`, not
-  started → `not_indexed`. `IndexingStatus` fields 2 to 7 are no longer set.
+  started → `not_indexed`. `IndexingStatus` fields 2 and 4 to 7 are no longer set.
 
 ## Update: honest indexing state (2026-08-10)
 
