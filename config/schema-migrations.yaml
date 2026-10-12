@@ -16,6 +16,13 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 104
+  scope: none
+  note: >-
+    Project gains preferred_ability read_project, which Orbit checks only for Rails
+    clients that answer each ability. The ability is read only when Orbit asks Rails
+    to authorize result rows; extract SQL, transform output, and DDL are unchanged,
+    so every indexed row is byte-identical.
 - version: 103
   scope: none
   note: >-

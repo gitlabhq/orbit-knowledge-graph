@@ -1,0 +1,24 @@
+description: A client without per-ability redaction checks a project with read_code
+
+config:
+  redaction:
+    allow:
+      "project:read_project": [1000]
+    deny:
+      "project:read_code": [1000]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (p:Project {id: 1000}) RETURN p.name LIMIT 10
+
+expect:
+  node_count: 0
+  nodes:
+    Project:
+      ids: []

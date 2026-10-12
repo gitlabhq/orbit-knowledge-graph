@@ -2411,9 +2411,13 @@ mod tests {
     fn redaction_config_core_nodes() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // Temporary: aligned with source-code entities to avoid duplicate
-        // resource_type entries in the redaction callback. See #570.
         assert_redaction(&ontology, "Project", "project", "id", "read_code");
+        assert_eq!(
+            ontology
+                .get_redaction_config("Project")
+                .and_then(|r| r.preferred_ability.as_deref()),
+            Some("read_project")
+        );
         assert_redaction(&ontology, "Group", "group", "id", "read_group");
         assert_redaction(&ontology, "User", "user", "id", "read_user");
         assert_redaction(&ontology, "Note", "note", "id", "read_note");

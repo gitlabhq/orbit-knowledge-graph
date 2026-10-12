@@ -1,0 +1,37 @@
+description: A branch row is visible when the user has read_project and read_code on its project
+
+config:
+  extra_seed:
+    gl_branch:
+      - { id: 7710, project_id: 1000, name: main, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7710, target_kind: Branch, traversal_path: "1/100/1000/" }
+  redaction:
+    by_ability: true
+    allow:
+      "project:read_project": [1000]
+      "project:read_code": [1000]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+        {"id": "b", "entity": "Branch", "columns": ["name"]}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "p", "to": "b"}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (p:Project {id: 1000})-[:CONTAINS]->(b:Branch) RETURN p.name, b.name LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    Project:
+      ids: [1000]
+    Branch:
+      ids: [7710]
+  edges:
+    CONTAINS: [[1000, 7710]]

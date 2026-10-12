@@ -83,7 +83,7 @@ sources:
   nodes/core/group.yaml: 8e94006d8fe58cd694731393d3e828554aaef113f99f115fd63862ecba29b8da
   nodes/core/note.yaml: 099bcc270039b78ba7ff8871841971840cabd9d0d44938e1d00256504719885d
   nodes/core/project.sql.j2: 1cdbd21aa2ae071d16918148ecf0aa6e67596257d21826c9899c21b1ea223228
-  nodes/core/project.yaml: a885825eac1e9479b779928ce0082d2a9f62d85ab7c766b9583ed5e718e8f7ea
+  nodes/core/project.yaml: c4251d8e41edc4cdc71d173327daa5c12f362b92a386ed2a9e5834f8c8786d8a
   nodes/core/user.yaml: ea9141ee1b34a46c679611da3ada290ebb66d71ac0c9e582374717d47bb27712
   nodes/packages/dependency.yaml: 3e82e649bc4951c0ab254772a292a8a7ca267b427b679f7addc062bbaeec7a0b
   nodes/packages/package.yaml: ee4de01811ee9bf14761158a12288ca5dd7ab421860117a0346703038227edf6

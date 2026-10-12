@@ -1,0 +1,25 @@
+description: A project is visible with read_project when the user cannot read its code
+
+config:
+  redaction:
+    by_ability: true
+    allow:
+      "project:read_project": [1000]
+    deny:
+      "project:read_code": [1000]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (p:Project {id: 1000}) RETURN p.name LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    Project:
+      ids: [1000]
