@@ -8,7 +8,6 @@ use crate::source::{Doc, SgNode};
 use cpu_time::ThreadTime;
 use std::borrow::Cow;
 use std::num::NonZero;
-use std::ops::ControlFlow;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -100,41 +99,6 @@ impl ParseGuard {
         self.budget = Some(CpuBudget::start(budget));
         self
     }
-
-    pub fn progress(&self) -> impl FnMut(&tree_sitter::ParseState) -> ControlFlow<()> + use<> {
-        let max_stall = self.max_stall;
-        let budget = self.budget;
-        let mut stall_count = 0;
-        let mut last_offset = u64::MAX;
-        move |state: &tree_sitter::ParseState| {
-            // Bail before the native parse overflows the stack; that fault is an uncatchable SIGSEGV.
-            if stacker::remaining_stack().is_some_and(|r| r < PARSE_STACK_RED_ZONE) {
-                tracing::warn!("tree-sitter parse aborted: stack near exhaustion");
-                return ControlFlow::Break(());
-            }
-            if let Some(budget) = budget
-                && budget.expired()
-            {
-                tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
-                return ControlFlow::Break(());
-            }
-            let offset = state.current_byte_offset() as u64;
-            if offset == last_offset {
-                stall_count += 1;
-                if stall_count > max_stall {
-                    tracing::warn!(
-                        "tree-sitter parse aborted: stalled at byte offset {offset} \
-                         (>{max_stall} iterations without progress)"
-                    );
-                    return ControlFlow::Break(());
-                }
-            } else {
-                last_offset = offset;
-                stall_count = 0;
-            }
-            ControlFlow::Continue(())
-        }
-    }
 }
 
 impl<L: LanguageExt> StrDoc<L> {
@@ -145,7 +109,41 @@ impl<L: LanguageExt> StrDoc<L> {
         let ts_lang = lang.get_ts_language();
         let tree = parse_lang(
             |p| {
-                let mut progress = guard.progress();
+                use std::ops::ControlFlow;
+                use std::sync::atomic::{AtomicU64, Ordering};
+
+                let max_stall = guard.max_stall;
+                let budget = guard.budget;
+                let stall_count = AtomicU64::new(0);
+                let last_offset = AtomicU64::new(u64::MAX);
+
+                let mut progress = |state: &tree_sitter::ParseState| {
+                    // Bail before the native parse overflows the stack; that fault is an uncatchable SIGSEGV.
+                    if stacker::remaining_stack().is_some_and(|r| r < PARSE_STACK_RED_ZONE) {
+                        tracing::warn!("tree-sitter parse aborted: stack near exhaustion");
+                        return ControlFlow::Break(());
+                    }
+                    if let Some(budget) = budget
+                        && budget.expired()
+                    {
+                        tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
+                        return ControlFlow::Break(());
+                    }
+                    let offset = state.current_byte_offset() as u64;
+                    if offset == last_offset.load(Ordering::Relaxed) {
+                        if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
+                            tracing::warn!(
+                                "tree-sitter parse aborted: stalled at byte offset {offset} \
+                                 (>{max_stall} iterations without progress)"
+                            );
+                            return ControlFlow::Break(());
+                        }
+                    } else {
+                        last_offset.store(offset, Ordering::Relaxed);
+                        stall_count.store(0, Ordering::Relaxed);
+                    }
+                    ControlFlow::Continue(())
+                };
 
                 let mut opts =
                     tree_sitter::ParseOptions::default().progress_callback(&mut progress);

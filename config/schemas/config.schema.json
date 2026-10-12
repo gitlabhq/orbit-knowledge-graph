@@ -583,7 +583,7 @@
           "minimum": 0
         },
         "per_file_timeout_ms": {
-          "description": "Per-file watchdog in milliseconds. It bounds per-file resolution in\nevery language, and the whole file in languages without per-phase\nbudgets (JS, TS, and Rust). The incremental engine passes it as\n`file_resolve_ms` and counts thread CPU time. 0 = no limit.",
+          "description": "Per-file watchdog in milliseconds. The legacy engine applies it to\nper-file resolution in every language, and to the whole file in\nlanguages without per-phase budgets (JS, TS, and Rust). The\nincremental engine applies the per-phase budgets to every language\nand passes this one as `file_resolve_ms`, in thread CPU time.\n0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0

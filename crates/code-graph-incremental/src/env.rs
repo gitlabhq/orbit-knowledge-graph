@@ -8,7 +8,7 @@ use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::rules::{LangConfig, ResolveConfig, ResolveStage};
 use crate::sentinel::Limits;
-use crate::treesitter::{FileBudget, SupportLang};
+use crate::treesitter::SupportLang;
 use crate::{rules, treesitter};
 
 pub struct Env {
@@ -87,24 +87,9 @@ impl Env {
     /// The file-level rules for a path: rewrite, link and display come from
     /// the file's own language.
     pub fn rules_for(&self, path: &str) -> &LangConfig {
-        &self.compiled[self.rules[&self.lang_for(path)]]
-    }
-
-    pub fn limits_for(&self, path: &str) -> Limits {
-        match self.lang_for(path).file_budget() {
-            FileBudget::Phases => self.limits,
-            FileBudget::Watchdog => Limits {
-                file_parse_ms: self.limits.file_resolve_ms,
-                file_rewrite_ms: self.limits.file_resolve_ms,
-                file_link_ms: self.limits.file_resolve_ms,
-                ..self.limits
-            },
-        }
-    }
-
-    fn lang_for(&self, path: &str) -> SupportLang {
-        SupportLang::from_path(path)
+        let lang = SupportLang::from_path(path)
             .filter(|l| self.in_family(*l))
-            .unwrap_or(self.lang_id)
+            .unwrap_or(self.lang_id);
+        &self.compiled[self.rules[&lang]]
     }
 }

@@ -1094,12 +1094,7 @@ impl<'t> Fold<'t> {
 
 pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
     let (lang, config) = (&env.lang, &env.rules_for(&tree.label).config.link);
-    let file = Sentinel::new(
-        "link",
-        &tree.label,
-        env.limits_for(&tree.label).file_link_ms,
-    )
-    .on_thread_cpu();
+    let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
     let tags = ReservedTags::new(lang);
     let root = tree.root();
     let root_label = root.tag(tags.scoped).unwrap_or(root.sym());

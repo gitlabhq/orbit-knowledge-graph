@@ -235,10 +235,12 @@ pub struct CodeIndexingPipelineConfig {
     pub source_compress_spill: bool,
     pub worker_threads: usize,
     pub max_concurrent_languages: usize,
-    /// Per-file watchdog in milliseconds. It bounds per-file resolution in
-    /// every language, and the whole file in languages without per-phase
-    /// budgets (JS, TS, and Rust). The incremental engine passes it as
-    /// `file_resolve_ms` and counts thread CPU time. 0 = no limit.
+    /// Per-file watchdog in milliseconds. The legacy engine applies it to
+    /// per-file resolution in every language, and to the whole file in
+    /// languages without per-phase budgets (JS, TS, and Rust). The
+    /// incremental engine applies the per-phase budgets to every language
+    /// and passes this one as `file_resolve_ms`, in thread CPU time.
+    /// 0 = no limit.
     pub per_file_timeout_ms: u64,
     /// Thread CPU budget in milliseconds for the tree-sitter parse of one
     /// file. Incremental engine: `file_parse_ms`. 0 = no limit.

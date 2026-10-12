@@ -117,66 +117,6 @@ fn a_parse_stops_before_the_thread_runs_out_of_stack() {
     assert_eq!(killed.map(|killed| killed.label), Some("tree-sitter"));
 }
 
-#[test]
-fn js_ts_and_rust_files_answer_to_the_watchdog_not_the_phase_budgets() {
-    let phases = Limits {
-        file_parse_ms: 0,
-        file_rewrite_ms: 0,
-        file_link_ms: 0,
-        ..Limits::UNLIMITED
-    };
-    let watchdog = Limits {
-        file_resolve_ms: 0,
-        ..Limits::UNLIMITED
-    };
-    let watched = [
-        (
-            SupportLang::JavaScript,
-            "main.js",
-            "export function f() { return 1; }\n",
-        ),
-        (
-            SupportLang::TypeScript,
-            "main.ts",
-            "export function f() { return 1; }\n",
-        ),
-        (
-            SupportLang::Tsx,
-            "main.tsx",
-            "export function f() { return 1; }\n",
-        ),
-        (SupportLang::Rust, "lib.rs", "pub fn f() -> u32 { 1 }\n"),
-    ];
-
-    for (lang, path, source) in watched {
-        assert_eq!(
-            index_one(lang, path, source, phases),
-            Vec::<&str>::new(),
-            "{path}"
-        );
-        assert_eq!(
-            index_one(lang, path, source, watchdog),
-            ["tree-sitter"],
-            "{path}"
-        );
-    }
-    let python = "def f():\n    return 1\n";
-    assert_eq!(
-        index_one(SupportLang::Python, "main.py", python, phases),
-        ["tree-sitter"]
-    );
-}
-
-fn index_one(lang: SupportLang, path: &str, source: &str, limits: Limits) -> Vec<&'static str> {
-    let repo = tempfile::tempdir().unwrap();
-    write_all(repo.path(), &[(path, source)]);
-    let env = Env::with_limits(lang, limits).unwrap();
-    let (context, _) = templates::index(Context::new(&env, common::walk(repo.path())))
-        .unwrap()
-        .finish();
-    context.report.skipped.iter().map(|k| k.label).collect()
-}
-
 fn write_all(root: &Path, files: &[(&str, &str)]) {
     for (path, content) in files {
         std::fs::write(root.join(path), content).unwrap();
