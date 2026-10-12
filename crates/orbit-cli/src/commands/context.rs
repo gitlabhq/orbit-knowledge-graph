@@ -392,6 +392,7 @@ fn render_range(
         )?;
     }
     write_lines(out, &lines, start, end)?;
+    out.push_str(&relations::range_links(client, path, start, end, &members)?);
     Ok(())
 }
 
