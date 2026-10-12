@@ -15,7 +15,7 @@ pub(super) fn is_code(path: &str) -> bool {
     })
 }
 
-pub(super) fn is_test(path: &str) -> bool {
+pub(crate) fn is_test(path: &str) -> bool {
     static TEST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
             r"(^|/)(tests?|spec|__tests__|fixtures?|scenarios|testdata|mocks?)/|(^|/)[\w-]*tests?[\w-]*/|(^|/)test_[^/]*$|_test\.|\.test\.|\.spec\.|-test\.",

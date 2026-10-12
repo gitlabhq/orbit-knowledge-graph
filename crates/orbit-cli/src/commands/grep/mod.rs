@@ -6,6 +6,8 @@ mod render;
 mod scan;
 mod term;
 
+pub(crate) use rank::is_test;
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
