@@ -57,7 +57,7 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Write this revision to a specific DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -158,7 +158,7 @@ struct GrepArgs {
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -363,7 +363,7 @@ struct ContextArgs {
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -393,7 +393,7 @@ struct SqlArgs {
     #[arg(long)]
     all: bool,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -401,7 +401,7 @@ struct SqlArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("get_graph_schema"))]
 struct SchemaArgs {
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -423,7 +423,7 @@ struct ListArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific manifest DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -447,7 +447,7 @@ struct RepoMapArgs {
     #[arg(long = "ext", value_name = "EXT")]
     extensions: Vec<String>,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -964,7 +964,8 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
              FROM information_schema.columns \
              WHERE table_schema = 'main' \
              AND table_name IN ({placeholders}) \
-             ORDER BY table_name, ordinal_position"
+             GROUP BY table_name, column_name, data_type \
+             ORDER BY table_name, min(ordinal_position)"
         );
         let params: Vec<serde_json::Value> = tables.iter().map(|t| serde_json::json!(t)).collect();
         let batches = client

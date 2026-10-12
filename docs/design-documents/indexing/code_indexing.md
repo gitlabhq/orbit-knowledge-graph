@@ -247,9 +247,21 @@ For each file, the parser extracts three categories of information:
 For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path, plus export-member definitions. These let several constructs reuse the same nested and member resolution machinery as other v2 definitions. The constructs are namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation. They do this without exposing a magic synthetic prefix as the user-facing identity.
 A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages. It feeds local bindings through the shared SSA engine. It resolves intrafile targets through the generic v2 `FileResolver`. It leaves JS-specific cross-file import and module resolution in the custom JS resolver layer. An imported call sometimes cannot resolve to a repository-local definition. Then the graph preserves the call as a `Definition` to `ImportedSymbol` `CALLS` edge, instead of dropping the call site.
 
-Orbit Local rebuilds its shared DuckDB graph when the code-index revision changes,
-even if repository commits have not changed. Repositories are re-indexed as used;
-Orbit Remote schema versions are unaffected.
+Orbit Local stores each checkout revision in `~/.gitlab/orbit/local/revisions/<project-id>/<commit-sha>.duckdb`.
+The canonical checkout path determines the project ID, so worktrees stay separate.
+The index describes the working-tree contents at the time of indexing, including uncommitted changes.
+Reindexing the same commit replaces only that revision. Other commits retain their databases.
+
+`local/manifest.duckdb` records revision paths and indexing status. Its key is the checkout path and commit SHA.
+Manifest operations hold a short advisory lock and close their DuckDB connection before parsing starts.
+A separate advisory lock serializes indexing of the same revision, including schema setup and status updates.
+Different revisions can be indexed concurrently. Queries open graph files read-only.
+`orbit sql --all` and MCP queries attach indexed revisions and expose shared temporary views.
+The manifest is copied into the query connection and detached so graph reads do not hold its lock.
+
+Orbit Local rebuilds a revision database when its schema or code-index revision changes.
+Repositories are re-indexed as used. Orbit Remote schema versions are unaffected.
+The previous shared `graph.duckdb` remains on disk. Run `orbit index` to populate the new layout.
 
 The incremental engine stores trees as `Tree<Mutable<Node>>` or `Tree<Compact<Node>>`.
 Storage owns its records and exposes node reads and updates through an associated node type.

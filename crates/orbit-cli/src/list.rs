@@ -14,12 +14,15 @@ const MANIFEST_QUERY: &str = "SELECT \
        commit_sha, \
        CAST(status AS VARCHAR) AS status, \
        CAST(last_indexed_at AS VARCHAR) AS last_indexed_at, \
-       error_message \
+        error_message, database_path \
      FROM _orbit_manifest \
      ORDER BY _orbit_manifest.last_indexed_at DESC NULLS LAST, repo_path";
 
 pub fn run(format: Format, db: Option<PathBuf>) -> Result<()> {
-    let db_path = workspace::resolve_db_path(db)?;
+    let db_path = match db {
+        Some(path) => path,
+        None => workspace::Workspace::open_default()?.manifest_path(),
+    };
     let stdout = std::io::stdout().lock();
     run_to(format, &db_path, stdout)
 }
@@ -45,6 +48,7 @@ fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
     if !present {
         return Ok(Vec::new());
     }
+    let _lock = workspace::lock_database(db_path)?;
     let client = duckdb_client::DuckDbClient::open_read_only(db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
     if !manifest_exists(&client)? {
@@ -70,7 +74,7 @@ mod tests {
     use super::*;
     use crate::workspace::project_id_from_path;
 
-    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+    const LOCAL_DDL: &str = workspace::MANIFEST_DDL;
 
     // Mirrors `set_status`: only `indexed` rows get a timestamp, so
     // non-indexed rows exercise the NULL `last_indexed_at` path.

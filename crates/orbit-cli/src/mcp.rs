@@ -23,8 +23,7 @@ pub struct RunSqlArgs {
     /// One or more read-only SQL statements, executed in order. Each element
     /// produces one result set in the returned JSON array, at the same index.
     pub sql: Vec<String>,
-    /// Optional override for the DuckDB file path. Defaults to the workspace
-    /// database (`~/.gitlab/orbit/graph.duckdb`).
+    /// Read one revision database. Omit to query all indexed revisions.
     #[serde(default)]
     pub db: Option<PathBuf>,
 }
@@ -38,7 +37,7 @@ pub struct GetGraphSchemaArgs {
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct IndexArgs {
     /// Filesystem path to a repository, a folder inside one, or a directory
-    /// containing one or more repositories. Each repo found is indexed into the workspace DuckDB.
+    /// containing one or more repositories. Each checkout revision has its own database.
     pub path: PathBuf,
     /// Worker threads. 0 (default) auto-detects from CPU cores.
     #[serde(default)]
@@ -46,8 +45,7 @@ pub struct IndexArgs {
     /// If true, include per-file skip/error breakdowns in the result.
     #[serde(default)]
     pub stats: bool,
-    /// Optional override for the DuckDB file path. Defaults to the workspace
-    /// database (`~/.gitlab/orbit/graph.duckdb`).
+    /// Write this revision to a specific DuckDB file.
     #[serde(default)]
     pub db: Option<PathBuf>,
 }

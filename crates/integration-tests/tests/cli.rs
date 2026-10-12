@@ -113,6 +113,113 @@ fn concurrent_readers() {
 }
 
 #[test]
+fn revisions_keep_their_data_and_do_not_share_write_locks() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let first_sha = git(&repo.path, &["rev-parse", "HEAD"]);
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let first_path = std::path::PathBuf::from(manifest[0]["database_path"].as_str().unwrap());
+    let first = duckdb_client::DuckDbClient::open(&first_path).unwrap();
+    let first_files = first.query_arrow("SELECT count(*) FROM gl_file").unwrap();
+    assert!(first.query_arrow("SELECT * FROM _orbit_manifest").is_err());
+
+    std::fs::write(repo.path.join("new.py"), "def second_revision(): pass\n").unwrap();
+    git(&repo.path, &["add", "-A"]);
+    git(&repo.path, &["commit", "-m", "second revision"]);
+    let second_sha = git(&repo.path, &["rev-parse", "HEAD"]);
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (listed, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    assert!(ok, "{stderr}");
+    let listed: Value = serde_json::from_str(&listed).unwrap();
+    assert_eq!(rows(&listed).len(), 2);
+    let first_row = rows_where(&listed, "commit_sha", &first_sha)[0];
+    let second_row = rows_where(&listed, "commit_sha", &second_sha)[0];
+    assert_ne!(first_row["database_path"], second_row["database_path"]);
+    assert_eq!(first_row["status"], "indexed");
+    assert_eq!(second_row["status"], "indexed");
+    assert_eq!(
+        duckdb_client::scalar_i64(&first_files),
+        duckdb_client::scalar_i64(&first.query_arrow("SELECT count(*) FROM gl_file").unwrap())
+    );
+
+    let result = orbit_cmd()
+        .args([
+            "sql",
+            "-F",
+            "json",
+            "SELECT DISTINCT commit_sha FROM gl_file",
+        ])
+        .current_dir(&repo.path)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(result, json!([{ "commit_sha": second_sha }]));
+    drop(first);
+
+    let manifest_db =
+        duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
+            .unwrap();
+    assert!(manifest_db.query_arrow("SELECT * FROM gl_file").is_err());
+    drop(manifest_db);
+    let all = orbit_sql("SELECT DISTINCT commit_sha FROM gl_file", data_dir.path());
+    assert_eq!(rows(&all).len(), 2);
+    git(&repo.path, &["checkout", "--detach", &first_sha]);
+    let result = orbit_cmd()
+        .args([
+            "sql",
+            "-F",
+            "json",
+            "SELECT DISTINCT commit_sha FROM gl_file",
+        ])
+        .current_dir(&repo.path)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(result, json!([{ "commit_sha": first_sha }]));
+}
+
+#[test]
+fn fresh_repositories_index_concurrently_into_separate_databases() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repos = [create_test_repo(), create_test_repo()];
+    let children: Vec<_> = repos
+        .iter()
+        .map(|repo| {
+            orbit_cmd()
+                .args(["index", repo.path.to_str().unwrap()])
+                .env("ORBIT_DATA_DIR", data_dir.path())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let manifest = orbit_sql(
+        "SELECT DISTINCT database_path FROM _orbit_manifest WHERE status = 'indexed'",
+        data_dir.path(),
+    );
+    assert_eq!(rows(&manifest).len(), 2);
+}
+
+#[test]
 fn reader_during_writer() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -154,7 +261,10 @@ fn concurrent_writers() {
             ok += 1;
         }
     }
-    assert!(ok > 0, "at least one writer should succeed");
+    assert_eq!(
+        ok, 2,
+        "both writers should complete under the revision lock"
+    );
 
     let result = orbit_sql(FILES_SIMPLE, data_dir.path());
     assert!(!rows(&result).is_empty());
@@ -210,6 +320,25 @@ fn index_db_flag_writes_to_custom_path() {
     assert!(result.status.success());
     let json: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(rows(&json).len(), 2);
+
+    git(
+        &repo.path,
+        &["commit", "--allow-empty", "-m", "new revision"],
+    );
+    let output = orbit_cmd()
+        .args([
+            "index",
+            repo.path.to_str().unwrap(),
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .env("ORBIT_DATA_DIR", workspace_dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
+    );
 }
 
 #[test]
@@ -505,7 +634,9 @@ fn a_busy_graph_is_reported_in_one_line() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let _writer = duckdb_client::DuckDbClient::open(&data_dir.path().join("graph.duckdb")).unwrap();
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let graph = std::path::Path::new(manifest[0]["database_path"].as_str().unwrap());
+    let _writer = duckdb_client::DuckDbClient::open(graph).unwrap();
     let (_, stderr, ok) = run_cmd(&["sql", "--all", "SELECT 1"], data_dir.path());
 
     assert!(!ok);
@@ -1328,7 +1459,12 @@ fn repo_map_relative_orbit_data_dir() {
         "index with relative ORBIT_DATA_DIR failed: {}",
         String::from_utf8_lossy(&idx.stderr)
     );
-    assert!(caller_dir.path().join("orbit-data/graph.duckdb").exists());
+    assert!(
+        caller_dir
+            .path()
+            .join("orbit-data/local/manifest.duckdb")
+            .exists()
+    );
 
     let out = orbit_cmd()
         .args([

@@ -32,7 +32,7 @@ When you run `orbit index`, GitLab Orbit Local:
 1. Walks the current working tree, including uncommitted files and respecting `.gitignore`.
 1. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
 1. Extracts definitions (functions, classes, modules), import declarations, and cross-file symbol references.
-1. Writes the results as nodes and edges into a local DuckDB file at `~/.gitlab/orbit/graph.duckdb`.
+1. Writes the results into a DuckDB file for that checkout and commit under `~/.gitlab/orbit/local/revisions/`.
 
 Indexing does not enumerate or check out other Git branches. Each checkout or
 worktree is indexed from the files currently on disk.
@@ -57,7 +57,7 @@ Edges connect files to their definitions, files to their imports, and definition
 GitLab Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
 against it with `orbit sql`:
 
-1. `orbit sql` opens `~/.gitlab/orbit/graph.duckdb` read-only.
+1. `orbit sql` opens the current checkout revision read-only. Use `--all` to query all indexed revisions.
 1. Your SQL runs directly against the graph tables — no DSL compilation,
    no authorization layer.
 1. Results stream back as a table, JSON, NDJSON, or CSV.
@@ -66,12 +66,18 @@ All data in the graph is accessible to whoever runs the CLI.
 
 ## Storage
 
-The graph is stored in a single DuckDB file at `~/.gitlab/orbit/graph.duckdb`. Multiple
-repository checkout paths can share the database. The canonical checkout path
-determines the project ID. Switching branches alone does not update the stored
-graph. Reindexing the same checkout replaces its previous graph in that database
-with the current working-tree contents. To retain graphs for multiple branches,
-index them from separate checkout or worktree paths.
+Each checkout revision has a DuckDB file at `~/.gitlab/orbit/local/revisions/<project-id>/<commit-sha>.duckdb`.
+The canonical checkout path determines the project ID.
+Reindexing replaces only that commit's graph with the current working-tree contents.
+Other indexed commits remain available.
+
+The separate `~/.gitlab/orbit/local/manifest.duckdb` records revision paths and status.
+Manifest writes are short, so indexing one revision does not hold the manifest lock while source files are parsed.
+Run `orbit list -F json` to see each revision and its database path.
+Set `ORBIT_DATA_DIR` to change the workspace root.
+
+If you used the earlier shared `graph.duckdb`, run `orbit index` to build the new revision files.
+The old file remains on disk.
 
 ## Supported languages
 

@@ -15,13 +15,16 @@ pub fn schema_introspection_sql() -> String {
          FROM information_schema.columns \
          WHERE table_schema = 'main' \
            AND table_name <> {} \
-         ORDER BY table_name, ordinal_position",
+         GROUP BY table_name, column_name, data_type \
+         ORDER BY table_name, min(ordinal_position)",
         sql_lit(META_TABLE)
     )
 }
 
 pub fn open_graph(db: Option<PathBuf>) -> Result<DuckDbClient> {
-    let db_path = workspace::resolve_db_path(db)?;
+    let Some(db_path) = db else {
+        return open_workspace_graph();
+    };
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Index a repository first \
@@ -30,8 +33,71 @@ pub fn open_graph(db: Option<PathBuf>) -> Result<DuckDbClient> {
             spec::launcher()
         );
     }
-    DuckDbClient::open_read_only(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))
+    let client = DuckDbClient::open_read_only(&db_path)
+        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    if workspace::stored_meta(&client, "revision")?.is_some() {
+        anyhow::ensure!(
+            workspace::stored_meta(&client, "indexed_commit")?.is_some(),
+            "revision at {} is not fully indexed; run `{} index` again",
+            db_path.display(),
+            spec::launcher()
+        );
+    }
+    Ok(client)
+}
+
+fn open_workspace_graph() -> Result<DuckDbClient> {
+    let manifest = workspace::Workspace::open_default()?.manifest_path();
+    if !manifest.exists() {
+        anyhow::bail!(
+            "no local graph found. Run `{} index` first.",
+            spec::launcher()
+        );
+    }
+    let client = DuckDbClient::open_in_memory()?;
+    let paths = {
+        let _lock = workspace::lock_database(&manifest)?;
+        client.execute(
+            &format!(
+                "ATTACH {} AS orbit_manifest (READ_ONLY)",
+                sql_lit(&manifest.to_string_lossy())
+            ),
+            &[],
+        )?;
+        client.execute("CREATE TEMP TABLE _orbit_manifest AS SELECT * FROM orbit_manifest.main._orbit_manifest", &[])?;
+        client.execute("DETACH orbit_manifest", &[])?;
+        string_column(
+            &client.query_arrow("SELECT DISTINCT database_path FROM _orbit_manifest WHERE status = 'indexed' AND database_path IS NOT NULL ORDER BY database_path")?,
+            "database_path",
+        )
+    };
+    let mut catalogs = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        let catalog = format!("revision_{index}");
+        client.execute(
+            &format!("ATTACH {} AS {catalog} (READ_ONLY)", sql_lit(path)),
+            &[],
+        )?;
+        catalogs.push(catalog);
+    }
+    let tables = string_column(
+        &client.query_arrow("SELECT table_name FROM information_schema.tables WHERE table_catalog = 'revision_0' AND table_schema = 'main' AND table_name LIKE 'gl_%' ORDER BY table_name")?,
+        "table_name",
+    );
+    for table in tables {
+        let table = quote_ident(&table);
+        let sources = catalogs
+            .iter()
+            .map(|catalog| format!("SELECT * FROM {catalog}.main.{table}"))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        client.execute(&format!("CREATE TEMP VIEW {table} AS {sources}"), &[])?;
+    }
+    client.execute(
+        "CREATE MACRO def_name(fqn) AS regexp_replace(fqn, '^.*[:.#/]', '')",
+        &[],
+    )?;
+    Ok(client)
 }
 
 pub fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
@@ -56,6 +122,16 @@ pub fn run(
         anyhow::bail!("empty SQL query");
     }
 
+    let db = if db.is_none() && !all {
+        workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))
+            .and_then(|top| workspace::git_info(&top))
+            .ok()
+            .map(|git| workspace::resolve_db_path(None, &git))
+            .transpose()?
+            .filter(|path| path.exists())
+    } else {
+        db
+    };
     let client = open_graph(db)?;
     if !all {
         scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?;

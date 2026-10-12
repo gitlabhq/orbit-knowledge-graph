@@ -9,6 +9,8 @@ use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFo
 use serde_json::json;
 use strum::{AsRefStr, Display};
 
+pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/orbit_manifest.sql"));
+
 /// Repo indexing status, stored as a DuckDB `repo_status` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
@@ -18,8 +20,6 @@ pub enum RepoStatus {
     Error,
 }
 
-/// Manages the `~/.gitlab/orbit/` workspace — graph database, repo discovery,
-/// and manifest.
 pub struct Workspace {
     root: PathBuf,
 }
@@ -49,8 +49,15 @@ impl Workspace {
         Ok(Self { root })
     }
 
-    pub fn db_path(&self) -> PathBuf {
-        self.root.join("graph.duckdb")
+    pub fn manifest_path(&self) -> PathBuf {
+        self.root.join("local/manifest.duckdb")
+    }
+
+    pub fn revision_path(&self, git: &GitInfo) -> PathBuf {
+        self.root
+            .join("local/revisions")
+            .join(git.project_id.to_string())
+            .join(format!("{}.duckdb", git.commit_sha))
     }
 
     /// Discover git repos in a directory, including nested repos when
@@ -109,14 +116,10 @@ fn migrate_legacy_root(legacy: &Path, root: PathBuf) -> PathBuf {
     }
 }
 
-/// Resolve the DuckDB path for a command: an explicit `--db` override wins,
-/// otherwise the default workspace's `graph.duckdb`. The result is absolute so
-/// that a later `set_current_dir` (e.g. `repo-map` anchoring at the repo root)
-/// cannot change which file a relative `--db` or `ORBIT_DATA_DIR` points at.
-pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
+pub fn resolve_db_path(db: Option<PathBuf>, git: &GitInfo) -> Result<PathBuf> {
     let path = match db {
         Some(p) => p,
-        None => Workspace::open_default()?.db_path(),
+        None => Workspace::open_default()?.revision_path(git),
     };
     absolutize(path)
 }
@@ -146,23 +149,23 @@ pub struct IndexedRepo {
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let db = resolve_db_path(db)?;
     let top_level = git_toplevel(&repo_path)
         .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
     let git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
+    let db_path = resolve_db_path(db.clone(), &git)?;
 
-    if graph_lacks_commit(&db, &git)? {
-        crate::commands::index::index_before_first_query(git.repo_path.clone(), Some(db.clone()))
+    if graph_lacks_commit(&db_path, &git)? {
+        crate::commands::index::index_before_first_query(git.repo_path.clone(), db)
             .context("failed to index the repository")?;
-        if graph_lacks_commit(&db, &git)? {
+        if graph_lacks_commit(&db_path, &git)? {
             anyhow::bail!(
                 "indexing finished but commit {} still has no rows in the local graph",
                 git.commit_sha
             );
         }
     }
-    let client = crate::sql::open_graph(Some(db))?;
+    let client = crate::sql::open_graph(Some(db_path))?;
     Ok(IndexedRepo { git, client })
 }
 
@@ -266,15 +269,11 @@ fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
     if !db.exists() {
         return Ok(true);
     }
-    let client = crate::sql::open_graph(Some(db.to_path_buf()))?;
+    let client = DuckDbClient::open_read_only(db)?;
     if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
         return Ok(true);
     }
-    let files = client.query_arrow_json(
-        "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
-        &[git.project_id.into(), git.commit_sha.clone().into()],
-    )?;
-    Ok(duckdb_client::scalar_i64(&files) == 0)
+    Ok(stored_meta(&client, "indexed_commit")?.as_deref() != Some(&git.commit_sha))
 }
 
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
@@ -298,7 +297,7 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     {
         return Ok(());
     }
-    let had_data = table_exists(&client, "_orbit_manifest")?;
+    let had_data = table_exists(&client, "gl_file")?;
     drop(client);
 
     if had_data {
@@ -377,19 +376,20 @@ pub fn set_status(
     status: RepoStatus,
     error_message: Option<&str>,
     git: Option<&GitInfo>,
+    database_path: Option<&Path>,
 ) -> Result<()> {
     let parent = git.map(|g| g.parent_repo_path.to_string_lossy().to_string());
     let branch = git.map(|g| g.branch.as_str());
-    let commit = git.map(|g| g.commit_sha.as_str());
+    let commit = git.map_or("", |g| g.commit_sha.as_str());
 
     client
         .execute(
-            "INSERT INTO _orbit_manifest (repo_path, project_id, parent_repo_path, branch, commit_sha, status, error_message, last_indexed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6::repo_status, ?7, CASE WHEN ?6 = 'indexed' THEN now() ELSE NULL END)
-             ON CONFLICT (repo_path) DO UPDATE SET
+            "INSERT INTO _orbit_manifest (repo_path, project_id, parent_repo_path, branch, commit_sha, status, error_message, last_indexed_at, database_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6::repo_status, ?7, CASE WHEN ?6 = 'indexed' THEN now() ELSE NULL END, ?8)
+             ON CONFLICT (repo_path, commit_sha) DO UPDATE SET
                  parent_repo_path = COALESCE(?3, parent_repo_path),
                  branch = COALESCE(?4, branch),
-                 commit_sha = COALESCE(?5, commit_sha),
+                 database_path = COALESCE(?8, database_path),
                  status = ?6::repo_status,
                  error_message = ?7,
                  last_indexed_at = CASE WHEN ?6 = 'indexed' THEN now() ELSE last_indexed_at END",
@@ -398,9 +398,10 @@ pub fn set_status(
                 json!(project_id),
                 parent.map_or(serde_json::Value::Null, |s| json!(s)),
                 branch.map_or(serde_json::Value::Null, |s| json!(s)),
-                commit.map_or(serde_json::Value::Null, |s| json!(s)),
+                json!(commit),
                 json!(status.as_ref()),
                 error_message.map_or(serde_json::Value::Null, |s| json!(s)),
+                json!(database_path.map(|path| path.to_string_lossy().to_string())),
             ],
         )
         .context("failed to upsert manifest")?;
@@ -413,7 +414,14 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
         .unwrap_or_else(|_| repo_path.to_path_buf())
         .to_string_lossy()
         .to_string();
-    let client = match DuckDbClient::open(db_path) {
+    let _lock = match lock_database(db_path) {
+        Ok(lock) => lock,
+        Err(error) => {
+            tracing::warn!("failed to lock manifest: {error}");
+            return;
+        }
+    };
+    let client = match open_manifest(db_path) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("failed to open DuckDB to record git failure for {key}: {e}");
@@ -427,9 +435,32 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
         RepoStatus::Error,
         Some(error),
         None,
+        None,
     ) {
         tracing::warn!("failed to record git failure status for {key}: {e}");
     }
+}
+
+pub fn lock_database(path: &Path) -> Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(PathBuf::from(lock_path))?;
+    file.lock()?;
+    Ok(file)
+}
+
+pub fn open_manifest(path: &Path) -> Result<DuckDbClient> {
+    let client = DuckDbClient::open(path)?;
+    client.initialize_schema(MANIFEST_DDL)?;
+    Ok(client)
 }
 
 #[derive(Clone)]
@@ -712,7 +743,7 @@ mod tests {
         let client = DuckDbClient::open(&db).unwrap();
         client
             .execute(
-                "INSERT INTO _orbit_manifest (repo_path, project_id) VALUES ('/r', 1)",
+                "INSERT INTO _orbit_meta (key, value) VALUES ('test', 'preserved')",
                 &[],
             )
             .unwrap();
@@ -721,7 +752,7 @@ mod tests {
         ensure_graph_schema(&db, LOCAL_DDL).unwrap();
         let client = DuckDbClient::open(&db).unwrap();
         let batches = client
-            .query_arrow("SELECT count(*) FROM _orbit_manifest")
+            .query_arrow("SELECT count(*) FROM _orbit_meta WHERE key = 'test'")
             .unwrap();
         let count = batches[0]
             .column(0)
@@ -773,15 +804,7 @@ mod tests {
         ensure_graph_schema(&db, LOCAL_DDL).unwrap();
 
         let client = DuckDbClient::open(&db).unwrap();
-        let batches = client
-            .query_arrow("SELECT count(*) FROM _orbit_manifest")
-            .unwrap();
-        let count = batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<arrow::array::Int64Array>()
-            .unwrap();
-        assert_eq!(count.value(0), 0);
+        assert!(!table_exists(&client, "_orbit_manifest").unwrap());
 
         let cols = client
             .query_arrow(

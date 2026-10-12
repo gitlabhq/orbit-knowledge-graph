@@ -70,8 +70,7 @@ impl DuckDbClient {
         Ok(Self { conn })
     }
 
-    #[cfg(test)]
-    pub(crate) fn open_in_memory() -> Result<Self> {
+    pub fn open_in_memory() -> Result<Self> {
         Self::open_once(Path::new(":memory:"), duckdb::AccessMode::ReadWrite)
     }
 

@@ -344,16 +344,14 @@ impl IndexReporter for LogReporter {
 }
 
 struct TuiReporter {
-    db_path: PathBuf,
     bars: Option<Arc<RepositoryBars>>,
     git: Option<GitInfo>,
     suggested_grep: Option<String>,
 }
 
 impl TuiReporter {
-    fn new(db_path: PathBuf) -> Self {
+    fn new() -> Self {
         Self {
-            db_path,
             bars: None,
             git: None,
             suggested_grep: None,
@@ -387,7 +385,8 @@ impl IndexReporter for TuiReporter {
         if self.suggested_grep.is_none()
             && let Some(git) = &self.git
         {
-            self.suggested_grep = most_referenced_definition(git, Some(self.db_path.clone()));
+            self.suggested_grep =
+                most_referenced_definition(git, output.database_path.as_ref().map(PathBuf::from));
         }
     }
 
@@ -486,7 +485,8 @@ fn repository_name(git: &GitInfo) -> String {
 }
 
 struct LocalIndexer {
-    db_path: PathBuf,
+    db: Option<PathBuf>,
+    manifest_path: PathBuf,
     repos: Vec<PathBuf>,
     ontology: Ontology,
     pipeline_config: PipelineConfig,
@@ -495,7 +495,7 @@ struct LocalIndexer {
 
 impl LocalIndexer {
     fn open(path: PathBuf, threads: usize, show_stats: bool, db: Option<PathBuf>) -> Result<Self> {
-        let db_path = workspace::resolve_db_path(db)?;
+        let db = db.map(std::path::absolute).transpose()?;
         let workspace = workspace::Workspace::open_default()?;
         let path = dunce::canonicalize(&path)?;
         let repos = workspace.resolve_repos(&path)?;
@@ -504,7 +504,9 @@ impl LocalIndexer {
         }
 
         let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
-        workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+        if db.is_some() && repos.len() != 1 {
+            bail!("--db selects one revision file; index one repository at a time");
+        }
 
         let pipeline_config = PipelineConfig {
             worker_threads: threads,
@@ -517,7 +519,8 @@ impl LocalIndexer {
         };
 
         Ok(Self {
-            db_path,
+            db,
+            manifest_path: std::path::absolute(workspace.manifest_path())?,
             repos,
             ontology,
             pipeline_config,
@@ -528,7 +531,7 @@ impl LocalIndexer {
     fn index_showing_progress(mut self) -> Result<Option<String>> {
         self.pipeline_config.cancel = cancel_on_ctrl_c();
         let _control_echo_off = tui::turn_off_control_echo();
-        let mut reporter = TuiReporter::new(self.db_path.clone());
+        let mut reporter = TuiReporter::new();
         self.index_all(&mut reporter)?;
         Ok(reporter.suggested_grep)
     }
@@ -565,38 +568,50 @@ impl LocalIndexer {
         reporter: &mut dyn IndexReporter,
     ) -> Result<IndexOutput> {
         let git = workspace::git_info(repo_path).inspect_err(|error| {
-            workspace::record_git_info_failure(&self.db_path, repo_path, &error.to_string())
+            workspace::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
         })?;
+        let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
+        let _revision_lock = workspace::lock_database(&db_path)?;
+        workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+        {
+            let client = duckdb_client::DuckDbClient::open(&db_path)?;
+            let revision = format!("{}:{}", git.project_id, git.commit_sha);
+            if let Some(owner) = workspace::stored_meta(&client, "revision")? {
+                anyhow::ensure!(
+                    owner == revision,
+                    "{} belongs to another checkout revision; choose a different --db path",
+                    db_path.display()
+                );
+            }
+            client.execute(
+                "INSERT INTO _orbit_meta (key, value) VALUES ('revision', ?1) ON CONFLICT DO NOTHING",
+                &[revision.into()],
+            )?;
+        }
         let key = git.repo_path.to_string_lossy().to_string();
         info!(
             "Indexing repository at: {key} (branch: {}, commit: {})",
             git.branch,
             git.short_sha()
         );
-        self.record_status(
-            &key,
-            &git,
-            workspace::RepoStatus::Indexing,
-            None,
-            Some(&git),
-        )?;
+        self.record_status(&key, &git, workspace::RepoStatus::Indexing, None, &db_path)?;
 
         let mut pipeline_config = self.pipeline_config.clone();
         pipeline_config.progress = reporter.repository_started(&git);
-        let result = index_repo(&git, &self.db_path, &self.ontology, pipeline_config).inspect_err(
-            |error| {
+        let result =
+            index_repo(&git, &db_path, &self.ontology, pipeline_config).inspect_err(|error| {
                 let recorded = self.record_status(
                     &key,
                     &git,
                     workspace::RepoStatus::Error,
                     Some(&error.to_string()),
-                    None,
+                    &db_path,
                 );
                 if let Err(manifest_error) = recorded {
                     tracing::warn!("failed to record error status in manifest: {manifest_error}");
                 }
-            },
-        )?;
+            })?;
+        self.record_status(&key, &git, workspace::RepoStatus::Indexed, None, &db_path)?;
         Ok(build_index_output(
             &repository_name(&git),
             &key,
@@ -611,17 +626,18 @@ impl LocalIndexer {
         git: &GitInfo,
         status: workspace::RepoStatus,
         error: Option<&str>,
-        git_for_manifest: Option<&GitInfo>,
+        db_path: &Path,
     ) -> Result<()> {
-        let client =
-            duckdb_client::DuckDbClient::open(&self.db_path).context("failed to open DuckDB")?;
+        let _lock = workspace::lock_database(&self.manifest_path)?;
+        let client = workspace::open_manifest(&self.manifest_path)?;
         workspace::set_status(
             &client,
             key,
             git.project_id,
             status,
             error,
-            git_for_manifest,
+            Some(git),
+            Some(db_path),
         )
     }
 }
@@ -658,7 +674,8 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
-    clear_project(&client, git, ontology)?;
+    client.execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])?;
+    clear_revision(&client, ontology)?;
 
     let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
         std::sync::Arc::new(duckdb_client::DuckDbConverter {
@@ -693,7 +710,7 @@ fn index_repo(
     if cancel.is_cancelled() {
         let client = duckdb_client::DuckDbClient::open(db_path)
             .context("failed to open DuckDB to discard a cancelled run")?;
-        clear_project(&client, git, ontology)?;
+        clear_revision(&client, ontology)?;
         return Err(tui::cancelled("indexing cancelled"));
     }
 
@@ -704,17 +721,12 @@ fn index_repo(
         anyhow::bail!(reason);
     }
 
-    let client =
-        duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
-    refresh_git_index(&git.repo_path);
-    workspace::set_status(
-        &client,
-        &key,
-        git.project_id,
-        workspace::RepoStatus::Indexed,
-        None,
-        Some(git),
+    let client = duckdb_client::DuckDbClient::open(db_path)?;
+    client.execute(
+        "INSERT INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",
+        &[git.commit_sha.clone().into()],
     )?;
+    refresh_git_index(&git.repo_path);
 
     Ok(IndexRunResult {
         total_processing_time: start_time.elapsed(),
@@ -736,12 +748,8 @@ fn index_repo(
     })
 }
 
-fn clear_project(
-    client: &duckdb_client::DuckDbClient,
-    git: &GitInfo,
-    ontology: &Ontology,
-) -> Result<()> {
-    let node_tables: Vec<String> = ontology
+fn clear_revision(client: &duckdb_client::DuckDbClient, ontology: &Ontology) -> Result<()> {
+    let mut tables: Vec<&str> = ontology
         .local_entity_names()
         .iter()
         .map(|name| {
@@ -749,16 +757,18 @@ fn clear_project(
                 .get_node(name)
                 .expect("local entity must exist")
                 .destination_table
-                .clone()
+                .as_str()
         })
         .collect();
-    let edge_table = ontology
-        .local_edge_table_name()
-        .context("local_db.edge_table.name must be configured")?;
+    tables.push(
+        ontology
+            .local_edge_table_name()
+            .context("local_db.edge_table.name must be configured")?,
+    );
 
     client
-        .delete_project(git.project_id, &node_tables, edge_table)
-        .context("failed to clear existing project data")?;
+        .delete_all_data(&tables)
+        .context("failed to clear revision data")?;
     Ok(())
 }
 
