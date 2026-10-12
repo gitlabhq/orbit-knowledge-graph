@@ -558,7 +558,7 @@
           "minimum": 0
         },
         "max_total_bytes": {
-          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.",
+          "description": "Archive entry bytes, counted before the content filter, above which a\nrepository is skipped entirely (indexed empty, then checkpointed). Bounds\nper-repo disk so fetch/index concurrency can rise without exhausting the\npod volume. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
