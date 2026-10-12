@@ -174,12 +174,17 @@ pub struct PhaseReport {
 pub struct FileTiming {
     pub path: String,
     pub phase: String,
+    pub language: crate::treesitter::SupportLang,
+    pub bytes: u64,
     pub elapsed: Duration,
 }
 
 /// The file an item of a per-file phase belongs to.
 pub trait Labelled {
     fn label(&self) -> &str;
+    fn bytes(&self) -> u64 {
+        0
+    }
 }
 
 /// Sees the run as it happens; implement only the methods you need.

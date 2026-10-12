@@ -24,14 +24,14 @@ pub(in crate::modules::code) fn run(
     use code_graph::v2::error::{AbortPhase, FaultedFile, FileFault, FileSkip, SkippedFile};
     use code_graph::v2::pipeline::{PhaseTimings, PipelineStats};
     let started = std::time::Instant::now();
-    let sizes: HashMap<String, u64> =
-        code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files)
-            .map(|file| (file.path.to_string(), file.size))
-            .collect();
     let mut stats = PipelineStats {
         files_discovered: repository.usage().files,
         bytes_discovered: repository.usage().bytes,
-        files_parsed: sizes.len(),
+        files_parsed: code_graph_incremental::pipeline::candidates(
+            &repository,
+            options.limits.max_files,
+        )
+        .count(),
         files_skipped: repository
             .files()
             .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
@@ -91,7 +91,7 @@ pub(in crate::modules::code) fn run(
         },
     )
     .map_err(|error| SinkError(error.to_string()))?;
-    stats.slowest_files = file_timings(&sizes, &report.files);
+    stats.slowest_files = file_timings(&report.files);
     stats.language_timings = language_timings(&stats.slowest_files);
     stats.slowest_files.truncate(SLOWEST_FILES);
     stats.phase_timings.total_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -130,27 +130,28 @@ pub(in crate::modules::code) fn run(
 
 const SLOWEST_FILES: usize = 100;
 
-fn file_timings(sizes: &HashMap<String, u64>, timings: &[FileTiming]) -> Vec<FileTimingEntry> {
-    let mut by_path: HashMap<&str, (f64, f64)> = HashMap::new();
+fn file_timings(timings: &[FileTiming]) -> Vec<FileTimingEntry> {
+    let mut by_path: HashMap<&str, FileTimingEntry> = HashMap::new();
     for timing in timings {
         let ms = timing.elapsed.as_secs_f64() * 1000.0;
-        let (parse, resolve) = by_path.entry(&timing.path).or_default();
+        let file = by_path
+            .entry(&timing.path)
+            .or_insert_with(|| FileTimingEntry {
+                path: timing.path.clone(),
+                size_bytes: 0,
+                parse_ms: 0.0,
+                resolve_ms: 0.0,
+                total_ms: 0.0,
+                language: <&str>::from(timing.language).to_owned(),
+            });
+        file.size_bytes += timing.bytes;
+        file.total_ms += ms;
         match timing.phase.as_str() {
-            "resolve" => *resolve += ms,
-            _ => *parse += ms,
+            "resolve" => file.resolve_ms += ms,
+            _ => file.parse_ms += ms,
         }
     }
-    let mut files: Vec<_> = by_path
-        .into_iter()
-        .map(|(path, (parse_ms, resolve_ms))| FileTimingEntry {
-            path: path.to_owned(),
-            size_bytes: sizes.get(path).copied().unwrap_or(0),
-            parse_ms,
-            resolve_ms,
-            total_ms: parse_ms + resolve_ms,
-            language: super::super::metrics::file_language(path),
-        })
-        .collect();
+    let mut files: Vec<_> = by_path.into_values().collect();
     files.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
     files
 }

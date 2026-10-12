@@ -179,63 +179,6 @@ async fn archive_indexes_multiple_families_into_server_batches() {
 }
 
 #[tokio::test]
-async fn reports_file_and_language_timings() {
-    let files: &[(&str, &[u8])] = &[
-        ("root/src/main.py", b"from helper import greet\ngreet()\n"),
-        ("root/src/helper.py", b"def greet():\n    pass\n"),
-        ("root/web/a.ts", b"export function hello() {}\n"),
-        ("root/README.md", b"readme"),
-    ];
-    let report = IndexFixture::new()
-        .run(files, options(), Arc::new(|_, _| Ok(())))
-        .await
-        .unwrap();
-    let mut timed: Vec<_> = report
-        .stats
-        .slowest_files
-        .iter()
-        .map(|file| (file.path.as_str(), file.size_bytes, file.language.as_str()))
-        .collect();
-    timed.sort();
-    assert_eq!(
-        timed,
-        [
-            ("src/helper.py", 22, "python"),
-            ("src/main.py", 33, "python"),
-            ("web/a.ts", 27, "type_script"),
-        ]
-    );
-    assert!(
-        report
-            .stats
-            .slowest_files
-            .windows(2)
-            .all(|pair| pair[0].total_ms >= pair[1].total_ms)
-    );
-    let languages: Vec<_> = report
-        .stats
-        .language_timings
-        .iter()
-        .map(|timing| {
-            (
-                timing.language.as_str(),
-                timing.file_count,
-                timing.total_bytes,
-            )
-        })
-        .collect();
-    assert!(languages.contains(&("python", 2, 55)), "{languages:?}");
-    assert!(languages.contains(&("type_script", 1, 27)), "{languages:?}");
-    assert!(
-        report
-            .stats
-            .language_timings
-            .iter()
-            .all(|timing| timing.parse_ms > 0.0)
-    );
-}
-
-#[tokio::test]
 async fn cancelled_run_emits_no_batches() {
     let mut options = options();
     options.cancelled = Arc::new(|| true);

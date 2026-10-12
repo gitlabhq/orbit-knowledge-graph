@@ -193,16 +193,17 @@ where
             .map(|item| {
                 let item = item?;
                 let path = item.label().to_string();
+                let bytes = item.bytes();
                 let started = Instant::now();
                 let outcome = phase.run(env, run, item);
-                Ok((outcome, path, started.elapsed()))
+                Ok((outcome, path, bytes, started.elapsed()))
             })
             .collect();
         context.run.check()?;
         let phase_name = self.0.name();
         let mut items = Vec::with_capacity(outcomes.len());
         for outcome in outcomes {
-            let (outcome, path, elapsed) = match outcome {
+            let (outcome, path, bytes, elapsed) = match outcome {
                 Ok(result) => result,
                 Err(path) => {
                     context.report.unread_files.push(path);
@@ -212,6 +213,8 @@ where
             context.report.files.push(FileTiming {
                 path,
                 phase: phase_name.to_string(),
+                language: env.lang_id,
+                bytes,
                 elapsed,
             });
             match outcome {
@@ -523,6 +526,8 @@ impl Phase<DirtyGraph> for Resolve {
                     .map(|(fi, elapsed)| FileTiming {
                         path: state.trees[fi as usize].label.clone(),
                         phase: "resolve".to_string(),
+                        language: context.env.lang_id,
+                        bytes: 0,
                         elapsed,
                     }),
             );

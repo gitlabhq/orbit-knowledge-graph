@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
@@ -89,6 +89,77 @@ async fn incremental_flag_indexes_archives_and_replaces_stale_definitions() {
     assert_eq!(
         files.iter().map(|row| row.0.as_str()).collect::<Vec<_>>(),
         ["replacement.py"]
+    );
+}
+
+#[tokio::test]
+async fn incremental_flag_records_language_timing_metrics() {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+    use orbit_server_config::features::{Feature, FeatureScope, FeaturesConfig};
+    let exporter = InMemoryMetricExporter::default();
+    let provider = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(exporter.clone()).build())
+        .build();
+    opentelemetry::global::set_meter_provider(provider.clone());
+    orbit_server_config::features::init(FeaturesConfig::from_iter([(
+        Feature::CodeGraphIncremental,
+        FeatureScope {
+            enabled: true,
+            namespaces: vec![2801],
+        },
+    )]));
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        2801,
+        "main",
+        &[
+            ("src/main.py", "from helper import greet\ngreet()\n"),
+            ("src/helper.py", "def greet():\n    pass\n"),
+            ("web/a.ts", "export function hello() {}\n"),
+            ("README.md", "readme"),
+        ],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(&handler, &clickhouse, 2801, "first", 1, "1/2801/").await;
+    provider.force_flush().unwrap();
+
+    let metrics = exporter.get_finished_metrics().unwrap();
+    let by_language = |name: &str| -> BTreeMap<String, u64> {
+        metrics
+            .iter()
+            .flat_map(|resource| resource.scope_metrics())
+            .flat_map(|scope| scope.metrics())
+            .filter(|metric| metric.name() == name)
+            .flat_map(|metric| match metric.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                    .data_points()
+                    .map(|point| {
+                        let language = point
+                            .attributes()
+                            .find(|kv| kv.key.as_str() == "language")
+                            .map(|kv| kv.value.to_string())
+                            .unwrap();
+                        (language, point.value())
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect()
+    };
+    assert_eq!(
+        by_language("gkg.indexer.code.language.files"),
+        BTreeMap::from([("python".to_string(), 2), ("typescript".to_string(), 1)])
+    );
+    assert_eq!(
+        by_language("gkg.indexer.code.language.bytes"),
+        BTreeMap::from([("python".to_string(), 55), ("typescript".to_string(), 27)])
     );
 }
 

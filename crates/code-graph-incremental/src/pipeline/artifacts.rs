@@ -83,6 +83,9 @@ impl super::Labelled for SourceFile {
     fn label(&self) -> &str {
         &self.path
     }
+    fn bytes(&self) -> u64 {
+        self.content.len() as u64
+    }
 }
 
 impl super::Labelled for Parsed {
