@@ -98,11 +98,13 @@ pub fn repository<E: std::fmt::Display>(
                 crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
             })
             .collect();
+        let mut plan = crate::export::ExportPlan::from_config(export_config, ontology, &lang)?;
+        plan.batch_bytes = options.batch_bytes;
         emit(crate::export::export(
             &trees,
             &[],
             &lang,
-            &crate::export::ExportPlan::from_config(export_config, ontology, &lang)?,
+            &plan,
             envelope,
             true,
             &|_| true,

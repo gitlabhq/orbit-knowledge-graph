@@ -351,7 +351,7 @@ impl Col {
         }
     }
 
-    fn value_bytes(&self) -> usize {
+    fn offsets_used(&self) -> usize {
         match self {
             Self::Str(b, _) => b.values_slice().len(),
             Self::StrList(b, _) => b.values_ref().values_slice().len(),
@@ -649,7 +649,7 @@ impl BatchBuilder {
     }
 
     pub fn take_if_over(&mut self, max_bytes: usize) -> BatchResult<Option<RecordBatch>> {
-        if self.cols.iter().all(|col| col.value_bytes() < max_bytes) {
+        if self.cols.iter().all(|col| col.offsets_used() < max_bytes) {
             return Ok(None);
         }
         let empty = Self::new(&self.specs, 0)?;

@@ -112,22 +112,19 @@ pub(in crate::modules::code) fn run(
             return Err(SinkError(error.to_string()));
         }
         Err(error) => {
+            let internal = |context: &str, message: String| {
+                vec![
+                    CodeGraphError::Internal {
+                        context: context.into(),
+                        message,
+                    }
+                    .into(),
+                ]
+            };
             let errors = match error {
                 _ if cancelled() => Vec::new(),
-                Error::Load(error) => vec![
-                    CodeGraphError::Internal {
-                        context: "load".into(),
-                        message: error.to_string(),
-                    }
-                    .into(),
-                ],
-                error @ Error::Panic { .. } => vec![
-                    CodeGraphError::Internal {
-                        context: "panic".into(),
-                        message: error.to_string(),
-                    }
-                    .into(),
-                ],
+                Error::Load(error) => internal("load", error.to_string()),
+                error @ Error::Panic { .. } => internal("panic", error.to_string()),
                 error => vec![
                     CodeGraphError::ArrowConversion {
                         message: error.to_string(),
