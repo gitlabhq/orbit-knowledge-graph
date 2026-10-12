@@ -2,54 +2,42 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Prompts to ask your AI agent about your code, merge requests, pipelines, and security with GitLab Orbit.
+description: Prompts to ask your agent about your code, merge requests, pipelines, and security with GitLab Orbit.
 title: GitLab Orbit use cases
 ---
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
+- Add-on: GitLab Orbit
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
+Copy a prompt into your [connected agent](agents/_index.md) or GitLab Duo, replace the values in `<angle brackets>`,
+and ask follow-up questions in the same conversation. The first two prompts, about code, also work on the
+[local graph](local/_index.md) of a repository on your machine.
 
-You do not write graph queries by hand.
-You ask your agent a question, and the agent queries GitLab Orbit for the answer.
-
-To use a prompt:
-
-1. [Connect your agent](_index.md) to GitLab Orbit, or use GitLab Duo Agent Platform.
-1. Copy the prompt.
-1. Replace the values in `<angle brackets>` with your group, project, file, or time window.
-1. Paste the prompt into your agent. Ask follow-up questions in the same conversation.
-
-Code questions work on the local code graph.
-Questions about merge requests, pipelines, or vulnerabilities need the GitLab server graph.
-
-Each section also shows one query that the agent can run.
-You do not need it, but you can use it to check the answer.
-Each query is the `query` object of a request.
-To run it yourself, put it in a [request envelope](queries/query-language.md#request-envelope).
+Each section also shows a [Cypher](queries/cypher.md) query that the agent can run.
+To check an answer, replace the example values in the query, then run it with `glab orbit query "<query>"`.
 
 ## Understand a codebase
 
 Get oriented in an unfamiliar project.
 
 ```plaintext
-I'm new to <my-org/my-project>. Using GitLab Orbit, give me a tour:
+I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour:
 - The core classes and modules, and how they relate.
 - The main entry points.
 - The three files I should read first, and why.
@@ -57,24 +45,10 @@ I'm new to <my-org/my-project>. Using GitLab Orbit, give me a tour:
 
 To look inside one file, the agent lists the definitions that the file contains:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "f",
-      "entity": "File",
-      "filters": {"path": {"eq": "app/models/project.rb"}}
-    },
-    {
-      "id": "def",
-      "entity": "Definition",
-      "columns": ["name", "fqn", "definition_type", "start_line"]
-    }
-  ],
-  "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],
-  "limit": 30
-}
+```gql orbit-query
+MATCH (f:File {path: 'app/models/user.rb'})-[:DEFINES]->(d:Definition)
+RETURN d.name, d.fqn, d.definition_type, d.start_line
+LIMIT 30
 ```
 
 ## Find the blast radius of a change
@@ -82,7 +56,7 @@ To look inside one file, the agent lists the definitions that the file contains:
 Find out what breaks before you change it.
 
 ```plaintext
-Using GitLab Orbit, map the blast radius of <shared-auth-lib>.
+Using GitLab Orbit, map the blast radius of <shared-payments-lib>.
 - Which projects and files import it?
 - Which code definitions depend on it?
 - What breaks if I change its public interface?
@@ -92,30 +66,12 @@ Rank the affected areas by how many places depend on them.
 
 The agent ranks the definitions that the most code imports:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "sym",
-      "entity": "ImportedSymbol",
-      "columns": ["import_path"],
-      "filters": {
-        "import_path": {"contains": "payments"}
-      }
-    },
-    {"id": "def", "entity": "Definition", "columns": ["name", "fqn", "file_path"]}
-  ],
-  "relationships": [
-    {"type": "IMPORTS", "from": "sym", "to": "def"}
-  ],
-  "group_by": ["def"],
-  "aggregations": [
-    { "count": "sym", "as": "import_count" }
-  ],
-  "aggregation_sort": "-import_count",
-  "limit": 20
-}
+```gql orbit-query
+MATCH (s:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+WHERE s.import_path CONTAINS 'payments'
+RETURN d.name, d.fqn, d.file_path, count(s) AS import_count
+ORDER BY import_count DESC
+LIMIT 20
 ```
 
 ## Review the history of a project
@@ -123,7 +79,7 @@ The agent ranks the definitions that the most code imports:
 Find out who changes the code and who to ask for a review.
 
 ```plaintext
-Using GitLab Orbit, show me the review history of <my-org/my-project>:
+Using GitLab Orbit, show me the review history of <my-group/my-project>:
 - The most active authors and reviewers in the last 90 days.
 - The merge requests that touched <app/models/project.rb>.
 - The people I should ask to review a change to that file.
@@ -131,33 +87,12 @@ Using GitLab Orbit, show me the review history of <my-org/my-project>:
 
 The agent counts the merged merge requests of each author:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "u", "entity": "User", "columns": ["username", "name"]},
-    {
-      "id": "mr",
-      "entity": "MergeRequest",
-      "filters": {"state": "merged"}
-    },
-    {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/my-project"}
-    }
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-  ],
-  "group_by": ["u"],
-  "aggregations": [
-    { "count": "mr", "as": "merged_mrs" }
-  ],
-  "aggregation_sort": "-merged_mrs",
-  "limit": 10
-}
+```gql orbit-query
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'my-group/my-project'})
+WHERE mr.state = 'merged'
+RETURN u.username, u.name, count(mr) AS merged_mrs
+ORDER BY merged_mrs DESC
+LIMIT 10
 ```
 
 ## Keep your pipelines healthy
@@ -184,23 +119,12 @@ definitions that keep changing. Tell me where a fix saves the most CI/CD time.
 
 The agent ranks the projects by failed pipelines:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "pl", "to": "p"}
-  ],
-  "group_by": ["p"],
-  "aggregations": [
-    { "count": "pl", "as": "failed_count" }
-  ],
-  "aggregation_sort": "-failed_count",
-  "limit": 10
-}
+```gql orbit-query
+MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
+WHERE pl.status = 'failed' AND p.full_path STARTS WITH 'my-group/'
+RETURN p.name, p.full_path, count(pl) AS failed_count
+ORDER BY failed_count DESC
+LIMIT 10
 ```
 
 ## Trace security risk to its source
@@ -209,7 +133,7 @@ Find where your risk is and how it got there.
 
 ```plaintext
 Using GitLab Orbit, find the critical and high severity vulnerabilities in
-<my-org> that are still detected:
+<my-group> that are still detected:
 - Which projects have them?
 - Trace each one back to the scan and, where possible, to the merge request
   that introduced the change.
@@ -217,29 +141,14 @@ Using GitLab Orbit, find the critical and high severity vulnerabilities in
 Sort by severity and give me a short list of fixes.
 ```
 
-The agent finds the critical and high vulnerabilities and their projects:
+The agent finds the critical and high vulnerabilities in a project:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "v",
-      "entity": "Vulnerability",
-      "columns": ["title", "severity", "state", "report_type"],
-      "filters": {
-        "severity": {"in": ["critical", "high"]},
-        "state": "detected"
-      }
-    },
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "v", "to": "p"}
-  ],
-  "order_by": "-v.severity",
-  "limit": 50
-}
+```gql orbit-query
+MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {full_path: 'my-group/my-project'})
+WHERE v.severity IN ['critical', 'high'] AND v.state = 'detected'
+RETURN v.title, v.severity, v.state, v.report_type, p.full_path
+ORDER BY v.severity DESC
+LIMIT 50
 ```
 
 ## Read the source
@@ -251,28 +160,20 @@ Using GitLab Orbit, show me the source of <app/models/project.rb> and the
 definition of <MyModule::my_function>.
 ```
 
-The `content` column on `File` and `Definition` fetches the source from the repository after the graph query.
+The `content` property of `File` and `Definition` fetches the source from the repository after the graph query.
 These queries are slower than other queries.
 For a `Definition`, `content` returns only the source of that definition, not the full file:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "d",
-    "entity": "Definition",
-    "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
-    "filters": {
-      "fqn": {"eq": "Gitlab::Auth::authenticate"}
-    }
-  }],
-  "limit": 5
-}
+```gql orbit-query
+MATCH (d:Definition {fqn: 'Gitlab::Auth::authenticate'})
+RETURN d.name, d.fqn, d.file_path, d.start_line, d.end_line, d.content
+LIMIT 5
 ```
 
 ## Related topics
 
-- [Get started with GitLab Orbit](_index.md)
-- [Connect AI agents](agents/_index.md)
+- [GitLab Orbit quickstart](quickstart.md)
+- [Connect your agent](agents/_index.md)
 - [Query the graph](queries/_index.md)
+- [Cypher query language](queries/cypher.md)
 - [What GitLab Orbit indexes](schema.md)
