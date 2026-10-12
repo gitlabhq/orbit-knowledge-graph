@@ -1,6 +1,6 @@
 //! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
 //! Limits count offered files before policy runs. Rejected content is not materialized.
-//! On-demand readers retain their backing; pending files are read for classification during loading.
+//! Pending files are read, classified, and stored during loading; metadata-accepted readers stay lazy.
 //! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
@@ -135,17 +135,13 @@ impl<T: Tag> Loading<T> {
         };
         match (file.decision(), what) {
             (Decision::List(_), _) => self.add_entry(file, Content::Unavailable),
-            (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes), None)?,
-            (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read(), None)?,
+            (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes))?,
+            (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read())?,
             (Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
                 self.add_entry(file, Content::ReadOnDemand(read))
             }
             (Decision::Pending, Put::ReadOnDemand { read, .. }) => {
-                self.put_bytes(
-                    file,
-                    read(self.limits.file_bytes.unwrap_or(u64::MAX)),
-                    Some(read),
-                )?;
+                self.put_bytes(file, read(self.limits.file_bytes.unwrap_or(u64::MAX)))?;
             }
             (_, Put::Symlink(_) | Put::Listed { .. }) => {
                 unreachable!("symlinks and listed entries return above")
@@ -158,7 +154,6 @@ impl<T: Tag> Loading<T> {
         &self,
         file: File<'static, T>,
         bytes: io::Result<Vec<u8>>,
-        reader: Option<ContentReader>,
     ) -> Result<(), SourceError> {
         let bytes = match bytes.and_then(|bytes| {
             if bytes.len() as u64 != file.size {
@@ -177,9 +172,8 @@ impl<T: Tag> Loading<T> {
             }
         };
         file.classify(&*self.passes, &bytes);
-        let content = match (file.decision(), reader) {
-            (Decision::Keep(_), Some(read)) => Content::ReadOnDemand(read),
-            (Decision::Keep(_), None) => self.store(bytes)?,
+        let content = match file.decision() {
+            Decision::Keep(_) => self.store(bytes)?,
             _ => Content::Unavailable,
         };
         self.add_entry(file, content);
