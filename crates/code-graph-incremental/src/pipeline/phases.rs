@@ -454,8 +454,10 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
 }
 
 /// Cross-file resolution over the dirty files. A file that overruns its
-/// resolve budget keeps its intra-file edges and is reported. Manifest files
-/// join the project tree so the resolver can read module roots from them.
+/// resolve budget keeps its intra-file edges and is reported. A family that
+/// overruns keeps the edges resolved so far, is reported, and resolves in
+/// full on the next run. Manifest files join the project tree so the
+/// resolver can read module roots from them.
 pub struct Resolve;
 
 impl Phase<DirtyGraph> for Resolve {
@@ -503,25 +505,8 @@ impl Phase<DirtyGraph> for Resolve {
             &walk.entrypoints,
             env,
             &resolve_budget,
-        );
+        )?;
         context.run.check()?;
-        let result = match result {
-            Ok(result) => result,
-            Err(killed) if killed.cancelled => return Err(killed.into()),
-            Err(killed) => {
-                state.edges.retain(|edge| edge.from_tree == edge.to_tree);
-                for edge in &mut state.edges {
-                    if edge.kind == crate::tree::EdgeKind::Imports
-                        && edge.call_resolution != crate::tree::CallResolution::Reference
-                    {
-                        edge.call_resolution = crate::tree::CallResolution::Unknown;
-                    }
-                }
-                state.resolver = crate::resolver::Resolver::new(&env.lang);
-                context.skip(killed);
-                return Ok(Resolved { state });
-            }
-        };
         for rsp in &result.resolved_source_paths {
             state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }

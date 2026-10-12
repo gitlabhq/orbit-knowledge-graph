@@ -77,31 +77,54 @@ fn pair(a: &str, b: &str) -> (String, String) {
 }
 
 #[test]
-fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
+fn cross_file_timeout_keeps_resolved_edges_and_recovers_on_noop_reindex() {
     let repo = tempfile::tempdir().unwrap();
-    write_all(repo.path(), &[("utils.py", UTILS), ("main.py", MAIN)]);
+    std::fs::create_dir(repo.path().join("pkg")).unwrap();
+    let main = format!("from pkg import mod\n{MAIN}    mod.f()\n");
+    write_all(
+        repo.path(),
+        &[
+            ("utils.py", UTILS),
+            ("main.py", &main),
+            ("pkg/mod.py", "def f():\n    pass\n"),
+        ],
+    );
+    let kinds = [EdgeKind::Imports, EdgeKind::Calls, EdgeKind::Extends];
     let mut env = python_env(Limits::UNLIMITED);
     let (baseline, _) = resolve_repo(&env, repo.path());
-    let expected = cross_file(&env, &baseline.state, EdgeKind::Calls);
-    assert!(!expected.is_empty());
-    env.limits.cross_file_resolve_ms = 0;
+    let expected = kinds.map(|kind| cross_file(&env, &baseline.state, kind));
     let empty_changes = || common::load(orbit_utils::vfs::sources::Memory(vec![]));
-    let (context, degraded) =
+    let family_skip = |skipped: &[Killed]| {
+        let skipped: Vec<_> = skipped
+            .iter()
+            .map(|k| (k.label, k.path.as_str(), k.cancelled))
+            .collect();
+        assert_eq!(skipped, [("resolve", "", false)]);
+    };
+
+    env.limits.cross_file_resolve_ms = 0;
+    let (context, kept) =
         templates::reindex(Context::new(&env, empty_changes()), baseline.state, vec![])
             .unwrap()
             .finish();
-    assert_eq!(context.report.skipped.len(), 1);
-    assert_eq!(context.report.skipped[0].label, "resolve");
-    assert!(!context.report.skipped[0].cancelled);
-    assert_eq!(degraded.state.trees.len(), 2);
-    assert!(!degraded.state.edges.is_empty());
-    assert!(
-        degraded
-            .state
-            .edges
-            .iter()
-            .all(|edge| edge.from_tree == edge.to_tree)
+    family_skip(&context.report.skipped);
+    assert_eq!(
+        kinds.map(|kind| cross_file(&env, &kept.state, kind)),
+        expected
     );
+
+    let (degraded, skipped) = resolve_repo(&env, repo.path());
+    family_skip(&skipped);
+    assert_eq!(degraded.state.trees.len(), 3);
+    assert_eq!(
+        kinds.map(|kind| cross_file(&env, &degraded.state, kind)),
+        [
+            vec![pair("main.py:", "pkg/mod.py:pkg/mod.py")],
+            vec![],
+            vec![]
+        ]
+    );
+
     env.limits.cross_file_resolve_ms = u64::MAX;
     let (context, recovered) =
         templates::reindex(Context::new(&env, empty_changes()), degraded.state, vec![])
@@ -109,7 +132,7 @@ fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
             .finish();
     assert!(context.report.skipped.is_empty());
     assert_eq!(
-        cross_file(&env, &recovered.state, EdgeKind::Calls),
+        kinds.map(|kind| cross_file(&env, &recovered.state, kind)),
         expected
     );
 }
