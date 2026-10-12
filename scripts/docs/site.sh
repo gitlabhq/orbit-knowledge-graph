@@ -33,6 +33,26 @@ run() {
     fi
 }
 
+apply_navigation() {
+    local nav="data/en-us/navigation.yaml"
+    awk -v section="$ORBIT_ROOT/docs/navigation.yaml" '
+        /^# GITLAB ORBIT$/ {
+            print; print ""
+            while ((getline line < section) > 0) if (line !~ /^#/) print line
+            print ""; skip = 1; next
+        }
+        skip && /^# / { skip = 0 }
+        !skip
+    ' "$nav" >"$nav.tmp"
+    if ! grep -q "^# GITLAB ORBIT$" "$nav.tmp"; then
+        rm -f "$nav.tmp"
+        echo "ERROR: $nav has no '# GITLAB ORBIT' section to replace."
+        return 1
+    fi
+    mv "$nav.tmp" "$nav"
+    echo "docs-gitlab-com: GitLab Orbit navigation replaced with docs/navigation.yaml."
+}
+
 prepare_site() {
     local branch=${DOCS_BRANCH:-$(docs_branch)}
     if [[ ! -d $DOCS_DIR/.git ]]; then
@@ -47,9 +67,11 @@ prepare_site() {
     if [[ $current != "$branch" ]]; then
         echo "WARNING: $DOCS_DIR is on branch '$current', not '$branch'. Using it as is."
     fi
+    apply_navigation
 
     export PATH="$SITE_DIR/bin:$PATH" COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-    if ! run yarn --version >/dev/null 2>&1; then
+    # A global Yarn 1 answers --version too, but the site needs the Yarn from packageManager.
+    if [[ "$(run yarn --version 2>/dev/null)" != [2-9]* ]]; then
         rm -rf "${SITE_DIR:?}/bin"
         mkdir "$SITE_DIR/bin"
         run corepack enable --install-directory "$SITE_DIR/bin" yarn
