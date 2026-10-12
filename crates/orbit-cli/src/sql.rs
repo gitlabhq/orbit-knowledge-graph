@@ -3,7 +3,7 @@ use crate::sql_format::{self, Format};
 use crate::workspace;
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
-use duckdb_client::{DuckDbClient, bool_column, sql_lit, string_column};
+use duckdb_client::{DuckDbClient, sql_lit, string_column};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
@@ -154,127 +154,25 @@ pub fn run(
         anyhow::bail!("empty SQL query");
     }
 
-    let db = if db.is_none()
-        && let Some(repo) = &repo
-    {
-        let git = workspace::git_info(&workspace::git_toplevel(repo)?)?;
-        Some(workspace::resolve_db_path(None, &git)?)
-    } else {
-        db
+    let git = repo
+        .map(|repo| workspace::git_info(&workspace::git_toplevel(&repo)?))
+        .transpose()?;
+    let db = match (db, &git) {
+        (None, Some(git)) => Some(workspace::resolve_db_path(None, git)?),
+        (db, _) => db,
     };
     let client = open_graph(db)?;
-    if let Some(repo) = repo {
-        scope_to_checkout(&client, &repo)?;
+    if let Some(git) = git {
+        let expected = format!("{}:{}", git.project_id, git.commit_sha);
+        anyhow::ensure!(
+            workspace::stored_meta(&client, "revision")?.as_deref() == Some(&expected),
+            "selected database does not match the checkout revision; choose a matching --db or omit --repo"
+        );
     }
     let batches = query(&client, sql)?;
 
     let stdout = std::io::stdout().lock();
     sql_format::write(stdout, format, &batches)
-}
-
-fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
-    let git = match workspace::git_toplevel(repo).and_then(|top| workspace::git_info(&top)) {
-        Ok(git) => git,
-        Err(_) => {
-            eprintln!(
-                "note: {} is not inside a git checkout; querying every indexed commit (as with --all)",
-                repo.display()
-            );
-            return Ok(());
-        }
-    };
-    if !scope_tables(client, git.project_id, &git.commit_sha)? {
-        eprintln!(
-            "note: commit {} of {} is not indexed; querying every indexed commit (as with --all). \
-             `{} index {}` indexes it.",
-            git.short_sha(),
-            git.repo_path.display(),
-            spec::launcher(),
-            git.repo_path.display()
-        );
-    }
-    Ok(())
-}
-
-fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Result<bool> {
-    let catalog = string_column(
-        &client.query_arrow("SELECT current_database() AS catalog")?,
-        "catalog",
-    )
-    .pop()
-    .context("DuckDB reported no current database")?;
-    let tables = client.query_arrow_json(
-        "SELECT table_name,
-                bool_or(column_name = 'source_id') AND bool_or(column_name = 'target_id') AS is_edge
-         FROM information_schema.columns
-         WHERE table_catalog = ?1 AND table_schema = 'main'
-         GROUP BY table_name
-         HAVING (bool_or(column_name = 'id')
-                 AND bool_or(column_name = 'project_id')
-                 AND bool_or(column_name = 'commit_sha'))
-             OR (bool_or(column_name = 'source_id') AND bool_or(column_name = 'target_id'))
-         ORDER BY table_name",
-        &[catalog.clone().into()],
-    )?;
-    let names = string_column(&tables, "table_name");
-    let is_edge = bool_column(&tables, "is_edge");
-    let (edge_tables, node_tables): (Vec<_>, Vec<_>) = names
-        .iter()
-        .zip(&is_edge)
-        .partition(|(_, is_edge)| **is_edge);
-    if node_tables.is_empty() {
-        return Ok(false);
-    }
-
-    let sha = sql_lit(commit_sha);
-    let base = |table: &str| format!("{}.main.{}", quote_ident(&catalog), quote_ident(table));
-    let indexed = node_tables
-        .iter()
-        .map(|(table, _)| {
-            format!(
-                "EXISTS (SELECT 1 FROM {} WHERE project_id = {project_id} AND commit_sha = {sha})",
-                base(table)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    if !bool_column(
-        &client.query_arrow(&format!("SELECT ({indexed}) AS indexed"))?,
-        "indexed",
-    )
-    .first()
-    .copied()
-    .unwrap_or(false)
-    {
-        return Ok(false);
-    }
-
-    for (table, _) in &node_tables {
-        client.execute(
-            &format!(
-                "CREATE TEMP VIEW {} AS SELECT * FROM {} WHERE project_id = {project_id} AND commit_sha = {sha}",
-                quote_ident(table),
-                base(table)
-            ),
-            &[],
-        )?;
-    }
-    let node_ids = node_tables
-        .iter()
-        .map(|(table, _)| format!("SELECT id FROM {}", quote_ident(table)))
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ");
-    for (table, _) in edge_tables {
-        client.execute(
-            &format!(
-                "CREATE TEMP VIEW {} AS SELECT DISTINCT * FROM {} WHERE source_id IN ({node_ids})",
-                quote_ident(table),
-                base(table)
-            ),
-            &[],
-        )?;
-    }
-    Ok(true)
 }
 
 fn quote_ident(name: &str) -> String {

@@ -208,6 +208,24 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     assert_eq!(result, json!([{ "commit_sha": second_sha }]));
     drop(first);
 
+    let mismatch = orbit_cmd()
+        .args([
+            "sql",
+            "--repo",
+            repo.path.to_str().unwrap(),
+            "--db",
+            first_path.to_str().unwrap(),
+            FILES_SIMPLE,
+        ])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(!mismatch.status.success());
+    assert!(mismatch.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&mismatch.stderr).contains("does not match the checkout revision")
+    );
+
     let manifest_db =
         duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
             .unwrap();

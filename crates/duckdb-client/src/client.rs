@@ -127,38 +127,6 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Delete data for a specific project across all tables.
-    /// Node tables are scoped by `project_id`; the edge table is scoped
-    /// by source_id matching any node ID for this project.
-    /// Edges are deleted first while node IDs are still queryable.
-    pub fn delete_project(
-        &self,
-        project_id: i64,
-        node_tables: &[String],
-        edge_table: &str,
-    ) -> Result<()> {
-        let subqueries: Vec<String> = node_tables
-            .iter()
-            .map(|t| format!("SELECT id FROM {t} WHERE project_id = ?1"))
-            .collect();
-        if !subqueries.is_empty() {
-            let union = subqueries.join(" UNION ");
-            self.conn.execute(
-                &format!("DELETE FROM {edge_table} WHERE source_id IN ({union})"),
-                params![project_id],
-            )?;
-        }
-
-        for table in node_tables {
-            self.conn.execute(
-                &format!("DELETE FROM {table} WHERE project_id = ?1"),
-                params![project_id],
-            )?;
-        }
-
-        Ok(())
-    }
-
     pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
         for (table, batch) in data.tables {
             self.insert_batch(&table, &batch)?;
