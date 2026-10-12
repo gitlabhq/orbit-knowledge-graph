@@ -141,7 +141,7 @@ Orbit shares a Rust workspace and YAML ontology across two runtimes. The hosted 
 |---|---|
 | [Orbit overview](docs/source/_index.md) · [use cases](docs/source/use-cases.md) | [Local development](docs/dev/local-development.md) |
 | [CLI](docs/source/cli.md) · [AI coding agents](docs/source/agents/_index.md) · [MCP](docs/source/agents/mcp.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
-| [Queries](docs/source/queries/_index.md) · [Query DSL](docs/source/queries/query-language.md) · [REST API](docs/source/queries/api.md) | [Design documents](docs/design-documents/) |
+| [Queries](docs/source/queries/_index.md) · [Cypher](docs/source/queries/cypher.md) · [REST API](docs/source/queries/api.md) | [Design documents](docs/design-documents/) |
 | [What Orbit indexes](docs/source/schema.md) · [How it works](docs/source/how-it-works.md) | [Adding a language](docs/dev/adding-a-language.md) |
 | [Security](docs/source/security.md) | [E2E testing](docs/dev/e2e-testing.md) |
 | [Self-managed setup](docs/source/self-managed/_index.md) | [Indexer crate guide](crates/indexer/AGENTS.md) |

@@ -520,6 +520,3 @@ description = "Build the docs.gitlab.com site with the user docs, as the docs_hu
 run = "DRY_RUN=true bash ./scripts/ci/sync-doc-principles.sh"
 description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
 
-[tasks."skill:sync:orbit"]
-run = "cp docs/source/queries/query-language.md skills/orbit/references/query_language.md"
-description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"

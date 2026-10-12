@@ -9,60 +9,59 @@ title: GitLab Orbit in GitLab Duo
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
+- Add-on: GitLab Orbit
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261361) to on by default in GitLab Duo in GitLab 19.6.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
-
-GitLab Duo Agent Platform agents use the GitLab Orbit graph to answer questions about your live GitLab data.
-You do not install anything. You turn on one setting.
-
-Agents call the GitLab Orbit tools `list_commands` and `invoke_command` when the graph can answer the question.
-Through these tools, they run commands such as `get_graph_schema` and `query_graph`.
-The graph helps with cross-project dependencies, blast radius, pipeline inheritance, vulnerability history, and contributor patterns.
-If the graph does not have the answer, the agent uses its other tools.
+GitLab Duo Agent Platform agents use GitLab Orbit to answer questions about your GitLab data, such as
+cross-project dependencies, blast radius, pipeline inheritance, and vulnerability history.
+You do not install anything. When GitLab Orbit is on for your group, it is on in GitLab Duo by default.
+Agents call the GitLab Orbit tools when the graph can answer a question, and their other tools when it cannot.
 
 ## Prerequisites
 
-- GitLab Orbit is [turned on for your group](../_index.md#turn-on-gitlab-orbit-for-your-group).
+- GitLab Orbit is [turned on for your group](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
 - You have access to [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/).
 
-## Turn on GitLab Orbit in GitLab Duo
+## Choose which agents use GitLab Orbit
 
-On GitLab.com, the setting is off by default. Each user turns it on.
+GitLab Orbit is on in GitLab Duo by default:
+
+- On GitLab.com, for each user who is a member of a top-level group where GitLab Orbit is turned on.
+- On GitLab Self-Managed and GitLab Dedicated, for all users. An administrator can turn it off for the instance.
+  For more information, see [administer GitLab Orbit](https://docs.gitlab.com/integration/orbit/).
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
+To choose which agents use GitLab Orbit:
+
 1. In the upper-right corner, select your avatar.
 1. Select **Preferences**.
-1. Under **Orbit in GitLab Duo**, select the **Use Orbit in GitLab Duo** checkbox.
+1. Under **Orbit in GitLab Duo**, select or clear these checkboxes. All of them are selected by default.
+
+   | Option | Gives the GitLab Orbit tools to |
+   |--------|---------------------------------|
+   | **Agentic Chat** | Agentic chat. |
+   | **Other Foundational Agents** | Foundational agents outside chat, for example the Security Analyst Agent. |
+   | **Custom Agents** | Custom agents that users build. |
+
 1. Select **Save changes**.
 
-When you select **Use Orbit in GitLab Duo**, these options show. All of them are on by default:
-
-| Option | Gives the GitLab Orbit tools to |
-|--------|---------------------------------|
-| **Agentic Chat** | Agentic chat. |
-| **Orbit Agent** | The standalone Orbit agent in GitLab Duo. |
-| **Other Foundational Agents** | Foundational agents outside chat, for example software development and security analyst agents. |
-| **Custom Agents** | Custom agents that users build. |
-
-When you clear **Use Orbit in GitLab Duo**, all GitLab Orbit features are off.
-
-In GitLab Duo Chat, the **Orbit** control in the chat header shows if the graph is on.
-Select it to change the **Agentic chat**, **Foundational agents**, and **Custom agents** options.
+In GitLab Duo Chat, the **Orbit** control in the chat header shows whether GitLab Orbit is on.
+Select it to change the same three options, labeled **Agentic chat**, **Foundational agents**, and **Custom agents**.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
@@ -70,37 +69,31 @@ Select it to change the **Agentic chat**, **Foundational agents**, and **Custom 
 
 | Agent or flow | Use it for |
 |---------------|------------|
-| GitLab Duo Agent | General help with code, planning, security, and project management. |
+| The default GitLab Duo agent | General help with code, planning, security, and project management. |
 | Planner Agent | Work item owners, blockers, contributor load, and milestone progress across projects. |
 | Security Analyst Agent | Open vulnerabilities by severity, CVE coverage in the group, and when vulnerabilities were introduced. |
-| Data Analyst Agent | SDLC analytics with GLQL: pipeline health, merge request cycle time, contributor patterns, and deployment frequency. |
+| Data Analyst Agent | SDLC analytics, such as pipeline health, merge request cycle time, contributor patterns, and deployment frequency. |
 | CI Expert Agent | Job failure causes, pipeline inheritance, slowest jobs, and projects that fail frequently. |
 | Developer Flow | A draft merge request from a work item. The graph gives the agent dependencies, owners, and blast radius. |
 | Custom flows | Your own flows, when the flow configuration lists the GitLab Orbit tools. |
 
-For example, create a work item that asks to rename the `deploy_user` method.
-The Developer Flow uses the graph to find every service that calls the method.
-Then it drafts a merge request that updates each one.
+For example, for a work item that asks to rename the `deploy_user` method, the Developer Flow finds every service
+that calls the method and drafts a merge request that updates each one.
 
-Code Review Flow does not use GitLab Orbit.
-To use the graph in code review, [add it to a custom flow](#use-gitlab-orbit-in-a-custom-flow).
+Code Review Flow does not use GitLab Orbit. To use the graph in code review, [add it to a custom flow](#use-gitlab-orbit-in-a-custom-flow).
 
 ## Use GitLab Orbit in a custom flow
 
-A [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/) can use GitLab Orbit.
-Turn on the setting, add the tools to the flow, then tell the agent when to use them.
-
-### Turn on GitLab Orbit for custom flows
-
-Each user who triggers the flow must [turn on GitLab Orbit in GitLab Duo](#turn-on-gitlab-orbit-in-gitlab-duo)
-and keep **Other Foundational Agents** selected.
-The **Custom Agents** option does not apply to custom flows.
+A [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/) can use GitLab Orbit
+when you add the tools to the flow.
 
 ### Add the tools to the flow
 
 Prerequisites:
 
 - You have the Maintainer or Owner role for the project that manages the flow.
+- Each user who triggers the flow keeps **Other Foundational Agents** selected in their
+  [GitLab Orbit preferences](#choose-which-agents-use-gitlab-orbit). The **Custom Agents** option does not apply to flows.
 
 To add the tools:
 
@@ -125,36 +118,30 @@ To edit the flow in VS Code, see
 
 ## Example prompts
 
-Ask these questions in any agent or flow above. The agent selects the tool.
+Ask these questions in any agent or flow above:
 
 ```plaintext
 Which projects import the payments-service library?
-If I deprecate this function, which other files reference it?
-Which projects have the most open merge requests?
-Who are the top contributors to this project by merged merge requests?
 What are the most common job failure reasons in this group?
-Which pipelines take the longest to run?
 Show me all critical and high severity open vulnerabilities in this group.
-Which projects have unresolved vulnerabilities introduced in the last 30 days?
-Which milestones are overdue?
 What work items are blocking this epic?
 ```
 
-For more questions, see [use cases](../use-cases.md).
+For more prompts, see [use cases](../use-cases.md).
 
-## Limitations
+## Known issues
 
 - GitLab Orbit answers only about groups that have it turned on and that you can access.
-- A complex question with many steps can need a follow-up question to narrow the scope.
-- For large results, the answer can leave out file text and function bodies.
-  To get them, ask the agent to show the source of the function.
+- A complex question can need a follow-up question to narrow the scope.
+- For large results, the answer can leave out source code. To get it, ask the agent to show the source.
 
 ## Billing
 
-GitLab Duo queries to GitLab Orbit do not consume GitLab Credits during the beta. For billing after general availability, see [billing](../how-it-works.md#billing).
+GitLab Orbit queries from GitLab Duo agents consume GitLab Credits, in addition to the GitLab Credits for
+GitLab Duo Agent Platform. For more information, see [billing](../how-it-works.md#billing).
 
 ## Related topics
 
-- [Connect AI agents](_index.md)
+- [Connect your agent](_index.md)
 - [MCP servers](mcp.md)
 - [Use cases](../use-cases.md)

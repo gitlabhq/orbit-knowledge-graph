@@ -217,8 +217,8 @@ between them.
   local node types and their properties.
 - [Orbit CLI](../../source/cli.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
-- [Orbit query language reference](../../source/queries/query-language.md)
-  for the Query DSL used by Orbit Remote and agent-facing graph queries.
+- [Cypher query language](../../source/queries/cypher.md) for remote graph queries, and the
+  [JSON query DSL reference](../../../skills/orbit/references/query_language.md) for the deprecated DSL.
 - [Use cases](../../source/use-cases.md) for copy-paste query ideas.
 - [Add a language to the code indexer](../adding-a-language.md) if you want to
   contribute parser coverage for more source languages.

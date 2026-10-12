@@ -2,163 +2,118 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Give your AI agent a graph of your code and your GitLab data, then ask your first question in minutes.
+description: GitLab Orbit gives your agent a graph of your GitLab data and code, so it can answer questions about changes, pipelines, security, and code structure.
 title: GitLab Orbit
 ---
-
-GitLab Orbit gives your AI agent a graph of your code and your GitLab SDLC data to query.
-Ask it what breaks if you change a service, or which CI/CD jobs fail most.
-The CLI builds the local code graph on your machine in seconds to minutes, with no GitLab account.
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
+- Add-on: GitLab Orbit
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
+- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
+GitLab Orbit indexes your GitLab data and code into a graph that your agent can query.
+Ask what breaks if you change a service, who should review a file, or why pipelines fail.
+Your agent answers with a few graph queries, not hundreds of file reads and API calls.
 
-## Step 1: Install the CLI
+{{< cards >}}
 
-Install [`glab`](https://docs.gitlab.com/cli/) 1.117 or later, then run:
+- [Quickstart](quickstart.md)
+- [Use cases](use-cases.md)
+- [How GitLab Orbit works](how-it-works.md)
 
-```shell
-glab orbit --install
-```
+{{< /cards >}}
 
-`glab` verifies the `orbit` binary and keeps it up to date.
-For other install methods, see [the GitLab Orbit CLI](cli.md).
+## What you can ask
 
-## Step 2: Connect your agents
+| Goal | Example prompt |
+|------|----------------|
+| [Understand a codebase](use-cases.md#understand-a-codebase) | `I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.` |
+| [Find the blast radius of a change](use-cases.md#find-the-blast-radius-of-a-change) | `Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?` |
+| [Review the history of a project](use-cases.md#review-the-history-of-a-project) | `Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?` |
+| [Keep your pipelines healthy](use-cases.md#keep-your-pipelines-healthy) | `Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?` |
+| [Trace security risk to its source](use-cases.md#trace-security-risk-to-its-source) | `Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?` |
 
-Go to a Git repository and run setup:
+## See an answer
 
-```shell
-cd path/to/your/repo
-glab orbit setup
-```
-
-Setup finds the AI agents on your machine.
-It gives each agent instructions, hooks, and the `orbit-cli` skill.
-Then it indexes the repository. The output is similar to:
+Ask your agent:
 
 ```plaintext
-◇  Configured ───────────────────────────────╮
-│  Claude Code   instructions, hooks, skill  │
-│  Codex         instructions, skill         │
-│  OpenCode      instructions, hooks, skill  │
-├────────────────────────────────────────────╯
-│
-◇  demo  main @ 779e8c44
-└  Done.
+Using GitLab Orbit, which projects in <my-group> have the most failed pipelines?
 ```
 
-- To see the changes before setup writes them, add `--dry-run`.
-- To set up one agent only, name it. For example, `glab orbit setup claude`.
-- To remove the changes, run `glab orbit uninstall`.
+The agent runs one graph query in place of many API calls:
 
-## Step 3: Ask your first question
-
-Check the graph from the terminal. Search for a function or class name from your code.
-This example uses a small Python repository:
-
-```shell
-glab orbit grep authenticate
+```gql orbit-query
+MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
+WHERE pl.status = 'failed' AND p.full_path STARTS WITH 'my-group/'
+RETURN p.full_path, count(pl) AS failed_pipelines
+ORDER BY failed_pipelines DESC
+LIMIT 3
 ```
+
+Then it answers from the rows. The answer is similar to:
 
 ```plaintext
-grep "authenticate" @ 779e8c44
-exact: authenticate
-  Definition:1200522285727076473  src.auth.authenticate  [Function]  src/auth.py:5-7  exact-name
-  Definition:6119267860322992230  src.app.login  [Function]  src/app.py:3-4  body-only ×1
-      4| return authenticate(request.user, request.password)
+1. my-group/payments-api: 47 failed pipelines
+2. my-group/web-frontend: 31 failed pipelines
+3. my-group/auth-service: 12 failed pipelines
 ```
 
-Then get its source and its callers:
+## Before you start
 
-```shell
-glab orbit context Definition:1200522285727076473
-```
+<!-- TODO(GA): confirm with Pricing what the add-on includes. -->
+- GitLab Orbit is a paid add-on for top-level groups with a Premium or Ultimate subscription.
+  The add-on includes GitLab Credits for GitLab Orbit queries. On GitLab.com, an Owner can [start a free trial](trial.md).
+- An Owner turns on GitLab Orbit for a top-level group on GitLab.com. On GitLab Self-Managed and GitLab Dedicated,
+  an administrator does. GitLab Orbit then indexes the group, its subgroups, and projects.
+  On GitLab Dedicated, GitLab runs GitLab Orbit for you.
+- On GitLab Self-Managed, an administrator [sets up GitLab Orbit](self-managed/_index.md) first.
+- To query the graph, you need at least the Reporter role. Security data needs the Security Manager role.
+  For more information, see [roles](security.md#roles).
 
-```plaintext
-Definition:1200522285727076473  src.auth.authenticate  [Function]  src/auth.py:5-7
-5|def authenticate(user, password):
-6|    store = SessionStore()
-7|    return store.get(user)
+## Connect your agent
 
-Connections (3 indexed):
-  <-- src.app.login  [calls]  Definition:6119267860322992230  (src/app.py:3)
-  --> src.auth.SessionStore  [calls]  Definition:5672401777261482265  (src/auth.py:1)
-  --> src.auth.SessionStore.get  [calls]  Definition:6248168060050738774  (:2)
-```
+| Connect with | Use it when |
+|--------------|-------------|
+| [GitLab Orbit CLI and skill](agents/_index.md) | You use Claude Code, Codex, OpenCode, or another agent that runs shell commands. |
+| [GitLab Duo](agents/duo.md) | You use GitLab Duo Agent Platform. You do not install anything. |
+| [MCP endpoint](agents/mcp.md) | Your agent supports MCP and cannot run shell commands. |
+| [REST API](queries/api.md) | You build a script, a scheduled report, or a custom tool on the graph. |
 
-Your agent runs the same commands for you. Open your agent in the repository and ask:
+## Code on your machine
 
-```plaintext
-Using GitLab Orbit, what does this project do, and how is it structured?
-```
+The GitLab Orbit CLI also indexes repositories on your machine, so your agent can search code that you have not pushed,
+offline and with no GitLab account. For more information, see [GitLab Orbit Local](local/_index.md).
 
-To ask about merge requests, pipelines, or vulnerabilities, run `glab auth login`.
-Your top-level group must have [GitLab Orbit turned on](#turn-on-gitlab-orbit-for-your-group).
-Then ask:
+## Billing
 
-```plaintext
-Using GitLab Orbit, which CI/CD jobs failed most often in <my-group> in the
-last 30 days? For the top three, show the failure reasons and the merge
-requests with the most failed pipelines.
-```
+Queries consume GitLab Credits on every access path, including GitLab Duo Agent Platform.
+For more information, see [billing](how-it-works.md#billing).
 
-For more prompts, see [use cases](use-cases.md).
-To ask in the GitLab UI instead, [turn on GitLab Orbit in GitLab Duo](agents/duo.md#turn-on-gitlab-orbit-in-gitlab-duo).
+## Reference
 
-## Turn on GitLab Orbit for your group
+{{< cards >}}
 
-GitLab Orbit indexes a top-level group with its subgroups and projects.
+- [GitLab Orbit CLI](cli.md)
+- [What GitLab Orbit indexes](schema.md)
+- [Queries](queries/_index.md)
+- [Security](security.md)
+- [GitLab Self-Managed](self-managed/_index.md)
+- [Troubleshooting](troubleshooting.md)
 
-Prerequisites:
-
-- The Owner role for the top-level group.
-- A Premium or Ultimate subscription for the group.
-
-To turn on GitLab Orbit on GitLab.com:
-
-1. In the top bar, select **Search or go to** > **Your work**.
-1. On the left sidebar, select **GitLab Orbit**.
-1. In the upper-right corner, select **Configure**.
-1. Select your top-level group.
-1. In the dialog, select **Turn on indexing**.
-
-The first index takes a few minutes, or up to 30 minutes for thousands of projects.
-To check the progress:
-
-```shell
-glab orbit graph-status --full-path <my-group>
-```
-
-To query the graph, users need the roles in [security](security.md#roles).
-On GitLab Self-Managed, see [turn on indexing for a group](self-managed/orbit-setup.md#turn-on-indexing-for-a-group).
-
-## Next steps
-
-Your agent uses the local code graph and the GitLab server graph. You do not choose a mode.
-
-- [Use cases](use-cases.md): prompts by goal.
-- [GitLab Orbit CLI](cli.md): install options and commands.
-- [Connect AI agents](agents/_index.md): what setup changes.
-- [Query the graph](queries/_index.md): the query language and the REST API.
-- [What GitLab Orbit indexes](schema.md): entities and supported languages.
-- [How GitLab Orbit works](how-it-works.md): the two graphs and freshness.
-- [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md): run it next to GitLab.
+{{< /cards >}}

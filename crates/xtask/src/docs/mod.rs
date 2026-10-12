@@ -6,7 +6,7 @@ use std::fs;
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
 
-const QUERY_LANGUAGE_DOC: &str = "docs/source/queries/query-language.md";
+const CYPHER_DOC: &str = "docs/source/queries/cypher.md";
 const SKILL_QUERY_LANGUAGE_DOC: &str = "skills/orbit/references/query_language.md";
 const SCHEMA_DOC: &str = "docs/source/schema.md";
 
@@ -19,7 +19,7 @@ struct Region {
 const REGIONS: &[Region] = &[
     Region {
         name: "text-indexed-properties",
-        docs: &[QUERY_LANGUAGE_DOC, SKILL_QUERY_LANGUAGE_DOC],
+        docs: &[CYPHER_DOC, SKILL_QUERY_LANGUAGE_DOC],
         render: tables::text_indexed_properties,
     },
     Region {

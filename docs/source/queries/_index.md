@@ -2,162 +2,107 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the GitLab Orbit graph to find GitLab data, code, and relationships.
+description: Query the GitLab Orbit graph with Cypher to find GitLab data, code, and relationships from scripts and custom tools.
 title: GitLab Orbit queries
 ---
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
+- Add-on: GitLab Orbit
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
-
-A query asks the graph one exact question and returns exact rows.
-Use queries in scripts, CI/CD jobs, and custom tools.
-
-A query is a JSON object. It names the entities to match, the relationships
-to follow, and the properties to return. The response contains only data that
-you can read in GitLab.
+A query asks the graph one exact question and returns exact rows, with only the data that you can access.
+Your agent writes queries for you. Write them yourself for scripts, scheduled reports, and custom tools.
+Queries use the [Cypher query language](cypher.md).
 
 {{< cards >}}
 
-- [Query language](query-language.md)
+- [Cypher query language](cypher.md)
 - [REST API](api.md)
 
 {{< /cards >}}
 
 ## Run a query
 
-1. Put the request in `request.json`:
+Pass the query text to the CLI:
 
-   ```json orbit-query
-   {
-     "query": {
-       "query_type": "traversal",
-       "nodes": [{
-         "id": "p",
-         "entity": "Project",
-         "filters": {"full_path": "gitlab-org/orbit/knowledge-graph"},
-         "columns": ["name", "full_path"]
-       }],
-       "limit": 1
-     }
-   }
-   ```
+```shell
+glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/orbit/knowledge-graph'}) RETURN p.name, p.full_path LIMIT 1"
+```
 
-1. Send the request:
-
-   ```shell
-   glab orbit query --file request.json
-   ```
-
-By default, the CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for AI agents, with one table for each node type.
-For structured JSON, add `--response-format raw`.
+The CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text. For JSON, add `--response-format raw`.
+From a script, use the [query endpoint](api.md#query-endpoint). Agents on the [MCP endpoint](../agents/mcp.md)
+send the same text with the `query_graph` command.
 
 ## Choose a query shape
 
 | Use case | Query shape |
 |----------|-------------|
-| Fetch matching nodes of one entity type | Single-node [`traversal`](query-language.md#traversal-examples) |
-| Follow relationships between known entity types | Multi-node [`traversal`](query-language.md#traversal-examples) |
-| Count, sum, average, or group graph results | [`aggregation`](query-language.md#aggregation) |
-| Find a path between two bounded endpoints | [`path_finding`](query-language.md#path-finding) |
-| Ask what is connected to one bounded node | [`neighbors`](query-language.md#neighbors) |
+| Fetch nodes of one type | `MATCH (n:Label {property: value}) RETURN n` |
+| Follow relationships between node types | `MATCH (a:Label)-[:RELATIONSHIP]->(b:Label) RETURN a, b` |
+| Count, sum, or average results by group | `RETURN key, count(n) AS total ORDER BY total DESC` |
+| Find a path between two bounded nodes | `MATCH path = ANY SHORTEST (a)-[:RELATIONSHIP*1..3]->(b) RETURN path` |
+| Find what is connected to one bounded node | `MATCH (a:Label {id: 1})--(n) RETURN n` |
 
-To search, use a single-node `traversal` with filters.
-There is no separate `search` query type.
+To search, filter one node type with `WHERE`, for example with `CONTAINS` or `all_tokens`.
+For the syntax, see the [Cypher query language](cypher.md).
+
+The examples use numeric IDs. To find the ID of a merge request or a project, see
+[anchor at least one node](cypher.md#anchor-at-least-one-node).
 
 ## Example: fetch a merge request diff
 
-The `diff` column on `MergeRequest` returns the full unified diff.
-Request columns such as `diff` by name. For other diff and source text columns,
-see [properties resolved at query time](../schema.md#properties-resolved-at-query-time).
+The `diff` property of `MergeRequest` returns the full unified diff.
+GitLab Orbit fetches it from the repository when the query asks for it.
+For other properties like this, see [properties resolved at query time](../schema.md#properties-resolved-at-query-time).
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "mr",
-    "entity": "MergeRequest",
-    "node_ids": [12345],
-    "columns": ["iid", "title", "state", "diff"]
-  }],
-  "limit": 1
-}
+```gql orbit-query
+MATCH (mr:MergeRequest {id: 12345})
+RETURN mr.iid, mr.title, mr.state, mr.diff
+LIMIT 1
 ```
 
 ## Example: fetch the changed files of a merge request
 
-`HAS_DIFF` goes from a merge request to its diff snapshots.
-`HAS_FILE` goes from a snapshot to its files.
+`HAS_LATEST_DIFF` goes from a merge request to its current diff version.
+`HAS_FILE` goes from a diff version to its files.
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "mr",
-      "entity": "MergeRequest",
-      "node_ids": [12345],
-      "columns": ["iid", "title", "state"]
-    },
-    {
-      "id": "snapshot",
-      "entity": "MergeRequestDiff",
-      "columns": ["id", "state"]
-    },
-    {
-      "id": "file",
-      "entity": "MergeRequestDiffFile",
-      "columns": ["new_path", "old_path", "too_large", "diff"]
-    }
-  ],
-  "relationships": [
-    {"type": "HAS_DIFF", "from": "mr", "to": "snapshot"},
-    {"type": "HAS_FILE", "from": "snapshot", "to": "file"}
-  ],
-  "limit": 20
-}
+```gql orbit-query
+MATCH (mr:MergeRequest {id: 12345})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+RETURN f.old_path, f.new_path, f.too_large, f.diff
+LIMIT 20
 ```
 
 When `too_large` is `true`, `diff` is `null`.
 
 ## Example: fetch source file content
 
-This query finds indexed files by path and returns the raw file text.
+This query finds indexed files by path and returns the file text.
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "file",
-    "entity": "File",
-    "filters": {
-      "path": {"ends_with": "app/models/project.rb"}
-    },
-    "columns": ["path", "language", "content"]
-  }],
-  "limit": 5
-}
+```gql orbit-query
+MATCH (f:File {project_id: 278964})
+WHERE f.path ENDS WITH 'app/models/project.rb'
+RETURN f.path, f.language, f.content
+LIMIT 5
 ```
 
 ## Related topics
 
-- [GitLab Orbit query language](query-language.md)
+- [Cypher query language](cypher.md)
 - [REST API](api.md)
 - [Use cases](../use-cases.md)
 - [What GitLab Orbit indexes](../schema.md)

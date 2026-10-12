@@ -52,11 +52,6 @@ pre-commit:
       glob:
         - "AGENTS.md"
         - "CLAUDE.md"
-    - name: orbit-skill-docs-sync
-      run: diff docs/source/queries/query-language.md skills/orbit/references/query_language.md
-      glob:
-        - "docs/source/queries/query-language.md"
-        - "skills/orbit/references/query_language.md"
     - name: rust-toolchain-sync
       run: mise run toolchain:check
       glob:
@@ -92,7 +87,7 @@ pre-commit:
         - "crates/xtask/src/docs/**/*.rs"
         - "crates/xtask/src/main.rs"
         - "crates/ontology/src/**/*.rs"
-        - "docs/source/queries/query-language.md"
+        - "docs/source/queries/cypher.md"
         - "docs/source/schema.md"
         - "skills/orbit/references/query_language.md"
     - name: secrets-detection

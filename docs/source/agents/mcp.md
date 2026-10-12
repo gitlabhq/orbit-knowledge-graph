@@ -2,243 +2,69 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect MCP clients to the local GitLab Orbit graph with orbit mcp serve, or to the server graph with the GitLab MCP endpoint.
+description: Connect MCP clients to GitLab Orbit with the GitLab MCP endpoint, or to the local graph with the local MCP server.
 title: GitLab Orbit MCP servers
 ---
 
 GitLab Orbit has two [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers:
 
-- The [local MCP server](#local-mcp-server) runs `orbit mcp serve` on your machine. It gives an agent SQL access to the local graph.
-- The [GitLab MCP endpoint](#gitlab-mcp-endpoint) runs on GitLab.com. It gives an agent the server graph of your groups.
+| Server | Gives your agent |
+|--------|------------------|
+| [GitLab MCP endpoint](#gitlab-mcp-endpoint) | The GitLab data and code of the groups where GitLab Orbit is turned on. |
+| [Local MCP server](#local-mcp-server) | SQL access to the [local graph](../local/_index.md) on your machine. |
 
 You can connect a client to one server or to both.
-
-## Local MCP server
-
-{{< details >}}
-
-- Tier: Free, Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experiment
-
-{{< /details >}}
-
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/643) in GitLab 19.2 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-
-{{< /history >}}
-
-`orbit mcp serve` starts an MCP server over stdio.
-AI agents like Claude Code, Codex, Cursor, and OpenCode can then read the local graph and run SQL on it.
-
-The server is stateless:
-
-- It reads the local graph, not a GitLab instance.
-- It does not cache results or keep a query history.
-- It answers more than one client, each one separately.
-
-Prerequisites:
-
-- The [GitLab Orbit CLI](../cli.md) is installed.
-
-`glab orbit setup --mcp` writes the server configuration for Claude Code, Codex, and OpenCode.
-For more information, see [connect AI agents](_index.md#set-up-your-agents).
-The tabs show the manual configuration.
-
-The examples use the server name `orbit`, the same name that `glab orbit setup` uses.
-If you use `glab`, replace the command `orbit mcp serve` with `glab orbit mcp serve`.
-
-### Connect a client to the local server
-
-{{< tabs >}}
-
-{{< tab title="Claude Code" >}}
-
-Claude Code keeps the configuration in one of three scopes:
-
-| Scope | Available to | Stored in |
-|-------|--------------|-----------|
-| `local` (default) | You, in the current project | `~/.claude.json` |
-| `user` | You, in all projects | `~/.claude.json` |
-| `project` | Everyone who checks out the repository | `.mcp.json` in the repository root |
-
-To add the server, run one of these commands:
-
-```shell
-claude mcp add orbit -- orbit mcp serve
-claude mcp add orbit --scope user -- orbit mcp serve
-claude mcp add orbit --scope project -- orbit mcp serve
-```
-
-You can also edit `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "orbit": {
-      "command": "orbit",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-To check the connection, run `claude mcp list`.
-For the `project` scope, Claude Code asks for approval before it uses `.mcp.json`.
-Until you approve, `claude mcp list` shows the server as `Pending approval`.
-
-{{< /tab >}}
-
-{{< tab title="Codex" >}}
-
-Codex keeps the configuration in `~/.codex/config.toml`, for all your projects:
-
-```shell
-codex mcp add orbit -- orbit mcp serve
-```
-
-To check the connection, run `codex mcp list`.
-
-{{< /tab >}}
-
-{{< tab title="Cursor" >}}
-
-Cursor reads the configuration from `.cursor/mcp.json` in the repository root for one project,
-or from `~/.cursor/mcp.json` for all your projects:
-
-```json
-{
-  "mcpServers": {
-    "orbit": {
-      "type": "stdio",
-      "command": "orbit",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-To check the connection, run `agent mcp list`.
-
-{{< /tab >}}
-
-{{< tab title="OpenCode" >}}
-
-Add the server to `opencode.json` in the repository root,
-or to `~/.config/opencode/opencode.json` for all your projects:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "orbit": {
-      "type": "local",
-      "command": ["orbit", "mcp", "serve"]
-    }
-  }
-}
-```
-
-To check the connection, run `opencode mcp list`.
-
-{{< /tab >}}
-
-{{< tab title="Other clients" >}}
-
-The local server has no URL. A client that needs a URL cannot connect to it.
-
-Add the server to the MCP configuration file of your client:
-
-```json
-{
-  "mcpServers": {
-    "orbit": {
-      "command": "orbit",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-If you use `glab`, run `glab orbit --install` first to download the binary.
-
-To check the connection, make sure that your client lists the `run_sql`, `get_graph_schema`, and `index` tools.
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
-### Local server tools
-
-| Tool | Description | Example prompt |
-|------|-------------|----------------|
-| `index` | Indexes a repository, or a directory of repositories, into the local graph. | "Index my checked-out project." |
-| `get_graph_schema` | Returns the tables, columns, and data types of the local graph. | "Use `get_graph_schema` to show the tables in my local graph." |
-| `run_sql` | Runs read-only SQL. It takes an array of statements and returns one array of JSON rows for each statement, in the same order. | "Show me the most used imports in this repository." |
-
-One `run_sql` call returns about 1 MB at most, for all statements together.
-A larger result fails, and the agent tries again with a narrower query.
-If the agent does not recover, ask it for fewer results.
+If your agent can run shell commands, use the [CLI and the GitLab Orbit skill](_index.md) instead.
 
 ## GitLab MCP endpoint
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
+- Add-on: GitLab Orbit
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
+<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Generally available in GitLab 19.x.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
-
-The GitLab MCP endpoint is `https://gitlab.com/api/v4/orbit/mcp`.
-It gives an MCP client two tools to find and run GitLab Orbit commands on the server graph.
-`glab orbit setup --mcp` does not configure this endpoint. Configure it by hand.
+The endpoint is `https://gitlab.com/api/v4/orbit/mcp`.
+On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostname of your instance.
 
 Prerequisites:
 
-- GitLab Orbit is [turned on for your group](../_index.md#turn-on-gitlab-orbit-for-your-group).
-- You can access the groups that you want to query.
-- Your client authenticates with OAuth. The first tool call opens your browser to sign in to GitLab.
-  You can also use a [fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/)
-  or a personal access token with the `read_api` scope.
-- If your client connects over native HTTP, not through `mcp-remote`, its OAuth request must include the `mcp_orbit` scope.
+- GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group that you can access.
+- Your client signs in with OAuth. The first tool call opens your browser.
+  A client that connects over native HTTP must request the `mcp_orbit` scope.
+  You can also use a personal access token with the `read_api` scope,
+  or a [fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/).
 
 ### Connect a client to the endpoint
 
-Some clients support only local stdio servers.
-For these clients, [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the endpoint as a local command.
+`glab orbit setup --mcp` does not configure the endpoint. Add it to your client by hand.
+Clients that support only local stdio servers connect through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote),
+which needs [Node.js](https://nodejs.org/).
 
 {{< tabs >}}
 
 {{< tab title="Claude Code" >}}
 
-Claude Code connects to the endpoint over its built-in HTTP transport:
-
 ```shell
 claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 ```
 
-Do not use `npx mcp-remote` with Claude Code.
-It starts a stdio process that conflicts with the built-in transport and causes `Failed to connect` errors.
-To fix a registration that uses `mcp-remote`, remove it and add it again:
-
-```shell
-claude mcp remove gitlab-orbit
-claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
-```
+Do not use `npx mcp-remote` with Claude Code. It conflicts with the built-in HTTP transport and causes
+`Failed to connect` errors. To fix a registration that uses `mcp-remote`, run
+`claude mcp remove gitlab-orbit`, then add the endpoint again.
 
 {{< /tab >}}
 
@@ -250,20 +76,27 @@ codex mcp add gitlab-orbit -- npx mcp-remote https://gitlab.com/api/v4/orbit/mcp
 
 {{< /tab >}}
 
-{{< tab title="Cursor and other clients" >}}
+{{< tab title="Gemini CLI" >}}
 
-Add the endpoint to the MCP configuration of your client, for example `~/.cursor/mcp.json`:
+Add the endpoint to `~/.gemini/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "gitlab-orbit": {
-      "command": "npx",
-      "args": ["mcp-remote", "https://gitlab.com/api/v4/orbit/mcp"]
+      "url": "https://gitlab.com/api/v4/orbit/mcp",
+      "type": "http",
+      "timeout": 5000,
+      "oauth": {
+        "enabled": true,
+        "scopes": ["mcp_orbit"]
+      }
     }
   }
 }
 ```
+
+Without `"scopes": ["mcp_orbit"]`, authentication fails, even when you are signed in to GitLab.
 
 {{< /tab >}}
 
@@ -283,45 +116,14 @@ Add the endpoint to `~/.config/opencode/opencode.json`:
 ```
 
 OpenCode needs `"type": "local"` and one array for the command and its arguments.
-A separate `args` field, or no `type`, causes a `ConfigInvalidError`.
+Otherwise, it fails with `ConfigInvalidError`.
 
 {{< /tab >}}
 
-{{< tab title="Gemini CLI" >}}
+{{< tab title="Cursor, Antigravity, and other clients" >}}
 
-Gemini CLI connects over native HTTP. Add the endpoint to `~/.gemini/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "gitlab-orbit": {
-      "url": "https://gitlab.com/api/v4/orbit/mcp",
-      "type": "http",
-      "timeout": 5000,
-      "oauth": {
-        "enabled": true,
-        "scopes": ["mcp_orbit"]
-      }
-    }
-  }
-}
-```
-
-You can also run `gemini mcp add gitlab-orbit https://gitlab.com/api/v4/orbit/mcp -t http -s user`,
-then add the `oauth.scopes` block by hand.
-Without `"scopes": ["mcp_orbit"]`, authentication fails, even if you are signed in to GitLab.
-
-Older configurations use `httpUrl` in place of `url` and `type`.
-`httpUrl` still works but is deprecated.
-
-{{< /tab >}}
-
-{{< tab title="Antigravity" >}}
-
-The Antigravity IDE and CLI read `~/.gemini/config/mcp_config.json`.
-Antigravity does not run the MCP OAuth flow for remote servers.
-A native `serverUrl` entry sends `initialize` without a token and fails with `Unauthorized`.
-Use `mcp-remote`:
+Add the endpoint to the MCP configuration of your client.
+Cursor reads `~/.cursor/mcp.json`. Antigravity reads `~/.gemini/config/mcp_config.json`.
 
 ```json
 {
@@ -334,7 +136,8 @@ Use `mcp-remote`:
 }
 ```
 
-Do not add an `oauth` block. `mcp-remote` gets the `mcp_orbit` scope from the OAuth metadata of the endpoint.
+Antigravity does not run the MCP OAuth flow for remote servers, so it needs `mcp-remote`.
+Do not add an `oauth` block. `mcp-remote` gets the `mcp_orbit` scope from the endpoint.
 
 {{< /tab >}}
 
@@ -348,83 +151,167 @@ In your agent, ask:
 Use GitLab Orbit to list the 5 most recently updated projects in my group.
 ```
 
-The first call opens your browser to sign in. The client shows `Needs authentication` until you complete the sign-in.
-After the sign-in, the agent returns project names and paths.
-If the browser does not open, run `glab auth status` to check your session, and `glab auth login` to sign in again.
-Also make sure that GitLab Orbit is turned on for one of your groups.
-For query errors after you connect, see [troubleshooting](../troubleshooting.md).
+The first call opens your browser to sign in. Until you sign in, the client shows `Needs authentication`.
+Then the agent returns project names and paths.
+
+If the browser does not open, check your session with `glab auth status`, and sign in again with `glab auth login`.
+For other errors, see [troubleshooting](../troubleshooting.md).
 
 ### Endpoint tools
 
-| Tool | Description |
-|------|-------------|
-| `list_commands` | Lists the GitLab Orbit commands with their descriptions and input schemas. |
-| `invoke_command` | Runs a command by name with parameters, and returns typed results. |
-
-`invoke_command` runs these commands:
+The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with their input schemas.
+`invoke_command` runs one of them by name:
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Runs a query in the JSON Query DSL, or read-only GQL text when GQL is turned on for the user. |
+| `query_graph` | Runs a query in the [Cypher query language](../queries/cypher.md). |
 | `get_graph_schema` | Returns the node types, their properties, and the relationship types. |
-| `get_query_dsl` | Returns the JSON DSL grammar of `query_graph` and its version. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
-The `orbit_gql_queries` feature flag in GitLab selects one query language for each user. It is off by default.
-For the requirements, see the [query endpoint](../queries/api.md#query-endpoint).
+`get_graph_schema` returns the whole schema. To get the schema of one node type only, run
+`CALL db.schema('MergeRequest')` with `query_graph`. The `get_query_dsl` command belongs to the deprecated JSON query DSL.
 
-- With the flag off, `list_commands` describes the JSON DSL, and `query_graph` accepts only JSON objects.
-- With the flag on, `list_commands` describes only GQL, and `query_graph` accepts only strings.
-  The command list does not show `get_query_dsl`, and DSL requests fail.
-  Use `CALL db.schema()` to discover the graph.
+Your agent writes the queries for you. For precise control, give it a complete query to run with
+`{"command_name": "query_graph", "parameters": {"query": "<query>"}}`, for example:
 
-A client cannot select the language.
-Do not share discovery results across users or modes.
-
-### Use the endpoint tools
-
-After you connect, tell your agent to use the tools. For example:
-
-```plaintext
-Use list_commands to show the GitLab Orbit commands, then run get_graph_schema to show the node types.
-Use query_graph to find the 10 projects with the most open merge requests in my group.
-Use GitLab Orbit to find all files in this project that import AuthService directly or transitively.
-Use GitLab Orbit to map the key services in this group, their languages, and the projects they depend on.
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+WHERE mr.state = 'opened' AND p.full_path STARTS WITH 'my-group/'
+RETURN p.name, p.full_path, count(mr) AS open_mrs
+ORDER BY open_mrs DESC
+LIMIT 10
 ```
 
-The agent writes the query and runs `query_graph` for you.
-For precise control, give the agent a complete query.
-For example, to call `invoke_command` with `{"command_name": "query_graph", "parameters": {"query": ...}}`, use this query:
-
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-  ],
-  "group_by": ["p"],
-  "aggregations": [
-    {"count": "mr", "as": "open_mrs"}
-  ],
-  "aggregation_sort": "-open_mrs",
-  "limit": 10
-}
-```
-
-To give the agent query recipes and the query language reference, install the [GitLab Orbit skill](_index.md#gitlab-orbit-skill).
+For query recipes and the query language reference, install the [GitLab Orbit skill](_index.md#gitlab-orbit-skill).
 
 ### Billing
 
-MCP queries do not consume GitLab Credits during the beta. For billing after general availability, see [billing](../how-it-works.md#billing).
+Queries through the MCP endpoint consume GitLab Credits. For more information, see [billing](../how-it-works.md#billing).
+
+## Local MCP server
+
+{{< details >}}
+
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
+- Status: Experiment
+
+{{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/643) in GitLab 19.2 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+
+{{< /history >}}
+
+`orbit mcp serve` starts an MCP server over stdio. It reads only the local graph,
+keeps no cache or query history, and serves each client separately.
+The server has no URL, so clients that need a URL cannot connect to it.
+It never consumes GitLab Credits.
+
+Prerequisites:
+
+- The [GitLab Orbit CLI](../cli.md) is installed.
+
+`glab orbit setup --mcp` registers the server for Claude Code, Codex, and OpenCode.
+For more information, see [set up your agents](_index.md#set-up-your-agents).
+
+### Connect a client to the local server
+
+The examples use the server name `orbit` and the command `glab orbit mcp serve`, as `glab orbit setup` does.
+`glab` must run the binary without a prompt, so first run `glab config set orbit_cli_auto_run true`.
+`glab orbit setup` sets this option for you. If you installed the standalone binary, use `orbit mcp serve`.
+
+{{< tabs >}}
+
+{{< tab title="Claude Code" >}}
+
+```shell
+claude mcp add orbit -- glab orbit mcp serve
+```
+
+The server is then available to you in the current project.
+Add `--scope user` for all your projects, or `--scope project` to write `.mcp.json` for everyone who
+checks out the repository. Claude Code asks for approval before it uses a project `.mcp.json`.
+
+To check the connection, run `claude mcp list`.
+
+{{< /tab >}}
+
+{{< tab title="Codex" >}}
+
+```shell
+codex mcp add orbit -- glab orbit mcp serve
+```
+
+Codex saves the server in `~/.codex/config.toml`, for all your projects.
+To check the connection, run `codex mcp list`.
+
+{{< /tab >}}
+
+{{< tab title="OpenCode" >}}
+
+Add the server to `opencode.json` in the repository root,
+or to `~/.config/opencode/opencode.json` for all your projects:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "orbit": {
+      "type": "local",
+      "command": ["glab", "orbit", "mcp", "serve"]
+    }
+  }
+}
+```
+
+To check the connection, run `opencode mcp list`.
+
+{{< /tab >}}
+
+{{< tab title="Cursor and other clients" >}}
+
+Add the server to the MCP configuration of your client.
+Cursor reads `.cursor/mcp.json` in the repository root, or `~/.cursor/mcp.json` for all your projects.
+
+```json
+{
+  "mcpServers": {
+    "orbit": {
+      "command": "glab",
+      "args": ["orbit", "mcp", "serve"]
+    }
+  }
+}
+```
+
+For Cursor, also add `"type": "stdio"` to the `orbit` entry.
+
+To check the connection, make sure that your client lists the `index`, `get_graph_schema`, and `run_sql` tools.
+In Cursor, run `agent mcp list`.
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+### Local server tools
+
+| Tool | Description |
+|------|-------------|
+| `index` | Indexes a repository, or a directory of repositories, into the local graph. |
+| `get_graph_schema` | Returns the tables, columns, and data types of the local graph. |
+| `run_sql` | Runs read-only SQL statements and returns one array of JSON rows for each statement, in order. |
+
+One `run_sql` call returns at most about 1 MB for all statements together.
+If a result is larger, the call fails and the agent tries again with a narrower query.
+If the agent does not recover, ask it for fewer results.
 
 ## Related topics
 
-- [Connect AI agents](_index.md)
+- [Connect your agent](_index.md)
+- [GitLab Orbit Local](../local/_index.md)
 - [GitLab Orbit in GitLab Duo](duo.md)
 - [GitLab Orbit CLI](../cli.md)
-- [Query the graph](../queries/_index.md)
+- [Queries](../queries/_index.md)
 - [Troubleshooting](../troubleshooting.md)
