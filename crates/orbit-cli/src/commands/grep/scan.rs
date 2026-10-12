@@ -236,5 +236,7 @@ mod tests {
             .map(|h| (h.file.as_str(), h.line, h.context))
             .collect();
         assert_eq!(lines, [("src/a.rs", 1, true), ("src/a.rs", 2, false)]);
+        let exact = matcher(&[Term::parse("mark_in_sync").fixed()], &options).unwrap();
+        assert!(scan(repo.path(), &[], &exact, &options).unwrap().is_empty());
     }
 }

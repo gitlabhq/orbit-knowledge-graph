@@ -10,6 +10,8 @@ pub(super) struct Term {
     pub(super) raw: String,
     regex: Option<(regex::Regex, regex::Regex)>,
     pub(super) assign: Option<regex::Regex>,
+    /// `-F`: the raw text exactly, so `_`, `-`, and spaces are not optional.
+    fixed: bool,
 }
 
 impl Term {
@@ -33,6 +35,7 @@ impl Term {
             raw: raw.to_string(),
             regex,
             assign,
+            fixed: false,
         }
     }
 
@@ -41,13 +44,21 @@ impl Term {
             raw: self.raw.clone(),
             regex: None,
             assign: assignment(&self.raw),
+            fixed: false,
+        }
+    }
+
+    pub(super) fn fixed(&self) -> Self {
+        Self {
+            fixed: true,
+            ..self.literal()
         }
     }
 
     fn pattern(&self) -> String {
         match self.regex {
             Some(_) => self.raw.clone(),
-            None if compact(&self.raw).is_empty() => regex::escape(&self.raw),
+            None if self.fixed || compact(&self.raw).is_empty() => regex::escape(&self.raw),
             None => compact(&self.raw)
                 .chars()
                 .map(|c| regex::escape(&c.to_string()))

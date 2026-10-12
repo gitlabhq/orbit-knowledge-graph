@@ -78,7 +78,7 @@ pub(crate) fn run(
 
     let mut terms: Vec<term::Term> = alternatives.iter().map(|a| term::Term::parse(a)).collect();
     if options.fixed {
-        terms = terms.iter().map(term::Term::literal).collect();
+        terms = terms.iter().map(term::Term::fixed).collect();
     }
     let scan = match query.is_some() {
         true => {
