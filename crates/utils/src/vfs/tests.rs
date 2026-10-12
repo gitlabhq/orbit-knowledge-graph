@@ -288,6 +288,52 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
 }
 
 #[test]
+fn directory_classification_retains_accepted_bytes_in_memory_or_scratch() {
+    for resident in [0, 1024] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.rs");
+        let content = b"fn main() {}";
+        std::fs::write(&path, content).unwrap();
+        std::fs::write(root.path().join("binary.rs"), b"\0binary").unwrap();
+        let vfs = Vfs::load(
+            super::sources::Directory(root.path()),
+            crate::vfs_policies::CodePolicy,
+            Limits {
+                resident_bytes: Some(resident),
+                ..Limits::default()
+            },
+            Options::default(),
+        )
+        .unwrap();
+        std::fs::remove_file(path).unwrap();
+        for _ in 0..2 {
+            assert_eq!(&*vfs.read("main.rs").unwrap(), content);
+        }
+        assert_eq!(
+            vfs.read("binary.rs").unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        let usage = vfs.usage();
+        assert_eq!(
+            usage.resident,
+            if resident == 0 {
+                0
+            } else {
+                content.len() as u64
+            }
+        );
+        assert_eq!(
+            usage.spilled,
+            if resident == 0 {
+                content.len() as u64
+            } else {
+                0
+            }
+        );
+    }
+}
+
+#[test]
 fn policy_composition_preserves_laziness_and_borrowed_content() {
     struct Stage(Arc<AtomicUsize>);
     impl Pass for Stage {
