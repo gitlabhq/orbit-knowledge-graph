@@ -12,10 +12,6 @@ use crate::tree::{Compact, Edge, Tree};
 
 pub type Sources = Arc<Vfs<()>>;
 
-pub fn candidate_count(repository: &Vfs<()>) -> usize {
-    candidates(repository, 0).count()
-}
-
 pub fn candidates(
     repository: &Vfs<()>,
     max_files: usize,
