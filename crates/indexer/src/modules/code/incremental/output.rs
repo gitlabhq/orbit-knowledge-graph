@@ -15,6 +15,7 @@ pub(super) struct Output<'a> {
     envelope: &'a IndexerEnvelope,
     ontology: &'a Ontology,
     emitted_branch: AtomicBool,
+    pub(super) batch_bytes: usize,
 }
 
 fn text(batch: &RecordBatch, column: &str, row: usize) -> Result<String, SinkError> {
@@ -35,14 +36,23 @@ impl<'a> Output<'a> {
             envelope,
             ontology,
             emitted_branch: AtomicBool::new(false),
+            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
         }
     }
 
     pub fn convert(
         &self,
         tables: Vec<(String, RecordBatch)>,
-    ) -> Result<ConvertedGraphData, SinkError> {
-        let mut tables: HashMap<_, _> = tables.into_iter().collect();
+    ) -> Result<Vec<ConvertedGraphData>, SinkError> {
+        let mut by_table: HashMap<_, Vec<_>> = HashMap::new();
+        for (table, batch) in tables {
+            by_table.entry(table).or_default().push(batch);
+        }
+        let mut take = |table: &str| {
+            by_table
+                .remove(table)
+                .ok_or_else(|| SinkError(format!("missing {table}")))
+        };
         let properties = build_tag_properties(self.ontology);
         let branch_id = compute_branch_id(self.envelope.project_id, &self.envelope.branch);
         let branch_tags: Vec<_> = properties
@@ -59,27 +69,28 @@ impl<'a> Output<'a> {
                 .ontology
                 .table_name(kind)
                 .map_err(|e| SinkError(e.to_string()))?;
-            let batch = tables
-                .remove(table)
-                .ok_or_else(|| SinkError(format!("missing {table}")))?;
-            for row in 0..batch.num_rows() {
-                let id = id(&batch, "id", row)?;
-                let row_tags = properties
-                    .get(kind)
-                    .into_iter()
-                    .flatten()
-                    .map(|(key, property)| {
-                        text(&batch, property, row).map(|value| format!("{key}:{value}"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                tags.insert(id, row_tags);
-                if matches!(kind, "Directory" | "File") {
-                    structure.push((id, kind, text(&batch, "path", row)?));
+            let batches = take(table)?;
+            for batch in &batches {
+                for row in 0..batch.num_rows() {
+                    let id = id(batch, "id", row)?;
+                    let row_tags = properties
+                        .get(kind)
+                        .into_iter()
+                        .flatten()
+                        .map(|(key, property)| {
+                            text(batch, property, row).map(|value| format!("{key}:{value}"))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    tags.insert(id, row_tags);
+                    if matches!(kind, "Directory" | "File") {
+                        structure.push((id, kind, text(batch, "path", row)?));
+                    }
                 }
             }
-            entities.push(batch);
+            entities.push(batches);
         }
         let mut edges = BatchBuilder::new(&edge_specs(self.ontology), 0)?;
+        let mut edge_batches = Vec::new();
         let empty_tags = Vec::new();
         let mut edge =
             |source_id, target_id, edge_kind: &str, source_kind: &str, target_kind: &str| {
@@ -103,7 +114,9 @@ impl<'a> Output<'a> {
                     source_tags,
                     target_tags,
                 }
-                .write_row(&mut edges, &())
+                .write_row(&mut edges, &())?;
+                edge_batches.extend(edges.take_if_over(self.batch_bytes)?);
+                Ok::<_, arrow::error::ArrowError>(())
             };
         let branch = if self.emitted_branch.swap(true, Ordering::Relaxed) {
             BatchBuilder::new(&entity_specs(self.ontology, "Branch"), 0)?.finish()?
@@ -130,30 +143,53 @@ impl<'a> Output<'a> {
                 edge(branch_id, id, "CONTAINS", "Branch", kind)?;
             }
         }
-        let batch = tables
-            .remove(self.ontology.edge_table())
-            .ok_or_else(|| SinkError("missing incremental edges".into()))?;
-        for row in 0..batch.num_rows() {
-            let target = id(&batch, "target_id", row)?;
-            let kind = text(&batch, "relationship_kind", row)?;
-            edge(
-                id(&batch, "source_id", row)?,
-                target,
-                &kind,
-                &text(&batch, "source_kind", row)?,
-                &text(&batch, "target_kind", row)?,
-            )?;
+        for batch in take(self.ontology.edge_table())? {
+            for row in 0..batch.num_rows() {
+                let target = id(&batch, "target_id", row)?;
+                let kind = text(&batch, "relationship_kind", row)?;
+                edge(
+                    id(&batch, "source_id", row)?,
+                    target,
+                    &kind,
+                    &text(&batch, "source_kind", row)?,
+                    &text(&batch, "target_kind", row)?,
+                )?;
+            }
         }
-        let [directories, files, definitions, imported_symbols]: [RecordBatch; 4] = entities
+        edge_batches.push(edges.finish()?);
+        let [directories, files, definitions, imported_symbols]: [Vec<RecordBatch>; 4] = entities
             .try_into()
             .map_err(|_| SinkError("invalid incremental entity set".into()))?;
-        Ok(ConvertedGraphData {
-            branch,
-            directories,
-            files,
-            definitions,
-            imported_symbols,
-            edges: edges.finish()?,
-        })
+        let parts = [
+            &directories,
+            &files,
+            &definitions,
+            &imported_symbols,
+            &edge_batches,
+        ]
+        .iter()
+        .map(|batches| batches.len())
+        .max()
+        .unwrap_or(1);
+        let part = |batches: &[RecordBatch], index: usize| {
+            batches
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| RecordBatch::new_empty(batches[0].schema()))
+        };
+        Ok((0..parts)
+            .map(|index| ConvertedGraphData {
+                branch: if index == 0 {
+                    branch.clone()
+                } else {
+                    RecordBatch::new_empty(branch.schema())
+                },
+                directories: part(&directories, index),
+                files: part(&files, index),
+                definitions: part(&definitions, index),
+                imported_symbols: part(&imported_symbols, index),
+                edges: part(&edge_batches, index),
+            })
+            .collect())
     }
 }

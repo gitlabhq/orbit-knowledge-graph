@@ -17,6 +17,7 @@ pub struct Options {
     pub worker_threads: usize,
     pub concurrent_families: usize,
     pub small_family_files: usize,
+    pub batch_bytes: usize,
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
 }
@@ -157,15 +158,17 @@ pub fn repository<E: std::fmt::Display>(
                                     let mut report = context.report;
                                     report.unread_files.retain(|path| owns(family, path));
                                     run.check()?;
+                                    let mut plan = crate::export::ExportPlan::from_config(
+                                        &env.export_config,
+                                        ontology,
+                                        &env.lang,
+                                    )?;
+                                    plan.batch_bytes = options.batch_bytes;
                                     let batches = crate::export::export(
                                         &graph.state.trees,
                                         &graph.state.edges,
                                         &env.lang,
-                                        &crate::export::ExportPlan::from_config(
-                                            &env.export_config,
-                                            ontology,
-                                            &env.lang,
-                                        )?,
+                                        &plan,
                                         envelope,
                                         family == first,
                                         &|path| owns(family, path),

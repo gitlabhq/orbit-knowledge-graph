@@ -667,6 +667,7 @@ impl CodeIndexer {
             worker_threads: legacy_config.worker_threads,
             concurrent_families: legacy_config.concurrent_languages(),
             small_family_files: self.small_repo_max_files,
+            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
         };

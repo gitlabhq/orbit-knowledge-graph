@@ -240,6 +240,7 @@ fn options() -> templates::Options {
         worker_threads: 0,
         concurrent_families: 2,
         small_family_files: 0,
+        batch_bytes: orbit_utils::arrow::BATCH_BYTES,
         cancelled: std::sync::Arc::new(|| false),
         family_finished: std::sync::Arc::new(|| {}),
     }
@@ -354,6 +355,65 @@ fn a_family_panic_ends_the_run_with_a_typed_error() {
     };
     assert_eq!(message, "emit failed");
     assert_eq!(emitted.into_inner(), 1);
+}
+
+#[test]
+fn tables_over_the_batch_byte_budget_split_into_batches() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
+    );
+    let ontology = Ontology::load_embedded().unwrap();
+    let export = |batch_bytes| {
+        let tables = std::sync::Mutex::new(std::collections::BTreeMap::<_, Vec<_>>::new());
+        templates::repository(
+            common::walk(repo.path()),
+            templates::Options {
+                batch_bytes,
+                ..options()
+            },
+            &envelope(),
+            &ontology,
+            code_graph_incremental::export::ExportConfig::embedded(),
+            |batches| -> Result<(), String> {
+                let mut tables = tables.lock().unwrap();
+                for (name, batch) in batches {
+                    tables.entry(name).or_default().push(batch);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        tables.into_inner().unwrap()
+    };
+    let whole = export(orbit_utils::arrow::BATCH_BYTES);
+    let split = export(1);
+    assert_eq!(
+        whole.keys().collect::<Vec<_>>(),
+        split.keys().collect::<Vec<_>>()
+    );
+    for (name, batches) in &whole {
+        let [batch] = batches.as_slice() else {
+            panic!("{name} came in {} batches", batches.len());
+        };
+        let pieces = &split[name];
+        assert!(pieces.iter().all(|piece| piece.num_rows() <= 1), "{name}");
+        assert_eq!(
+            pieces.iter().filter(|piece| piece.num_rows() > 0).count(),
+            batch.num_rows(),
+            "{name}"
+        );
+        let names: Vec<_> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
+        let names: Vec<_> = names.iter().map(String::as_str).collect();
+        let joined = arrow::compute::concat_batches(&batch.schema(), pieces).unwrap();
+        assert_eq!(rows(&joined, &names), rows(batch, &names), "{name}");
+    }
 }
 
 #[test]

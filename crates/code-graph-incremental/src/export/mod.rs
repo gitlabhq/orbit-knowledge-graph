@@ -261,9 +261,8 @@ pub fn export(
     let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
     for (index, entity) in plan.entities.iter().enumerate() {
-        let mut b = BatchBuilder::new(&entity.specs, 0)?;
         write_entity(
-            &mut b,
+            &mut tables,
             plan,
             entity,
             index,
@@ -277,18 +276,16 @@ pub fn export(
                 _ => true,
             },
         )?;
-        tables.push((entity.table.clone(), b.finish()?));
     }
-    tables.push((
-        plan.edge_table.clone(),
-        write_edges(plan, edges, &forest, &ids, envelope)?,
-    ));
+    for batch in write_edges(plan, edges, &forest, &ids, envelope)? {
+        tables.push((plan.edge_table.clone(), batch));
+    }
     Ok(tables)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn write_entity(
-    b: &mut BatchBuilder,
+    tables: &mut Vec<(String, RecordBatch)>,
     plan: &ExportPlan,
     entity: &EntityPlan,
     index: usize,
@@ -298,6 +295,8 @@ fn write_entity(
     ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
     emit: &dyn Fn(&Tree) -> bool,
 ) -> Result<(), Error> {
+    let mut builder = BatchBuilder::new(&entity.specs, 0)?;
+    let b = &mut builder;
     for (ti, tree) in forest.all() {
         let root = tree.root();
         let nodes = std::iter::once(root)
@@ -354,9 +353,13 @@ fn write_entity(
                     row.value(column, lang)
                         .write(b, &column.name, column.col_type)?;
                 }
+                if let Some(batch) = b.take_if_over(plan.batch_bytes)? {
+                    tables.push((entity.table.clone(), batch));
+                }
             }
         }
     }
+    tables.push((entity.table.clone(), builder.finish()?));
     Ok(())
 }
 
@@ -372,7 +375,7 @@ fn write_edges(
     forest: &Forest,
     ids: &FxHashMap<(u32, u32), (i64, usize, bool)>,
     envelope: &Envelope,
-) -> Result<RecordBatch, Error> {
+) -> Result<Vec<RecordBatch>, Error> {
     let entity_name = |index: usize| plan.entities[index].name.as_str();
     let mut rows: Vec<EdgeRow> = Vec::new();
 
@@ -425,27 +428,29 @@ fn write_edges(
         });
     }
 
-    Ok(
-        BatchBuilder::new(&plan.edge_specs, rows.len())?.build(&rows, |row, b| {
-            for column in &plan.edge_columns {
-                let value = match &column.source {
-                    RowSource::Const(value) => {
-                        envelope.get(&column.name).unwrap_or(Scalar::Str(value))
-                    }
-                    RowSource::Value(name) => match name.as_str() {
-                        "source.id" => Scalar::Int(row.source.0),
-                        "source.entity" => Scalar::Str(row.source.1),
-                        "kind" => Scalar::Str(row.kind),
-                        "target.id" => Scalar::Int(row.target.0),
-                        "target.entity" => Scalar::Str(row.target.1),
-                        name => envelope.get(name).expect("validated envelope"),
-                    },
-                };
-                value.write(b, &column.name, column.col_type)?;
-            }
-            Ok(())
-        })?,
-    )
+    let mut batches = Vec::new();
+    let mut b = BatchBuilder::new(&plan.edge_specs, rows.len())?;
+    for row in &rows {
+        for column in &plan.edge_columns {
+            let value = match &column.source {
+                RowSource::Const(value) => envelope.get(&column.name).unwrap_or(Scalar::Str(value)),
+                RowSource::Value(name) => match name.as_str() {
+                    "source.id" => Scalar::Int(row.source.0),
+                    "source.entity" => Scalar::Str(row.source.1),
+                    "kind" => Scalar::Str(row.kind),
+                    "target.id" => Scalar::Int(row.target.0),
+                    "target.entity" => Scalar::Str(row.target.1),
+                    name => envelope.get(name).expect("validated envelope"),
+                },
+            };
+            value.write(&mut b, &column.name, column.col_type)?;
+        }
+        if let Some(batch) = b.take_if_over(plan.batch_bytes)? {
+            batches.push(batch);
+        }
+    }
+    batches.push(b.finish()?);
+    Ok(batches)
 }
 
 #[cfg(test)]

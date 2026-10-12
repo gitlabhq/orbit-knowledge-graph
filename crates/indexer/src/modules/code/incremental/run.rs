@@ -48,7 +48,8 @@ pub(in crate::modules::code) fn run(
         language_timings: Vec::new(),
         phase_timings: PhaseTimings::default(),
     };
-    let output = Output::new(&envelope, &ontology);
+    let mut output = Output::new(&envelope, &ontology);
+    output.batch_bytes = options.batch_bytes;
     let cancelled = options.cancelled.clone();
     let mut export_config = ExportConfig::embedded().clone();
     for name in ontology.local_entity_names() {
@@ -79,22 +80,23 @@ pub(in crate::modules::code) fn run(
         &ontology,
         &export_config,
         |batches| -> Result<(), SinkError> {
-            let batches = output.convert(batches)?;
-            {
-                let mut stats = indexed.lock().expect("stats lock");
-                stats.files_indexed += batches.files.num_rows();
-                stats.directories_indexed += batches.directories.num_rows();
-                stats.definitions_count += batches.definitions.num_rows();
-                stats.imports_count += batches.imported_symbols.num_rows();
-                stats.edges_count += batches.edges.num_rows();
-            }
-            for (table, batch) in route_graph(batches, &tables)? {
-                if cancelled() {
-                    return Err(SinkError("indexing cancelled".into()));
+            for batches in output.convert(batches)? {
+                {
+                    let mut stats = indexed.lock().expect("stats lock");
+                    stats.files_indexed += batches.files.num_rows();
+                    stats.directories_indexed += batches.directories.num_rows();
+                    stats.definitions_count += batches.definitions.num_rows();
+                    stats.imports_count += batches.imported_symbols.num_rows();
+                    stats.edges_count += batches.edges.num_rows();
                 }
-                on_batch(&table, batch).inspect_err(|_| {
-                    sink_failed.store(true, std::sync::atomic::Ordering::Relaxed)
-                })?;
+                for (table, batch) in route_graph(batches, &tables)? {
+                    if cancelled() {
+                        return Err(SinkError("indexing cancelled".into()));
+                    }
+                    on_batch(&table, batch).inspect_err(|_| {
+                        sink_failed.store(true, std::sync::atomic::Ordering::Relaxed)
+                    })?;
+                }
             }
             Ok(())
         },
