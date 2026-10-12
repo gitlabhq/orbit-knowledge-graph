@@ -464,7 +464,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 .sum::<usize>();
         if predicate_count > MAX_PREDICATES {
             return Err(QueryError::Validation(format!(
-                "predicate count ({predicate_count}) must not exceed {MAX_PREDICATES}"
+                "Query has {predicate_count} predicates; the maximum is {MAX_PREDICATES} across the entire query. Remove redundant conditions or simplify the query."
             )));
         }
         if input.nodes.len() > MAX_NODES_CAP {

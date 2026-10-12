@@ -12,7 +12,7 @@ fn assert_budget(query: &str, frontend: Frontend, count: usize) {
             result.unwrap();
         } else {
             assert!(matches!(result, Err(QueryError::Validation(message))
-                if message == "predicate count (17) must not exceed 16"));
+                if message == "Query has 17 predicates; the maximum is 16 across the entire query. Remove redundant conditions or simplify the query."));
         }
     }
 }
