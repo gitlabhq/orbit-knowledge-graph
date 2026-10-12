@@ -5,7 +5,7 @@ use super::super::pipeline::IndexingReport;
 use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
 use code_graph_incremental::pipeline::FileTiming;
-use code_graph_incremental::{Envelope, Scalar, export::ExportConfig, templates};
+use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -21,7 +21,9 @@ pub(in crate::modules::code) fn run(
     tables: Arc<CodeTableNames>,
     on_batch: Arc<OnBatch>,
 ) -> Result<IndexingReport, SinkError> {
-    use code_graph::v2::error::{AbortPhase, FaultedFile, FileFault, FileSkip, SkippedFile};
+    use code_graph::v2::error::{
+        AbortPhase, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile,
+    };
     use code_graph::v2::pipeline::{PhaseTimings, PipelineStats};
     let started = std::time::Instant::now();
     let mut stats = PipelineStats {
@@ -58,6 +60,7 @@ pub(in crate::modules::code) fn run(
             super::super::arrow_converter::entity_specs(&ontology, name),
         );
     }
+    let mut retryable = false;
     let report = templates::repository(
         repository,
         options,
@@ -82,15 +85,46 @@ pub(in crate::modules::code) fn run(
             stats.imports_count += batches.imported_symbols.num_rows();
             stats.edges_count += batches.edges.num_rows();
             for (table, batch) in route_graph(batches, &tables)? {
+                retryable = true;
                 if cancelled() {
                     return Err(SinkError("indexing cancelled".into()));
                 }
                 on_batch(&table, batch)?;
+                retryable = false;
             }
             Ok(())
         },
-    )
-    .map_err(|error| SinkError(error.to_string()))?;
+    );
+    let report = match report {
+        Ok(report) => report,
+        Err(error) if !cancelled() && (retryable || matches!(error, Error::Killed(_))) => {
+            return Err(SinkError(error.to_string()));
+        }
+        Err(error) => {
+            let errors = match error {
+                _ if cancelled() => Vec::new(),
+                Error::Load(error) => vec![
+                    CodeGraphError::Internal {
+                        context: "load".into(),
+                        message: error.to_string(),
+                    }
+                    .into(),
+                ],
+                error => vec![
+                    CodeGraphError::ArrowConversion {
+                        message: error.to_string(),
+                    }
+                    .into(),
+                ],
+            };
+            return Ok(IndexingReport {
+                stats,
+                errors,
+                skipped: Vec::new(),
+                faults: Vec::new(),
+            });
+        }
+    };
     stats.slowest_files = file_timings(&report.files);
     stats.language_timings = language_timings(&stats.slowest_files);
     stats.slowest_files.truncate(SLOWEST_FILES);

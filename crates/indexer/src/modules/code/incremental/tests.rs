@@ -179,17 +179,18 @@ async fn archive_indexes_multiple_families_into_server_batches() {
 }
 
 #[tokio::test]
-async fn cancelled_run_emits_no_batches() {
+async fn cancelled_run_emits_no_batches_and_no_errors() {
     let mut options = options();
     options.cancelled = Arc::new(|| true);
-    let result = IndexFixture::new()
+    let report = IndexFixture::new()
         .run(
             &[("root/file.py", b"def f(): pass")],
             options,
             Arc::new(|_, _| panic!("cancelled run must not emit")),
         )
-        .await;
-    assert!(result.is_err());
+        .await
+        .unwrap();
+    assert!(report.errors.is_empty());
 }
 
 #[tokio::test]
@@ -233,6 +234,24 @@ async fn sink_failure_aborts_the_run() {
         .err()
         .unwrap();
     assert!(error.to_string().contains("write failed"));
+}
+
+#[tokio::test]
+async fn an_ontology_the_export_cannot_map_is_a_fatal_error() {
+    let fixture = IndexFixture {
+        ontology: Arc::new(ontology::Ontology::new()),
+        ..IndexFixture::new()
+    };
+    let report = fixture
+        .run(
+            &[("root/file.py", b"def f(): pass")],
+            options(),
+            Arc::new(|_, _| Ok(())),
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.errors.len(), 1);
+    assert!(report.errors[0].fatal);
 }
 
 fn stream(bytes: Vec<u8>) -> ByteStream {
