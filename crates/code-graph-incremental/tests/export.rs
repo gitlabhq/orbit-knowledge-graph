@@ -254,8 +254,7 @@ fn definition_coordinates_cover_the_same_span_as_bytes() {
         write_all(repo.path(), &[(path, source.as_bytes())]);
         let env = Env::with_limits(language, Limits::UNLIMITED).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
-        let inventory = inventory::walk(repo.path()).unwrap().into_inner();
-        let exported = templates::index(Context::new(&env), repo.path(), inventory)
+        let exported = templates::index(Context::new(&env), common::walk(repo.path()))
             .unwrap()
             .then(Display)
             .unwrap()
