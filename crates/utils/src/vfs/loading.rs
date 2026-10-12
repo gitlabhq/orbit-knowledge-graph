@@ -32,6 +32,10 @@ pub enum Put<'a> {
         read: ContentReader,
     },
     Symlink(String),
+    Listed {
+        size: u64,
+        reason: &'static str,
+    },
 }
 
 const ENTRY_SHARDS: usize = 64;
@@ -63,6 +67,7 @@ pub(super) enum Content {
     Spilled { offset: u64, len: u64, raw_len: u64 },
     ReadOnDemand(ContentReader),
     Symlink(String),
+    Excluded,
 }
 
 impl<T: Tag> Loading<T> {
@@ -86,16 +91,41 @@ impl<T: Tag> Loading<T> {
     }
 
     pub fn put(&self, path: &str, what: Put<'_>) -> Result<(), SourceError> {
+        if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
+            return Err(SourceError::Cancelled);
+        }
+        let key = key(path).filter(|key| !key.is_empty()).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
+        })?;
         let size = match &what {
             Put::Bytes(bytes) => bytes.len() as u64,
             Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,
             Put::Symlink(_) => 0,
+            Put::Listed { size, .. } => *size,
         };
-        let key = self.admit(path, size)?;
+        add_capped(
+            &self.files,
+            LimitKind::Files,
+            1,
+            self.limits.files.map(|n| n as u64),
+        )?;
+        add_capped(
+            &self.bytes,
+            LimitKind::TotalBytes,
+            size,
+            self.limits.total_bytes,
+        )?;
 
         if let Put::Symlink(target) = what {
             let file = File::new(key, size, Decision::List("symlink"));
             self.add_entry(file, Content::Symlink(target));
+            return Ok(());
+        }
+        if let Put::Listed { reason, .. } = what {
+            self.add_entry(
+                File::new(key, size, Decision::List(reason)),
+                Content::Excluded,
+            );
             return Ok(());
         }
         let mut file = File::new(key, size, Decision::Pending);
@@ -117,40 +147,11 @@ impl<T: Tag> Loading<T> {
                     Some(read),
                 )?;
             }
-            (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
+            (_, Put::Symlink(_) | Put::Listed { .. }) => {
+                unreachable!("symlinks and listed entries return above")
+            }
         }
         Ok(())
-    }
-
-    pub fn list(&self, path: &str, size: u64, reason: &'static str) -> Result<(), SourceError> {
-        let key = self.admit(path, size)?;
-        self.add_entry(
-            File::new(key, size, Decision::List(reason)),
-            Content::Unavailable,
-        );
-        Ok(())
-    }
-
-    fn admit(&self, path: &str, size: u64) -> Result<String, SourceError> {
-        if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
-            return Err(SourceError::Cancelled);
-        }
-        let key = key(path).filter(|key| !key.is_empty()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
-        })?;
-        add_capped(
-            &self.files,
-            LimitKind::Files,
-            1,
-            self.limits.files.map(|n| n as u64),
-        )?;
-        add_capped(
-            &self.bytes,
-            LimitKind::TotalBytes,
-            size,
-            self.limits.total_bytes,
-        )?;
-        Ok(key)
     }
 
     fn put_bytes(
@@ -229,7 +230,9 @@ impl<T: Tag> Loading<T> {
             if later.file.path != earlier.file.path {
                 return false;
             }
-            std::mem::swap(later, earlier);
+            if !matches!(later.content, Content::Excluded) {
+                std::mem::swap(later, earlier);
+            }
             true
         });
         let duplicate_paths = offered - entries.len();

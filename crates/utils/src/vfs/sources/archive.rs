@@ -47,7 +47,13 @@ impl<R: Read> Source for Archive<R> {
                 continue;
             }
             if !utf8 {
-                into.list(path, entry.size(), "non_utf8_path")?;
+                into.put(
+                    path,
+                    Put::Listed {
+                        size: entry.size(),
+                        reason: "non_utf8_path",
+                    },
+                )?;
                 continue;
             }
             if is_link {
@@ -60,13 +66,22 @@ impl<R: Read> Source for Archive<R> {
                             "archive link has no target",
                         )
                     })?;
-                let target = String::from_utf8_lossy(&target);
+                let Ok(target) = std::str::from_utf8(&target) else {
+                    into.put(
+                        path,
+                        Put::Listed {
+                            size: 0,
+                            reason: "non_utf8_link_target",
+                        },
+                    )?;
+                    continue;
+                };
                 let target = if kind == EntryType::Link {
-                    let relative = relative_path(&target, &mut root)?
+                    let relative = relative_path(target, &mut root)?
                         .ok_or_else(|| std::io::Error::other("archive hard link outside root"))?;
                     format!("/{relative}")
                 } else {
-                    target.into_owned()
+                    target.to_owned()
                 };
                 into.put(path, Put::Symlink(target))?;
                 continue;
@@ -264,8 +279,47 @@ mod tests {
         assert_eq!(paths(&vfs), ["caf\u{fffd}.py", "link.py", "ok.py"]);
         let decisions: Vec<_> = vfs.files().map(|file| file.decision()).collect();
         assert!(matches!(decisions[0], Decision::List("non_utf8_path")));
-        assert!(matches!(decisions[1], Decision::List("symlink")));
-        assert_eq!(vfs.usage().kept, 3);
+        assert!(matches!(
+            decisions[1],
+            Decision::List("non_utf8_link_target")
+        ));
+        assert_eq!(
+            vfs.read("link.py").unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+    }
+
+    #[test]
+    fn a_non_utf8_entry_never_replaces_a_file_with_the_same_lossy_name() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = |bytes: &'static [u8]| std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
+        for invalid_first in [true, false] {
+            let mut builder = tar::Builder::new(Vec::new());
+            let invalid = || {
+                (
+                    header(5, EntryType::Regular),
+                    raw(b"project-main/caf\xe9.py"),
+                    &b"cafe\n"[..],
+                )
+            };
+            let real = || {
+                (
+                    header(5, EntryType::Regular),
+                    std::path::Path::new("project-main/caf\u{fffd}.py"),
+                    &b"real\n"[..],
+                )
+            };
+            for (mut header, path, body) in if invalid_first {
+                [invalid(), real()]
+            } else {
+                [real(), invalid()]
+            } {
+                builder.append_data(&mut header, path, body).unwrap();
+            }
+            let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
+            assert_eq!(paths(&vfs), ["caf\u{fffd}.py"]);
+            assert_eq!(&*vfs.read("caf\u{fffd}.py").unwrap(), b"real\n");
+        }
     }
 
     // crates/utils/src/archive.rs::tests::skips_pax_global_and_per_file_headers
