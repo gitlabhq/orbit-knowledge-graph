@@ -311,6 +311,133 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
     Ok(out)
 }
 
+/// Edges of the definitions a line range shows, each with a ready `path:start-end`, so the next
+/// hop (who extends, calls, or is called) can be read in one batch. Subclasses and superclasses
+/// come first, then code, with at most a couple of test links; vendored code is left out.
+const RANGE_LINKS_PER_SIDE: usize = 6;
+const RANGE_TEST_LINKS_PER_SIDE: usize = 2;
+
+pub(crate) fn range_links(
+    client: &DuckDbClient,
+    path: &str,
+    start: usize,
+    end: usize,
+    members: &[context::SourceRange],
+) -> Result<String> {
+    let inside: Vec<&context::SourceRange> = members
+        .iter()
+        .filter(|m| m.start >= start && m.end <= end)
+        .collect();
+    let shown: Vec<&context::SourceRange> = match inside.is_empty() {
+        true => members
+            .iter()
+            .min_by_key(|m| m.end - m.start)
+            .into_iter()
+            .collect(),
+        false => inside,
+    };
+    if shown.is_empty() {
+        return Ok(String::new());
+    }
+    let ids = shown
+        .iter()
+        .map(|m| m.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let batches = client.query_arrow_json(
+        &format!(
+            "WITH m AS (SELECT unnest([{ids}]::BIGINT[]) AS id),
+links AS (
+  SELECT '-->' AS dir, e.relationship_kind AS kind, COALESCE(ie.target_id, e.target_id) AS other
+  FROM gl_edge e
+  LEFT JOIN gl_edge ie ON e.target_kind = 'ImportedSymbol' AND ie.source_id = e.target_id
+    AND ie.relationship_kind = 'IMPORTS' AND ie.target_kind = 'Definition'
+  WHERE e.source_id IN (SELECT id FROM m) AND e.relationship_kind IN ('CALLS', 'EXTENDS')
+  UNION ALL
+  SELECT '<--', e.relationship_kind, e.source_id FROM gl_edge e
+  WHERE e.target_id IN (SELECT id FROM m) AND e.relationship_kind IN ('CALLS', 'EXTENDS')
+    AND e.source_kind = 'Definition'
+)
+SELECT DISTINCT dir, kind, d.fqn AS fqn, d.file_path AS file,
+       CAST(d.start_line AS BIGINT) AS start_line, CAST(d.end_line AS BIGINT) AS end_line
+FROM (SELECT DISTINCT dir, kind, other FROM links) l JOIN gl_definition d ON d.id = l.other
+WHERE d.id NOT IN (SELECT id FROM m)
+  AND NOT (d.file_path = ?1 AND d.start_line <= ?3 AND d.end_line >= ?2)
+  AND NOT regexp_matches(d.file_path, '(^|/)(vendor|node_modules|third_party)/')
+ORDER BY dir, kind = 'CALLS', d.file_path, d.start_line"
+        ),
+        &[path.into(), (start as i64).into(), (end as i64).into()],
+    )?;
+    let (dirs, kinds, fqns, files) = (
+        string_column(&batches, "dir"),
+        string_column(&batches, "kind"),
+        string_column(&batches, "fqn"),
+        string_column(&batches, "file"),
+    );
+    let (starts, ends) = (
+        i64_column(&batches, "start_line"),
+        i64_column(&batches, "end_line"),
+    );
+    let test = |i: usize| crate::commands::grep::is_test(&files[i]);
+    let mut order: Vec<usize> = (0..dirs.len()).collect();
+    order.sort_by_key(|&i| (dirs[i] == "-->", kinds[i] != "EXTENDS", test(i)));
+    let (mut out, mut listed, mut tests) = (String::new(), [0usize; 2], [0usize; 2]);
+    for i in order {
+        let side = usize::from(dirs[i] == "-->");
+        if listed[side] >= RANGE_LINKS_PER_SIDE
+            || (test(i) && tests[side] >= RANGE_TEST_LINKS_PER_SIDE)
+        {
+            continue;
+        }
+        listed[side] += 1;
+        tests[side] += usize::from(test(i));
+        let mut name: Vec<&str> = fqns[i]
+            .rsplit(['.', ':', '#', '/'])
+            .filter(|p| !p.is_empty())
+            .take(2)
+            .collect();
+        name.reverse();
+        let kind = match (side, kinds[i].as_str()) {
+            (0, "EXTENDS") => "extended by",
+            (1, "EXTENDS") => "extends",
+            (0, _) => "called by",
+            _ => "calls",
+        };
+        writeln!(
+            out,
+            "  {} {kind} {}  {}:{}-{}",
+            dirs[i],
+            name.join("."),
+            files[i],
+            starts[i],
+            ends[i]
+        )?;
+    }
+    let more: Vec<String> = [("<--", 0), ("-->", 1)]
+        .iter()
+        .filter_map(|&(dir, side)| {
+            let total = dirs.iter().filter(|d| *d == dir).count();
+            (total > listed[side]).then(|| format!("{dir} +{}", total - listed[side]))
+        })
+        .collect();
+    if !more.is_empty() {
+        let target = match shown.as_slice() {
+            [only] => only.fqn.as_str(),
+            _ => "<name>",
+        };
+        writeln!(
+            out,
+            "  … {}; all of them: {} context {target}",
+            more.join(", "),
+            spec::launcher()
+        )?;
+    }
+    Ok(match out.is_empty() {
+        true => out,
+        false => format!("Connections:\n{out}"),
+    })
+}
+
 fn loc_suffix(loc: &str, prev_path: &mut String) -> String {
     if loc.is_empty() {
         return String::new();

@@ -1546,6 +1546,11 @@ fn grep_lists_matching_lines_with_their_definitions() {
         ("context", "src/utils.py:3-4", "3|def read_file(path):"),
         (
             "context",
+            "src/utils.py:3-4",
+            "Connections:\n  <-- called by ",
+        ),
+        (
+            "context",
             "src/utils.py:4",
             "4|    return open(path).read()",
         ),
