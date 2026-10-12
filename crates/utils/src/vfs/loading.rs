@@ -86,29 +86,12 @@ impl<T: Tag> Loading<T> {
     }
 
     pub fn put(&self, path: &str, what: Put<'_>) -> Result<(), SourceError> {
-        if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
-            return Err(SourceError::Cancelled);
-        }
-        let key = key(path).filter(|key| !key.is_empty()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
-        })?;
         let size = match &what {
             Put::Bytes(bytes) => bytes.len() as u64,
             Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,
             Put::Symlink(_) => 0,
         };
-        add_capped(
-            &self.files,
-            LimitKind::Files,
-            1,
-            self.limits.files.map(|n| n as u64),
-        )?;
-        add_capped(
-            &self.bytes,
-            LimitKind::TotalBytes,
-            size,
-            self.limits.total_bytes,
-        )?;
+        let key = self.admit(path, size)?;
 
         if let Put::Symlink(target) = what {
             let file = File::new(key, size, Decision::List("symlink"));
@@ -137,6 +120,37 @@ impl<T: Tag> Loading<T> {
             (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
         }
         Ok(())
+    }
+
+    pub fn list(&self, path: &str, size: u64, reason: &'static str) -> Result<(), SourceError> {
+        let key = self.admit(path, size)?;
+        self.add_entry(
+            File::new(key, size, Decision::List(reason)),
+            Content::Unavailable,
+        );
+        Ok(())
+    }
+
+    fn admit(&self, path: &str, size: u64) -> Result<String, SourceError> {
+        if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
+            return Err(SourceError::Cancelled);
+        }
+        let key = key(path).filter(|key| !key.is_empty()).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
+        })?;
+        add_capped(
+            &self.files,
+            LimitKind::Files,
+            1,
+            self.limits.files.map(|n| n as u64),
+        )?;
+        add_capped(
+            &self.bytes,
+            LimitKind::TotalBytes,
+            size,
+            self.limits.total_bytes,
+        )?;
+        Ok(key)
     }
 
     fn put_bytes(

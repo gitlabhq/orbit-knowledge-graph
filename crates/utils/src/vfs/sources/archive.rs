@@ -38,14 +38,16 @@ impl<R: Read> Source for Archive<R> {
                 continue;
             }
             let entry_path = entry.path_bytes().into_owned();
-            let Ok(entry_path) = std::str::from_utf8(&entry_path) else {
-                warn!(path = %String::from_utf8_lossy(&entry_path), "skipping archive entry with a non-UTF-8 path");
-                continue;
-            };
-            let Some(path) = relative_path(entry_path, &mut root)? else {
+            let utf8 = std::str::from_utf8(&entry_path).is_ok();
+            let entry_path = String::from_utf8_lossy(&entry_path);
+            let Some(path) = relative_path(&entry_path, &mut root)? else {
                 continue;
             };
             if path.is_empty() || kind == EntryType::Directory {
+                continue;
+            }
+            if !utf8 {
+                into.list(path, entry.size(), "non_utf8_path")?;
                 continue;
             }
             if is_link {
@@ -58,16 +60,13 @@ impl<R: Read> Source for Archive<R> {
                             "archive link has no target",
                         )
                     })?;
-                let Ok(target) = std::str::from_utf8(&target) else {
-                    warn!(path, "skipping archive link with a non-UTF-8 target");
-                    continue;
-                };
+                let target = String::from_utf8_lossy(&target);
                 let target = if kind == EntryType::Link {
-                    let relative = relative_path(target, &mut root)?
+                    let relative = relative_path(&target, &mut root)?
                         .ok_or_else(|| std::io::Error::other("archive hard link outside root"))?;
                     format!("/{relative}")
                 } else {
-                    target.to_owned()
+                    target.into_owned()
                 };
                 into.put(path, Put::Symlink(target))?;
                 continue;
@@ -236,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_entries_with_non_utf8_paths_or_link_targets() {
+    fn lists_entries_with_non_utf8_paths_or_link_targets() {
         use std::os::unix::ffi::OsStrExt;
         let raw = |bytes: &'static [u8]| std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
         let mut builder = tar::Builder::new(Vec::new());
@@ -262,7 +261,11 @@ mod tests {
             )
             .unwrap();
         let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
-        assert_eq!(paths(&vfs), ["ok.py"]);
+        assert_eq!(paths(&vfs), ["caf\u{fffd}.py", "link.py", "ok.py"]);
+        let decisions: Vec<_> = vfs.files().map(|file| file.decision()).collect();
+        assert!(matches!(decisions[0], Decision::List("non_utf8_path")));
+        assert!(matches!(decisions[1], Decision::List("symlink")));
+        assert_eq!(vfs.usage().kept, 3);
     }
 
     // crates/utils/src/archive.rs::tests::skips_pax_global_and_per_file_headers
