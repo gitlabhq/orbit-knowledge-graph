@@ -1,6 +1,7 @@
-name: Incoming branches join and cascade through the shared physical target
+# JSON preserves incoming directions; branch_incoming_gql.yaml tests the equivalent GQL query's normalized plan.
+name: JSON incoming branches join and cascade through the shared physical target
 missing_frontends:
-  gql: GQL supports this query but normalizes arrows to outgoing edges, changing hop order and aliases. The non_adjacent_branch_incoming result scenario covers both frontends.
+  gql: branch_incoming_gql.yaml checks the same query after GQL arrow normalization and hop reordering.
 query:
   json: |
     {
