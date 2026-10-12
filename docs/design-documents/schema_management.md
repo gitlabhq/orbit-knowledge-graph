@@ -185,7 +185,8 @@ parser, and compiler. Validate a cross-version rollout before relying on it.
 
 Deploy variant-table parsing and routing support to every query server before publishing split-route archives.
 Older binaries can ignore a variant's `table` field and read the wrong table.
-The metadata-only release rejects split routes at dispatcher startup and server snapshot loading.
+The dispatcher rejects split routes until producers support writes to variant-specific tables.
+Query servers support split routes once variant-aware query planning is deployed.
 Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
 
 ### Webserver readiness gate

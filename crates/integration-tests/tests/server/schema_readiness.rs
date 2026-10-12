@@ -49,7 +49,7 @@ const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
 ];
 
 #[tokio::test]
-async fn split_route_archive_is_not_served() {
+async fn split_route_archive_is_served_by_variant_aware_queries() {
     let mut cluster = Cluster::start(1).await;
     cluster.create_tables(&[1, 2]).await;
     cluster.promote(1).await;
@@ -61,8 +61,6 @@ async fn split_route_archive_is_not_served() {
     let archive = OntologyArchive::from_sources(2, &sources).unwrap();
     cluster.catalog.publish(&archive).await.unwrap();
     cluster.promote(2).await;
-    cluster.await_serving(None).await;
-    cluster.restore_archive(2).await;
     cluster.await_serving(Some(2)).await;
 }
 

@@ -209,7 +209,6 @@ impl SnapshotLoader {
         } else {
             self.catalog.load(version).await?.load_ontology()?
         };
-        ontology.validate_single_table_edge_routes()?;
         let ontology = Arc::new(ontology.with_schema_version_prefix(&table_prefix(version)));
         let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)?
             .table_names()
