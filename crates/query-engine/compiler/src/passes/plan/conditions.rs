@@ -47,7 +47,7 @@ pub(super) fn place_conditions(
         }
         let scan = root
             .local_node()
-            .filter(|_| hops.is_empty() || !untagged.is_empty())
+            .filter(|_| !untagged.is_empty())
             .map(str::to_string);
         placement
             .joined_nodes
