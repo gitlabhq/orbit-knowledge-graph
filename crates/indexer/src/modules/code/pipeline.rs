@@ -333,10 +333,7 @@ impl CodeIndexer {
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
         let lane = self
-            .acquire_indexing_lane(
-                &repository,
-                lock.time_left().saturating_sub(clock.remaining),
-            )
+            .acquire_indexing_lane(&repository, lock.time_left())
             .await?;
 
         let indexed = clock

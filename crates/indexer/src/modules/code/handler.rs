@@ -756,7 +756,27 @@ mod tests {
         assert_eq!(checkpoint.attempts, 1);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
+    async fn a_busy_lane_waits_while_the_heartbeat_renews_the_lock() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let lanes = ctx.pipeline.occupy_small_indexing_lanes().await;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(45)).await;
+            drop(lanes);
+        });
+
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert!(ctx.mock_locks.renew_count() >= 2);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn no_free_indexing_lane_backs_off_without_counting_an_attempt() {
         let ctx = TestContext::new();
         ctx.mock_repo.set_archive(
