@@ -38,8 +38,6 @@ cases:
   - name: negated_ids_need_anchor
     description: Negated ID bounds do not become a selective positive anchor
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","not":{"id":{"in":[4000],"gte":4000,"lte":4010}}}],"limit":30}
       gql: MATCH (wi:WorkItem) WHERE NOT (wi.id IN [4000] AND wi.id >= 4000 AND wi.id <= 4010) RETURN wi.id
     expect: { compile_error: or WHERE mr.project_id = 42 (NOT conditions do not count) }
 
@@ -91,8 +89,6 @@ cases:
   - name: not_group_path_rejected
     description: Shortest paths reject NOT over a list membership
     query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,102],"not":{"visibility_level":{"in":["internal"]}}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
       gql: |
         MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
         WHERE g.id IN [100, 102] AND NOT g.visibility_level IN ['internal']
@@ -122,21 +118,17 @@ cases:
   - name: not_list_only_needs_anchor
     description: A node whose only condition is NOT over a list is not anchored
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"id":{"in":[1]}}}],"limit":30}
       gql: |
         MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
     expect: { compile_error: or WHERE mr.project_id = 42 (NOT conditions do not count) }
 
   - name: not_literal_comparison_rejected
-    description: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable, and a JSON not key must be a property name.
+    description: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable.
     query:
       gql: |
         MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' = 'private-query-literal' RETURN wi.id
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"1":"private-query-literal"}}],"limit":10}
     expect:
-      compile_error: { gql: each comparison starts with a property such as n.name, json: does not match }
+      compile_error: { gql: each comparison starts with a property such as n.name }
       compile_error_not_contains: [private-query-literal]
 
   - name: not_literal_left_rejected
@@ -173,8 +165,6 @@ cases:
   - name: not_virtual_contains_rejected
     description: NOT cannot wrap a condition on a virtual column
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[13000],"not":{"content":{"contains":"secret"}},"columns":["name"]}],"limit":30}
       gql: |
         MATCH (f:File {id: 13000})
         WHERE NOT f.content CONTAINS 'secret'

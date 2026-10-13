@@ -1,8 +1,6 @@
 cases:
   - name: Projected endpoints hydrate from one edge relation
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project)
         RETURN mr.title, p.name
@@ -21,8 +19,6 @@ cases:
 
   - name: A fixed chain composes routed edge relations
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"},"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
       gql: |
         MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest)
           -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
@@ -42,8 +38,6 @@ cases:
 
   - name: Stored relationship families compose through shared endpoints
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}]}
       gql: |
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
         RETURN u.username, mr.title, p.name
@@ -62,8 +56,6 @@ cases:
 
   - name: Relationship filters remain on their edge relation
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","columns":["id"]}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
       gql: |
         MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
         RETURN mr.id, pipe.id, j.id
@@ -78,8 +70,6 @@ cases:
 
   - name: FK endpoints narrow current holder rows
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"pl","entity":"Pipeline","node_ids":[1000]},{"id":"j","entity":"Job"}],"relationships":[{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.status"],"aggregations":[{"count":"j","as":"n"}]}
       gql: |
         MATCH (pl:Pipeline {id: 1000})-[:HAS_JOB]->(j:Job)
         RETURN j.status, count(j) AS n

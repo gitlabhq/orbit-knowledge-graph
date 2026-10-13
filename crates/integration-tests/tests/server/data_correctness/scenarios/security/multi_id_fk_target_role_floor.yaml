@@ -8,20 +8,6 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "v", "entity": "Vulnerability"},
-        {"id": "n", "entity": "Note", "node_ids": [3000]},
-        {"id": "f", "entity": "VulnerabilityOccurrence", "node_ids": [90000, 90001]}
-      ],
-      "relationships": [
-        {"type": "HAS_NOTE", "from": "v", "to": "n"},
-        {"type": "HAS_FINDING", "from": "v", "to": "f"}
-      ],
-      "aggregations": [{"count": "v", "as": "n"}]
-    }
   gql: |
     MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3000})
     MATCH (v)-[:HAS_FINDING]->(f:VulnerabilityOccurrence)

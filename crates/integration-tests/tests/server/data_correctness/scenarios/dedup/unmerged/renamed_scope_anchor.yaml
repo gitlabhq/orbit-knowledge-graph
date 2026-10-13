@@ -12,9 +12,6 @@ config:
       - { source_id: 970, source_kind: Group, relationship_kind: CONTAINS, target_id: 9700, target_kind: Project, traversal_path: "1/970/" }
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"full_path":"old"}}],
-     "relationships":[{"type":"CONTAINS","from":"p","to":"g","direction":"incoming"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}
   gql: |
     MATCH (p:Project)<-[:CONTAINS]-(g:Group {full_path: 'old'}) RETURN count(p) AS c LIMIT 10
 

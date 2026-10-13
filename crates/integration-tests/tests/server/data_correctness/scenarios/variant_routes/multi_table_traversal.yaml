@@ -9,8 +9,6 @@ config:
       - { source_id: 11000, source_kind: File, target_id: 12000, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _deleted: false }
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"file","entity":"File","node_ids":[11000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"file","to":"callee","hops":[1,2]}],"limit":10}
   gql: |
     MATCH (file:File {id: 11000})-[:CALLS*1..2]->(callee:Definition) RETURN file, callee LIMIT 10
 

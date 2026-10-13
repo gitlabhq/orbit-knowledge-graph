@@ -1,8 +1,6 @@
 name: Covered node filters use edge tags without node scans
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
   gql: |
     MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition) RETURN a, b
 

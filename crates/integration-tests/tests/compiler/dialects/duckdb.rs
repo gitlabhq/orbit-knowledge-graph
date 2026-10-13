@@ -5,7 +5,7 @@ use crate::compiler::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
-    compile_local(json, Frontend::JsonDsl, &test_ontology()).unwrap()
+    compile_local(json, Frontend::Gql, &test_ontology()).unwrap()
 }
 
 fn parse_duckdb(json: &str) -> ParsedSql {
@@ -15,9 +15,6 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 #[test]
 fn cycles_are_rejected() {
     let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
-    let cycle_query = serde_json::json!({"query_type":"traversal", "nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}], "relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"a"}]});
-    let error = compile_local(&cycle_query.to_string(), Frontend::JsonDsl, &ontology).unwrap_err();
-    assert!(error.to_string().contains("exactly n-1 relationships"));
     let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", Frontend::Gql, &ontology).unwrap_err();
     assert!(error.to_string().contains("cycles are unsupported"));
 }
@@ -38,8 +35,8 @@ fn local_starts_with_folds_unicode_case() {
         )
         .unwrap();
     let compiled = compile_local(
-        r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["path"],"filters":{"path":{"starts_with":"ÄRG"}}}],"limit":10}"#,
-        Frontend::JsonDsl,
+        r#"MATCH (f:File) WHERE f.path STARTS WITH 'ÄRG' RETURN f{.path} LIMIT 10"#,
+        Frontend::Gql,
         &ontology,
     )
     .unwrap();
@@ -57,9 +54,8 @@ fn fused_neighbors_execute_both_directions_including_self_loops() {
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("neighbors.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE gl_project(id BIGINT, traversal_path VARCHAR); INSERT INTO gl_project VALUES (1, '1/'); CREATE TABLE gl_edge(source_id BIGINT, source_kind VARCHAR, target_id BIGINT, target_kind VARCHAR, relationship_kind VARCHAR, traversal_path VARCHAR); INSERT INTO gl_edge VALUES (1,'Project',2,'Project','CONTAINS','1/'), (3,'Project',1,'Project','CONTAINS','1/'), (1,'Project',1,'Project','CONTAINS','1/');").unwrap();
-    let compiled = compile(
-        r#"{"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}"#,
-    );
+    let compiled =
+        compile(r#"MATCH (p:Project {id: 1})-[:CONTAINS]-(neighbor) RETURN p, neighbor"#);
     let result = database
         .query_arrow(&compiled.base.render())
         .unwrap_or_else(|error| panic!("{error}: {}", compiled.base.render()));
@@ -345,12 +341,9 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
 #[test]
 fn search_uses_positional_params() {
     let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
-                   "filters": {"username": "alice"}}],
-        "limit": 10
-    }"#,
+        r#"MATCH (u:User {id: 1, username: 'alice'})
+            RETURN u{.username}
+            LIMIT 10"#,
     );
 
     let sql = &result.base.sql;
@@ -361,11 +354,9 @@ fn search_uses_positional_params() {
 #[test]
 fn no_clickhouse_functions_leak() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-        "limit": 10
-    }"#,
+        r#"MATCH (p:Project {id: 1})
+            RETURN p{.name}
+            LIMIT 10"#,
     );
 
     assert!(!sql.has_function("startsWith"));
@@ -376,11 +367,9 @@ fn no_clickhouse_functions_leak() {
 #[test]
 fn no_security_filter() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-        "limit": 10
-    }"#,
+        r#"MATCH (p:Project {id: 1})
+            RETURN p{.name}
+            LIMIT 10"#,
     );
 
     assert!(!sql.has_function("startsWith"));
@@ -389,15 +378,9 @@ fn no_security_filter() {
 #[test]
 fn traversal() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "n", "entity": "Note", "columns": ["confidential"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "limit": 25
-    }"#,
+        r#"MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note)
+            RETURN u{.username}, n{.confidential}
+            LIMIT 25"#,
     );
 
     assert!(sql.has_table("gl_edge"));
@@ -408,17 +391,9 @@ fn traversal() {
 #[test]
 fn aggregation() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "n", "entity": "Note"}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "group_by": ["u"],
-        "aggregations": [{"count": "n", "as": "note_count"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note)
+            RETURN u, count(n) AS note_count
+            LIMIT 10"#,
     );
 
     assert!(
@@ -434,15 +409,8 @@ fn aggregation() {
 #[test]
 fn path_finding() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [100]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                 "rel_types": ["MEMBER_OF"]}
-    }"#,
+        r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF*1..3]->(`end`:Project {id: 100})
+            RETURN p"#,
     );
 
     assert!(sql.has_table("gl_edge"));
@@ -452,12 +420,9 @@ fn path_finding() {
 #[test]
 fn neighbors() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-        "neighbors": {"direction": "outgoing"},
-        "limit": 10
-    }"#,
+        r#"MATCH (u:User {id: 1})-->(neighbor)
+            RETURN u, neighbor
+            LIMIT 10"#,
     );
 
     assert!(sql.has_table("gl_edge"));
@@ -467,15 +432,9 @@ fn neighbors() {
 #[test]
 fn group_by_truncate_emits_duckdb_date_trunc() {
     let result = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "u", "entity": "Note", "node_ids": [1]}
-        ],
-        "aggregations": [{"count": "u", "as": "n"}],
-        "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (u:Note {id: 1})
+            RETURN date_trunc('month', u.created_at) AS bucket, count(u) AS n
+            LIMIT 10"#,
     );
     let rendered = result.base.render();
     assert!(
@@ -491,18 +450,10 @@ fn group_by_truncate_emits_duckdb_date_trunc() {
 #[test]
 fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
     for unit in ["minute", "hour", "day", "week", "month", "quarter", "year"] {
-        let json = format!(
-            r#"{{
-                "query_type": "aggregation",
-                "nodes": [
-                    {{"id": "u", "entity": "Note", "node_ids": [1]}}
-                ],
-                "aggregations": [{{"count": "u", "as": "n"}}],
-                "group_by": [{{"key": "u.created_at", "truncate": "{unit}"}}],
-                "limit": 10
-            }}"#
+        let query = format!(
+            "MATCH (u:Note {{id: 1}}) RETURN date_trunc('{unit}', u.created_at), count(u) AS n LIMIT 10"
         );
-        let result = compile_local(&json, Frontend::JsonDsl, &test_ontology())
+        let result = compile_local(&query, Frontend::Gql, &test_ontology())
             .unwrap_or_else(|e| panic!("compile_local failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         let expected = if unit == "week" {
@@ -520,11 +471,10 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
 #[test]
 fn node_ids_expand_params() {
     let sql = parse_duckdb(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2, 3]}],
-        "limit": 10
-    }"#,
+        r#"MATCH (u:User)
+            WHERE u.id IN [1, 2, 3]
+            RETURN u
+            LIMIT 10"#,
     );
 
     assert!(sql.has_operator("IN"));

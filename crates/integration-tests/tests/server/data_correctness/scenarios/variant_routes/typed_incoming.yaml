@@ -10,8 +10,6 @@ config:
       - { source_id: 11001, source_kind: File, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "2/200/2000/", _deleted: false }
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["name"]},{"id":"file","entity":"File","columns":["path"]}],"relationships":[{"type":"CALLS","from":"callee","to":"file","direction":"incoming"}],"limit":10}
   gql: |
     MATCH (callee:Definition {id: 12001})<-[:CALLS]-(file:File) RETURN callee.name, file.path LIMIT 10
 

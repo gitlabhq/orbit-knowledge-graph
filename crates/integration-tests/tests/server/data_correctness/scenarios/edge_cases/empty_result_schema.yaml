@@ -1,12 +1,6 @@
 description: Non-existent node_id returns empty result with valid schema
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
-        "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 99999}) RETURN u.username LIMIT 10
 

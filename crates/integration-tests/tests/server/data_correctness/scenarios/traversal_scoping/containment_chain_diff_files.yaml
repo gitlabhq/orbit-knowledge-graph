@@ -30,26 +30,6 @@ config:
       label: [7000, 7001, 7002]
 
 query:
-  json: |
-    {
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "g", "entity": "Group", "filters": {"full_path": "g701"}},
-            {"id": "p", "entity": "Project"},
-            {"id": "mr", "entity": "MergeRequest"},
-            {"id": "d", "entity": "MergeRequestDiff"},
-            {"id": "f", "entity": "MergeRequestDiffFile"}
-        ],
-        "relationships": [
-            {"type": "CONTAINS", "from": "g", "to": "p"},
-            {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-            {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
-            {"type": "HAS_FILE", "from": "d", "to": "f"}
-        ],
-        "group_by": ["p"],
-        "aggregations": [{"count": "f", "as": "c"}],
-        "limit": 10
-    }
   gql: |
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10
 

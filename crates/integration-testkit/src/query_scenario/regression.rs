@@ -1,4 +1,4 @@
-use query_engine::compiler::input::parse_input;
+use query_engine::compiler::gql::parse;
 use serde_json::{Value, json};
 
 use super::run_duckdb_dir;
@@ -139,12 +139,12 @@ fn compile_errors_require_all_fragments_and_frontend_configuration() {
     );
     rejects(
         query.clone(),
-        "compile_error: {json: error}",
+        "compile_error: {other: error}",
         "compile_error missing frontend 'gql'",
     );
     rejects(
         query,
-        "compile_error: true\ncompile_error_not_contains: {json: []}",
+        "compile_error: true\ncompile_error_not_contains: {other: []}",
         "expectation missing frontend 'gql'",
     );
 }
@@ -226,7 +226,7 @@ fn repeated_aggregation_runs_check_row_values() {
 fn repeated_responses_reject_changes_that_individual_expectations_allow() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
 
-    let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+    let input = parse("MATCH (u:User) RETURN u, count(u) AS c").unwrap();
     let expect = orbit_utils::yaml::from_str("groups: {u: {entity: User, count: 2}}").unwrap();
     let baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     super::assert_response(&input, baseline.clone(), &expect, "baseline");
@@ -301,7 +301,7 @@ fn page_expectations_reject_fields_that_are_not_executed() {
 fn empty_aggregation_requires_rows_and_column_metadata() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
 
-    let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+    let input = parse("MATCH (u:User) RETURN u, count(u) AS c").unwrap();
     let expect = orbit_utils::yaml::from_str("empty_aggregation: true").unwrap();
     let mut baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     baseline["rows"] = json!([]);
@@ -335,8 +335,7 @@ fn traversal_rejects_aggregation_and_path_assertions() {
 fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
     use crate::visitor::tests::sample_search_response;
 
-    let input =
-        parse_input(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}"#).unwrap();
+    let input = parse("MATCH (u:User) RETURN u").unwrap();
     let mut full = serde_json::to_value(sample_search_response()).unwrap();
     full["pagination"] = json!({"has_more": false, "truncated": false});
     let mut page = full.clone();

@@ -1,16 +1,6 @@
 description: FK traversal returns holder properties from the base query and hydrates the referenced endpoint
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["confidential", "created_at"]},
-            {"id": "u", "entity": "User", "columns": ["username"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "limit": 20
-    }
   gql: |
     MATCH (n:Note {id: 3000})<-[:AUTHORED]-(u:User) RETURN n.confidential, n.created_at, u.username LIMIT 20
 

@@ -1,8 +1,6 @@
 name: Both-direction neighbors of a center no edge targets scan only the outgoing arm
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}
   gql: |
     MATCH (u:User {id: 1})--(neighbor) RETURN u, neighbor
 

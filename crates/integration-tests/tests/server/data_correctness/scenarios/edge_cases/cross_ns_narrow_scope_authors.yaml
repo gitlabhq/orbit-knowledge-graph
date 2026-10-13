@@ -4,16 +4,6 @@ config:
   security: { org_id: 1, paths: ["1/100/1000/"] }
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "limit": 20
-    }
   gql: |
     MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, mr.title LIMIT 20
 

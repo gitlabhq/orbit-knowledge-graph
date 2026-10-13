@@ -1,16 +1,6 @@
 description: Non-default PK filter with no matching rows returns empty result
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "d",
-        "entity": "MergeRequestDiff",
-        "filters": {"head_commit_sha": {"eq": "no-such-sha"}}
-      }],
-      "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
-    }
   gql: |
     MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha = 'no-such-sha' RETURN d, n
 

@@ -1,8 +1,6 @@
 name: Covered relationship alternatives share denormalized tag filtering
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[99002]},{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"relationships":[{"type":["AUTHORED","APPROVED"],"from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
   gql: |
     MATCH (u:User {id: 99002})-[:AUTHORED|APPROVED]->(mr:MergeRequest {state: 'opened'})
     RETURN count(mr) AS n

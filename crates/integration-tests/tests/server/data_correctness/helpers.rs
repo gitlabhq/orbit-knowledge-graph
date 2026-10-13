@@ -11,7 +11,7 @@ pub(super) async fn run_query(ctx: &TestContext, query: &str) -> ResponseView {
     redaction.allow("note", &[3000, 3001, 3002, 3003]);
     query_scenario::run_query(
         ctx,
-        Frontend::JsonDsl,
+        Frontend::Gql,
         query,
         &test_security_context(),
         &redaction,

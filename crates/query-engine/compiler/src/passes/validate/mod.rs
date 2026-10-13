@@ -1,15 +1,12 @@
 //! Query validation.
 //!
-//! [`Validator`] checks in three layers:
-//! 1. **Schema validation** — JSON-only: the raw text against the base and
-//!    ontology-derived JSON Schemas, before deserialization.
-//! 2. **Shape validation** — every [`Input`] regardless of frontend: identifiers,
-//!    ontology membership, limits, and filter value shapes.
-//! 3. **Cross-reference validation** — node ID references, complexity caps, and
-//!    filter typing that neither layer above can express.
+//! [`Validator`] checks in two layers:
+//! 1. **Shape validation** — identifiers, ontology membership, limits, and
+//!    filter value shapes.
+//! 2. **Cross-reference validation** — node ID references, complexity caps, and
+//!    filter typing that shape checks cannot express.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
 
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
@@ -28,81 +25,8 @@ use ontology::{DataType, TRAVERSAL_PATH_COLUMN};
 use query_data_model::ClickHouseDataModel;
 use query_data_model::PropertyId;
 
-use super::errors::format_schema_error;
-
 mod conditions;
 use conditions::{check_condition_column, check_condition_counts};
-
-pub(crate) const BASE_SCHEMA_JSON: &str =
-    include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
-
-static BASE_SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
-static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-
-pub(crate) fn base_schema() -> &'static serde_json::Value {
-    BASE_SCHEMA.get_or_init(|| {
-        serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON")
-    })
-}
-
-pub(crate) fn base_validator() -> &'static jsonschema::Validator {
-    BASE_SCHEMA_VALIDATOR.get_or_init(|| {
-        jsonschema::validator_for(base_schema()).expect("schema.json must be a valid JSON Schema")
-    })
-}
-
-pub(crate) fn order_by_regex() -> &'static regex::Regex {
-    static ORDER_BY_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    ORDER_BY_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["properties"]["order_by"]["pattern"]
-            .as_str()
-            .expect("schema.json must define an order_by pattern");
-        regex::Regex::new(pattern).expect("order_by pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn aggregation_sort_regex() -> &'static regex::Regex {
-    static AGGREGATION_SORT_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    AGGREGATION_SORT_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["properties"]["aggregation_sort"]["pattern"]
-            .as_str()
-            .expect("schema.json must define an aggregation_sort pattern");
-        regex::Regex::new(pattern).expect("aggregation_sort pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn node_ref_regex() -> &'static regex::Regex {
-    static NODE_REF_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    NODE_REF_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["$defs"]["NodeOrPropertyRef"]["pattern"]
-            .as_str()
-            .expect("schema.json must define a NodeOrPropertyRef pattern");
-        regex::Regex::new(pattern).expect("NodeOrPropertyRef pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn collect_schema_errors(
-    validator: &jsonschema::Validator,
-    schema: &serde_json::Value,
-    value: &serde_json::Value,
-) -> Result<()> {
-    let errors: Vec<_> = validator
-        .iter_errors(value)
-        .map(|e| format_schema_error(&e, schema))
-        .collect();
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(QueryError::Validation(errors.join("; ")))
-    }
-}
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
 ///
@@ -421,12 +345,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             if self.model.get().entity(entity).is_none() {
                 return Err(QueryError::AllowlistRejected(format!(
                     "unknown entity '{entity}'"
-                )));
-            }
-            if !node.negated_filters.is_empty() {
-                return Err(QueryError::PipelineInvariant(format!(
-                    "node \"{}\" has not conditions the frontend did not lift",
-                    node.id
                 )));
             }
             self.check_field(entity, &node.id_property)?;
@@ -1737,7 +1655,7 @@ mod tests {
             skip: Skip::default(),
         }
     }
-    use crate::input::parse_input;
+    use crate::gql::parse;
     use ontology::{DataType, FieldSource, VirtualSource};
     use std::collections::BTreeMap;
 
@@ -1791,20 +1709,29 @@ mod tests {
             .unwrap()
     }
 
-    fn assert_ok(json: &str) {
-        let input = parse_input(json).unwrap();
+    fn assert_ok(query: &str) {
+        let input = parse(query).unwrap();
         let ontology = test_ontology();
         validator(&ontology).check_references(&input).unwrap();
     }
 
-    fn assert_rejects(json: &str, expected: &str) {
-        let input = parse_input(json).unwrap();
+    fn assert_rejects(query: &str, expected: &str) {
+        assert_input_rejects(parse(query).unwrap(), expected);
+    }
+
+    fn assert_input_rejects(input: Input, expected: &str) {
         let ontology = test_ontology();
         let err = validator(&ontology).check_references(&input).unwrap_err();
         assert!(
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
         );
+    }
+
+    fn mutated(query: &str, mutate: impl FnOnce(&mut Input)) -> Input {
+        let mut input = parse(query).unwrap();
+        mutate(&mut input);
+        input
     }
 
     #[test]
@@ -1820,21 +1747,20 @@ mod tests {
     #[test]
     fn selectivity_error_mentions_id_range_cap_only_for_wide_ranges() {
         let ontology = test_ontology();
-        let error_for = |json: &str| {
-            let input = parse_input(json).unwrap();
+        let error_for = |query: &str| {
+            let input = parse(query).unwrap();
             validator(&ontology)
                 .check_references(&input)
                 .unwrap_err()
                 .to_string()
         };
 
-        let plain =
-            error_for(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#);
+        let plain = error_for(r#"MATCH (u:User) RETURN u"#);
         assert!(plain.ends_with("or WHERE mr.project_id = 42"), "{plain}");
 
         let neighbors = error_for(
-            r#"{"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User"}],
-                "neighbors": {"node": "u", "direction": "both"}}"#,
+            r#"MATCH (u:User)--(neighbor)
+                RETURN u, neighbor"#,
         );
         assert!(
             neighbors.ends_with("on the center node to avoid scanning all edges"),
@@ -1842,9 +1768,9 @@ mod tests {
         );
 
         let wide_neighbors = error_for(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}],
-                "neighbors": {"node": "u", "direction": "both"}}"#,
+            r#"MATCH (u:User)--(neighbor)
+                WHERE u.id >= 1 AND u.id <= 999999999
+                RETURN u, neighbor"#,
         );
         assert!(
             wide_neighbors.ends_with(
@@ -1859,40 +1785,19 @@ mod tests {
         let ontology = test_ontology();
         let validator = validator(&ontology);
 
-        let two_props_many_entries = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "u", "entity": "User",
-                    "filters": {
-                        "created_at": [
-                            {"gte": "2020-01-01"}, {"lt": "2020-02-01"},
-                            {"gte": "2020-03-01"}, {"lt": "2020-04-01"},
-                            {"gte": "2020-05-01"}, {"lt": "2020-06-01"}
-                        ],
-                        "username": [
-                            {"contains": "a"}, {"contains": "b"},
-                            {"contains": "c"}, {"contains": "d"},
-                            {"contains": "e"}, {"contains": "f"}
-                        ]
-                    }
-                }]
-            }"#,
+        let two_props_many_entries = parse(
+            r#"MATCH (u:User)
+                WHERE u.created_at >= '2020-01-01' AND u.created_at < '2020-02-01' AND u.created_at >= '2020-03-01' AND u.created_at < '2020-04-01' AND u.created_at >= '2020-05-01' AND u.created_at < '2020-06-01' AND u.username CONTAINS 'a' AND u.username CONTAINS 'b' AND u.username CONTAINS 'c' AND u.username CONTAINS 'd' AND u.username CONTAINS 'e' AND u.username CONTAINS 'f'
+                RETURN u"#,
         )
         .unwrap();
         assert!(validator.check_depth(&two_props_many_entries).is_ok());
 
         let eleven_props: String = (0..=10)
-            .map(|i| format!("\"p{i}\": true"))
+            .map(|i| format!("p{i}: true"))
             .collect::<Vec<_>>()
             .join(", ");
-        let over_key_cap = parse_input(&format!(
-            r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "u", "entity": "User", "filters": {{{eleven_props}}}}}]
-            }}"#
-        ))
-        .unwrap();
+        let over_key_cap = parse(&format!("MATCH (u:User {{{eleven_props}}}) RETURN u")).unwrap();
         let err = validator.check_depth(&over_key_cap).unwrap_err();
         assert!(
             err.to_string().contains("filter property count (11)"),
@@ -1906,14 +1811,11 @@ mod tests {
         let validator = validator(&ontology);
 
         let eleven_conditions: String = (0..11)
-            .map(|_| r#"{"gte": "2020-01-01"}"#)
+            .map(|_| "u.created_at >= '2020-01-01'")
             .collect::<Vec<_>>()
-            .join(", ");
-        let over_cap = parse_input(&format!(
-            r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "u", "entity": "User", "filters": {{"created_at": [{eleven_conditions}]}}}}]
-            }}"#
+            .join(" AND ");
+        let over_cap = parse(&format!(
+            "MATCH (u:User) WHERE {eleven_conditions} RETURN u"
         ))
         .unwrap();
         let err = validator.check_depth(&over_cap).unwrap_err();
@@ -1926,234 +1828,148 @@ mod tests {
     #[test]
     fn cross_reference_validation() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note)
+                RETURN u, n"#,
         );
 
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-                "group_by": ["u"],
-                "aggregations": [{
-                    "count": "n",
-                    "as": "note_count"
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note)
+                RETURN u{.username}, count(n) AS note_count"#,
         );
 
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-                "order_by": "u.username"
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN u{.username}
+                ORDER BY u.username"#,
         );
 
         assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..2]->(b:Project {id: 2})
+                RETURN p"#,
         );
 
         assert_ok(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "both"}
-            }"#,
+            r#"MATCH (u:User {id: 1})--(neighbor)
+                RETURN u, neighbor"#,
         );
 
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "relationships": [{"type": "AUTHORED", "from": "ghost", "to": "u"}]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note) RETURN u, n",
+                |input| input.relationships[0].from = "ghost".into(),
+            ),
+            "undefined node \"ghost\"",
+        );
+
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note) RETURN u, n",
+                |input| input.relationships[0].to = "ghost".into(),
+            ),
             "undefined node \"ghost\"",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "ghost"}]
-            }"#,
-            "undefined node \"ghost\"",
+            r#"MATCH (u:User {id: 1})
+                RETURN count(missing) AS c"#,
+            "undefined node \"missing\"",
         );
 
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "count": "missing",
-                    "as": "c"
-                }]
-            }"#,
+        assert_input_rejects(
+            mutated("MATCH (u:User {id: 1}) RETURN u, count(u) AS c", |input| {
+                input.aggregation.group_by[0] = InputGroupByKey::Node {
+                    node: "missing".into(),
+                    alias: None,
+                }
+            }),
             "undefined node \"missing\"",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "group_by": ["missing"],
-                "aggregations": [{
-                    "count": "u",
-                    "as": "c"
-                }]
-            }"#,
-            "undefined node \"missing\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "sum": "u.nonexistent",
-                    "as": "total"
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN sum(u.nonexistent) AS total"#,
             "invalid property",
         );
 
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.visibility_level"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
+            r#"MATCH (p:Project {id: 1})
+                RETURN p.visibility_level, count(p) AS project_count"#,
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["missing.visibility_level"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
+            r#"MATCH (p:Project {id: 1})
+                RETURN missing.visibility_level, count(p) AS project_count"#,
             "undefined node \"missing\"",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.not_real"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
+            r#"MATCH (p:Project {id: 1})
+                RETURN p.not_real, count(p) AS project_count"#,
             "invalid property",
         );
 
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.visibility_level"]
-            }"#,
+        assert_input_rejects(
+            mutated("MATCH (p:Project {id: 1}) RETURN p", |input| {
+                input.aggregation.group_by.push(InputGroupByKey::Property {
+                    node: "p".into(),
+                    property: "visibility_level".into(),
+                    truncate: None,
+                    alias: None,
+                })
+            }),
             "only supported for aggregation",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [
-                  "p.visibility_level",
-                  "p.visibility_level"
-                ],
-                "aggregations": [{
-                    "count": "p",
-                    "as": "project_count"
-                }]
-            }"#,
+            r#"MATCH (p:Project {id: 1})
+                RETURN p.visibility_level, p.visibility_level, count(p) AS project_count"#,
             "duplicate group_by output column",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.visibility_level"],
-                "aggregations": [{"count": "p", "as": "p_visibility_level"}]
-            }"#,
+            r#"MATCH (p:Project {id: 1})
+                RETURN p.visibility_level, count(p) AS p_visibility_level"#,
             "conflicts with another output column",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "order_by": "missing.username"
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN u
+                ORDER BY missing.username"#,
             "undefined node \"missing\"",
         );
 
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "order_by": "u.nonexistent"
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN u
+                ORDER BY u.nonexistent"#,
             "does not exist",
         );
 
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "ghost", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..2]->(b:Project {id: 2}) RETURN p",
+                |input| input.path.as_mut().unwrap().from = "ghost".into(),
+            ),
             "undefined node \"ghost\"",
         );
 
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..2]->(b:Project {id: 2}) RETURN p",
+                |input| input.path.as_mut().unwrap().to = "ghost".into(),
+            ),
             "undefined node \"ghost\"",
         );
     }
 
     #[test]
     fn rejects_duplicate_node_ids() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "u", "entity": "Project"}
-                ]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note) RETURN u, n",
+                |input| input.nodes[1].id = "u".into(),
+            ),
             "duplicate node id \"u\"",
         );
     }
@@ -2161,26 +1977,16 @@ mod tests {
     #[test]
     fn accepts_unique_node_ids() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
+            r#"MATCH (u:User {id: 1})<-[:CONTAINS]-(p:Project)
+                RETURN u, p"#,
         );
     }
 
     #[test]
     fn rejects_virtual_group_by_property() {
-        let input = parse_input(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.name"],
-                "aggregations": [{"count": "p", "as": "project_count"}]
-            }"#,
+        let input = parse(
+            r#"MATCH (p:Project {id: 1})
+                RETURN p.name, count(p) AS project_count"#,
         )
         .unwrap();
         let ontology = test_ontology()
@@ -2207,16 +2013,17 @@ mod tests {
     #[test]
     fn rejects_unreferenced_traversal_node() {
         // 3 nodes but 1 relationship: n-1 check fires before the orphan check
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"},
-                    {"id": "orphan", "entity": "Note"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})<-[:CONTAINS]-(p:Project) RETURN u, p",
+                |input| {
+                    input.nodes.push(InputNode {
+                        id: "orphan".into(),
+                        entity: Some("Note".into()),
+                        ..Default::default()
+                    })
+                },
+            ),
             "n-1 relationships",
         );
     }
@@ -2224,25 +2031,24 @@ mod tests {
     #[test]
     fn accepts_aggregation_node_referenced_only_by_target() {
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "aggregations": [{"count": "p", "as": "total"}]
-            }"#,
+            r#"MATCH (p:Project {id: 1})
+                RETURN count(p) AS total"#,
         );
     }
 
     #[test]
     fn rejects_collect_aggregation() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "collect": "u.username",
-                    "as": "usernames"
-                }]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1}) RETURN count(u) AS usernames",
+                |input| {
+                    input.aggregation.metrics[0].expr =
+                        crate::input::AggExpr::Collect(crate::input::PropertyRef {
+                            node: "u".into(),
+                            property: "username".into(),
+                        })
+                },
+            ),
             "\"collect\" is not supported",
         );
     }
@@ -2269,39 +2075,21 @@ mod tests {
     #[test]
     fn rejects_property_less_sum_avg_min_max() {
         for func in ["sum", "avg", "min", "max"] {
-            let json = format!(
-                r#"{{
-                    "query_type": "aggregation",
-                    "nodes": [{{"id": "u", "entity": "User", "node_ids": [1]}}],
-                    "aggregations": [{{
-                        "{func}": "u",
-                        "as": "result"
-                    }}]
-                }}"#
-            );
-            let err = parse_input(&json).unwrap_err().to_string();
+            let query = format!("MATCH (u:User {{id: 1}}) RETURN {func}(u) AS result");
+            let err = parse(&query).unwrap_err().to_string();
             assert!(err.contains("node.property"), "{func}: got {err}");
         }
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{"count": "u", "as": "total"}]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN count(u) AS total"#,
         );
     }
 
     #[test]
     fn rejects_sum_on_string_property() {
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "sum": "u.username",
-                    "as": "username_sum"
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN sum(u.username) AS username_sum"#,
             "requires a numeric property",
         );
     }
@@ -2309,14 +2097,8 @@ mod tests {
     #[test]
     fn rejects_avg_on_string_property() {
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "avg": "u.username",
-                    "as": "username_avg"
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN avg(u.username) AS username_avg"#,
             "requires a numeric property",
         );
     }
@@ -2324,35 +2106,18 @@ mod tests {
     #[test]
     fn accepts_top_level_group_by_for_all_aggregations() {
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "group_by": ["u"],
-                "aggregations": [
-                    {"count": "u", "as": "total"},
-                    {"count": "g", "as": "group_count"}
-                ]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
+                RETURN u, count(u) AS total, count(g) AS group_count"#,
         );
     }
 
     #[test]
     fn rejects_disconnected_multi_node_aggregation_without_group_by() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "mr", "entity": "MergeRequest"},
-                    {"id": "p", "entity": "Project", "node_ids": [278964]}
-                ],
-                "aggregations": [
-                    {"count": "mr", "as": "total"}
-                ]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN count(mr) AS total",
+                |input| input.relationships.clear(),
+            ),
             "without group_by requires relationships",
         );
     }
@@ -2360,39 +2125,26 @@ mod tests {
     #[test]
     fn accepts_single_node_aggregation_without_group_by() {
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [
-                    {"count": "u", "as": "total"}
-                ]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN count(u) AS total"#,
         );
     }
 
     #[test]
     fn accepts_string_filter_on_string_column() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}}]
-            }"#,
+            r#"MATCH (u:User {username: 'alice'})
+                RETURN u"#,
         );
     }
 
     #[test]
     fn rejects_aggregation_direction_both() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "mr", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr", "direction": "both"}],
-                "group_by": ["u"],
-                "aggregations": [{"count": "mr", "as": "count"}]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, count(mr) AS count",
+                |input| input.relationships[0].direction = crate::input::Direction::Both,
+            ),
             "does not support direction",
         );
     }
@@ -2400,69 +2152,51 @@ mod tests {
     #[test]
     fn accepts_int_filter_on_int_column() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}]
-            }"#,
+            r#"MATCH (n:Note {noteable_id: 42})
+                RETURN n"#,
         );
     }
 
     #[test]
     fn accepts_bool_filter_on_bool_column() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": true}}]
-            }"#,
+            r#"MATCH (n:Note {confidential: true})
+                RETURN n"#,
         );
     }
 
     #[test]
     fn accepts_string_in_filter() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "u", "entity": "User",
-                    "filters": {"username": {"in": ["alice", "bob"]}}
-                }]
-            }"#,
+            r#"MATCH (u:User)
+                WHERE u.username IN ['alice', 'bob']
+                RETURN u"#,
         );
     }
 
     #[test]
     fn accepts_int_in_filter() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"in": [1, 2, 3]}}
-                }]
-            }"#,
+            r#"MATCH (n:Note)
+                WHERE n.noteable_id IN [1, 2, 3]
+                RETURN n"#,
         );
     }
 
     #[test]
     fn accepts_is_null_without_value_check() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "u", "entity": "User",
-                    "filters": {"username": {"is_null": true}}
-                }]
-            }"#,
+            r#"MATCH (u:User)
+                WHERE u.username IS NULL
+                RETURN u"#,
         );
     }
 
     #[test]
     fn rejects_int_on_string_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": 42}}]
-            }"#,
+            r#"MATCH (u:User {username: 42})
+                RETURN u"#,
             "expected String",
         );
     }
@@ -2470,10 +2204,8 @@ mod tests {
     #[test]
     fn rejects_string_on_int_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": "abc"}}]
-            }"#,
+            r#"MATCH (n:Note {noteable_id: 'abc'})
+                RETURN n"#,
             "expected Int",
         );
     }
@@ -2481,10 +2213,8 @@ mod tests {
     #[test]
     fn rejects_string_on_bool_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": "yes"}}]
-            }"#,
+            r#"MATCH (n:Note {confidential: 'yes'})
+                RETURN n"#,
             "expected Bool",
         );
     }
@@ -2492,13 +2222,9 @@ mod tests {
     #[test]
     fn rejects_mixed_type_in_array() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"in": [1, "two", 3]}}
-                }]
-            }"#,
+            r#"MATCH (n:Note)
+                WHERE n.noteable_id IN [1, 'two', 3]
+                RETURN n"#,
             "element [1]",
         );
     }
@@ -2506,10 +2232,8 @@ mod tests {
     #[test]
     fn rejects_float_on_int_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 3.14}}]
-            }"#,
+            r#"MATCH (n:Note {noteable_id: 3.14})
+                RETURN n"#,
             "is a float, not an integer",
         );
     }
@@ -2521,11 +2245,9 @@ mod tests {
             .with_nodes(["Metric"])
             .with_fields("Metric", [("score", DataType::Float)]);
 
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "m", "entity": "Metric", "filters": {"score": 42}}]
-            }"#,
+        let input = parse(
+            r#"MATCH (m:Metric {score: 42})
+                RETURN m"#,
         )
         .unwrap();
         validator(&ontology).check_references(&input).unwrap();
@@ -2534,10 +2256,8 @@ mod tests {
     #[test]
     fn accepts_string_on_enum_column() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": "human"}}]
-            }"#,
+            r#"MATCH (u:User {user_type: 'human'})
+                RETURN u"#,
         );
     }
 
@@ -2545,20 +2265,16 @@ mod tests {
     fn accepts_int_on_enum_column() {
         // Int-based enums pass validation; normalization coerces to string later.
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": 0}}]
-            }"#,
+            r#"MATCH (u:User {user_type: 0})
+                RETURN u"#,
         );
     }
 
     #[test]
     fn rejects_bool_on_enum_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": true}}]
-            }"#,
+            r#"MATCH (u:User {user_type: true})
+                RETURN u"#,
             "not a string or integer",
         );
     }
@@ -2568,11 +2284,9 @@ mod tests {
         let ontology = test_ontology();
         let validator = validator(&ontology);
 
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": "bad"}}]
-            }"#,
+        let input = parse(
+            r#"MATCH (n:Note {noteable_id: 'bad'})
+                RETURN n"#,
         )
         .unwrap();
         assert!(
@@ -2580,14 +2294,10 @@ mod tests {
             "scalar type mismatch must reject the query"
         );
 
-        let input = parse_input(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{
-                    "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"in": [1, "bad", 3]}}
-                }]
-            }"#,
+        let input = parse(
+            r#"MATCH (n:Note)
+                WHERE n.noteable_id IN [1, 'bad', 3]
+                RETURN n"#,
         )
         .unwrap();
         assert!(
@@ -2599,85 +2309,42 @@ mod tests {
     #[test]
     fn accepts_int_filter_on_edge_source_id() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": 42}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {source_id: 42}]->(n:Note)
+                RETURN u, n"#,
         );
     }
 
     #[test]
     fn accepts_string_filter_on_edge_relationship_kind() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_kind": "User"}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {source_kind: 'User'}]->(n:Note)
+                RETURN u, n"#,
         );
     }
 
     #[test]
     fn accepts_is_null_on_edge_column() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_kind": {"is_null": true}}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note)
+                WHERE r.target_kind IS NULL
+                RETURN u, n"#,
         );
     }
 
     #[test]
     fn accepts_in_filter_on_edge_int_column() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_id": {"in": [1, 2, 3]}}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note)
+                WHERE r.target_id IN [1, 2, 3]
+                RETURN u, n"#,
         );
     }
 
     #[test]
     fn rejects_string_on_edge_int_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": "not-a-number"}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {source_id: 'not-a-number'}]->(n:Note)
+                RETURN u, n"#,
             "expected Int",
         );
     }
@@ -2685,17 +2352,8 @@ mod tests {
     #[test]
     fn rejects_int_on_edge_string_column() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_kind": 123}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {target_kind: 123}]->(n:Note)
+                RETURN u, n"#,
             "expected String",
         );
     }
@@ -2703,17 +2361,8 @@ mod tests {
     #[test]
     fn rejects_unknown_edge_column_filter() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"bogus_column": 42}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {bogus_column: 42}]->(n:Note)
+                RETURN u, n"#,
             "unknown edge column \"bogus_column\"",
         );
     }
@@ -2721,17 +2370,9 @@ mod tests {
     #[test]
     fn rejects_mixed_types_in_edge_in_filter() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "n", "entity": "Note"}
-                ],
-                "relationships": [{
-                    "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": {"in": [1, "bad", 3]}}
-                }]
-            }"#,
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note)
+                WHERE r.source_id IN [1, 'bad', 3]
+                RETURN u, n"#,
             "element [1]",
         );
     }
@@ -2755,11 +2396,10 @@ mod tests {
             ]);
         let validator = validator(&ontology);
 
-        let input = parse_input(r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
-        }"#)
+        let input = parse(
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {source_id: 42}]->(n:Note)
+            RETURN u, n"#,
+        )
         .unwrap();
 
         let result = validator.check_references(&input);
@@ -2789,11 +2429,10 @@ mod tests {
             ]);
         let validator = validator(&ontology);
 
-        let input = parse_input(r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
-        }"#)
+        let input = parse(
+            r#"MATCH (u:User {id: 1})-[r:AUTHORED {source_id: 42}]->(n:Note)
+            RETURN u, n"#,
+        )
         .unwrap();
 
         let result = validator.check_references(&input);
@@ -2804,302 +2443,159 @@ mod tests {
         );
     }
 
-    /// Verify the Identifier regex in graph_query.schema.json only matches ASCII.
-    /// This is a defense against homoglyph attacks — the regex engine treats
-    /// [a-zA-Z] as ASCII-only, but this test makes the assumption explicit.
-    /// The pattern is loaded from the schema to prevent staleness.
     #[test]
-    fn identifier_regex_rejects_non_ascii() {
-        let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
-        let pattern = schema["$defs"]["Identifier"]["pattern"]
-            .as_str()
-            .expect("Identifier pattern missing from schema");
-        let re = regex::Regex::new(pattern).unwrap();
-
-        assert!(re.is_match("user"));
-        assert!(re.is_match("_foo"));
-        assert!(re.is_match("User123"));
-
-        assert!(!re.is_match("usеr")); // Cyrillic е (U+0435)
-        assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
-        assert!(!re.is_match("üser")); // Latin u with diaeresis
-        assert!(!re.is_match("用户")); // CJK
+    fn identifiers_reject_non_ascii() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let v = validator(&ontology);
+        for name in ["usеr", "ᴜser", "üser", "用户"] {
+            assert!(
+                parse(&format!("MATCH ({name}:User {{id: 1}}) RETURN {name}")).is_err(),
+                "{name}"
+            );
+            let escaped = parse(&format!("MATCH (`{name}`:User {{id: 1}}) RETURN `{name}`"));
+            assert!(
+                escaped.is_err() || v.check_shape(&escaped.unwrap()).is_err(),
+                "{name}"
+            );
+        }
     }
 
     #[test]
     fn selectivity_guards() {
         assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..3]->(b:Project {id: 2})
+                RETURN p"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:CONTAINS*1..2]->(b:Project {id: 2})
+                RETURN p"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:User)-[:CONTAINS*1..2]->(b:Project {id: 2})
+                WHERE a.id >= 1 AND a.id <= 100
+                RETURN p"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:User)-[:CONTAINS*1..2]->(b:Project {id: 2})
+                WHERE a.id >= 1 AND a.id <= 10000
+                RETURN p"#,
             "endpoint \"a\"",
         );
         assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User"},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:User)-[:CONTAINS*1..2]->(b:Project {id: 2})
+                RETURN p"#,
             "endpoint \"a\"",
         );
         assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "User"}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..2]->(b:User)
+                RETURN p"#,
             "endpoint \"b\"",
         );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
-            }"#,
-            "require named relationship types",
-        );
-        assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "node_ids": [1]},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
-            }"#,
-            "require named relationship types",
-        );
+        for query in [
+            "MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:CONTAINS*1..2]->(b:Project {id: 2}) RETURN p",
+            "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..2]->(b:Project {id: 2}) RETURN p",
+        ] {
+            assert_input_rejects(
+                mutated(query, |input| {
+                    input.path.as_mut().unwrap().rel_types.clear()
+                }),
+                "require named relationship types",
+            );
+        }
 
         assert_ok(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "both"}
-            }"#,
+            r#"MATCH (u:User {id: 1})--(neighbor)
+                RETURN u, neighbor"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}],
-                "neighbors": {"direction": "both"}
-            }"#,
+            r#"MATCH (u:User {username: 'root'})--(neighbor)
+                RETURN u, neighbor"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "neighbors": {"direction": "both"}
-            }"#,
+            r#"MATCH (u:User)--(neighbor)
+                RETURN u, neighbor"#,
             "center node",
         );
 
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}]
-            }"#,
+            r#"MATCH (u:User {username: 'root'})
+                RETURN u"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                RETURN u"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}]
-            }"#,
+            r#"MATCH (u:User)
+                RETURN u"#,
             "filters or node_ids to at least one node",
         );
 
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
+            r#"MATCH (u:User {id: 1})<-[:CONTAINS]-(p:Project)
+                RETURN u, p"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project", "filters": {"name": "gitlab"}}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
+            r#"MATCH (u:User)<-[:CONTAINS]-(p:Project {name: 'gitlab'})
+                RETURN u, p"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
+            r#"MATCH (u:User)<-[:CONTAINS]-(p:Project)
+                RETURN u, p"#,
             "filters or node_ids to at least one node",
         );
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
-            }"#,
+            r#"MATCH (u:User {id: 1})<-[:CONTAINS*1..2]-(p:Project)
+                RETURN u, p"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
-            }"#,
+            r#"MATCH (u:User)<-[:CONTAINS*1..2]-(p:Project)
+                RETURN u, p"#,
             "filters or node_ids to at least one node",
         );
 
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "filters": {"username": "root"}},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": ["p"],
-                "aggregations": [{"count": "u", "as": "c"}]
-            }"#,
+            r#"MATCH (u:User {username: 'root'})<-[:CONTAINS]-(p:Project)
+                RETURN p, count(u) AS c"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": ["p"],
-                "aggregations": [{"count": "u", "as": "c"}]
-            }"#,
+            r#"MATCH (u:User)<-[:CONTAINS]-(p:Project)
+                RETURN p, count(u) AS c"#,
             "filters or node_ids to at least one node",
         );
 
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}]
-            }"#,
+            r#"MATCH (u:User)
+                WHERE u.id >= 1 AND u.id <= 100
+                RETURN u"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
-            }"#,
+            r#"MATCH (u:User)
+                WHERE u.id >= 1 AND u.id <= 999999999
+                RETURN u"#,
             "add filters or node_ids to at least one node, such as \
              (p:Project {full_path: 'group/project'}) or WHERE mr.project_id = 42 \
              (an id_range counts only with a span of at most 100000)",
         );
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
-            }"#,
+            r#"MATCH (u:User)<-[:CONTAINS]-(p:Project)
+                WHERE u.id >= 1 AND u.id <= 100
+                RETURN u, p"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": ["p"],
-                "aggregations": [{"count": "u", "as": "c"}]
-            }"#,
+            r#"MATCH (u:User)<-[:CONTAINS]-(p:Project)
+                WHERE u.id >= 1 AND u.id <= 100
+                RETURN p, count(u) AS c"#,
         );
         assert_ok(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 100}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:Project)-[:CONTAINS*1..2]->(b:Project {id: 2})
+                WHERE a.id >= 1 AND a.id <= 100
+                RETURN p"#,
         );
         assert_rejects(
-            r#"{
-                "query_type": "path_finding",
-                "nodes": [
-                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 1000}},
-                    {"id": "b", "entity": "Project", "node_ids": [2]}
-                ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
-                         "rel_types": ["CONTAINS"]}
-            }"#,
+            r#"MATCH p = ANY SHORTEST (a:Project)-[:CONTAINS*1..2]->(b:Project {id: 2})
+                WHERE a.id >= 1 AND a.id <= 1000
+                RETURN p"#,
             "endpoint \"a\"",
         );
     }
@@ -3138,13 +2634,11 @@ mod tests {
     fn rejects_short_like_pattern() {
         let ont = test_ontology();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"contains": "ab"}}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (u:User)
+                WHERE u.username CONTAINS 'ab'
+                RETURN u
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3160,13 +2654,11 @@ mod tests {
     fn rejects_like_on_disallowed_field() {
         let ont = ontology_with_sensitive_field();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": {"contains": "example"}}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (u:User)
+                WHERE u.email CONTAINS 'example'
+                RETURN u
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3194,13 +2686,11 @@ mod tests {
             })
             .unwrap();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"created_at": {"contains": "2024"}}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (u:User)
+                WHERE u.created_at CONTAINS '2024'
+                RETURN u
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3210,13 +2700,11 @@ mod tests {
             "expected non-text rejection, got: {err}"
         );
 
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"state": {"contains": "act"}}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (u:User)
+                WHERE u.state CONTAINS 'act'
+                RETURN u
+                LIMIT 10"#,
         )
         .unwrap();
         assert!(validator.check_references(&input).is_ok());
@@ -3226,13 +2714,10 @@ mod tests {
     fn accepts_equality_on_like_disallowed_field() {
         let ont = ontology_with_sensitive_field();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": "test@example.com"}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (u:User {email: 'test@example.com'})
+                RETURN u
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3246,13 +2731,10 @@ mod tests {
     fn rejects_filter_on_unfilterable_field() {
         let ont = ontology_with_unfilterable_field();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"private_note": "secret"}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (g:Group {private_note: 'secret'})
+                RETURN g
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3267,14 +2749,10 @@ mod tests {
     fn rejects_group_by_property_on_unfilterable_field() {
         let ont = ontology_with_unfilterable_field();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [1]}],
-            "group_by": ["g.private_note"],
-            "aggregations": [{"count": "g", "as": "group_count"}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (g:Group {id: 1})
+                RETURN g.private_note, count(g) AS group_count
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3289,13 +2767,10 @@ mod tests {
     fn accepts_filter_on_filterable_field() {
         let ont = ontology_with_unfilterable_field();
         let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"name": "Public Group"}}],
-            "limit": 10
-        }"#,
+        let input = parse(
+            r#"MATCH (g:Group {name: 'Public Group'})
+                RETURN g
+                LIMIT 10"#,
         )
         .unwrap();
 
@@ -3308,30 +2783,18 @@ mod tests {
     #[test]
     fn accepts_multi_filter_range() {
         assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "node_ids": [1],
-                         "filters": {"created_at": [
-                             {"gte": "2026-04-01T00:00:00Z"},
-                             {"lt": "2026-05-01T00:00:00Z"}
-                         ]}}]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                WHERE u.created_at >= '2026-04-01T00:00:00Z' AND u.created_at < '2026-05-01T00:00:00Z'
+                RETURN u"#,
         );
     }
 
     #[test]
     fn rejects_multi_filter_type_mismatch() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "node_ids": [1],
-                         "filters": {"created_at": [
-                             {"gte": "2026-04-01T00:00:00Z"},
-                             {"lt": 12345}
-                         ]}}]
-            }"#,
+            r#"MATCH (u:User {id: 1})
+                WHERE u.created_at >= '2026-04-01T00:00:00Z' AND u.created_at < 12345
+                RETURN u"#,
             "not a string",
         );
     }
