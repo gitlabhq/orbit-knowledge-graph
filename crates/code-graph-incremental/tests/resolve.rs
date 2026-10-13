@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::Resolved;
+use code_graph_incremental::pipeline::{FileStats, Resolved};
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Killed, Limits, State, templates};
@@ -41,6 +43,16 @@ fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
         .unwrap()
         .finish();
     (resolved, context.report.skipped)
+}
+
+fn resolved_paths(resolved: &Resolved) -> Vec<&str> {
+    let mut paths: Vec<_> = resolved
+        .resolved
+        .iter()
+        .map(|&fi| resolved.state.trees[fi as usize].label.as_str())
+        .collect();
+    paths.sort();
+    paths
 }
 
 fn python_env(limits: Limits) -> Env {
@@ -260,6 +272,7 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     .unwrap()
     .finish();
     assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair("main.js:caller", "package/first.js:run")]
@@ -277,17 +290,8 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
             .unwrap()
             .finish();
     assert!(context.report.skipped.is_empty());
-    let mut resolved_files: Vec<_> = context
-        .report
-        .files
-        .iter()
-        .map(|file| {
-            assert_eq!(file.phase, "resolve");
-            file.path.as_str()
-        })
-        .collect();
-    resolved_files.sort();
-    assert_eq!(resolved_files, ["barrel.js", "main.js"]);
+    assert!(context.report.files.is_empty());
+    assert_eq!(resolved_paths(&resolved), ["barrel.js", "main.js"]);
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair("main.js:caller", "package/second.js:run")]
@@ -331,16 +335,11 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
         templates::reindex(Context::new(&env, changes), resolved.state, vec![])
             .unwrap()
             .finish();
-    let mut resolved_files: Vec<_> = context
-        .report
-        .files
-        .iter()
-        .filter(|file| file.phase == "resolve")
-        .map(|file| file.path.as_str())
-        .collect();
-    resolved_files.sort();
+    let mut stats_paths: Vec<_> = context.report.files.keys().map(String::as_str).collect();
+    stats_paths.sort();
+    assert_eq!(stats_paths, ["left.js", "right.js"]);
     assert_eq!(
-        resolved_files,
+        resolved_paths(&resolved),
         ["first.js", "left.js", "main.js", "right.js", "second.js"]
     );
     assert_eq!(
@@ -376,4 +375,63 @@ fn a_file_over_the_resolve_budget_keeps_imports_and_loses_inheritance() {
         ]
     );
     assert!(cross_file(&env, &resolved.state, EdgeKind::Extends).is_empty());
+}
+
+fn index_stats(limits: Limits) -> (HashMap<String, FileStats>, Vec<Killed>) {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("a.py", UTILS), ("b.py", MAIN)]);
+    let env = python_env(limits);
+    let (context, _) = templates::index(Context::new(&env, common::walk(repo.path())))
+        .unwrap()
+        .finish();
+    (context.report.files, context.report.skipped)
+}
+
+fn sorted_paths(files: &HashMap<String, FileStats>) -> Vec<&str> {
+    let mut paths: Vec<_> = files.keys().map(String::as_str).collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn file_stats_cover_parsed_files() {
+    let (files, _) = index_stats(Limits::UNLIMITED);
+    assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
+    for stats in files.values() {
+        assert!(stats.parse > Duration::ZERO);
+        assert!(stats.resolve > Duration::ZERO);
+    }
+}
+
+#[test]
+fn file_stats_drop_files_killed_in_a_per_file_phase() {
+    for limits in [
+        Limits {
+            file_parse_ms: 0,
+            ..Limits::UNLIMITED
+        },
+        Limits {
+            file_rewrite_ms: 0,
+            ..Limits::UNLIMITED
+        },
+        Limits {
+            file_link_ms: 0,
+            ..Limits::UNLIMITED
+        },
+    ] {
+        let (files, skipped) = index_stats(limits);
+        assert!(!skipped.is_empty(), "{limits:?}");
+        assert!(files.is_empty(), "{limits:?}");
+    }
+}
+
+#[test]
+fn file_stats_keep_files_killed_by_the_resolve_budget() {
+    let (files, skipped) = index_stats(Limits {
+        file_resolve_ms: 0,
+        ..Limits::UNLIMITED
+    });
+    assert!(!skipped.is_empty());
+    assert!(skipped.iter().all(|killed| killed.label == "resolve"));
+    assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
