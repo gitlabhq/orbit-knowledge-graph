@@ -154,6 +154,17 @@ impl Deref for TreeRead<'_> {
 }
 
 impl<'a> TreeRepository<'a> {
+    pub fn root_tag(self, file: usize, key: u32) -> Option<u32> {
+        match self {
+            Self::Resident(trees) => trees[file].root().tag(key),
+            Self::Stored(files, _) => files[file]
+                .root_tags
+                .iter()
+                .find(|tag| tag.key == key)
+                .map(|tag| tag.val),
+        }
+    }
+
     pub fn len(self) -> usize {
         match self {
             Self::Resident(trees) => trees.len(),

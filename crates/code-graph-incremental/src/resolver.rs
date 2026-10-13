@@ -490,6 +490,7 @@ impl Resolver {
                     .push(edge.to_node);
             }
         }
+        drop(resolved_imports);
         let sentinels = [run];
         let session = TreeSession::from_repository(trees, &sentinels);
         let mut ctx = ResolveCtx {
@@ -501,11 +502,11 @@ impl Resolver {
             file_resolve_ms: env.limits.file_resolve_ms,
             env,
             extends_of: Arc::new(extends_of),
-            imports_to: Arc::new(imports_to),
+            imports_to: Arc::new(pack_edges(imports_to)),
             call_at_site: Arc::new(call_at_site),
             corpus: &session,
-            type_uses: Arc::new(type_uses),
-            producers: Arc::new(producers),
+            type_uses: Arc::new(pack_edges(type_uses)),
+            producers: Arc::new(pack_edges(producers)),
             lang,
             visible: &self.visible,
             ambiguous: &ambiguous,
@@ -590,7 +591,6 @@ impl Resolver {
                 .or_default()
                 .push(e.to());
         }
-        cross_edges.extend(&wave1);
         run.check()?;
 
         // Wildcard references come from the linker and from wave 1's unbound
@@ -609,6 +609,7 @@ impl Resolver {
                 referrers.entry(e.to()).or_default().insert(e.from_node);
             }
         }
+        cross_edges.extend(wave1);
         let wildcard_edges: Vec<Edge> = requests
             .par_iter()
             .map(|requests| {
@@ -632,7 +633,9 @@ impl Resolver {
             .into_iter()
             .flatten()
             .collect();
-        cross_edges.extend(&wildcard_edges);
+        cross_edges.extend(wildcard_edges);
+        drop(requests);
+        drop(referrers);
         run.check()?;
 
         let mut uses_by_file = vec![Vec::new(); trees.len()];
@@ -663,7 +666,8 @@ impl Resolver {
             .into_iter()
             .flatten()
             .collect();
-        cross_edges.extend(&wave2);
+        cross_edges.extend(wave2);
+        drop(uses_by_file);
 
         let mut seen = FxHashSet::default();
         let mut wave: Vec<Edge> = edges
@@ -675,7 +679,6 @@ impl Resolver {
         let key = |e: &Edge| (e.from_tree, e.from_node, e.site, e.to_tree, e.to_node);
         seen.extend(edges.iter().filter(|e| e.kind == EdgeKind::Calls).map(key));
         cross_edges.retain(|e| e.kind != EdgeKind::Calls || seen.insert(key(e)));
-        let mut type_edges: Vec<Edge> = Vec::new();
         while !wave.is_empty() {
             run.check()?;
             let mut by_file = vec![Vec::new(); trees.len()];
@@ -698,9 +701,9 @@ impl Resolver {
                 .flatten()
                 .filter(|e| seen.insert(key(e)))
                 .collect();
-            type_edges.extend(&wave);
+            cross_edges.extend(&wave);
         }
-        cross_edges.extend(type_edges);
+        drop(seen);
 
         let mut import_sites: FxHashSet<_> = edges
             .iter()
@@ -713,6 +716,7 @@ impl Resolver {
                 || import_sites.insert((edge.from(), edge.to(), edge.site))
         });
 
+        drop(import_sites);
         let mut non_callable = FxHashMap::default();
         for edge in edges
             .iter()
@@ -765,6 +769,14 @@ impl Resolver {
 }
 
 type RelatedNodes = FxHashMap<(u32, u32), Vec<(u32, u32)>>;
+type EdgeList<'a> = Box<[&'a Edge]>;
+
+fn pack_edges(index: FxHashMap<(u32, u32), Vec<&Edge>>) -> FxHashMap<(u32, u32), EdgeList<'_>> {
+    index
+        .into_iter()
+        .map(|(node, edges)| (node, edges.into_boxed_slice()))
+        .collect()
+}
 
 #[derive(Clone)]
 struct ResolveCtx<'a> {
@@ -776,11 +788,11 @@ struct ResolveCtx<'a> {
     file_resolve_ms: u64,
     env: &'a Env,
     extends_of: Arc<RelatedNodes>,
-    imports_to: Arc<FxHashMap<(u32, u32), Vec<&'a Edge>>>,
+    imports_to: Arc<FxHashMap<(u32, u32), EdgeList<'a>>>,
     call_at_site: Arc<FxHashMap<(u32, u32), &'a Edge>>,
     corpus: &'a TreeSession<'a>,
-    type_uses: Arc<FxHashMap<(u32, u32), Vec<&'a Edge>>>,
-    producers: Arc<FxHashMap<(u32, u32), Vec<&'a Edge>>>,
+    type_uses: Arc<FxHashMap<(u32, u32), EdgeList<'a>>>,
+    producers: Arc<FxHashMap<(u32, u32), EdgeList<'a>>>,
     lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(u32, u32)>,
@@ -953,8 +965,7 @@ fn gather_imports_for(
     let root_relative = lang.syms.lookup("source_root_rel");
     let mut declared_roots = FxHashSet::default();
     for fi in 0..trees.len() {
-        let tree = trees.acquire(fi)?;
-        if let Some(relative) = tree.root().tag(root_relative)
+        if let Some(relative) = trees.root_tag(fi, root_relative)
             && let Some(root) = trees.label(fi).strip_suffix(lang.syms.resolve(relative))
         {
             declared_roots.insert(root.trim_end_matches(PATH_SEP));
