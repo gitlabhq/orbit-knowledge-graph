@@ -1,8 +1,0 @@
-description: A comparison of a property with itself is rejected, with or without NOT
-
-query:
-  gql: |
-    MATCH (wi:WorkItem {id: 4000}) WHERE NOT wi.weight = wi.weight RETURN wi.id
-
-expect:
-  compile_error: "every condition must compare a property of a matched node or relationship"

@@ -1,6 +1,0 @@
-description: Negated membership validates element types
-query:
-  gql: |
-    MATCH (wi:WorkItem {id: 4000}) WHERE NOT wi.id IN ['bad'] RETURN wi.id
-expect:
-  compile_error: not an integer

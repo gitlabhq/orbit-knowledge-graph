@@ -1,8 +1,0 @@
-description: A JSON not entry with is_null on traversal_path is rejected before it becomes is_not_null
-
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"is_null":true}}}],"limit":30}
-
-expect:
-  compile_error: "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths"

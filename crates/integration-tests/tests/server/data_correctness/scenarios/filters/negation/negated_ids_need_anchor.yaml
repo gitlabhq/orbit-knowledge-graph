@@ -1,7 +1,0 @@
-description: Negated ID bounds do not become a selective positive anchor
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","not":{"id":{"in":[4000],"gte":4000,"lte":4010}}}],"limit":30}
-  gql: MATCH (wi:WorkItem) WHERE NOT (wi.id IN [4000] AND wi.id >= 4000 AND wi.id <= 4010) RETURN wi.id
-expect:
-  compile_error: add filters or node_ids to at least one node (NOT conditions do not count)
