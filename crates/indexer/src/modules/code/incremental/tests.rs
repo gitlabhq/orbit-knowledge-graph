@@ -186,6 +186,7 @@ async fn language_timings_keep_files_killed_by_the_resolve_budget() {
     };
     let timings = timings_for(files, limits).await;
     assert_eq!(timings.errors, 0);
+    assert_eq!(timings.skipped_paths, ["a.js", "b.js"]);
     assert_eq!(timings.languages, [("javascript".to_owned(), 2)]);
     assert_eq!(timings.slowest_paths, ["a.js", "b.js"]);
 }

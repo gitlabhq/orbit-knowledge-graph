@@ -209,12 +209,13 @@ fn file_timings(timings: &[FileTiming], skipped: &[Killed]) -> Vec<FileTimingEnt
             "resolve" => file.entry.resolve_ms += ms,
             _ => {
                 file.entry.parse_ms += ms;
+                // Unparsed placeholder trees get resolve timings too, so only
+                // a parse-phase timing proves the file was parsed.
                 file.parsed = true;
             }
         }
     }
-    // Unparsed placeholder trees get resolve timings too. Resolve-budget kills
-    // were parsed, so they still count.
+    // Resolve-budget kills were parsed, so they still count.
     for killed in skipped {
         if matches!(killed.label, "tree-sitter" | "rewrite" | "link")
             && let Some(file) = by_path.get_mut(killed.path.as_str())
