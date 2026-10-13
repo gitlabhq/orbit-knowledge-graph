@@ -551,7 +551,7 @@ fn build_denorm_tags(
                 edge_alias,
                 &facts.edge_column,
                 &facts.tag_key,
-                &filter.filter,
+                &filter.predicate,
             )
         {
             exprs.push(expr);

@@ -1,7 +1,7 @@
 use ontology::constants::*;
 
 use crate::error::Result;
-use crate::input::*;
+use crate::query::Direction;
 
 use super::context::PlanningContext;
 use super::helpers::has_non_denorm_filters;

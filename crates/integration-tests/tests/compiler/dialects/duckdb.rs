@@ -154,8 +154,8 @@ fn canonical_functions_execute_in_duckdb() {
 
 #[test]
 fn week_buckets_start_sunday_and_return_dates() {
+    use compiler::TruncateUnit;
     use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
-    use compiler::input::TruncateUnit;
 
     let directory = tempfile::tempdir().unwrap();
     let database =
@@ -276,8 +276,8 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
 
 #[test]
 fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
+    use compiler::AggFunction;
     use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
-    use compiler::input::AggFunction;
 
     let directory = tempfile::tempdir().unwrap();
     let database =

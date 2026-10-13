@@ -1,8 +1,8 @@
 use ontology::constants::*;
 
-use super::helpers::{denorm_tag_values, requested_columns};
+use super::helpers::denorm_tag_values;
 use super::{BoundFilter, NodePlan};
-use crate::input::InputFilter;
+use crate::query::Predicate as BoundPredicate;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {
@@ -23,7 +23,7 @@ impl Column {
 pub enum Predicate {
     Property {
         column: Column,
-        filter: InputFilter,
+        filter: BoundPredicate,
         data_type: Option<ontology::DataType>,
         in_sort_key: bool,
     },
@@ -87,7 +87,7 @@ impl Projection {
 pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
     Predicate::Property {
         column: Column::new(alias, property),
-        filter: bound.filter.clone(),
+        filter: bound.predicate.clone(),
         data_type: bound.data_type,
         in_sort_key: bound.in_sort_key,
     }
@@ -113,7 +113,12 @@ pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
     })
 }
 
-pub fn tag_filter(alias: &str, column: &str, key: &str, filter: &InputFilter) -> Option<Predicate> {
+pub fn tag_filter(
+    alias: &str,
+    column: &str,
+    key: &str,
+    filter: &BoundPredicate,
+) -> Option<Predicate> {
     denorm_tag_values(key, filter).map(|values| Predicate::Tags {
         column: Column::new(alias, column),
         values,
@@ -144,11 +149,11 @@ pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
     if !node.emit_select {
         return vec![];
     }
-    requested_columns(&node.columns)
-        .into_iter()
+    node.columns
+        .iter()
         .map(|column| {
             Projection::new(
-                OutputValue::Column(Column::new(&node.alias, &column)),
+                OutputValue::Column(Column::new(&node.alias, column)),
                 format!("{}_{column}", node.alias),
             )
         })

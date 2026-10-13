@@ -243,14 +243,14 @@ impl Context {
             }
             Expr::TimeBucket { unit, value } => {
                 let value = self.emit_expr(value);
-                let bucket = if *unit == crate::input::TruncateUnit::Week {
+                let bucket = if *unit == crate::query::TruncateUnit::Week {
                     format!("(date_trunc('week', {value} + INTERVAL 1 DAY) - INTERVAL 1 DAY)")
                 } else {
                     format!("date_trunc('{}', {value})", unit.name())
                 };
                 if matches!(
                     unit,
-                    crate::input::TruncateUnit::Minute | crate::input::TruncateUnit::Hour
+                    crate::query::TruncateUnit::Minute | crate::query::TruncateUnit::Hour
                 ) {
                     bucket
                 } else {
@@ -270,12 +270,12 @@ impl Context {
                     return String::new();
                 }
                 let name = match function {
-                    crate::input::AggFunction::Count => "COUNT",
-                    crate::input::AggFunction::Sum => "SUM",
-                    crate::input::AggFunction::Avg => "AVG",
-                    crate::input::AggFunction::Min => "MIN",
-                    crate::input::AggFunction::Max => "MAX",
-                    crate::input::AggFunction::Collect => "array_agg",
+                    crate::query::AggFunction::Count => "COUNT",
+                    crate::query::AggFunction::Sum => "SUM",
+                    crate::query::AggFunction::Avg => "AVG",
+                    crate::query::AggFunction::Min => "MIN",
+                    crate::query::AggFunction::Max => "MAX",
+                    crate::query::AggFunction::Collect => "array_agg",
                 };
                 let argument = argument
                     .as_ref()
@@ -286,7 +286,7 @@ impl Context {
                     if *distinct { "DISTINCT " } else { "" }
                 );
                 let condition = condition.as_ref().map(|value| self.emit_expr(value));
-                if *function == crate::input::AggFunction::Collect {
+                if *function == crate::query::AggFunction::Collect {
                     let nonnull = format!("{argument} IS NOT NULL");
                     let condition = condition.map_or_else(
                         || nonnull.clone(),

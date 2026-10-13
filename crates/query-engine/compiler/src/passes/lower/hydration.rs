@@ -151,12 +151,9 @@ fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{ColumnSelection, Input, InputNode, QueryType};
     use crate::passes::codegen::codegen;
     use crate::passes::enforce::ResultContext;
-    use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
     use orbit_server_config::QueryConfig;
-    use std::sync::Arc;
 
     fn render(node: &Node) -> String {
         codegen(node, ResultContext::new(), QueryConfig::default())
@@ -174,54 +171,34 @@ mod tests {
         (q.sql, q.params)
     }
 
-    fn plan(columns: Vec<&str>, node_ids: Vec<i64>, traversal_paths: Vec<&str>) -> InputNode {
-        InputNode {
-            id: "hydrate".into(),
-            entity: Some("MergeRequest".into()),
+    fn plan(
+        columns: Vec<&str>,
+        node_ids: Vec<i64>,
+        traversal_paths: Vec<&str>,
+    ) -> HydrationNodePlan {
+        HydrationNodePlan {
+            alias: "hydrate".into(),
+            table: "gl_merge_request".into(),
+            entity: "MergeRequest".into(),
+            id_property: "id".into(),
             node_ids,
-            columns: Some(ColumnSelection::List(
-                columns.into_iter().map(String::from).collect(),
+            columns: columns.into_iter().map(String::from).collect(),
+            path_filter: Some(HydrationPathFilter::PrefixUnion(
+                traversal_paths
+                    .into_iter()
+                    .map(TraversalPath::new_unchecked)
+                    .collect(),
             )),
-            traversal_paths: traversal_paths
-                .into_iter()
-                .map(TraversalPath::new_unchecked)
-                .collect(),
-            ..Default::default()
+            sort_key: vec!["id".into()],
         }
     }
 
-    fn emit_dynamic(plans: &[InputNode], limit: u32) -> Node {
-        emit(plans, limit, true)
+    fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Node {
+        emit_hydration(plans, limit).unwrap()
     }
 
-    fn emit_static(plans: &[InputNode], limit: u32) -> Node {
-        emit(plans, limit, false)
-    }
-
-    fn emit(nodes: &[InputNode], limit: u32, dynamic: bool) -> Node {
-        let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
-            ontology::Ontology::load_embedded().unwrap(),
-        ))
-        .unwrap();
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes: nodes.to_vec(),
-            limit,
-            ..Default::default()
-        };
-        let query =
-            crate::passes::bind::bind(input, &model, crate::passes::bind::Mode::Hydration).unwrap();
-        let plan = plan_clickhouse(
-            &query,
-            &model,
-            HydrationCompileOptions {
-                dynamic,
-                path_segment_budget: None,
-            },
-            &Default::default(),
-        )
-        .unwrap();
-        super::super::emit(&plan, &query).unwrap().ast
+    fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Node {
+        emit_hydration(plans, limit).unwrap()
     }
 
     #[test]
@@ -229,10 +206,8 @@ mod tests {
         let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
-        let plan = InputNode {
-            traversal_paths: paths.clone(),
-            ..plan(vec!["title"], vec![1], vec![])
-        };
+        let mut plan = plan(vec!["title"], vec![1], vec![]);
+        plan.path_filter = Some(HydrationPathFilter::PrefixSet(paths.clone()));
 
         let node = emit_dynamic(&[plan], 10);
         let (sql, params) = render_with_params(&node);
@@ -266,10 +241,8 @@ mod tests {
         let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
-        let plan = InputNode {
-            traversal_paths: paths,
-            ..plan(vec!["title"], vec![1], vec![])
-        };
+        let mut plan = plan(vec!["title"], vec![1], vec![]);
+        plan.path_filter = Some(HydrationPathFilter::PrefixUnion(paths));
 
         let node = emit_static(&[plan], 10);
         let sql = render(&node);

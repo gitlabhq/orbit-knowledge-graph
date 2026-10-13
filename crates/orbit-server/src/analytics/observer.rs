@@ -199,7 +199,7 @@ mod tests {
             "33".to_string(),
         );
         obs.set_compiled(&CompiledQueryContext {
-            query_type: query_engine::compiler::input::QueryType::Traversal,
+            query_type: query_engine::compiler::QueryType::Traversal,
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
@@ -209,7 +209,7 @@ mod tests {
             },
             hydration: query_engine::compiler::HydrationPlan::None,
             input: query_engine::compiler::BoundQuery::new(
-                query_engine::compiler::input::QueryType::Traversal,
+                query_engine::compiler::QueryType::Traversal,
             ),
             pagination: Default::default(),
             has_virtual_columns: false,

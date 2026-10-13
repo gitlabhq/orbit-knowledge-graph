@@ -113,7 +113,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                         .iter()
                         .any(|relationship| facts.relationships.contains(relationship))
                     && let Some(predicate) =
-                        tag_filter(alias, &facts.edge_column, &facts.tag_key, &filter.filter)
+                        tag_filter(alias, &facts.edge_column, &facts.tag_key, &filter.predicate)
                 {
                     predicates.push(predicate);
                     tagged.insert(tag);

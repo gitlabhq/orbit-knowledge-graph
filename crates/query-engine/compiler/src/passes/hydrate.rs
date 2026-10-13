@@ -3,14 +3,13 @@
 
 use std::collections::HashSet;
 
-use ontology::VirtualSource;
 #[cfg(test)]
-use ontology::{FieldSource, Ontology};
+use ontology::FieldSource;
+use ontology::VirtualSource;
 use query_data_model::PropertyRealization;
 
 use crate::ast::Node;
-use crate::input::{DynamicColumnMode, QueryType};
-use crate::query::Query;
+use crate::query::{DynamicColumnMode, Query, QueryType};
 use crate::types::SecurityContext;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,7 +61,7 @@ pub struct HydrationTemplate {
     pub has_traversal_path: bool,
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.
-    pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
+    pub virtual_filters: Vec<(String, crate::query::Predicate)>,
     /// Virtual columns resolved only because they are filtered, not selected.
     /// Stripped from result rows after the in-memory filter pass.
     pub filter_injected_columns: Vec<String>,
@@ -171,10 +170,9 @@ fn build_static_templates(
                 }
                 virtual_filters.push((
                     property.clone(),
-                    crate::input::InputFilter {
-                        op: Some(filter.predicate.op),
+                    crate::query::Predicate {
+                        op: filter.predicate.op,
                         value: filter.predicate.value.clone(),
-                        rhs_column: None,
                     },
                 ));
                 if !virtual_columns
@@ -434,18 +432,6 @@ fn split_columns(
 }
 
 #[cfg(test)]
-fn build_dynamic_specs_from_ontology(
-    input: crate::Input,
-    ontology: &Ontology,
-    security_context: &SecurityContext,
-) -> Vec<DynamicEntityColumns> {
-    let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-    let query =
-        crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Local).unwrap();
-    build_dynamic_specs(&query, model.as_ref(), security_context)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use ontology::{Field, FieldSource, VirtualSource};
@@ -637,7 +623,7 @@ mod tests {
     // consulting the security context (RestrictPass only runs on
     // `node.columns`).
 
-    use crate::input::{DynamicColumnMode, Input, InputNode, QueryType};
+    use crate::query::{DynamicColumnMode, QueryType};
     use ontology::{DataType, Ontology};
 
     fn user_ontology() -> Ontology {
@@ -660,29 +646,20 @@ mod tests {
 
     use crate::testkit::{admin_ctx, non_admin_ctx};
 
-    fn neighbors_input(mode: DynamicColumnMode) -> Input {
-        Input {
-            query_type: QueryType::Neighbors,
-            nodes: vec![InputNode {
-                id: "g".into(),
-                entity: Some("User".into()),
-                ..Default::default()
-            }],
-            options: crate::input::QueryOptions {
-                dynamic_columns: mode,
-                ..Default::default()
-            },
-            ..Input::default()
-        }
+    fn neighbors_query(mode: DynamicColumnMode) -> Query {
+        let mut query = Query::new(QueryType::Neighbors);
+        query.dynamic_columns = mode;
+        query
     }
 
     #[test]
     fn dynamic_wildcard_strips_admin_only_for_non_admin() {
         let ont = user_ontology();
         let ctx = non_admin_ctx();
-        let input = neighbors_input(DynamicColumnMode::All);
+        let query = neighbors_query(DynamicColumnMode::All);
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
 
-        let specs = build_dynamic_specs_from_ontology(input, &ont, &ctx);
+        let specs = build_dynamic_specs(&query, model.as_ref(), &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -706,9 +683,10 @@ mod tests {
     fn dynamic_wildcard_preserves_admin_only_for_admin() {
         let ont = user_ontology();
         let ctx = admin_ctx();
-        let input = neighbors_input(DynamicColumnMode::All);
+        let query = neighbors_query(DynamicColumnMode::All);
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
 
-        let specs = build_dynamic_specs_from_ontology(input, &ont, &ctx);
+        let specs = build_dynamic_specs(&query, model.as_ref(), &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -733,9 +711,10 @@ mod tests {
         // filter must still strip it for non-admins.
         let ont = user_ontology().with_default_columns("User", ["username", "is_admin"]);
         let ctx = non_admin_ctx();
-        let input = neighbors_input(DynamicColumnMode::Default);
+        let query = neighbors_query(DynamicColumnMode::Default);
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
 
-        let specs = build_dynamic_specs_from_ontology(input, &ont, &ctx);
+        let specs = build_dynamic_specs(&query, model.as_ref(), &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -748,13 +727,10 @@ mod tests {
     fn generate_hydration_plan_neighbors_applies_non_admin_filter() {
         let ont = user_ontology();
         let ctx = non_admin_ctx();
-        let input = neighbors_input(DynamicColumnMode::All);
+        let query = neighbors_query(DynamicColumnMode::All);
 
         let emitted = Node::Query(Box::default());
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
-        let query =
-            crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Local)
-                .unwrap();
         let plan = generate_hydration_plan(&query, &emitted, model.as_ref(), &ctx);
 
         match plan {

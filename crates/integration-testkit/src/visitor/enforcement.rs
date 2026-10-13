@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use query_engine::compiler::BoundQuery;
-use query_engine::compiler::input::{Input, QueryType};
+use query_engine::compiler::input::Input;
+use query_engine::compiler::{BoundQuery, QueryType};
 
 /// Some variants carry data from the AST (field name, edge type) so the
 /// enforcement is granular: a query with two filter fields or two

@@ -15,8 +15,7 @@ pub mod requirements;
 use std::collections::{HashMap, HashSet};
 
 use crate::error::Result;
-use crate::input::{Direction, InputFilter, QueryType};
-use crate::query::Query;
+use crate::query::{Direction, Predicate, Query, QueryType};
 
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
@@ -25,7 +24,7 @@ pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedP
 
 #[derive(Clone)]
 pub struct BoundFilter {
-    pub filter: InputFilter,
+    pub predicate: Predicate,
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
@@ -35,11 +34,7 @@ pub struct BoundFilter {
 impl From<&crate::query::Filter> for BoundFilter {
     fn from(filter: &crate::query::Filter) -> Self {
         Self {
-            filter: InputFilter {
-                op: Some(filter.predicate.op),
-                value: filter.predicate.value.clone(),
-                rhs_column: None,
-            },
+            predicate: filter.predicate.clone(),
             property: filter.property,
             data_type: Some(filter.data_type),
             selectivity: filter.selectivity,

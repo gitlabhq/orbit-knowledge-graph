@@ -1,7 +1,6 @@
 use query_data_model::OrbitQueryModel;
 
-use super::helpers::requested_columns;
-use crate::input::{AggFunction, InputAggSort, TruncateUnit};
+use crate::query::{AggFunction, AggregationSort, TruncateUnit};
 
 use super::HydrationStrategy;
 use super::context::PlanningContext;
@@ -25,7 +24,7 @@ pub struct AggregationPlan {
     pub group_outputs: Vec<(Group, String)>,
     pub measures: Vec<Measure>,
     pub condition: Vec<Predicate>,
-    pub order: Option<InputAggSort>,
+    pub order: Option<AggregationSort>,
 }
 
 impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
@@ -50,10 +49,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             group_outputs: vec![],
             measures: vec![],
             condition,
-            order: aggregation.sort.as_ref().map(|sort| InputAggSort {
-                column: sort.column.clone(),
-                direction: sort.direction,
-            }),
+            order: aggregation.sort.clone(),
         };
         for group in &aggregation.groups {
             match group {
@@ -79,7 +75,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                 crate::query::Group::Node { node, .. } => {
                     let node = &self.input.node(*node).alias;
                     if let Some(metadata) = self.nodes.get(node.as_str()) {
-                        for column in requested_columns(&metadata.columns) {
+                        for column in &metadata.columns {
                             let group = Group {
                                 column: Column::new(node, column),
                                 truncate: None,

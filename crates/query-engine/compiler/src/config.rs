@@ -13,7 +13,7 @@ const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Node, TableRef};
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::codegen::PaginationContext;
 use crate::passes::enforce::ResultContext;
@@ -26,7 +26,7 @@ use crate::passes::{
     bind, check, codegen, cursor, enforce, hydrate, lower, plan, response_policy, restrict,
     security, settings,
 };
-use crate::query::Query;
+use crate::query::{Query, QueryType};
 use crate::types::SecurityContext;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {

@@ -1,7 +1,8 @@
 use pest::Span;
 use serde_json::Value;
 
-use crate::input::{Direction, FilterOp, OrderDirection, PropertyRef, TruncateUnit};
+use crate::input::PropertyRef;
+use crate::query::{Direction, FilterOp, OrderDirection, TruncateUnit};
 
 pub(super) enum Statement<'i> {
     Query(Box<Query<'i>>),

@@ -575,10 +575,7 @@ impl GraphFormatter {
                 .get(neighbor_is_outgoing_column())
                 .and_then(|value| value.as_int64().copied())
                 .map(|value| value != 0)
-                .unwrap_or(!matches!(
-                    direction,
-                    Some(compiler::input::Direction::Incoming)
-                ));
+                .unwrap_or(!matches!(direction, Some(compiler::Direction::Incoming)));
 
             let (from, from_id, to, to_id) = if is_outgoing {
                 (

@@ -4,10 +4,10 @@ mod projections;
 use std::collections::{HashMap, HashSet};
 
 use crate::input::{
-    Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
-    PropertyRef, QueryType,
+    InputCursor, InputNeighbors, InputPath, InputRelationship, PathType, PropertyRef,
 };
 use crate::passes::cursor;
+use crate::query::{Direction, HopRange, QueryType};
 use crate::query_limits::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 

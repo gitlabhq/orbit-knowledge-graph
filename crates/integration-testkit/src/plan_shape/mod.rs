@@ -250,7 +250,7 @@ fn check<M: OrbitQueryModel>(
         let mut input = input;
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
-            input.query_type = compiler::input::QueryType::Hydration;
+            input.query_type = compiler::QueryType::Hydration;
             for (alias, paths) in &hydration.paths {
                 let node = input
                     .nodes
@@ -653,7 +653,8 @@ reject:
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
     use compiler::Input;
-    use compiler::input::{InputNode, QueryType};
+    use compiler::QueryType;
+    use compiler::input::InputNode;
     use compiler::passes::plan::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 

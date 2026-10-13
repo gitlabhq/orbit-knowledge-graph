@@ -1,8 +1,8 @@
 use super::sql;
 use crate::ast::*;
-use crate::input::OrderDirection;
 use crate::passes::plan::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
+use crate::query::OrderDirection;
 
 pub(super) fn column(value: &Column) -> Expr {
     Expr::col(&value.source, &value.name)

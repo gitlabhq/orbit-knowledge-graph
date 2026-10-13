@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use compiler::input::Direction;
+use compiler::Direction;
 use compiler::{QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column};
 use orbit_utils::arrow::ColumnValue;
 use orbit_utils::strings::quote_escaped;

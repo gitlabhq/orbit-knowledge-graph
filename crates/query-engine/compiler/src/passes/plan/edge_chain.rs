@@ -5,8 +5,7 @@ use ontology::constants::*;
 
 use super::context::PlanningContext;
 use crate::error::{QueryError, Result};
-use crate::input::*;
-use crate::query::Query;
+use crate::query::{AggFunction, Direction, IdRange, Query, QueryType};
 
 use super::{
     Aggregation, BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
@@ -67,11 +66,11 @@ pub struct NodePlan {
     pub hydration: HydrationStrategy,
     pub filters: Vec<(String, BoundFilter)>,
     pub node_ids: Vec<i64>,
-    pub id_range: Option<InputIdRange>,
+    pub id_range: Option<IdRange>,
     pub has_traversal_path: bool,
     pub is_global: bool,
     pub redaction_id_column: String,
-    pub columns: Option<ColumnSelection>,
+    pub columns: Vec<String>,
     pub use_narrowing: bool,
     pub fk_needs_join: bool,
     pub emit_select: bool,
@@ -103,7 +102,7 @@ impl NodePlan {
             has_traversal_path: node.has_traversal_path,
             is_global: node.is_global,
             redaction_id_column: node.redaction_id_column.clone(),
-            columns: Some(ColumnSelection::List(columns)),
+            columns,
             use_narrowing: false,
             fk_needs_join: false,
             emit_select: true,
@@ -427,27 +426,25 @@ fn elide_hops(
         let elided = if let Some((fk_node, fk_column, pinned_ids)) = elide_info.clone() {
             if let Some(fk_np) = nodes.get_mut(&fk_node) {
                 let filter = if pinned_ids.len() == 1 {
-                    InputFilter {
-                        op: Some(FilterOp::Eq),
+                    crate::query::Predicate {
+                        op: crate::query::FilterOp::Eq,
                         value: Some(serde_json::Value::Number(pinned_ids[0].into())),
-                        ..Default::default()
                     }
                 } else {
-                    InputFilter {
-                        op: Some(FilterOp::In),
+                    crate::query::Predicate {
+                        op: crate::query::FilterOp::In,
                         value: Some(serde_json::Value::Array(
                             pinned_ids
                                 .iter()
                                 .map(|&id| serde_json::Value::Number(id.into()))
                                 .collect(),
                         )),
-                        ..Default::default()
                     }
                 };
                 fk_np.filters.push((
                     fk_column,
                     BoundFilter {
-                        filter,
+                        predicate: filter,
                         property: None,
                         data_type: Some(ontology::DataType::Int),
                         selectivity: ontology::FieldSelectivity::High,
@@ -773,8 +770,7 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         };
         let needs = fk.referenced_column != DEFAULT_PRIMARY_KEY
             || np.hydration == HydrationStrategy::Join
-            || (input.query_type != QueryType::Aggregation
-                && matches!(&np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
+            || (input.query_type != QueryType::Aggregation && !np.columns.is_empty());
         if needs {
             nodes.get_mut(&fk.target_node).unwrap().fk_needs_join = true;
         }
@@ -798,7 +794,7 @@ mod tests {
             has_traversal_path,
             is_global,
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
-            columns: None,
+            columns: vec![],
             use_narrowing: false,
             fk_needs_join: false,
             emit_select: true,

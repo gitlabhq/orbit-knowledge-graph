@@ -1,15 +1,7 @@
 use std::collections::HashMap;
 
 use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-use crate::input::{ColumnSelection, FilterOp, InputFilter};
-
-pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
-    match columns {
-        Some(ColumnSelection::List(cols)) => cols.clone(),
-        Some(ColumnSelection::All) => vec!["*".to_string()],
-        None => vec![],
-    }
-}
+use crate::query::{FilterOp, Predicate};
 
 pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
     (!crate::query::is_wildcard(types)).then(|| types.to_vec())
@@ -23,9 +15,9 @@ fn tag_value(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>> {
+pub fn denorm_tag_values(key: &str, filter: &Predicate) -> Option<Vec<String>> {
     match filter.op {
-        None | Some(FilterOp::Eq) => Some(vec![format!(
+        FilterOp::Eq => Some(vec![format!(
             "{key}:{}",
             filter
                 .value
@@ -33,7 +25,7 @@ pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>>
                 .and_then(tag_value)
                 .unwrap_or_default()
         )]),
-        Some(FilterOp::In) => {
+        FilterOp::In => {
             let values = filter.value.as_ref()?.as_array()?;
             let tags: Vec<_> = values
                 .iter()
@@ -66,5 +58,5 @@ pub fn lowerable_denorm<'a>(
             property: filter.property?,
             direction,
         })
-        .filter(|facts| denorm_tag_values(&facts.tag_key, &filter.filter).is_some())
+        .filter(|facts| denorm_tag_values(&facts.tag_key, &filter.predicate).is_some())
 }

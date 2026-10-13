@@ -21,7 +21,8 @@ pub const EXPECTED_PATH_TYPES: &[&str] = &["shortest"];
 #[cfg(test)]
 mod tests {
     use super::{EXPECTED_FILTER_OPS, EXPECTED_PATH_TYPES};
-    use crate::input::{FilterOp, PathType};
+    use crate::input::PathType;
+    use crate::query::FilterOp;
     use strum::VariantNames;
 
     #[test]

@@ -22,7 +22,7 @@ use orbit_server::probes;
 use orbit_server::shutdown;
 use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
-use query_engine::compiler::input::QueryType;
+use query_engine::compiler::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};

@@ -10,7 +10,7 @@ pub mod traversal;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
-use crate::input::*;
+use crate::query::{Direction, QueryType};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{BTreeMap, HashMap};
 

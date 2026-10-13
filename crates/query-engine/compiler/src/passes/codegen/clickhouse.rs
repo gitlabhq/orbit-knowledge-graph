@@ -240,7 +240,7 @@ impl Context {
                 format!("{}({})", name, args.join(", "))
             }
             Expr::TimeBucket { unit, value } => {
-                use crate::input::TruncateUnit;
+                use crate::query::TruncateUnit;
                 let function = match unit {
                     TruncateUnit::Minute => "toStartOfMinute",
                     TruncateUnit::Hour => "toStartOfHour",
@@ -279,12 +279,12 @@ impl Context {
                     return String::new();
                 }
                 let base = match function {
-                    crate::input::AggFunction::Count => "count",
-                    crate::input::AggFunction::Sum => "sum",
-                    crate::input::AggFunction::Avg => "avg",
-                    crate::input::AggFunction::Min => "min",
-                    crate::input::AggFunction::Max => "max",
-                    crate::input::AggFunction::Collect => "groupArray",
+                    crate::query::AggFunction::Count => "count",
+                    crate::query::AggFunction::Sum => "sum",
+                    crate::query::AggFunction::Avg => "avg",
+                    crate::query::AggFunction::Min => "min",
+                    crate::query::AggFunction::Max => "max",
+                    crate::query::AggFunction::Collect => "groupArray",
                 };
                 let name = if *distinct || condition.is_some() {
                     format!(
@@ -554,7 +554,7 @@ mod tests {
                 },
                 SelectExpr {
                     expr: Expr::aggregate(
-                        crate::input::AggFunction::Count,
+                        crate::query::AggFunction::Count,
                         Some(Expr::col("n", "id")),
                     ),
                     alias: Some("count".into()),
@@ -563,7 +563,7 @@ mod tests {
             from: TableRef::scan("nodes", "n"),
             group_by: vec![Expr::col("n", "label")],
             order_by: vec![OrderExpr {
-                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                expr: Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("n", "id"))),
                 desc: true,
             }],
             ..Default::default()
@@ -792,7 +792,7 @@ mod tests {
             select: vec![
                 SelectExpr::new(Expr::col("n", "label"), "type"),
                 SelectExpr::new(
-                    Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                    Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("n", "id"))),
                     "count",
                 ),
             ],
@@ -800,7 +800,7 @@ mod tests {
             group_by: vec![Expr::col("n", "label")],
             having: Some(Expr::binary(
                 Op::Gt,
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("n", "id"))),
                 Expr::lit(5),
             )),
             ..Default::default()
@@ -822,13 +822,13 @@ mod tests {
     fn having_without_group_by() {
         let q = Query {
             select: vec![SelectExpr::new(
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("n", "id"))),
                 "total",
             )],
             from: TableRef::scan("nodes", "n"),
             having: Some(Expr::binary(
                 Op::Gt,
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("n", "id"))),
                 Expr::lit(0),
             )),
             ..Default::default()

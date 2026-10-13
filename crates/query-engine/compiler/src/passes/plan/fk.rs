@@ -6,7 +6,7 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 use super::requirements::{Column, OutputValue, Projection, id_list};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::input::Direction;
+use crate::query::Direction;
 
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};

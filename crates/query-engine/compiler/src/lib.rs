@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! raw → {JSON | GQL} frontend → Input → shared compiler passes → SQL
+//! raw → {JSON | GQL} frontend → Input → bind → Query → compiler passes → SQL
 //! ```
 //!
 //! # Example
@@ -59,13 +59,13 @@ pub use constants::{
     path_column, relationship_type_column,
 };
 pub use error::{QueryError, RejectionReason, Result};
-pub use input::{
-    ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
-    parse_input,
-};
+pub use input::{ColumnSelection, Input, InputFilter, InputNode, parse_input};
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
-pub use query::Query as BoundQuery;
+pub use query::{
+    AggFunction, Direction, DynamicColumnMode, FilterOp, OrderDirection, Query as BoundQuery,
+    QueryType, TruncateUnit,
+};
 pub use query_data_model::EntityAuthConfig;
 
 pub use analytics::ExecMetrics;

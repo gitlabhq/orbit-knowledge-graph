@@ -10,8 +10,7 @@
 
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::input::{FilterOp, QueryType};
-use crate::query::{Predicate, Query};
+use crate::query::{FilterOp, Predicate, Query, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
@@ -193,7 +192,7 @@ fn validate_traversal_path_within_scope(
 /// only hold rows under that scope; scoping it is lossless and restores the
 /// edge PK prefix that the broad org-wide authorization filter erases (#601941).
 ///
-/// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
+/// The per-alias proofs come from [`crate::scope::derive_bound_scope_proofs`].
 fn stamp_edge_scope_proofs(
     input: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
@@ -287,10 +286,10 @@ pub fn restrict(
 mod tests {
     use super::*;
     use crate::input::{
-        AggExpr, AggFunction, ColumnSelection, FilterOp, Input, InputAggregation,
-        InputAggregationMetric, InputFilter, InputGroupByKey, InputNode, InputOrderBy,
-        OrderDirection, QueryType,
+        AggExpr, ColumnSelection, Input, InputAggregation, InputAggregationMetric, InputFilter,
+        InputGroupByKey, InputNode, InputOrderBy,
     };
+    use crate::query::{AggFunction, OrderDirection};
 
     use ontology::{DataType, RequiredRole};
     use serde_json::Value;
@@ -336,8 +335,8 @@ mod tests {
             types: vec!["MEMBER_OF".into()],
             from: from.into(),
             to: to.into(),
-            hops: crate::input::HopRange::default(),
-            direction: crate::input::Direction::Outgoing,
+            hops: crate::query::HopRange::default(),
+            direction: crate::query::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
         }
     }
@@ -1125,8 +1124,8 @@ mod tests {
             types: types.iter().map(|s| (*s).into()).collect(),
             from: from.into(),
             to: to.into(),
-            hops: crate::input::HopRange::default(),
-            direction: crate::input::Direction::Outgoing,
+            hops: crate::query::HopRange::default(),
+            direction: crate::query::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
         }
     }

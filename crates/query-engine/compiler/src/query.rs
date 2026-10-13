@@ -1,14 +1,156 @@
 use std::collections::{BTreeMap, HashMap};
 
+use ontology::constants::{SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use ontology::{DataType, EnumType, FieldSelectivity, VirtualSource};
 use orbit_utils::traversal_path::TraversalPath;
 use query_data_model::{EntityId, PropertyId, RelationshipId};
+use serde::Deserialize;
 use serde_json::Value;
 
-use crate::input::{
-    AggFunction, DynamicColumnMode, FilterOp, InputCursor, InputIdRange, OrderDirection, QueryType,
-    TruncateUnit,
-};
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum DynamicColumnMode {
+    #[serde(rename = "*")]
+    All,
+    #[default]
+    #[serde(rename = "default")]
+    Default,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Deserialize,
+    strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum QueryType {
+    Traversal,
+    Aggregation,
+    PathFinding,
+    Neighbors,
+    #[serde(skip)]
+    Hydration,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cursor {
+    pub page_size: u32,
+    pub after: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IdRange {
+    pub start: i64,
+    pub end: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum FilterOp {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    In,
+    Contains,
+    StartsWith,
+    EndsWith,
+    IsNull,
+    IsNotNull,
+    TokenMatch,
+    AllTokens,
+    AnyTokens,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HopRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+impl Default for HopRange {
+    fn default() -> Self {
+        Self { min: 1, max: 1 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+    #[default]
+    Outgoing,
+    Incoming,
+    Both,
+}
+
+impl Direction {
+    pub fn edge_columns(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Outgoing | Self::Both => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
+            Self::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum AggFunction {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+    Collect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum TruncateUnit {
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+}
+
+impl TruncateUnit {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Minute => "minute",
+            Self::Hour => "hour",
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Quarter => "quarter",
+            Self::Year => "year",
+        }
+    }
+
+    pub fn requires_selectivity_guard(self) -> bool {
+        matches!(self, Self::Minute | Self::Hour)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum OrderDirection {
+    #[default]
+    Asc,
+    Desc,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub(crate) usize);
@@ -52,11 +194,10 @@ impl Property {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Predicate {
     pub op: FilterOp,
     pub value: Option<Value>,
-    pub rhs: Option<PropertyRef>,
 }
 
 impl Predicate {
@@ -92,7 +233,7 @@ pub struct Node {
     pub columns: Vec<Property>,
     pub filters: Vec<Filter>,
     pub node_ids: Vec<i64>,
-    pub id_range: Option<InputIdRange>,
+    pub id_range: Option<IdRange>,
     pub id_property: Property,
     pub traversal_paths: Vec<TraversalPath>,
     pub has_traversal_path: bool,
@@ -119,8 +260,8 @@ pub struct Relationship {
     pub tables: Vec<String>,
     pub from: NodeId,
     pub to: NodeId,
-    pub hops: crate::input::HopRange,
-    pub direction: crate::input::Direction,
+    pub hops: HopRange,
+    pub direction: Direction,
     pub filters: Vec<Filter>,
 }
 
@@ -192,7 +333,7 @@ pub struct Path {
 
 #[derive(Debug, Clone)]
 pub struct Neighbors {
-    pub direction: crate::input::Direction,
+    pub direction: Direction,
     pub relationship_ids: Vec<RelationshipId>,
     pub relationship_names: Vec<String>,
     pub tables: Vec<String>,
@@ -221,7 +362,7 @@ pub struct Query {
     pub path: Option<Path>,
     pub neighbors: Option<Neighbors>,
     pub limit: u32,
-    pub cursor: Option<InputCursor>,
+    pub cursor: Option<Cursor>,
     pub order: Option<Order>,
     pub dynamic_columns: DynamicColumnMode,
     pub include_debug_sql: bool,

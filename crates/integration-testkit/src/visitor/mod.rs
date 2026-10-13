@@ -26,7 +26,7 @@ pub use enforcement::{QueryRequirements, Requirement};
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use query_engine::compiler::input::QueryType;
+use query_engine::compiler::QueryType;
 #[cfg(test)]
 use query_engine::formatters::ColumnDescriptor;
 use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};

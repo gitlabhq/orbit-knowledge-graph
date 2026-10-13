@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::Result;
-use crate::input::*;
+use crate::query::OrderDirection;
 
 use super::EmitOutput;
 pub fn emit_traversal(input: &crate::query::Query, output: EmitOutput) -> Result<Node> {

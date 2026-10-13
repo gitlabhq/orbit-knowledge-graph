@@ -30,13 +30,13 @@ pub enum Expr {
     },
     EmptyTupleArray(Vec<SqlType>),
     Aggregate {
-        function: crate::input::AggFunction,
+        function: crate::query::AggFunction,
         argument: Option<Box<Expr>>,
         distinct: bool,
         condition: Option<Box<Expr>>,
     },
     TimeBucket {
-        unit: crate::input::TruncateUnit,
+        unit: crate::query::TruncateUnit,
         value: Box<Expr>,
     },
     TextSearch {
@@ -413,7 +413,7 @@ impl Expr {
         Expr::FuncCall { name, args }
     }
 
-    pub fn aggregate(function: crate::input::AggFunction, argument: Option<Expr>) -> Self {
+    pub fn aggregate(function: crate::query::AggFunction, argument: Option<Expr>) -> Self {
         Self::Aggregate {
             function,
             argument: argument.map(Box::new),

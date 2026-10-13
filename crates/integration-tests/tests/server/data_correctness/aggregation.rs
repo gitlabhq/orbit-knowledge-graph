@@ -2,8 +2,8 @@ use super::helpers::*;
 
 #[tokio::test]
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {
+    use compiler::AggFunction;
     use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
-    use compiler::input::AggFunction;
 
     let ctx = TestContext::new(&[]).await;
     ctx.execute("CREATE TABLE measurements(value Nullable(Int64), keep Bool) ENGINE=Memory")

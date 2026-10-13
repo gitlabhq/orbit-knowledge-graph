@@ -7,10 +7,10 @@ pub mod duckdb;
 
 use orbit_server_config::QueryConfig;
 
-use crate::input::QueryType;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 use crate::query::Query;
+use crate::query::QueryType;
 pub use orbit_utils::query_types::ParamValue;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -18,11 +18,11 @@ use std::sync::LazyLock;
 pub use clickhouse::codegen;
 
 fn validate_aggregate(
-    function: crate::input::AggFunction,
+    function: crate::query::AggFunction,
     argument: Option<&crate::ast::Expr>,
     distinct: bool,
 ) -> Result<(), String> {
-    if argument.is_none() && (distinct || function != crate::input::AggFunction::Count) {
+    if argument.is_none() && (distinct || function != crate::query::AggFunction::Count) {
         let qualifier = if distinct { "distinct " } else { "" };
         return Err(format!("{qualifier}{function} requires an argument"));
     }
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn aggregate_codegen_rejects_missing_arguments_except_row_count() {
-        use crate::input::AggFunction;
+        use crate::query::AggFunction;
 
         for function in [
             AggFunction::Count,
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn semantic_aggregates_render_arguments_distinctness_and_conditions() {
-        use crate::input::AggFunction;
+        use crate::query::AggFunction;
 
         for (function, plain, conditional, local) in [
             (AggFunction::Count, "COUNT", "countIf", "COUNT"),

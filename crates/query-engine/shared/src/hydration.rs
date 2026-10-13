@@ -9,9 +9,9 @@ use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
     HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column, traversal_path_column,
 };
+use compiler::query::Predicate;
 use compiler::{
-    ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
-    InputNode, QueryType,
+    ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputNode, QueryType,
 };
 use ontology::{DataType, Ontology};
 use orbit_utils::arrow::{ArrowUtils, ColumnValue};
@@ -396,8 +396,8 @@ pub fn hydrate_dynamic(
     Ok((nodes, total_ids))
 }
 
-fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> bool {
-    let op = filter.op.unwrap_or(FilterOp::Eq);
+fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &Predicate) -> bool {
+    let op = filter.op;
     match op {
         FilterOp::IsNull => value.is_none() || matches!(value, Some(ColumnValue::Null)),
         FilterOp::IsNotNull => value.is_some() && !matches!(value, Some(ColumnValue::Null)),

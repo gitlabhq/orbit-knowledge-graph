@@ -6,13 +6,11 @@ use query_data_model::{OrbitQueryModel, PropertyRealization};
 
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
-use crate::input::{
-    AggFunction, ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, QueryType,
-    group_by_output_names,
-};
+use crate::input::{ColumnSelection, Input, InputFilter, InputGroupByKey, group_by_output_names};
 use crate::query::{
-    AggregationSort, Comparison, Filter, Group, Metric, Neighbors, Node, NodeId, Order, Path,
-    Predicate, Property, PropertyRef, Query, Relationship,
+    AggFunction, AggregationSort, Comparison, Cursor, Direction, Filter, FilterOp, Group, IdRange,
+    Metric, Neighbors, Node, NodeId, Order, Path, Predicate, Property, PropertyRef, Query,
+    QueryType, Relationship, TruncateUnit,
 };
 use crate::query_limits::*;
 use crate::types::SecurityContext;
@@ -27,7 +25,10 @@ pub fn bind<M: OrbitQueryModel>(mut input: Input, model: &M, mode: Mode) -> Resu
     check_shape(&input, mode)?;
     let mut query = Query::new(input.query_type);
     query.limit = input.limit;
-    query.cursor = input.cursor.take();
+    query.cursor = input.cursor.take().map(|cursor| Cursor {
+        page_size: cursor.page_size,
+        after: cursor.after,
+    });
     query.dynamic_columns = input.options.dynamic_columns;
     query.include_debug_sql = input.options.include_debug_sql;
 
@@ -154,7 +155,10 @@ fn bind_node<M: OrbitQueryModel>(
         columns,
         filters: Vec::new(),
         node_ids: input.node_ids,
-        id_range: input.id_range,
+        id_range: input.id_range.map(|range| IdRange {
+            start: range.start,
+            end: range.end,
+        }),
         id_property,
         traversal_paths: input.traversal_paths,
         has_traversal_path: model.entity_has_traversal_path(&entity_name),
@@ -376,7 +380,6 @@ fn bind_predicate(input: InputFilter) -> Predicate {
     Predicate {
         op: input.op.unwrap_or(FilterOp::Eq),
         value: input.value,
-        rhs: None,
     }
 }
 
@@ -505,8 +508,8 @@ fn specialize_relationships<M: OrbitQueryModel>(
     query: &Query,
     from: NodeId,
     to: NodeId,
-    direction: crate::input::Direction,
-    hops: crate::input::HopRange,
+    direction: Direction,
+    hops: crate::query::HopRange,
     types: Vec<String>,
     model: &M,
 ) -> Result<Vec<String>> {
@@ -522,9 +525,9 @@ fn specialize_relationships<M: OrbitQueryModel>(
     let from = &query.node(from).entity_name;
     let to = &query.node(to).entity_name;
     let names = match direction {
-        crate::input::Direction::Outgoing => model.graph().relationship_names(Some(from), Some(to)),
-        crate::input::Direction::Incoming => model.graph().relationship_names(Some(to), Some(from)),
-        crate::input::Direction::Both => model
+        Direction::Outgoing => model.graph().relationship_names(Some(from), Some(to)),
+        Direction::Incoming => model.graph().relationship_names(Some(to), Some(from)),
+        Direction::Both => model
             .graph()
             .relationship_names(Some(from), Some(to))
             .into_iter()
@@ -543,18 +546,18 @@ fn check_relationship_variants<M: OrbitQueryModel>(
     query: &Query,
     from: NodeId,
     to: NodeId,
-    direction: crate::input::Direction,
-    hops: crate::input::HopRange,
+    direction: Direction,
+    hops: crate::query::HopRange,
     names: &[String],
     model: &M,
 ) -> Result<()> {
-    if hops.max > 1 || direction == crate::input::Direction::Both {
+    if hops.max > 1 || direction == Direction::Both {
         return Ok(());
     }
     let (source, target) = match direction {
-        crate::input::Direction::Outgoing => (query.node(from), query.node(to)),
-        crate::input::Direction::Incoming => (query.node(to), query.node(from)),
-        crate::input::Direction::Both => unreachable!(),
+        Direction::Outgoing => (query.node(from), query.node(to)),
+        Direction::Incoming => (query.node(to), query.node(from)),
+        Direction::Both => unreachable!(),
     };
     let from_alias = &query.node(from).alias;
     let to_alias = &query.node(to).alias;
@@ -687,15 +690,13 @@ fn bind_aggregation<M: OrbitQueryModel>(
                         "group_by[{index}] truncation requires a Date or DateTime property"
                     )));
                 }
-                if truncate.is_some_and(crate::input::TruncateUnit::requires_selectivity_guard)
+                if truncate.is_some_and(TruncateUnit::requires_selectivity_guard)
                     && query.node(node).node_ids.is_empty()
                     && !query.node(node).has_filter(&property.name)
                 {
                     return Err(QueryError::Validation(format!(
                         "group_by[{index}] truncate \"{}\" requires either node_ids or a filter on {}",
-                        truncate
-                            .map(crate::input::TruncateUnit::name)
-                            .unwrap_or_default(),
+                        truncate.map(TruncateUnit::name).unwrap_or_default(),
                         property.name
                     )));
                 }
@@ -999,7 +1000,7 @@ fn check_query(query: &Query, mode: Mode) -> Result<()> {
         && query
             .relationships
             .iter()
-            .any(|relationship| relationship.direction == crate::input::Direction::Both)
+            .any(|relationship| relationship.direction == Direction::Both)
     {
         return Err(QueryError::Validation(
             "aggregation does not support direction both".into(),

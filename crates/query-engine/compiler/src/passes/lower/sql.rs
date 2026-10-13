@@ -2,9 +2,9 @@ use ontology::constants::*;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
-use crate::input::*;
 use crate::passes::plan::BoundFilter;
 use crate::passes::plan::helpers::denorm_tag_values;
+use crate::query::{FilterOp, IdRange, Predicate};
 
 pub(crate) fn latest_row_dedup(
     alias: &str,
@@ -23,7 +23,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     filter_expression(
         alias,
         prop,
-        &bound.filter,
+        &bound.predicate,
         bound.data_type.as_ref(),
         bound.in_sort_key,
     )
@@ -32,22 +32,16 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
 pub(crate) fn filter_expression(
     alias: &str,
     prop: &str,
-    filter: &InputFilter,
+    filter: &Predicate,
     data_type: Option<&ontology::DataType>,
     in_sort_key: bool,
 ) -> Expr {
     let col = Expr::col(alias, prop);
 
-    if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
-        let rhs = Expr::col(rhs_alias, rhs_prop);
-        return comparison(col, filter.op.unwrap_or(FilterOp::Eq), rhs)
-            .expect("validated property comparison");
-    }
-
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
-    match filter.op.unwrap_or(FilterOp::Eq) {
+    match filter.op {
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
@@ -124,7 +118,7 @@ pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
     }
 }
 
-pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
+pub fn id_range_predicate(alias: &str, range: &IdRange) -> Expr {
     Expr::and(
         Expr::binary(
             Op::Ge,
@@ -189,7 +183,7 @@ pub fn denorm_tag_expr(
     edge_alias: &str,
     tag_col: &str,
     tag_key: &str,
-    filter: &InputFilter,
+    filter: &Predicate,
 ) -> Option<Expr> {
     denorm_tag_values(tag_key, filter).map(|values| tag_membership(edge_alias, tag_col, &values))
 }

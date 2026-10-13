@@ -1,12 +1,17 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use strum::VariantNames;
+
+use crate::query::{
+    AggFunction, Direction, DynamicColumnMode, FilterOp, HopRange, OrderDirection, QueryType,
+    TruncateUnit,
+};
 
 const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
@@ -59,18 +64,6 @@ pub(crate) fn validate_identifier(identifier: &str) -> Result<(), String> {
     } else {
         Err(format!("invalid identifier {identifier:?}"))
     }
-}
-
-/// Controls which columns are fetched for dynamically-discovered entities
-/// during hydration (PathFinding, Neighbors).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum DynamicColumnMode {
-    #[serde(rename = "*")]
-    All,
-    #[default]
-    #[serde(rename = "default")]
-    Default,
 }
 
 /// Optional presentation hints that control response shape without affecting query
@@ -160,31 +153,6 @@ fn default_limit() -> u32 {
 pub struct InputCursor {
     pub page_size: u32,
     pub after: Option<String>,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Deserialize,
-    strum::Display,
-    strum::IntoStaticStr,
-    strum::VariantNames,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum QueryType {
-    Traversal,
-    Aggregation,
-    PathFinding,
-    Neighbors,
-    /// Internal-only: consolidated hydration for multiple entity types.
-    /// Generates a UNION ALL of search-like arms, one per node. Skips
-    /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip)]
-    Hydration,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,30 +282,6 @@ impl InputFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum FilterOp {
-    Eq,
-    Ne,
-    Gt,
-    Lt,
-    Gte,
-    Lte,
-    In,
-    Contains,
-    StartsWith,
-    EndsWith,
-    IsNull,
-    IsNotNull,
-    /// Token-boundary match via `hasToken()`. Requires a text index on the column.
-    TokenMatch,
-    /// All tokens present via `hasAllTokens()`. Requires a text index on the column.
-    AllTokens,
-    /// Any token present via `hasAnyTokens()`. Requires a text index on the column.
-    AnyTokens,
-}
-
 fn deserialize_filters<'de, D>(
     deserializer: D,
 ) -> Result<HashMap<String, Vec<InputFilter>>, D::Error>
@@ -433,18 +377,6 @@ pub struct InputRelationship {
     pub filters: HashMap<String, Vec<InputFilter>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HopRange {
-    pub min: u32,
-    pub max: u32,
-}
-
-impl Default for HopRange {
-    fn default() -> Self {
-        Self { min: 1, max: 1 }
-    }
-}
-
 impl<'de> Deserialize<'de> for HopRange {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -503,24 +435,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Direction {
-    #[default]
-    Outgoing,
-    Incoming,
-    Both,
-}
-
-impl Direction {
-    pub fn edge_columns(self) -> (&'static str, &'static str) {
-        match self {
-            Direction::Outgoing | Direction::Both => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
-            Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct InputAggregation {
@@ -548,14 +462,8 @@ impl InputAggregationMetric {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, strum::EnumDiscriminants)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[strum_discriminants(
-    name(AggFunction),
-    vis(pub),
-    derive(strum::Display),
-    strum(serialize_all = "lowercase")
-)]
 pub enum AggExpr {
     Count(TargetRef),
     Sum(PropertyRef),
@@ -567,7 +475,14 @@ pub enum AggExpr {
 
 impl AggExpr {
     pub fn function(&self) -> AggFunction {
-        self.into()
+        match self {
+            Self::Count(_) => AggFunction::Count,
+            Self::Sum(_) => AggFunction::Sum,
+            Self::Avg(_) => AggFunction::Avg,
+            Self::Min(_) => AggFunction::Min,
+            Self::Max(_) => AggFunction::Max,
+            Self::Collect(_) => AggFunction::Collect,
+        }
     }
 
     pub fn node(&self) -> &str {
@@ -785,39 +700,6 @@ fn parse_group_by_object(
     parse_group_by_spec(&spec, truncate, alias)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum TruncateUnit {
-    Minute,
-    Hour,
-    Day,
-    Week,
-    Month,
-    Quarter,
-    Year,
-}
-
-impl TruncateUnit {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Minute => "minute",
-            Self::Hour => "hour",
-            Self::Day => "day",
-            Self::Week => "week",
-            Self::Month => "month",
-            Self::Quarter => "quarter",
-            Self::Year => "year",
-        }
-    }
-
-    /// Granularities whose bucket cardinality is too high to allow without
-    /// the caller scoping the query to a bounded set.
-    pub fn requires_selectivity_guard(self) -> bool {
-        matches!(self, Self::Minute | Self::Hour)
-    }
-}
-
 impl InputGroupByKey {
     pub fn node(&self) -> &str {
         match self {
@@ -941,14 +823,6 @@ impl<'de> Deserialize<'de> for InputOrderBy {
             direction,
         })
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum OrderDirection {
-    #[default]
-    Asc,
-    Desc,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

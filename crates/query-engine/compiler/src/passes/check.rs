@@ -506,14 +506,14 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let inner = Query {
             select: vec![SelectExpr {
-                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
+                expr: Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("p", "id"))),
                 alias: Some("cnt".into()),
             }],
             from: TableRef::scan("gl_project", "p"),
             group_by: vec![Expr::col("p", "namespace_id")],
             having: Some(Expr::binary(
                 crate::ast::Op::Gt,
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
+                Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("p", "id"))),
                 Expr::lit(1),
             )),
             ..Default::default()
@@ -539,7 +539,7 @@ mod tests {
         );
         let inner = Query {
             select: vec![SelectExpr {
-                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
+                expr: Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("p", "id"))),
                 alias: Some("cnt".into()),
             }],
             from: TableRef::scan("gl_project", "p"),
@@ -547,7 +547,7 @@ mod tests {
             group_by: vec![Expr::col("p", "namespace_id")],
             having: Some(Expr::binary(
                 crate::ast::Op::Gt,
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
+                Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("p", "id"))),
                 Expr::lit(1),
             )),
             ..Default::default()

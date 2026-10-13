@@ -8,7 +8,7 @@ use super::NodeBinding;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
-use crate::input::*;
+use crate::query::{Direction, IdRange, OrderDirection};
 
 use super::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
@@ -48,7 +48,7 @@ pub fn emit_neighbors(
         table: &str,
         filters: &[(String, crate::passes::plan::BoundFilter)],
         node_ids: &[i64],
-        id_range: Option<&InputIdRange>,
+        id_range: Option<&IdRange>,
         extra_select: &[&str],
     ) -> (TableRef, Expr) {
         let mut scan_where = Vec::new();
@@ -162,7 +162,7 @@ pub fn emit_neighbors(
                     edge_alias,
                     &facts.edge_column,
                     &facts.tag_key,
-                    &filter.filter,
+                    &filter.predicate,
                 )
             {
                 where_parts.push(expr);
@@ -349,7 +349,7 @@ fn build_fused_both_arm(
                     edge_alias,
                     &facts.edge_column,
                     &facts.tag_key,
-                    &filter.filter,
+                    &filter.predicate,
                 )
             {
                 parts.push(expr);

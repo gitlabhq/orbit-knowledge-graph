@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
-use crate::input::{AggFunction, QueryType};
 use crate::passes::lower::LoweredMetadata;
 use crate::query::Query as BoundQuery;
+use crate::query::{AggFunction, QueryType};
 use orbit_utils::query_types::SqlType;
 
 pub fn cursor_column(i: usize) -> String {

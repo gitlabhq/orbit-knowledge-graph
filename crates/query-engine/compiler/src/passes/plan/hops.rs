@@ -4,7 +4,7 @@ use ontology::constants::*;
 
 use super::requirements::{Column, OutputValue, Predicate, Projection, live, relationship_kinds};
 use crate::constants::{DEPTH_COLUMN, PATH_NODES_COLUMN};
-use crate::input::Direction;
+use crate::query::Direction;
 
 use super::physical::{PhysicalPlan, PhysicalSource};
 use super::{Hop, NodePlan};

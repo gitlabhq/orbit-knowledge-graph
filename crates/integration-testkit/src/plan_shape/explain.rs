@@ -1,8 +1,10 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
-use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
+use compiler::input::{ColumnSelection, Input, InputFilter};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
+use compiler::query::Predicate as BoundPredicate;
+use compiler::{FilterOp, OrderDirection};
 use query_engine::compiler;
 use std::collections::HashMap;
 
@@ -71,9 +73,9 @@ pub fn logical(input: &Input) -> Tree {
         .collect();
     children.extend(input.relationships.iter().enumerate().map(|(index, edge)| {
         let (source, target, arrow) = match edge.direction {
-            compiler::input::Direction::Incoming => (&edge.to, &edge.from, "->"),
-            compiler::input::Direction::Outgoing => (&edge.from, &edge.to, "->"),
-            compiler::input::Direction::Both => (&edge.from, &edge.to, "--"),
+            compiler::Direction::Incoming => (&edge.to, &edge.from, "->"),
+            compiler::Direction::Outgoing => (&edge.from, &edge.to, "->"),
+            compiler::Direction::Both => (&edge.from, &edge.to, "--"),
         };
         let alias = format!("e{index}");
         let depth = if edge.hops.min == 1 && edge.hops.max == 1 {
@@ -195,6 +197,30 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
     format!("{alias}.{property} {operator} {value}")
 }
 
+fn bound_property_filter(alias: &str, property: &str, filter: &BoundPredicate) -> String {
+    let value = literal(filter.value.as_ref().unwrap_or(&serde_json::Value::Null));
+    let operator = match filter.op {
+        FilterOp::Eq => "=",
+        FilterOp::Ne => "!=",
+        FilterOp::Gt => ">",
+        FilterOp::Gte => ">=",
+        FilterOp::Lt => "<",
+        FilterOp::Lte => "<=",
+        FilterOp::In => "IN",
+        FilterOp::IsNull => return format!("{alias}.{property} IS NULL"),
+        FilterOp::IsNotNull => return format!("{alias}.{property} IS NOT NULL"),
+        FilterOp::Contains
+        | FilterOp::StartsWith
+        | FilterOp::EndsWith
+        | FilterOp::TokenMatch
+        | FilterOp::AllTokens
+        | FilterOp::AnyTokens => {
+            return format!("{}({alias}.{property}, {value})", filter.op.as_ref());
+        }
+    };
+    format!("{alias}.{property} {operator} {value}")
+}
+
 pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
     let planned = match plan {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
@@ -278,9 +304,9 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     "center={} direction={} {access} center_filter={} relationships=[{}] path_lookup={}",
                     operation.center,
                     match operation.direction {
-                        compiler::input::Direction::Both => "both",
-                        compiler::input::Direction::Incoming => "incoming",
-                        compiler::input::Direction::Outgoing => "outgoing",
+                        compiler::Direction::Both => "both",
+                        compiler::Direction::Incoming => "incoming",
+                        compiler::Direction::Outgoing => "outgoing",
                     },
                     operation.has_non_denorm,
                     operation
@@ -544,7 +570,7 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
     };
     match value {
         Predicate::Property { column, filter, .. } => {
-            vec![property_filter(&column.source, &column.name, filter)]
+            vec![bound_property_filter(&column.source, &column.name, filter)]
         }
         Predicate::Ids { column, values } => vec![membership(
             planned_column(column),

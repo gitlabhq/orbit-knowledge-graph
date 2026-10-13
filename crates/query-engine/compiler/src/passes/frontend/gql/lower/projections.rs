@@ -2,9 +2,10 @@ use std::collections::HashSet;
 
 use crate::Result;
 use crate::input::{
-    AggExpr, ColumnSelection, DynamicColumnMode, InputAggSort, InputAggregationMetric,
-    InputGroupByKey, InputOrderBy, PropertyRef, QueryType, TargetRef,
+    AggExpr, ColumnSelection, InputAggSort, InputAggregationMetric, InputGroupByKey, InputOrderBy,
+    PropertyRef, TargetRef,
 };
+use crate::query::{DynamicColumnMode, QueryType};
 use crate::query_limits::MAX_COLUMNS;
 
 use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, Target};

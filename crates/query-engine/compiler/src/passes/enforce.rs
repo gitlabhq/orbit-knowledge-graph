@@ -3,12 +3,12 @@ use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::input::QueryType;
 use crate::passes::lower::sql::{
     deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use crate::query::Query as BoundQuery;
+use crate::query::QueryType;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};

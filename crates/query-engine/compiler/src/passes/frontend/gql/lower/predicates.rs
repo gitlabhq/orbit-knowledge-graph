@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::input::{FilterOp, InputFilter, InputIdRange};
+use crate::input::{InputFilter, InputIdRange};
+use crate::query::FilterOp;
 use crate::{QueryError, Result};
 use serde_json::Value;
 

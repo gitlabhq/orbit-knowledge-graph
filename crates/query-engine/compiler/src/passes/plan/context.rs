@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use query_data_model::OrbitQueryModel;
 
 use crate::error::{QueryError, Result};
-use crate::input::QueryType;
-use crate::query::{Node, Query};
+use crate::query::{Node, Query, QueryType};
 
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
