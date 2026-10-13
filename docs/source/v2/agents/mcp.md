@@ -137,6 +137,7 @@ Cursor reads `~/.cursor/mcp.json`. Antigravity reads `~/.gemini/config/mcp_confi
 ```
 
 Antigravity does not run the MCP OAuth flow for remote servers, so it needs `mcp-remote`.
+A native `serverUrl` entry sends no token and fails with `Unauthorized`.
 Do not add an `oauth` block. `mcp-remote` gets the `mcp_orbit` scope from the endpoint.
 
 {{< /tab >}}
