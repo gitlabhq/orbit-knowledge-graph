@@ -44,10 +44,10 @@ To answer package registry questions with GitLab Orbit:
 ## Before you begin
 
 - You have a top-level group on GitLab.com with Premium or Ultimate. GitLab Orbit is turned on for
-  the group. For more information, see [Get started with GitLab Orbit Remote](getting-started.md).
+  the group. For more information, see [Get started with GitLab Orbit Remote](../getting-started.md).
 - You have the Reporter role or higher on the projects you query. Results include only packages you
   can read. GitLab Orbit checks the `read_package` permission on every row. For more information,
-  see [security](security.md).
+  see [security](../security.md).
 - Your group has packages in the GitLab package registry.
 - You have the GitLab CLI (`glab`) 1.117 or later, signed in with `glab auth login`. Or you have a
   personal access token with the `read_api` scope for the REST API.
@@ -530,7 +530,7 @@ p=Project:29589722 packages=12
 
 GitLab Duo Agent Platform has GitLab Orbit built in. You can ask the same questions in plain
 language in GitLab Duo Chat. The agent writes and runs the query for you. For more information, see
-[Use GitLab Orbit with GitLab Duo](access/duo.md).
+[Use GitLab Orbit with GitLab Duo](../access/duo.md).
 
 For example:
 
@@ -538,10 +538,10 @@ For example:
 Using GitLab Orbit, which packages in my-group declare a dependency on lodash, and which version range does each one ask for?
 ```
 
-MCP clients such as Claude Code connect through [MCP](access/mcp.md).
+MCP clients such as Claude Code connect through [MCP](../access/mcp.md).
 
 ## Next steps
 
-- [Cookbook](cookbook.md): copy-paste prompts.
-- [Query language](queries/query-language.md): the full query language.
-- [Schema reference](schema.md): all node types.
+- [Cookbook](../cookbook.md): copy-paste prompts.
+- [Query language](../queries/query-language.md): the full query language.
+- [Schema reference](../schema.md): all node types.
