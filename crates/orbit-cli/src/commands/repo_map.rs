@@ -162,7 +162,7 @@ pub(crate) fn run(
         source_exts,
     };
 
-    let client = sql::open_graph(Some(db))?;
+    let client = crate::database::open_graph(Some(db))?;
     map.preflight(&client)?;
 
     let mut out = std::io::stdout().lock();

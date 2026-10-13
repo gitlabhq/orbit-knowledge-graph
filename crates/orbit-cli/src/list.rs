@@ -1,3 +1,4 @@
+use crate::database::schema;
 use crate::sql_format::{self, Format};
 use crate::workspace;
 use anyhow::{Context, Result};
@@ -51,7 +52,7 @@ fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
     let _lock = crate::database::lock_database(db_path)?;
     let client = duckdb_client::DuckDbClient::open_read_only(db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
-    if !workspace::table_exists(&client, "_orbit_manifest")? {
+    if !schema::table_exists(&client, "_orbit_manifest")? {
         return Ok(Vec::new());
     }
     client
@@ -62,13 +63,14 @@ fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::manifest;
     use crate::workspace::project_id_from_path;
 
     // Mirrors `set_status`: only `indexed` rows get a timestamp, so
     // non-indexed rows exercise the NULL `last_indexed_at` path.
     fn seed(db_path: &Path, rows: &[(&str, &str, &str, &str)]) {
         let client = duckdb_client::DuckDbClient::open(db_path).unwrap();
-        client.initialize_schema(workspace::MANIFEST_DDL).unwrap();
+        client.initialize_schema(manifest::MANIFEST_DDL).unwrap();
         for (repo, branch, commit, status) in rows {
             client
                 .execute(
@@ -153,7 +155,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let db = tmp.path().join("manifest.duckdb");
         let client = duckdb_client::DuckDbClient::open(&db).unwrap();
-        client.initialize_schema(workspace::MANIFEST_DDL).unwrap();
+        client.initialize_schema(manifest::MANIFEST_DDL).unwrap();
         client
             .execute(
                 "INSERT INTO _orbit_manifest \

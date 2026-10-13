@@ -18,6 +18,7 @@ use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use super::setup::spec;
+use crate::database::{manifest, schema};
 use crate::tui;
 use crate::workspace::{self, GitInfo};
 
@@ -288,7 +289,7 @@ impl std::fmt::Display for NoRepositoryFound {
 impl std::error::Error for NoRepositoryFound {}
 
 fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
-    let batches = crate::sql::open_graph(db)
+    let batches = crate::database::open_graph(db)
         .ok()?
         .query_arrow_json(
             "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
@@ -568,14 +569,14 @@ impl LocalIndexer {
         reporter: &mut dyn IndexReporter,
     ) -> Result<IndexOutput> {
         let git = workspace::git_info(repo_path).inspect_err(|error| {
-            workspace::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
+            manifest::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
         })?;
         let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
         let _revision_lock = crate::database::lock_database(&db_path)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if db_path.exists() {
             let client = duckdb_client::DuckDbClient::open_read_only(&db_path)?;
-            if let Some(owner) = workspace::stored_meta(&client, "revision")? {
+            if let Some(owner) = schema::stored_meta(&client, "revision")? {
                 anyhow::ensure!(
                     owner == revision,
                     "{} belongs to another checkout revision; choose a different --db path",
@@ -583,7 +584,7 @@ impl LocalIndexer {
                 );
             }
         }
-        workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+        schema::ensure_graph_schema(&db_path, LOCAL_DDL)?;
         {
             let client = duckdb_client::DuckDbClient::open(&db_path)?;
             client.execute(
@@ -597,7 +598,7 @@ impl LocalIndexer {
             git.branch,
             git.short_sha()
         );
-        self.record_status(&git, workspace::RepoStatus::Indexing, None, &db_path)?;
+        self.record_status(&git, manifest::RepoStatus::Indexing, None, &db_path)?;
 
         let mut pipeline_config = self.pipeline_config.clone();
         pipeline_config.progress = reporter.repository_started(&git);
@@ -605,7 +606,7 @@ impl LocalIndexer {
             index_repo(&git, &db_path, &self.ontology, pipeline_config).inspect_err(|error| {
                 let recorded = self.record_status(
                     &git,
-                    workspace::RepoStatus::Error,
+                    manifest::RepoStatus::Error,
                     Some(&error.to_string()),
                     &db_path,
                 );
@@ -613,7 +614,7 @@ impl LocalIndexer {
                     tracing::warn!("failed to record error status in manifest: {manifest_error}");
                 }
             })?;
-        self.record_status(&git, workspace::RepoStatus::Indexed, None, &db_path)?;
+        self.record_status(&git, manifest::RepoStatus::Indexed, None, &db_path)?;
         Ok(build_index_output(
             &repository_name(&git),
             &key,
@@ -625,13 +626,13 @@ impl LocalIndexer {
     fn record_status(
         &self,
         git: &GitInfo,
-        status: workspace::RepoStatus,
+        status: manifest::RepoStatus,
         error: Option<&str>,
         db_path: &Path,
     ) -> Result<()> {
         let _lock = crate::database::lock_database(&self.manifest_path)?;
-        let client = workspace::open_manifest(&self.manifest_path)?;
-        workspace::set_status(
+        let client = manifest::open_manifest(&self.manifest_path)?;
+        manifest::set_status(
             &client,
             &git.repo_path.to_string_lossy(),
             git.project_id,
