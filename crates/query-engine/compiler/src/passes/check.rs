@@ -1,18 +1,16 @@
 //! Post-compilation safety checks.
 //!
 //! Runs after security filter injection to verify invariants that must hold
-//! before the AST is handed to codegen. Checks that every node table alias
-//! has a `startsWith(alias.traversal_path, path)` predicate whose path literal
-//! is derivable from the [`SecurityContext`] — catching both injection bugs
-//! and path value mismatches.
+//! before the AST is handed to codegen. Checks that every namespaced graph
+//! table alias has a role-eligible traversal path predicate or a fail-closed
+//! false predicate.
 
 use serde_json::Value;
 
-use crate::ast::visit::visit_queries;
-use crate::ast::{Expr, Function, Node, Op, Query};
-use crate::constants::TRAVERSAL_PATH_COLUMN;
+use crate::ast::visit::{visit_queries, visit_relations};
+use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
 use crate::error::{QueryError, Result};
-use crate::passes::security::{SecurityContext, collect_node_aliases};
+use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
 
@@ -32,11 +30,12 @@ fn check_query(
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from, model);
-    for alias in &aliases {
-        if !has_valid_path_filter(q.where_clause.as_ref(), alias, ctx) {
+    let protected_paths = protected_path_columns(&q.from, model);
+    for (alias, column, required_access_level) in &protected_paths {
+        let eligible_paths = ctx.paths_at_least(*required_access_level);
+        if !has_valid_path_filter(q.where_clause.as_ref(), alias, column, &eligible_paths) {
             return Err(QueryError::Security(format!(
-                "post-check failed: alias '{alias}' missing valid traversal_path filter"
+                "post-check failed: column '{alias}.{column}' missing valid traversal_path filter at access level {required_access_level}"
             )));
         }
     }
@@ -44,7 +43,30 @@ fn check_query(
     Ok(())
 }
 
-fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext) -> bool {
+fn protected_path_columns(
+    table_ref: &TableRef,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> Vec<(String, String, u32)> {
+    let mut protected_paths = Vec::new();
+    visit_relations(table_ref, &mut |relation| {
+        if let TableRef::Scan { table, alias, .. } = relation
+            && let Some(columns) = model.table_path_columns(table)
+        {
+            protected_paths.extend(columns.iter().map(|column| {
+                let access_level = model.path_column_minimum_access_level(column);
+                (alias.clone(), column.name.clone(), access_level)
+            }));
+        }
+    });
+    protected_paths
+}
+
+fn has_valid_path_filter(
+    expr: Option<&Expr>,
+    alias: &str,
+    column: &str,
+    eligible_paths: &[&orbit_utils::traversal_path::TraversalPath],
+) -> bool {
     let Some(expr) = expr else { return false };
     match expr {
         Expr::Literal(Value::Bool(false))
@@ -57,25 +79,32 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, ctx)
-                || has_valid_path_filter(Some(right), alias, ctx)
+            has_valid_path_filter(Some(left), alias, column, eligible_paths)
+                || has_valid_path_filter(Some(right), alias, column, eligible_paths)
         }
         Expr::BinaryOp {
             op: Op::Or,
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, ctx)
-                && has_valid_path_filter(Some(right), alias, ctx)
+            has_valid_path_filter(Some(left), alias, column, eligible_paths)
+                && has_valid_path_filter(Some(right), alias, column, eligible_paths)
         }
         Expr::FuncCall {
             name: Function::StartsWith,
             args,
         } => {
-            let [Expr::Column { table, column }, path] = args.as_slice() else {
+            let [
+                Expr::Column {
+                    table,
+                    column: actual,
+                },
+                path,
+            ] = args.as_slice()
+            else {
                 return false;
             };
-            if table != alias || column != TRAVERSAL_PATH_COLUMN {
+            if table != alias || actual != column {
                 return false;
             }
             match path {
@@ -83,10 +112,9 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
                 | Expr::Param {
                     value: Value::String(path),
                     ..
-                } => ctx
-                    .traversal_paths
+                } => eligible_paths
                     .iter()
-                    .any(|tp| path.starts_with(tp.path.as_str())),
+                    .any(|authorized| path.starts_with(authorized.as_str())),
                 _ => false,
             }
         }
@@ -98,6 +126,7 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
+    use crate::constants::TRAVERSAL_PATH_COLUMN;
 
     fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
@@ -119,6 +148,10 @@ mod tests {
             limit: Some(10),
             ..Default::default()
         }))
+    }
+
+    fn project_ontology() -> Ontology {
+        Ontology::new().with_nodes(["Project"])
     }
 
     #[test]
@@ -328,6 +361,105 @@ mod tests {
         assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
+    #[test]
+    fn rejects_reporter_path_for_security_manager_table() {
+        use crate::AuthorizedPath;
+
+        let context = SecurityContext::new_with_roles(
+            1,
+            vec![
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/200/", 25),
+            ],
+        )
+        .unwrap();
+        let ontology = Ontology::new()
+            .with_nodes(["Vulnerability"])
+            .with_redaction("Vulnerability", "vulnerability", "id")
+            .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager);
+        let filter = Expr::func(
+            Function::StartsWith,
+            vec![
+                Expr::col("v", TRAVERSAL_PATH_COLUMN),
+                Expr::string("1/100/"),
+            ],
+        );
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::col("v", "id")],
+            from: TableRef::scan("gl_vulnerability", "v"),
+            where_clause: Some(filter),
+            ..Default::default()
+        }));
+
+        let error = check(&node, &context, &ontology).unwrap_err();
+        assert!(error.to_string().contains("access level 25"));
+    }
+
+    #[test]
+    fn validates_role_floor_for_denormalized_join() {
+        use crate::AuthorizedPath;
+
+        let context = SecurityContext::new_with_roles(
+            1,
+            vec![
+                AuthorizedPath::new("1/100/", 20),
+                AuthorizedPath::new("1/200/", 25),
+            ],
+        )
+        .unwrap();
+        let ontology = Ontology::load_embedded()
+            .unwrap()
+            .with_redaction_role("MergeRequest", ontology::RequiredRole::SecurityManager)
+            .with_denormalized_join(
+                "reviewer_project",
+                &[
+                    ("REVIEWER", "User", "MergeRequest", false),
+                    ("IN_PROJECT", "MergeRequest", "Project", true),
+                ],
+            );
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::col("d", "t2_id")],
+            from: TableRef::scan("gl_denorm_reviewer_project", "d"),
+            where_clause: Some(Expr::func(
+                Function::StartsWith,
+                vec![
+                    Expr::col("d", TRAVERSAL_PATH_COLUMN),
+                    Expr::string("1/100/"),
+                ],
+            )),
+            ..Default::default()
+        }));
+
+        let error = check(&node, &context, &ontology).unwrap_err();
+        assert!(error.to_string().contains("d.t2_traversal_path"));
+        assert!(error.to_string().contains("access level 25"));
+
+        let node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::col("d", "t2_id")],
+            from: TableRef::scan("gl_denorm_reviewer_project", "d"),
+            where_clause: Expr::and_all([
+                Some(Expr::func(
+                    Function::StartsWith,
+                    vec![
+                        Expr::col("d", TRAVERSAL_PATH_COLUMN),
+                        Expr::string("1/100/"),
+                    ],
+                )),
+                Some(Expr::func(
+                    Function::StartsWith,
+                    vec![Expr::col("d", "t2_traversal_path"), Expr::string("1/200/")],
+                )),
+                Some(Expr::func(
+                    Function::StartsWith,
+                    vec![Expr::col("d", "t3_traversal_path"), Expr::string("1/100/")],
+                )),
+            ]),
+            ..Default::default()
+        }));
+
+        assert!(check(&node, &context, &ontology).is_ok());
+    }
+
     /// A `col = false` comparison (or any other non-AND operator whose
     /// operand happens to be a boolean false literal) must NOT be treated
     /// as a proof that the alias is scoped. Bool(false) short-circuits the
@@ -369,7 +501,7 @@ mod tests {
             Expr::lit(true),
         );
         let node = project_query(Some(or_expr));
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
@@ -570,7 +702,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
@@ -599,7 +731,7 @@ mod tests {
             }],
             ..Default::default()
         }));
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
@@ -628,7 +760,7 @@ mod tests {
             }],
             ..Default::default()
         }));
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         apply_security(&mut node, &ctx, &ontology);
         assert!(check(&node, &ctx, &ontology).is_ok());
     }
@@ -659,7 +791,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
@@ -702,7 +834,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
@@ -740,7 +872,7 @@ mod tests {
             where_clause: Some(filter),
             ..Default::default()
         }));
-        let ontology = ontology::Ontology::new();
+        let ontology = project_ontology();
         let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
