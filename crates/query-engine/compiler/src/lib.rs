@@ -1587,6 +1587,30 @@ mod tests {
     }
 
     #[test]
+    fn latest_row_dedup_breaks_version_ties_by_the_later_insert() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed", "source": "push"}},
+                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [
+                {"type": "HAS_JOB", "from": "pipe", "to": "j"},
+                {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("ORDER BY pipe.traversal_path ASC, pipe.id ASC, pipe._version DESC, pipe._block_number DESC LIMIT 1 BY pipe.traversal_path, pipe.id"),
+            "a row re-extracted at the same _version must win by insert order, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn fk_star_joined_nodes_use_candidate_ctes() {
         let query = r#"{
             "query_type": "traversal",

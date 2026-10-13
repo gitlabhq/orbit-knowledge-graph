@@ -269,7 +269,36 @@ Generated node projections come from their database-backed properties, while gen
 
 For the `.sql.j2` form the indexer renders `{{version_column}}` / `{{watermark_column}}` / `{{deleted_column}}` through MiniJinja at plan build. A generated `filter` may use the version and deleted markers. The indexer fills `{{filters}}` / `{{batch_size}}` at runtime. The version column resolves row state and becomes graph `_version`; the watermark is only the change signal used by extraction windows. All ontology SQL templates render through `ontology::sql_template` (strict-undefined MiniJinja). The first table in `extract.tables` is the partition-probe base table; for generated extracts it is the only entry.
 
-A pipeline can declare `extract.watermark_sources`: child tables, each with the column that holds the parent `id`. A child change re-extracts its parent even when the parent row did not change. This covers a late Duo link, metrics, reviewer or approval row. The authored SQL reads the changed parents through `{{changed_rows}}` and their ids through `{{changed_ids}}`. The indexer renders `{{changed_rows}}` as two separately prunable scans. One covers parents whose own watermark is in the window. The other covers parents with a child in the window whose own row is not. A single `window OR id IN (...)` predicate would defeat the `_siphon_watermark` minmax index. An idle namespace would then scan every parent row. The child window is the same per-pipeline `(last, upper]` on the child's watermark. It applies no deleted filter, so a link deletion re-extracts. It is skipped on the initial load. A source can declare `row_key` when delete tombstones keep only key columns. The parent id then comes from the row's earlier versions. A source can also declare `also_changed_by`: another child table whose changed rows count as changes to the source rows that reference them. For `MergeRequest` that table holds the Duo workflows. A workflow that replicates or changes after its link still re-extracts the merge request. `MergeRequest.created_by_duo` uses both features. It is true when a live `link_type = 1` link points at a workflow that is replicated and not deleted. A private Slack messaging session never counts, and the adapter list lives in `merge_request.sql.j2`. A link whose workflow row is missing never counts either. The re-extracted parent keeps its `_version`. The target relies on `ReplacingMergeTree` keeping the last inserted row at an equal version. Only namespaced authored extracts support this.
+A pipeline can declare `extract.watermark_sources`: child tables, each with the column that holds the parent ID.
+A child change re-extracts its parent even when the parent row did not change.
+This covers a late Duo link, metrics, reviewer or approval row.
+The authored SQL reads the changed parents through `{{changed_rows}}` and their IDs through `{{changed_ids}}`.
+
+The indexer renders `{{changed_rows}}` as two separately prunable scans.
+One covers parents whose own watermark is in the window.
+The other covers parents with a child in the window whose own row is not.
+A single `window OR id IN (...)` predicate would defeat the `_siphon_watermark` minmax index, so an idle namespace would scan every parent row.
+The child window is the same per-pipeline `(last, upper]` on the child's watermark, and it skips the initial load.
+It applies no deleted filter, so a link deletion re-extracts.
+
+A source can declare `row_key` when delete tombstones keep only key columns. The parent ID then comes from the row's earlier versions.
+A source can also declare `also_changed_by`: another child table whose changed rows count as changes to the source rows that reference them.
+Each cause is its own `UNION ALL` branch, so every branch keeps the minmax index.
+For `MergeRequest` that table holds the Duo workflows, so a workflow that replicates or changes after its link still re-extracts the merge request.
+Only namespaced authored extracts support this.
+
+`MergeRequest.created_by_duo` uses both features.
+It is true when a live `link_type = 1` link points at a workflow that is replicated and not deleted.
+A private Slack messaging session never counts, and the adapter list lives in `merge_request.sql.j2`.
+A link whose workflow row is missing never counts either.
+A link carries its workflow's project or namespace, so both share a path.
+A workflow in another root namespace than the merge request is never seen when the merge request's root is indexed, so the flag stays false.
+
+A re-extracted parent keeps its `_version`, so the target holds two rows with the same version and key.
+`ReplacingMergeTree` merges and `FINAL` keep the last inserted row, but unmerged parts may still hold both.
+Graph tables set `enable_block_number_column`.
+The query compiler and stale-edge reconciliation add `_block_number DESC` after `_version DESC` in their `LIMIT 1 BY` dedup.
+The later insert then wins before parts merge.
 
 The Arrow `RecordBatch` schema is the runtime contract between extraction and transformation.
 DataFusion registers each extracted batch with its own schema, so planning does not duplicate a

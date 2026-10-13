@@ -16,6 +16,8 @@ pub(crate) fn latest_row_dedup(
         .collect();
     let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
     order.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    // A re-extracted row (late child table) keeps its `_version`; the later insert must win.
+    order.push(OrderExpr::desc(Expr::col(alias, BLOCK_NUMBER_COLUMN)));
     (order, Some((1, keys)))
 }
 

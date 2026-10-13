@@ -180,35 +180,39 @@ impl WatermarkSources {
             .join(" UNION ALL ")
     }
 
-    /// Predicate selecting the child rows that changed in the window, including rows
-    /// whose `also_changed_by` table changed.
-    fn child_window(&self, child: &ontology::WatermarkSource) -> String {
-        let window = self.window();
+    /// `SELECT <columns>` over the child rows that changed in the window, one prunable
+    /// branch per cause: the child's own window, then (`also_changed_by`) the rows that
+    /// point at a row of the other table changed in the window. An `OR` of the two would
+    /// defeat the `_siphon_watermark` minmax index, like in `changed_rows_sql`.
+    fn changed_child_rows_sql(&self, child: &ontology::WatermarkSource, columns: &str) -> String {
+        let (table, scope, window) = (&child.table, Self::SCOPE, self.window());
+        let own = format!("SELECT {columns} FROM {table} WHERE {scope} AND {window}");
         let Some(changed_by) = &child.also_changed_by else {
-            return window;
+            return own;
         };
-        let scope = Self::SCOPE;
         format!(
-            "({window} OR {link_key} IN (SELECT {key} FROM {table} WHERE {scope} AND {window}))",
+            "{own} UNION ALL SELECT {columns} FROM {table} WHERE {scope} AND {link_key} IN \
+             (SELECT {key} FROM {other} WHERE {scope} AND {window})",
             link_key = changed_by.link_key,
             key = changed_by.key,
-            table = changed_by.table,
+            other = changed_by.table,
         )
     }
 
     fn child_parent_ids_sql(&self, child: &ontology::WatermarkSource) -> String {
-        let (table, scope, window) = (&child.table, Self::SCOPE, self.child_window(child));
+        let (table, scope) = (&child.table, Self::SCOPE);
         let key = &child.parent_key;
         if child.row_key.is_empty() {
-            return format!("SELECT {key} AS parent_id FROM {table} WHERE {scope} AND {window}");
+            return self.changed_child_rows_sql(child, &format!("{key} AS parent_id"));
         }
         // A delete tombstone keeps only the key columns, so `{key}` is 0 on it; the
         // parent is whatever the row's earlier versions pointed at.
         let row_key = child.row_key.join(", ");
         let version = &self.version_column;
+        let changed_rows = self.changed_child_rows_sql(child, &row_key);
         format!(
             "SELECT argMaxIf({key}, {version}, {key} != 0) AS parent_id FROM {table} \
-             WHERE {scope} AND ({row_key}) IN (SELECT {row_key} FROM {table} WHERE {scope} AND {window}) \
+             WHERE {scope} AND ({row_key}) IN ({changed_rows}) \
              GROUP BY {row_key} HAVING parent_id != 0"
         )
     }

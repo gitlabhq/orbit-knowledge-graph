@@ -74,7 +74,7 @@ sources:
   nodes/ci/runner.yaml: f9ed220a727a4d651754b9d719bc3ab528555922aaa4058de49b6e615e64e125
   nodes/ci/stage.yaml: c90adc72fc3e8838ddeb74738f61eaa8f3244ca219054f57dc06b5b8b9609269
   nodes/code_review/merge_request.sql.j2: 0215f55bf6d384ba513acea00c900015fd7cc26d36023b5a0e33c83a11880841
-  nodes/code_review/merge_request.yaml: ced6eb0fdc97ffbe2ec54c6bd8b9a34acbb835ca91b36c99cf5a9b0c0ad06edd
+  nodes/code_review/merge_request.yaml: 198fe7226762be917525e26cbbb85efbc5858c810dc756f46c01e22fee7fd818
   nodes/code_review/merge_request_diff.yaml: 8011a2867857047de0939442d115a91c0447c37fea9490f553acbace89664160
   nodes/code_review/merge_request_diff_file.sql.j2: 5f7b29b0b00b813f63a16e2e41382be229b8be42e5214ec05929c53c004e6a20
   nodes/code_review/merge_request_diff_file.yaml: 304c64375c4483de0ae5fbb4094f3a36794a0108faabe0fa87cb72bc8ff376e3

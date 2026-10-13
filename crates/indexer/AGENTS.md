@@ -160,7 +160,11 @@ preventable feedback (see #2772, !1416). Check each of these first:
   `.sql.j2` file's raw content verbatim as `ExtractQuery::Sql`. The indexer's `plan/extract/sql.rs`
   renders `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan
   build. It derives the qualified watermark expression from the file's `AS _version`. It recovers
-  `AS _deleted`. It passes `{{filters}}`/`{{batch_size}}` through to query time. All ClickHouse
+  `AS _deleted`. It passes `{{filters}}`/`{{batch_size}}` through to query time. A pipeline can declare
+  `extract.watermark_sources`: child tables that re-extract their parent (see `sdlc_indexing.md`).
+  It must then also use `{{changed_rows}}` (the parent rows) and `{{changed_ids}}` (their IDs), which
+  `plan/mod.rs` renders per run. A re-extracted row keeps its `_version`, so reads must tie-break on
+  `_block_number DESC`. All ClickHouse
   dialect and SQL generation live in the
   indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`. It
   decomposes each pipeline and hands `extract/` transform-neutral inputs. Those inputs are an

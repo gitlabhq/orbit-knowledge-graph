@@ -288,7 +288,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
              SELECT id, traversal_path, _version, _deleted \
              FROM {emitting_node_table} \
              WHERE _version >= {{cursor:String}}{namespace_guard} \
-             ORDER BY traversal_path, id, _version DESC \
+             ORDER BY traversal_path, id, _version DESC, _block_number DESC \
              LIMIT 1 BY traversal_path, id \
            ) WHERE _deleted = false \
          ), \
@@ -300,7 +300,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
                AND {emitting_node_kind_column} = '{emitting_node}' \
                AND traversal_path IN (SELECT traversal_path FROM emitter) \
                AND {emitting_node_id_column} IN (SELECT id FROM emitter) \
-             ORDER BY {edge_sort_key}, _version DESC \
+             ORDER BY {edge_sort_key}, _version DESC, _block_number DESC \
              LIMIT 1 BY {edge_sort_key} \
            ) WHERE _deleted = false \
          ) \

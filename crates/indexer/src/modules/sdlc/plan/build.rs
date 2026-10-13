@@ -725,8 +725,8 @@ mod tests {
     fn a_changed_workflow_re_extracts_the_merge_requests_its_links_point_at() {
         let sql = merge_request_sql(Utc::now());
         assert!(
-            sql.contains("(_siphon_watermark > {last_watermark:String} AND _siphon_watermark <= {watermark:String} OR workflow_id IN (SELECT id FROM siphon_duo_workflows_workflows WHERE startsWith(traversal_path, {traversal_path:String}) AND _siphon_watermark > {last_watermark:String} AND _siphon_watermark <= {watermark:String}))"),
-            "links of a workflow changed in the window count as changed, sql: {sql}"
+            sql.contains("WHERE startsWith(traversal_path, {traversal_path:String}) AND (workflow_id, id) IN (SELECT workflow_id, id FROM siphon_duo_workflows_workflow_merge_requests WHERE startsWith(traversal_path, {traversal_path:String}) AND _siphon_watermark > {last_watermark:String} AND _siphon_watermark <= {watermark:String} UNION ALL SELECT workflow_id, id FROM siphon_duo_workflows_workflow_merge_requests WHERE startsWith(traversal_path, {traversal_path:String}) AND workflow_id IN (SELECT id FROM siphon_duo_workflows_workflows WHERE startsWith(traversal_path, {traversal_path:String}) AND _siphon_watermark > {last_watermark:String} AND _siphon_watermark <= {watermark:String}))"),
+            "links of a workflow changed in the window count as changed, in their own prunable branch, sql: {sql}"
         );
     }
 

@@ -40,6 +40,10 @@ pub const EDGE_TABLE: &str = concatcp!(GL_TABLE_PREFIX, "edge");
 
 pub const VERSION_COLUMN: &str = "_version";
 
+/// ClickHouse hidden column on every graph table (`enable_block_number_column`). It breaks
+/// `_version` ties in favor of the later insert, matching `ReplacingMergeTree`.
+pub const BLOCK_NUMBER_COLUMN: &str = "_block_number";
+
 pub const DELETED_COLUMN: &str = "_deleted";
 
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
