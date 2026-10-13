@@ -118,7 +118,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
                 edge_kinds_column(),
             ),
         ],
-        from: TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
+        from: TableRef::cte(FORWARD_CTE, FORWARD_ALIAS),
         where_clause: Expr::and_all([
             Some(Expr::binary(
                 Op::Eq,
@@ -189,8 +189,8 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
             }
             TableRef::join(
                 JoinType::Inner,
-                TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
-                TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
+                TableRef::cte(FORWARD_CTE, FORWARD_ALIAS),
+                TableRef::cte(BACKWARD_CTE, BACKWARD_ALIAS),
                 join_cond,
             )
         },
@@ -330,7 +330,7 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     // by edges carrying only the deeper tp, so equality yields an empty scope.
     let arm = |cte: &str, alias: &str| Query {
         select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
-        from: TableRef::scan(cte, alias),
+        from: TableRef::cte(cte, alias),
         group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
         ..Default::default()
     };
