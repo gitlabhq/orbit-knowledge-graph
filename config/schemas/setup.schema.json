@@ -30,6 +30,11 @@
       "minLength": 1,
       "description": "Markdown spliced into each assistant's instruction file between the orbit:setup markers."
     },
+    "remote": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Values for {{name}} placeholders in `instructions`, filled when Orbit can reach GitLab at setup time and left empty otherwise."
+    },
     "nudge_search": {
       "type": "string",
       "minLength": 1,
