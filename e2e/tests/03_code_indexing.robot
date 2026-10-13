@@ -11,7 +11,6 @@ Resource            orbit.resource
 Resource            git.resource
 
 Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Push Weather Fixtures
-...                 AND    Set Engine Definition Types
 
 
 *** Variables ***
@@ -21,7 +20,6 @@ ${JAVA_FIXTURE_DIR}     /fixtures/java/weather-app
 # Expected fixture cardinalities (must match e2e/fixtures/*/weather-app/).
 ${RUBY_FILE_COUNT}      ${8}
 ${JAVA_FILE_COUNT}      ${8}
-${CODE_GRAPH_INCREMENTAL}       %{CODE_GRAPH_INCREMENTAL=false}
 
 
 *** Test Cases ***
@@ -44,7 +42,7 @@ Ruby Project Code Graph Has Expected Files And Definitions
     ${pid}=    Set Variable    ${RUBY_PROJECT}[id]
     File Count For Project Is    ${pid}    ${RUBY_FILE_COUNT}
     Definition Count For Project Is At Least    ${pid}    ${15}
-    Definition Exists In Project    ${pid}    WeatherApp                              ${MODULE_TYPE}
+    Definition Exists In Project    ${pid}    WeatherApp                              Module
     Definition Exists In Project    ${pid}    WeatherApp::Forecast                    Class
     Definition Exists In Project    ${pid}    WeatherApp::CLI                         Class
     Definition Exists In Project    ${pid}    WeatherApp::Formatter                   Class
@@ -52,7 +50,7 @@ Ruby Project Code Graph Has Expected Files And Definitions
     Definition Exists In Project    ${pid}    WeatherApp::UnknownCityError            Class
     Definition Exists In Project    ${pid}    WeatherApp::Forecast::temperature_f     Method
     Definition Exists In Project    ${pid}    WeatherApp::CLI::run                    Method
-    Definition Exists In Project    ${pid}    WeatherApp::CLI::run                    ${SINGLETON_METHOD_TYPE}
+    Definition Exists In Project    ${pid}    WeatherApp::CLI::run                    SingletonMethod
 
 Ruby Project Code Graph Has Expected Containment Edges
     [Documentation]    Assert structural DEFINES edges (Module→Class, Class→Method,
@@ -89,7 +87,7 @@ Java Project Code Graph Has Expected Files And Definitions
     Definition Exists In Project    ${pid}    com.example.weather.service.UnknownCityException        Class
     Definition Exists In Project    ${pid}    com.example.weather.formatter.Formatter                 Class
     Definition Exists In Project    ${pid}    com.example.weather.formatter.Formatter.Format          Enum
-    Definition Exists In Project    ${pid}    com.example.weather.model.Forecast                      ${RECORD_TYPE}
+    Definition Exists In Project    ${pid}    com.example.weather.model.Forecast                      Record
 
 Java Project Code Graph Has Expected Containment Edges
     [Documentation]    Assert DEFINES edges (Class→Method, File→top-level Class, Enum→EnumConstant)
@@ -139,14 +137,3 @@ Push Weather Fixtures
     Enable Orbit    ${group["id"]}
     Set Suite Variable    ${RUBY_PROJECT}    ${ruby}
     Set Suite Variable    ${JAVA_PROJECT}    ${java}
-
-Set Engine Definition Types
-    [Documentation]    The incremental engine has no Module, SingletonMethod or Record
-    ...                definition type yet, so it writes Class, Method and Class.
-    ${incremental}=    Evaluate    $CODE_GRAPH_INCREMENTAL == 'true'
-    ${module}=    Set Variable If    ${incremental}    Class    Module
-    ${singleton}=    Set Variable If    ${incremental}    Method    SingletonMethod
-    ${record}=    Set Variable If    ${incremental}    Class    Record
-    Set Suite Variable    ${MODULE_TYPE}    ${module}
-    Set Suite Variable    ${SINGLETON_METHOD_TYPE}    ${singleton}
-    Set Suite Variable    ${RECORD_TYPE}    ${record}

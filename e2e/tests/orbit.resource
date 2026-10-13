@@ -274,21 +274,21 @@ Assert Entity Count At Least For Project
     ...    ${entity} count for project ${project_id} = ${count} (need >= ${minimum})
 
 Definition Exists In Project
-    [Documentation]    Assert that a Definition with ${fqn} (and optional ${definition_type}) exists under ${project_id}.
+    [Documentation]    Assert that a Definition with ${fqn} (and optional ${language_type}) exists under ${project_id}.
     ...                Returns the matched node dict.
-    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}    ${timeout}=180s    ${interval}=3s
+    [Arguments]    ${project_id}    ${fqn}    ${language_type}=${None}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     ${node}=    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
-    ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${definition_type}
+    ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${language_type}
     RETURN    ${node}
 
 Lookup Definition By Fqn
-    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}
-    ${type}=    Set Variable If    $definition_type is None    ${EMPTY}    , definition_type: '${definition_type}'
+    [Arguments]    ${project_id}    ${fqn}    ${language_type}=${None}
+    ${type}=    Set Variable If    $language_type is None    ${EMPTY}    , language_type: '${language_type}'
     ${resp}=    Orbit Query
     ...    MATCH (n:Definition {project_id: ${project_id}, fqn: '${fqn}'${type}}) RETURN n LIMIT 5
     Should Be True    ${resp["row_count"]} >= 1
-    ...    Definition fqn=${fqn} type=${definition_type} not found in project ${project_id}
+    ...    Definition fqn=${fqn} language_type=${language_type} not found in project ${project_id}
     RETURN    ${resp["result"]["nodes"][0]}
 
 Defines Edge Exists Between Definitions
