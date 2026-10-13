@@ -292,7 +292,7 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
+      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns and orbit-server validates them against the user's permissions before returning data.",
       "properties": {
         "resource_type": {
           "type": "string",
@@ -317,7 +317,7 @@
             "maintainer",
             "owner"
           ],
-          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
+          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
         }
       },
       "required": [
@@ -486,7 +486,7 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Automated column statistics collection via AggregatingMergeTree MVs. All filterable properties on all entities are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low \u2192 stats_table (value frequencies), string \u2192 token_table (token frequencies), int64/timestamp/date/float \u2192 histogram_table (equi-depth buckets), uuid \u2192 skipped.",
+          "description": "Automated column statistics via AggregatingMergeTree MVs. All filterable properties are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low \u2192 stats_table (value frequencies), string \u2192 token_table (token frequencies), int64/timestamp/date/float \u2192 histogram_table (equi-depth buckets), uuid \u2192 skipped.",
           "properties": {
             "stats_table": {
               "type": "string",
@@ -577,7 +577,7 @@
         },
         "denormalized_joins": {
           "type": "array",
-          "description": "Linear chains of tables pre-joined into gl_denorm_<name> tables, kept current by one materialized view per source table. Adjacent tables join on the id or edge id that links them; every scoped table keeps its own traversal_path in the row and the compiler filters each. Each declaration is a versioned table, so adding one is a schema bump.",
+          "description": "Linear chains of tables pre-joined into gl_denorm_<name> tables, kept current by one MV per source table. Adjacent tables join on the id or edge id that links them; every scoped table keeps its own traversal_path in the row and the compiler filters each. Each declaration is a versioned table, so adding one is a schema bump.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -1261,7 +1261,7 @@
         "prune_to_source",
         "prune_to_target"
       ],
-      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) \u2014 the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
+      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates. 'prune_to_source'/'prune_to_target': confine the edge's scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (the named endpoint must be path-scopable). Omitted: fail-closed, no scoping or propagation."
     },
     "edgeVariant": {
       "type": "object",
@@ -1806,54 +1806,14 @@
           "items": {
             "type": "object",
             "properties": {
-              "table": {
-                "type": "string",
-                "description": "Child table listed in extract.tables after the base table."
-              },
-              "parent_key": {
-                "type": "string",
-                "description": "Column of the child table that holds the parent row's id."
-              },
-              "row_key": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "minItems": 1,
-                "description": "Key columns, besides traversal_path, that identify a child row. Set when delete tombstones keep only key columns, so parent_key is 0 on a deletion and the parent is resolved through the row's earlier versions."
-              },
-              "also_changed_by": {
-                "type": "object",
-                "properties": {
-                  "table": {
-                    "type": "string",
-                    "description": "Another child table listed in extract.tables after the base table."
-                  },
-                  "key": {
-                    "type": "string",
-                    "description": "Column of that table referenced by link_key."
-                  },
-                  "link_key": {
-                    "type": "string",
-                    "description": "Column of this source's table that holds the referenced table's key."
-                  }
-                },
-                "required": [
-                  "table",
-                  "key",
-                  "link_key"
-                ],
-                "additionalProperties": false,
-                "description": "Also treat rows of this source's table as changed when a row of the referenced table changed in the window, so the parent is re-extracted when that table updates after the rows that point at it."
-              }
+              "table": {"type": "string"},
+              "parent_key": {"type": "string"},
+              "row_key":{"type":"array","items":{"type":"string"},"minItems":1},
+              "also_changed_by":{"type":"object","properties":{"table":{"type":"string"},"key":{"type":"string"},"link_key":{"type":"string"}},"required":["table","key","link_key"],"additionalProperties":false}
             },
-            "required": [
-              "table",
-              "parent_key"
-            ],
+            "required": ["table", "parent_key"],
             "additionalProperties": false
-          },
-          "description": "Child tables whose changes re-extract the parent row even when its own watermark did not move. Authored SQL consumes them through the {{changed_rows}} (parent rows) and {{changed_ids}} (parent ids) markers. Namespaced pipelines only."
+          }
         }
       },
       "required": [
