@@ -75,6 +75,9 @@ The separate `~/.gitlab/orbit/local/manifest.duckdb` records revision paths and 
 Manifest writes are short, so indexing one revision does not hold the manifest lock while source files are parsed.
 Readers hold shared advisory locks on their selected revision files. Writers hold exclusive locks.
 Busy revisions cause a query to wait up to five seconds, then fail with a retry message rather than return partial results.
+If a revision file is missing or an abandoned index is incomplete, workspace queries skip it and print a diagnostic.
+Explicit `--db` queries still fail for a missing or incomplete revision.
+Workspace queries match columns by name across revision schemas and include each table wherever it exists.
 The operating system releases locks when a process exits.
 Run `orbit list -F json` to see each revision and its database path.
 Set `ORBIT_DATA_DIR` to change the workspace root.

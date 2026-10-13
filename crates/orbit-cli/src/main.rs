@@ -2,6 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
+mod database;
 mod descriptions;
 mod list;
 mod mcp;

@@ -38,7 +38,7 @@ pub fn open_graph(db: Option<PathBuf>) -> Result<LocalGraphReader> {
     let Some(db_path) = db else {
         return open_workspace_graph();
     };
-    let lock = workspace::read_lock_database(&db_path)?;
+    let lock = crate::database::read_lock_database(&db_path)?;
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Index a repository first \
@@ -77,7 +77,7 @@ fn open_workspace_graph() -> Result<LocalGraphReader> {
     };
     let client = &reader.client;
     let paths = {
-        let _lock = workspace::lock_database(&manifest)?;
+        let _lock = crate::database::lock_database(&manifest)?;
         client.execute(
             &format!(
                 "ATTACH {} AS orbit_manifest (READ_ONLY)",
@@ -92,37 +92,52 @@ fn open_workspace_graph() -> Result<LocalGraphReader> {
             "database_path",
         )
     };
-    let mut catalogs = Vec::new();
+    let mut tables = std::collections::BTreeMap::<String, Vec<String>>::new();
     for (index, path) in paths.iter().enumerate() {
         reader
             ._locks
-            .push(workspace::read_lock_database(Path::new(path))?);
+            .push(crate::database::read_lock_database(Path::new(path))?);
+        if !Path::new(path).try_exists()? {
+            eprintln!("orbit: skipping missing revision {path}; reindex its checkout");
+            reader._locks.pop();
+            continue;
+        }
         let catalog = format!("revision_{index}");
         client.execute(
             &format!("ATTACH {} AS {catalog} (READ_ONLY)", sql_lit(path)),
             &[],
         )?;
-        let complete = client.query_arrow(&format!(
-            "SELECT count(*) AS n FROM {catalog}.main._orbit_meta WHERE key = 'indexed_commit'"
-        ))?;
-        anyhow::ensure!(
-            duckdb_client::scalar_i64(&complete) == 1,
-            "revision at {path} is not fully indexed; run `{} index` again",
-            spec::launcher()
-        );
-        catalogs.push(catalog);
+        let metadata = client.query_arrow_json(
+            "SELECT count(*) AS n FROM information_schema.tables WHERE table_catalog = ?1 AND table_name = '_orbit_meta' AND table_schema = 'main'",
+            &[catalog.clone().into()],
+        )?;
+        let complete = duckdb_client::scalar_i64(&metadata) == 1
+            && duckdb_client::scalar_i64(&client.query_arrow(&format!(
+                "SELECT count(*) AS n FROM {catalog}.main._orbit_meta WHERE key = 'indexed_commit'"
+            ))?) == 1;
+        if !complete {
+            eprintln!("orbit: skipping incomplete revision {path}; reindex its checkout");
+            client.execute(&format!("DETACH {catalog}"), &[])?;
+            reader._locks.pop();
+            continue;
+        }
+        for table in string_column(
+            &client.query_arrow_json(
+                "SELECT table_name FROM information_schema.tables WHERE table_catalog = ?1 AND table_schema = 'main' AND starts_with(table_name, 'gl_') ORDER BY table_name",
+                &[catalog.clone().into()],
+            )?,
+            "table_name",
+        ) {
+            tables.entry(table).or_default().push(catalog.clone());
+        }
     }
-    let tables = string_column(
-        &client.query_arrow("SELECT table_name FROM information_schema.tables WHERE table_catalog = 'revision_0' AND table_schema = 'main' AND table_name LIKE 'gl_%' ORDER BY table_name")?,
-        "table_name",
-    );
-    for table in tables {
+    for (table, catalogs) in tables {
         let table = quote_ident(&table);
         let sources = catalogs
             .iter()
             .map(|catalog| format!("SELECT * FROM {catalog}.main.{table}"))
             .collect::<Vec<_>>()
-            .join(" UNION ALL ");
+            .join(" UNION ALL BY NAME ");
         client.execute(&format!("CREATE TEMP VIEW {table} AS {sources}"), &[])?;
     }
     client.execute(

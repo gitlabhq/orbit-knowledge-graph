@@ -571,7 +571,7 @@ impl LocalIndexer {
             workspace::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
         })?;
         let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
-        let _revision_lock = workspace::lock_database(&db_path)?;
+        let _revision_lock = crate::database::lock_database(&db_path)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if db_path.exists() {
             let client = duckdb_client::DuckDbClient::open_read_only(&db_path)?;
@@ -629,7 +629,7 @@ impl LocalIndexer {
         error: Option<&str>,
         db_path: &Path,
     ) -> Result<()> {
-        let _lock = workspace::lock_database(&self.manifest_path)?;
+        let _lock = crate::database::lock_database(&self.manifest_path)?;
         let client = workspace::open_manifest(&self.manifest_path)?;
         workspace::set_status(
             &client,

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+use crate::database::{lock_database, read_lock_database};
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
@@ -9,7 +10,7 @@ use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFo
 use serde_json::json;
 use strum::{AsRefStr, Display};
 
-pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/orbit_manifest.sql"));
+pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/local/manifest.sql"));
 
 /// Repo indexing status, stored as a DuckDB `repo_status` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
@@ -439,48 +440,6 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
         None,
     ) {
         tracing::warn!("failed to record git failure status for {key}: {e}");
-    }
-}
-
-pub fn lock_database(path: &Path) -> Result<std::fs::File> {
-    acquire_database_lock(path, false)
-}
-
-pub fn read_lock_database(path: &Path) -> Result<std::fs::File> {
-    acquire_database_lock(path, true)
-}
-
-fn acquire_database_lock(path: &Path, shared: bool) -> Result<std::fs::File> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut lock_path = path.as_os_str().to_owned();
-    lock_path.push(".lock");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(PathBuf::from(lock_path))?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let result = if shared {
-            file.try_lock_shared()
-        } else {
-            file.try_lock()
-        };
-        match result {
-            Ok(()) => return Ok(file),
-            Err(std::fs::TryLockError::WouldBlock) => {
-                anyhow::ensure!(
-                    std::time::Instant::now() < deadline,
-                    "local database {} is busy; retry when its readers or writer finish",
-                    path.display()
-                );
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
-        }
     }
 }
 

@@ -247,28 +247,9 @@ For each file, the parser extracts three categories of information:
 For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path, plus export-member definitions. These let several constructs reuse the same nested and member resolution machinery as other v2 definitions. The constructs are namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation. They do this without exposing a magic synthetic prefix as the user-facing identity.
 A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages. It feeds local bindings through the shared SSA engine. It resolves intrafile targets through the generic v2 `FileResolver`. It leaves JS-specific cross-file import and module resolution in the custom JS resolver layer. An imported call sometimes cannot resolve to a repository-local definition. Then the graph preserves the call as a `Definition` to `ImportedSymbol` `CALLS` edge, instead of dropping the call site.
 
-Orbit Local stores each checkout revision in `~/.gitlab/orbit/local/revisions/<project-id>/<commit-sha>.duckdb`.
-The canonical checkout path determines the project ID, so worktrees stay separate.
-The index describes the working-tree contents at the time of indexing, including uncommitted changes.
-Reindexing the same commit replaces only that revision. Other commits retain their databases.
-
-`local/manifest.duckdb` records revision paths and indexing status. Its key is the checkout path and commit SHA.
-Manifest operations hold a short advisory lock and close their DuckDB connection before parsing starts.
-A revision writer holds an exclusive advisory lock through schema setup, graph writes, and status updates.
-Readers hold shared locks until their DuckDB connection closes. Different revisions can be indexed concurrently.
-Locks use the standard library file-lock API, wait at most five seconds, and release when the process exits.
-The lock files remain on disk. The manifest does not track readers or reader leases.
-Queries fail if a selected revision remains busy or incomplete, rather than returning partial results.
-No operation holds the manifest lock while waiting for a revision lock.
-`orbit sql` and MCP queries attach revisions read-only to one in-memory client and expose shared temporary views.
-SQL includes all indexed revisions by default. `--repo` selects the checkout revision and `--db` selects one file.
-`--all` remains an alias for the default. Grep, context, and repo-map stay checkout-scoped.
-The manifest is copied into the query connection and detached so graph reads do not hold its lock.
-Revisions marked `indexing` are included in selection so readers wait for their writer, then check completion metadata.
-
-Orbit Local rebuilds a revision database when its schema or code-index revision changes.
-Repositories are re-indexed as used. Orbit Remote schema versions are unaffected.
-The previous shared `graph.duckdb` remains on disk. Run `orbit index` to populate the new layout.
+Orbit Local rebuilds its shared DuckDB graph when the code-index revision changes,
+even if repository commits have not changed. Repositories are re-indexed as used;
+Orbit Remote schema versions are unaffected.
 
 The incremental engine stores trees as `Tree<Mutable<Node>>` or `Tree<Compact<Node>>`.
 Storage owns its records and exposes node reads and updates through an associated node type.

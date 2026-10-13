@@ -11,6 +11,134 @@ const FILES_FULL: &str = "SELECT id, name, path, branch, commit_sha FROM gl_file
 const FILES_SIMPLE: &str =
     "SELECT id, name, path FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
 
+fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path::PathBuf {
+    let path = data_dir.join(format!("{name}.duckdb"));
+    let graph = duckdb_client::DuckDbClient::open(&path).unwrap();
+    graph.initialize_schema(ddl).unwrap();
+    graph.initialize_schema("CREATE TABLE _orbit_meta(key VARCHAR, value VARCHAR); INSERT INTO _orbit_meta VALUES ('indexed_commit', 'test')").unwrap();
+    let manifest =
+        duckdb_client::DuckDbClient::open(&data_dir.join("local/manifest.duckdb")).unwrap();
+    manifest
+        .initialize_schema(include_str!(concat!(
+            env!("CONFIG_DIR"),
+            "/local/manifest.sql"
+        )))
+        .unwrap();
+    manifest.execute("INSERT INTO _orbit_manifest (repo_path, project_id, commit_sha, database_path, status) VALUES (?1, 1, 'test', ?2, 'indexed')", &[name.into(), path.to_string_lossy().to_string().into()]).unwrap();
+    path
+}
+
+#[test]
+fn workspace_queries_match_columns_by_name_and_include_tables_from_each_revision() {
+    let data = tempfile::TempDir::new().unwrap();
+    seed_revision(
+        data.path(),
+        "a",
+        "CREATE TABLE gl_probe(name VARCHAR, path VARCHAR); INSERT INTO gl_probe VALUES ('first', 'first.py')",
+    );
+    seed_revision(
+        data.path(),
+        "b",
+        "CREATE TABLE gl_probe(path VARCHAR, name VARCHAR, added BIGINT); INSERT INTO gl_probe VALUES ('second.py', 'second', 7); CREATE TABLE gl_new(id BIGINT); INSERT INTO gl_new VALUES (42)",
+    );
+    assert_eq!(
+        orbit_sql("SELECT * FROM gl_probe ORDER BY name", data.path()),
+        json!([
+            {"name":"first", "path":"first.py"},
+            {"name":"second", "path":"second.py", "added":7}
+        ])
+    );
+    assert_eq!(
+        orbit_sql("SELECT * FROM gl_new", data.path()),
+        json!([{"id":42}])
+    );
+    let (_, error, ok) = run_cmd(&["schema", "--raw"], data.path());
+    assert!(ok, "{error}");
+}
+
+#[test]
+fn workspace_queries_skip_abandoned_and_missing_revisions() {
+    let data = tempfile::TempDir::new().unwrap();
+    let broken = seed_revision(
+        data.path(),
+        "a",
+        "CREATE TABLE gl_probe(id BIGINT); INSERT INTO gl_probe VALUES (99)",
+    );
+    seed_revision(
+        data.path(),
+        "b",
+        "CREATE TABLE gl_probe(id BIGINT); INSERT INTO gl_probe VALUES (42)",
+    );
+    let manifest =
+        duckdb_client::DuckDbClient::open(&data.path().join("local/manifest.duckdb")).unwrap();
+    manifest
+        .execute(
+            "UPDATE _orbit_manifest SET status = 'indexing' WHERE repo_path = 'a'",
+            &[],
+        )
+        .unwrap();
+    drop(manifest);
+    for change in ["DELETE FROM _orbit_meta", "DROP TABLE _orbit_meta"] {
+        let graph = duckdb_client::DuckDbClient::open(&broken).unwrap();
+        graph.execute(change, &[]).unwrap();
+        drop(graph);
+        let (output, error, ok) = run_cmd(
+            &["sql", "-F", "json", "SELECT * FROM gl_probe"],
+            data.path(),
+        );
+        assert!(ok, "{error}");
+        assert!(error.contains("skipping incomplete revision"), "{error}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&output).unwrap(),
+            json!([{"id":42}])
+        );
+    }
+    std::fs::remove_file(&broken).unwrap();
+    let (output, error, ok) = run_cmd(
+        &["sql", "-F", "json", "SELECT * FROM gl_probe"],
+        data.path(),
+    );
+    assert!(ok, "{error}");
+    assert!(error.contains("skipping missing revision"), "{error}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&output).unwrap(),
+        json!([{"id":42}])
+    );
+    let responses = mcp_roundtrip(
+        data.path(),
+        &[
+            mcp_tool_call(1, "run_sql", json!({"sql":["SELECT * FROM gl_probe"]})),
+            mcp_tool_call(2, "get_graph_schema", json!({})),
+        ],
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(mcp_tool_text(&responses[0])).unwrap(),
+        json!([[{"id":42}]])
+    );
+    assert_ne!(responses[1]["result"]["isError"], true);
+    let (_, error, ok) = run_cmd(
+        &["sql", "--db", broken.to_str().unwrap(), "SELECT 1"],
+        data.path(),
+    );
+    assert!(!ok, "explicit missing file must fail: {error}");
+}
+
+fn wait_for_reader(lock: &std::fs::File) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match lock.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) => return,
+            Ok(()) => lock.unlock().unwrap(),
+            Err(error) => panic!("{error}"),
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "reader did not acquire its lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn worktree_tracking() {
     let data_dir = tempfile::TempDir::new().unwrap();
@@ -186,26 +314,30 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
         duckdb_client::scalar_i64(&first.query_arrow("SELECT count(*) FROM gl_file").unwrap())
     );
 
-    let result = orbit_cmd()
-        .args([
+    let query_commits = |scoped: bool| {
+        let mut command = orbit_cmd();
+        command.args([
             "sql",
-            "--repo",
-            repo.path.to_str().unwrap(),
             "-F",
             "json",
             "SELECT DISTINCT commit_sha FROM gl_file",
-        ])
-        .current_dir(&repo.path)
-        .env("ORBIT_DATA_DIR", data_dir.path())
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
-    assert_eq!(result, json!([{ "commit_sha": second_sha }]));
+        ]);
+        if scoped {
+            command.args(["--repo", repo.path.to_str().unwrap()]);
+        }
+        let output = command
+            .current_dir(&repo.path)
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    assert_eq!(query_commits(true), json!([{ "commit_sha": second_sha }]));
     drop(first);
 
     let mismatch = orbit_cmd()
@@ -234,38 +366,8 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let all = orbit_sql("SELECT DISTINCT commit_sha FROM gl_file", data_dir.path());
     assert_eq!(rows(&all).len(), 2);
     git(&repo.path, &["checkout", "--detach", &first_sha]);
-    let all = orbit_cmd()
-        .args([
-            "sql",
-            "-F",
-            "json",
-            "SELECT DISTINCT commit_sha FROM gl_file",
-        ])
-        .current_dir(&repo.path)
-        .env("ORBIT_DATA_DIR", data_dir.path())
-        .output()
-        .unwrap();
-    assert!(all.status.success());
-    assert_eq!(
-        rows(&serde_json::from_slice::<Value>(&all.stdout).unwrap()).len(),
-        2
-    );
-    let result = orbit_cmd()
-        .args([
-            "sql",
-            "--repo",
-            repo.path.to_str().unwrap(),
-            "-F",
-            "json",
-            "SELECT DISTINCT commit_sha FROM gl_file",
-        ])
-        .current_dir(&repo.path)
-        .env("ORBIT_DATA_DIR", data_dir.path())
-        .output()
-        .unwrap();
-    assert!(result.status.success());
-    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
-    assert_eq!(result, json!([{ "commit_sha": first_sha }]));
+    assert_eq!(rows(&query_commits(false)).len(), 2);
+    assert_eq!(query_commits(true), json!([{ "commit_sha": first_sha }]));
 }
 
 #[test]
@@ -287,19 +389,7 @@ fn revision_read_locks_block_writers_and_release_when_reader_exits() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        match lock.try_lock() {
-            Err(std::fs::TryLockError::WouldBlock) => break,
-            Ok(()) => lock.unlock().unwrap(),
-            Err(error) => panic!("{error}"),
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "reader did not acquire its lock"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+    wait_for_reader(&lock);
     assert!(!orbit_index(&repo.path, data_dir.path()));
     assert_eq!(rows(&orbit_sql(FILES_SIMPLE, data_dir.path())).len(), 2);
     let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
@@ -348,16 +438,7 @@ fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        match locks[0].try_lock() {
-            Err(std::fs::TryLockError::WouldBlock) => break,
-            Ok(()) => locks[0].unlock().unwrap(),
-            Err(error) => panic!("{error}"),
-        }
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+    wait_for_reader(&locks[0]);
     let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
     assert!(
         ok,

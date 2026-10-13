@@ -48,7 +48,7 @@ fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
     if !present {
         return Ok(Vec::new());
     }
-    let _lock = workspace::lock_database(db_path)?;
+    let _lock = crate::database::lock_database(db_path)?;
     let client = duckdb_client::DuckDbClient::open_read_only(db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
     if !workspace::table_exists(&client, "_orbit_manifest")? {

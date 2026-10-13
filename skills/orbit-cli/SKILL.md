@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.23.2
+version: 0.24.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
