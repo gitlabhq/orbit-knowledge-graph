@@ -1,13 +1,14 @@
 pub(crate) const EXIT_GENERIC: i32 = 1;
 pub(crate) const EXIT_UNAVAILABLE: i32 = 2;
 const EXIT_UNAUTHENTICATED: i32 = 3;
-const EXIT_FORBIDDEN: i32 = 4;
-const EXIT_RATE_LIMITED: i32 = 5;
+pub(crate) const EXIT_FORBIDDEN: i32 = 4;
+pub(crate) const EXIT_RATE_LIMITED: i32 = 5;
 
 #[derive(Debug)]
 pub(crate) struct RemoteError {
     pub exit_code: i32,
     pub message: String,
+    pub retry_after: Option<std::time::Duration>,
 }
 
 impl RemoteError {
@@ -15,6 +16,7 @@ impl RemoteError {
         Self {
             exit_code,
             message: message.into(),
+            retry_after: None,
         }
     }
 }

@@ -21,6 +21,8 @@ struct SetupAssets;
 struct SetupTexts {
     mcp_server: McpServerText,
     instructions: String,
+    #[serde(default)]
+    remote: BTreeMap<String, String>,
     nudge_search: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
@@ -50,17 +52,26 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-fn render_instructions(launcher: &str) -> String {
-    substitute_launcher(
-        &TEXTS
-            .instructions
-            .trim_end()
-            .replace("{{graph_contents}}", &describe_graph_contents()),
-        launcher,
-    )
+fn render_instructions(launcher: &str, remote: bool) -> String {
+    let mut text = TEXTS
+        .instructions
+        .trim_end()
+        .replace("{{graph_contents}}", &describe_graph_contents());
+    for (name, value) in &TEXTS.remote {
+        let value = if remote { value.as_str() } else { "" };
+        text = text.replace(&format!("{{{{{name}}}}}"), value);
+    }
+    substitute_launcher(&text, launcher)
 }
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instructions(launcher()));
+static REACHES_GITLAB: LazyLock<bool> = LazyLock::new(crate::remote::client::credentials_available);
+
+static RENDERED_INSTRUCTIONS: LazyLock<String> =
+    LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
+
+pub(crate) fn reaches_gitlab() -> bool {
+    *REACHES_GITLAB
+}
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
@@ -321,19 +332,36 @@ mod tests {
             (DIRECT_LAUNCHER, "`orbit grep"),
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
-            let rendered = render_instructions(launcher);
-            assert!(rendered.contains(expected), "{launcher}: {rendered}");
-            assert!(!rendered.contains("{{orbit}}"), "{launcher}");
-            for phrase in [
-                " grep` must be used for search",
-                "Ignores case, `_`, `-`",
-                "`a|b` OR",
-                "definitions you need in one call",
-            ] {
-                assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+            for remote in [true, false] {
+                let rendered = render_instructions(launcher, remote);
+                assert!(rendered.contains(expected), "{launcher}: {rendered}");
+                assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
+                for phrase in [
+                    " grep` must be used for search",
+                    "Ignores case, `_`, `-`",
+                    "`a|b` OR",
+                    "definitions you need in one call",
+                ] {
+                    assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+                }
+                assert_eq!(
+                    rendered.contains("GitLab"),
+                    remote,
+                    "{launcher}: {rendered}"
+                );
+                assert!(
+                    rendered.contains("MergeRequest[42]") == remote,
+                    "{launcher}"
+                );
+                assert!(rendered.split_whitespace().count() <= 100, "{launcher}");
             }
-            assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
+        let local = render_instructions(DIRECT_LAUNCHER, false);
+        assert!(local.contains("or `--kind`.\n"), "{local}");
+        assert!(
+            local.contains("in one call: `orbit context a.rs:10-40 b.rs:88-120`."),
+            "{local}"
+        );
         assert!(search_nudge_text().contains("MANDATORY"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");

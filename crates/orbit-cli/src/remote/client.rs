@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fmt::Write;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -11,6 +13,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
@@ -19,6 +22,8 @@ const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
+const GREP_PATH: &str = "/api/v4/orbit/grep";
+const CONTEXT_PATH: &str = "/api/v4/orbit/context";
 
 pub(crate) struct SkillHttpResponse {
     pub(crate) status: u16,
@@ -26,6 +31,7 @@ pub(crate) struct SkillHttpResponse {
     pub(crate) body: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
     http: reqwest::Client,
@@ -40,8 +46,14 @@ struct ResolvedEndpoint {
 
 impl OrbitClient {
     pub(crate) fn from_env() -> Result<Self, RemoteError> {
-        let endpoint =
-            resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper)?;
+        Self::from_env_in(Path::new("."))
+    }
+
+    pub(crate) fn from_env_in(dir: &Path) -> Result<Self, RemoteError> {
+        let endpoint = resolve_endpoint(
+            |key| std::env::var(key).ok(),
+            || resolve_via_credential_helper(dir),
+        )?;
         Self::new(endpoint)
     }
 
@@ -49,7 +61,10 @@ impl OrbitClient {
     /// error: it returns `None` so callers serve the embedded local skill. An
     /// invalid base URL is still an error so callers can say why they fall back.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
-        match resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper) {
+        match resolve_endpoint(
+            |key| std::env::var(key).ok(),
+            || resolve_via_credential_helper(Path::new(".")),
+        ) {
             Ok(endpoint) => Self::new(endpoint).map(Some),
             Err(error) if error.is::<MissingCredential>() => Ok(None),
             Err(error) => Err(error.into()),
@@ -154,6 +169,30 @@ impl OrbitClient {
         self.get_bytes(GRAPH_STATUS_PATH, params).await
     }
 
+    pub(crate) async fn get_grep(&self, params: &[(&str, String)]) -> Result<Vec<u8>, RemoteError> {
+        let response = self
+            .send(
+                self.http
+                    .get(self.url(GREP_PATH))
+                    .query(params)
+                    .timeout(GREP_REQUEST_TIMEOUT),
+            )
+            .await?;
+        read_body(response).await
+    }
+
+    pub(crate) async fn post_context(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        let response = self
+            .send(
+                self.http
+                    .post(self.url(CONTEXT_PATH))
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(body),
+            )
+            .await?;
+        read_body(response).await
+    }
+
     pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
@@ -188,8 +227,16 @@ impl OrbitClient {
         let response = self.send_authenticated(request).await?;
         let status = response.status();
         if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.trim().parse().ok())
+                .map(Duration::from_secs);
             let body = response.text().await.unwrap_or_default();
-            return Err(map_http_error(status.as_u16(), &body));
+            let mut error = map_http_error(status.as_u16(), &body);
+            error.retry_after = retry_after;
+            return Err(error);
         }
         Ok(response)
     }
@@ -311,26 +358,34 @@ impl std::fmt::Display for MissingCredential {
 
 impl std::error::Error for MissingCredential {}
 
-fn resolve_via_credential_helper() -> Option<ResolvedEndpoint> {
-    static CACHED: OnceLock<Option<ResolvedEndpoint>> = OnceLock::new();
+pub(crate) fn credentials_available() -> bool {
+    resolve_endpoint(
+        |key| std::env::var(key).ok(),
+        || resolve_via_credential_helper(Path::new(".")),
+    )
+    .is_ok()
+}
 
-    CACHED
-        .get_or_init(|| {
-            let output = std::process::Command::new("glab")
-                .args(["auth", "credential-helper"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .output()
-                .ok()?;
+fn resolve_via_credential_helper(dir: &Path) -> Option<ResolvedEndpoint> {
+    static CACHED: LazyLock<Mutex<HashMap<PathBuf, Option<ResolvedEndpoint>>>> =
+        LazyLock::new(Default::default);
 
-            if !output.status.success() {
-                return None;
-            }
-
-            parse_credential_helper_response(&output.stdout)
-        })
-        .clone()
+    let key = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if let Some(cached) = CACHED.lock().ok()?.get(&key) {
+        return cached.clone();
+    }
+    let resolved = std::process::Command::new("glab")
+        .args(["auth", "credential-helper"])
+        .current_dir(&key)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| parse_credential_helper_response(&output.stdout));
+    CACHED.lock().ok()?.insert(key, resolved.clone());
+    resolved
 }
 
 fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {

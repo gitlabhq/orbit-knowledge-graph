@@ -2,6 +2,7 @@ mod defs;
 mod kind;
 mod local;
 mod rank;
+mod remote;
 mod render;
 mod scan;
 mod term;
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use orbit_search::{RecallFilter, query_alternatives};
 
+use crate::remote::grep::{Outcome, scope_for};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
@@ -59,14 +61,130 @@ impl std::fmt::Display for NoMatches {
 
 impl std::error::Error for NoMatches {}
 
-pub(crate) fn run(
+pub(crate) async fn run(
+    query: Option<String>,
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+    paths: Vec<String>,
+    mut filter: RecallFilter,
+    options: Options,
+) -> Result<()> {
+    let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
+    let exists = |path: &str| {
+        Path::new(path).exists() || root.as_ref().is_some_and(|root| root.join(path).exists())
+    };
+    let indexed = || indexed_checkouts(db.clone());
+    let route = remote::route(
+        query.as_deref(),
+        repo.as_deref(),
+        paths,
+        &filter.kinds,
+        &options,
+        remote::Checkouts {
+            exists: &exists,
+            indexed: &indexed,
+        },
+    )?;
+    for reason in &route.skipped {
+        eprintln!("orbit: {reason}");
+    }
+    let label = query.clone().unwrap_or_default();
+    let pending: Vec<_> = route
+        .remote
+        .into_iter()
+        .map(|request| {
+            let explicit = request.target.explicit();
+            let search = crate::remote::grep::search(request, label.clone());
+            (explicit, tokio::spawn(search))
+        })
+        .collect();
+    if !pending.is_empty() {
+        filter.kinds.retain(|kind| scope_for(kind).is_none());
+        if route.local.is_empty() && !filter.kinds.is_empty() {
+            eprintln!(
+                "orbit: skipping hosted --kind {}; use `{} query`",
+                filter.kinds.join(", "),
+                crate::commands::setup::spec::launcher()
+            );
+        }
+    }
+    let remote_only = route.local.is_empty();
+    let (mut found, mut printed) = (false, false);
+    for target in route.local {
+        if printed {
+            println!();
+        }
+        found |= local(
+            query.clone(),
+            target.repo,
+            db.clone(),
+            target.paths,
+            filter.clone(),
+            options.clone(),
+        )?;
+        printed = true;
+    }
+    for (explicit, task) in pending {
+        match task
+            .await
+            .unwrap_or_else(|error| Outcome::Failed(error.to_string()))
+        {
+            Outcome::Found(text) => {
+                let mut out = std::io::stdout().lock();
+                if printed {
+                    writeln!(out)?;
+                }
+                write!(out, "{text}")?;
+                out.flush()?;
+                (found, printed) = (true, true);
+            }
+            Outcome::Skipped(reason) if explicit || remote_only => {
+                eprintln!("orbit: GitLab search skipped: {reason}");
+            }
+            Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
+            Outcome::Empty | Outcome::Skipped(_) => {}
+        }
+    }
+    match found {
+        true => Ok(()),
+        false => Err(NoMatches.into()),
+    }
+}
+
+fn indexed_checkouts(db: Option<PathBuf>) -> Vec<(PathBuf, String, String)> {
+    if db.is_some() {
+        return Vec::new();
+    }
+    let Ok(manifest) = crate::workspace::Workspace::open_default().map(|w| w.manifest_path()) else {
+        return Vec::new();
+    };
+    if !manifest.exists() {
+        return Vec::new();
+    }
+    let Ok(batches) = crate::database::manifest::read(
+        &manifest,
+        "SELECT repo_path FROM _orbit_manifest WHERE CAST(status AS VARCHAR) = 'indexed'",
+    ) else {
+        return Vec::new();
+    };
+    duckdb_client::string_column(&batches, "repo_path")
+        .into_iter()
+        .map(PathBuf::from)
+        .filter_map(|checkout| {
+            let (host, full_path) = crate::remote::origin::project(&checkout)?;
+            Some((checkout, host, full_path))
+        })
+        .collect()
+}
+
+fn local(
     query: Option<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     paths: Vec<String>,
     mut filter: RecallFilter,
     mut options: Options,
-) -> Result<()> {
+) -> Result<bool> {
     let languages = kind::languages(&mut filter.kinds);
     options.types.extend(languages.iter().cloned());
     let launcher = crate::commands::setup::spec::launcher();
@@ -191,10 +309,7 @@ pub(crate) fn run(
         }
     }
     out.flush()?;
-    match hits.iter().any(|hit| !hit.context) {
-        true => Ok(()),
-        false => Err(NoMatches.into()),
-    }
+    Ok(hits.iter().any(|hit| !hit.context))
 }
 
 const NOTE: &str = "» ";
@@ -323,8 +438,9 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
     let hosted = kinds.hosted.join(", ");
     anyhow::ensure!(
         kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
-        "{hosted} lives in the hosted graph, which `{launcher} grep` does not search yet; \
-         use `{launcher} query`"
+        "{hosted} lives in the hosted graph; `{launcher} grep` searches GitLab for work items, \
+         merge requests, commits, notes, milestones, users, projects, and groups only without \
+         paths or file filters. Otherwise use `{launcher} query`"
     );
     if !kinds.hosted.is_empty() {
         eprintln!("orbit: skipping hosted --kind {hosted}; use `{launcher} query`");

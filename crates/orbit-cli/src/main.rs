@@ -151,9 +151,13 @@ struct GrepArgs {
     #[arg(short = 'M', long, value_name = "NUM")]
     max_columns: Option<usize>,
 
-    /// Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the current
-    /// directory or the repository, and globs such as `crates/*/src/lib.rs` work.
-    #[arg(value_name = "PATH")]
+    #[arg(
+        value_name = "PATH",
+        help = "Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the \
+                current directory or the repository, and globs such as `crates/*/src/lib.rs` \
+                work. A GitLab `group/project`, `Project[id]`, or `Group[id]` searches that \
+                project or group in GitLab."
+    )]
     paths: Vec<String>,
 
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
@@ -172,7 +176,7 @@ const KIND_ARG_HELP: &str = "Ontology node kinds, comma-separated. Definition ki
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
 
-fn run_grep(args: GrepArgs) -> Result<()> {
+async fn run_grep(args: GrepArgs) -> Result<()> {
     use commands::grep::{Options, Output};
     let mut paths = Vec::new();
     let query = match args.regexp.is_empty() {
@@ -223,6 +227,7 @@ fn run_grep(args: GrepArgs) -> Result<()> {
         },
         options,
     )
+    .await
 }
 
 /// grep and rg flags that `orbit grep` already behaves as: line numbers, recursion, ignoring
@@ -340,7 +345,7 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn context_target_help() -> String {
     format!(
-        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, or directories. Mix or repeat targets; quote paths with spaces.",
+        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, directories, or GitLab tokens such as MergeRequest[42], Issue[7], group/project!12, and GitLab URLs. Mix or repeat targets; quote paths with spaces.",
         commands::setup::spec::launcher()
     )
 }
@@ -841,8 +846,8 @@ async fn dispatch(
             verbose,
             db,
         }) => commands::index::run(path, threads, stats, verbose, db),
-        Commands::Grep(args) => run_grep(*args),
-        Commands::Context(args) => commands::context::run(args),
+        Commands::Grep(args) => run_grep(*args).await,
+        Commands::Context(args) => commands::context::run(args).await,
         Commands::Sql(SqlArgs {
             query,
             file,

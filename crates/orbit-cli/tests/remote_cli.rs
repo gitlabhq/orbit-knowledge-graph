@@ -17,6 +17,15 @@ fn serve_once(
     response_body: &'static str,
     content_type: &'static str,
 ) -> (String, thread::JoinHandle<CapturedRequest>) {
+    serve_status_once("200 OK", "", response_body, content_type)
+}
+
+fn serve_status_once(
+    status: &'static str,
+    extra_headers: &'static str,
+    response_body: &'static str,
+    content_type: &'static str,
+) -> (String, thread::JoinHandle<CapturedRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock addr");
     let base_url = format!("http://{addr}");
@@ -56,7 +65,7 @@ fn serve_once(
         }
 
         let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
             response_body.len()
         );
         stream
@@ -358,4 +367,267 @@ fn scheme_less_gitlab_url_fails_with_a_clear_error() {
         "{stderr}"
     );
     assert!(!stderr.contains("plaintext"), "{stderr}");
+}
+
+fn git_clone_with_origin(origin: &str) -> tempfile::TempDir {
+    let clone = tempfile::tempdir().expect("tempdir");
+    for args in [
+        ["init", "--quiet"].as_slice(),
+        &["remote", "add", "origin", origin],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(clone.path())
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+    clone
+}
+
+fn run_orbit_with_data(
+    dir: &Path,
+    data: &Path,
+    base_url: &str,
+    args: &[&str],
+) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .current_dir(dir)
+        .args(args)
+        .env("ORBIT_API_BASE_URL", base_url)
+        .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+        .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+        .env("ORBIT_DATA_DIR", data)
+        .env_remove("GITLAB_TOKEN")
+        .output()
+        .expect("run orbit binary")
+}
+
+const GREP_RESPONSE: &str = r#"{"version":"1.0.0","target":{"type":"project","id":1,"full_path":"my-group/my-project"},"scopes":[{"name":"merge_requests","search_type":"basic","results":[{"entity_type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"summary":"Add runner"}]}],"unavailable_scopes":[],"result_count":1,"truncated":false}"#;
+
+#[test]
+fn grep_for_a_hosted_kind_searches_the_origin_project() {
+    let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let data = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        clone.path(),
+        data.path(),
+        &base_url,
+        &["grep", "runner", "--kind", "MergeRequest"],
+    );
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/grep?keywords=runner&full_path=my-group%2Fmy-project&limit=10&per_scope=3&scopes=merge_requests HTTP/1.1"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("gitlab \"runner\" @ localhost/my-group/my-project: 1 results\n  MergeRequest[42]  Add runner\n"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn grep_of_a_group_target_searches_its_projects() {
+    let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        dir.path(),
+        dir.path(),
+        &base_url,
+        &["grep", "runner", "Group[9]"],
+    );
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/grep?keywords=runner&namespace_id=9&limit=10&per_scope=3&scopes=work_items%2Cmerge_requests%2Ccommits%2Cnotes%2Cmilestones%2Cprojects HTTP/1.1"
+    );
+}
+
+#[test]
+fn grep_backs_off_after_a_rate_limit() {
+    let (base_url, handle) = serve_status_once(
+        "429 Too Many Requests",
+        "Retry-After: 120\r\n",
+        "Retry later",
+        "text/plain",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data = tempfile::tempdir().expect("tempdir");
+
+    let limited = run_orbit_with_data(
+        dir.path(),
+        data.path(),
+        &base_url,
+        &["grep", "runner", "Group[9]"],
+    );
+    handle.join().expect("join mock");
+    assert_eq!(limited.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&limited.stderr).contains("GitLab search failed: rate limited")
+    );
+
+    let waiting = run_orbit_with_data(
+        dir.path(),
+        data.path(),
+        &base_url,
+        &["grep", "runner", "Group[9]"],
+    );
+    assert_eq!(waiting.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&waiting.stderr).contains("rate limited; retrying in"),
+        "{}",
+        String::from_utf8_lossy(&waiting.stderr)
+    );
+}
+
+#[test]
+fn context_posts_gitlab_tokens_without_a_local_index() {
+    let response = "orbit_context version=1.1.0 entities=3\n- MergeRequest[42] type=MergeRequest id=42 found=true\n";
+    let (base_url, handle) = serve_once(response, "text/plain");
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        dir.path(),
+        dir.path(),
+        &base_url,
+        &[
+            "context",
+            "MergeRequest:42",
+            "gitlab-org/gitlab#7",
+            "Issue[5]",
+        ],
+    );
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(request.request_line, "POST /api/v4/orbit/context HTTP/1.1");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&request.body).unwrap(),
+        serde_json::json!({
+            "tokens": ["MergeRequest[42]", "gitlab-org/gitlab#7", "Issue[5]"],
+            "response_format": "llm",
+        })
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), response);
+}
+
+#[cfg(unix)]
+fn fake_glab(bin: &Path, repo: &Path, base_url: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = dunce::canonicalize(repo).expect("canonical repo");
+    let script = format!(
+        "#!/bin/sh\n\
+         if [ \"$(pwd -P)\" = \"{}\" ]; then url={base_url}; else url=https://elsewhere.example; fi\n\
+         printf '{{\"type\":\"success\",\"instance_url\":\"%s\",\"token\":{{\"type\":\"pat\",\"token\":\"glpat-test\"}}}}' \"$url\"\n",
+        repo.display()
+    );
+    let path = bin.join("glab");
+    std::fs::write(&path, script).expect("write fake glab");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+}
+
+#[cfg(unix)]
+#[test]
+fn grep_with_repo_resolves_credentials_for_that_checkout() {
+    let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let elsewhere = tempfile::tempdir().expect("tempdir");
+    let bin = tempfile::tempdir().expect("tempdir");
+    fake_glab(bin.path(), clone.path(), &base_url);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .current_dir(elsewhere.path())
+        .args(["grep", "runner", "--kind", "MergeRequest", "--repo"])
+        .arg(clone.path())
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.path().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        )
+        .env("ORBIT_DATA_DIR", elsewhere.path())
+        .env_remove("ORBIT_API_BASE_URL")
+        .env_remove("ORBIT_AUTH_HEADER_NAME")
+        .env_remove("ORBIT_AUTH_HEADER_VALUE")
+        .env_remove("GITLAB_TOKEN")
+        .output()
+        .expect("run orbit binary");
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        request
+            .request_line
+            .starts_with("GET /api/v4/orbit/grep?keywords=runner&full_path=my-group%2Fmy-project"),
+        "{}",
+        request.request_line
+    );
+}
+
+#[test]
+fn origin_relative_references_expand_against_the_origin_project() {
+    let response = "orbit_context version=1.1.0 entities=1\n";
+    let (base_url, handle) = serve_once(response, "text/plain");
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+
+    let output = run_orbit_with_data(clone.path(), clone.path(), &base_url, &["context", "!12"]);
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&request.body).unwrap()["tokens"],
+        serde_json::json!(["my-group/my-project!12"])
+    );
+}
+
+#[test]
+fn origin_relative_references_refuse_another_instance() {
+    let clone = git_clone_with_origin("https://gitlab.example.com/my-group/my-project");
+
+    let output = run_orbit_with_data(
+        clone.path(),
+        clone.path(),
+        "http://localhost:9",
+        &["context", "!12"],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("on gitlab.example.com, but Orbit uses localhost"),
+        "{stderr}"
+    );
 }
