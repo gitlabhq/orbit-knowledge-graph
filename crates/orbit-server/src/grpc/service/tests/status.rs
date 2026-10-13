@@ -65,21 +65,3 @@ async fn status_rpcs_deny_a_path_outside_the_callers_groups() {
         tonic::Code::PermissionDenied
     );
 }
-
-#[tokio::test]
-async fn indexing_status_rejects_an_enabled_at_that_is_not_rfc_3339() {
-    let request = GetIndexingStatusRequest {
-        traversal_paths: vec!["1/22/".to_string()],
-        enabled_at: HashMap::from([("1/22/".to_string(), "yesterday".to_string())]),
-    };
-    let claims = Claims {
-        admin: true,
-        ..test_claims()
-    };
-    let error = test_service()
-        .get_indexing_status(signed_request(request, claims))
-        .await
-        .unwrap_err();
-
-    assert_eq!(error.code(), tonic::Code::InvalidArgument);
-}

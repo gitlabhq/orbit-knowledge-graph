@@ -559,7 +559,7 @@ enum IndexingPhase {
 
 message GetIndexingStatusRequest {
   repeated string traversal_paths = 1;  // 1 to 100 group or project paths (e.g. "1/2/")
-  map<string, string> enabled_at = 2;  // traversal path => RFC 3339 time Orbit was turned on for its top-level group
+  map<string, int64> enabled_at = 2;  // traversal path => Unix seconds when Orbit was turned on for its top-level group
 }
 
 message GetIndexingStatusResponse {

@@ -35,11 +35,8 @@ SELECT root, plan, \
 HAVING argMax(_deleted, _version) = false";
 
 const LAST_SWEEP_SQL: &str = "\
-SELECT argMax(watermark, _version) AS swept_at \
-  FROM {table:Identifier} \
- WHERE key = {key:String} \
- GROUP BY key \
-HAVING argMax(_deleted, _version) = false";
+SELECT argMax(watermark, _version) FROM {table:Identifier} \
+ WHERE key = {key:String} GROUP BY key HAVING argMax(_deleted, _version) = false";
 
 struct PlanCheckpoint {
     indexed_at: Option<DateTime<Utc>>,
@@ -53,9 +50,13 @@ pub struct PlanCheckpoints {
 }
 
 impl PlanCheckpoints {
-    pub fn get_plan_phase(&self, plan: &str, now: DateTime<Utc>) -> Phase {
+    pub fn get_plan_phase(&self, plan: &str, dispatch_overdue: bool, now: DateTime<Utc>) -> Phase {
         let Some(checkpoint) = self.by_plan.get(plan) else {
-            return Phase::NotStarted;
+            return if dispatch_overdue && self.by_plan.is_empty() {
+                Phase::Error
+            } else {
+                Phase::NotStarted
+            };
         };
 
         if checkpoint.indexed_at.is_some() {
@@ -67,17 +68,6 @@ impl PlanCheckpoints {
         } else {
             Phase::Syncing
         }
-    }
-
-    pub fn was_missed_by_sweep(
-        &self,
-        enabled_at: Option<DateTime<Utc>>,
-        swept_at: Option<DateTime<Utc>>,
-    ) -> bool {
-        self.by_plan.is_empty()
-            && enabled_at
-                .zip(swept_at)
-                .is_some_and(|(enabled_at, swept_at)| enabled_at + STALE_AFTER <= swept_at)
     }
 
     pub fn get_last_completed_at(&self, plans: &[PipelineDescriptor]) -> Option<DateTime<Utc>> {
@@ -143,6 +133,12 @@ pub async fn read_plan_checkpoints(
     Ok(checkpoints)
 }
 
+pub fn is_dispatch_overdue(enabled_at: Option<&i64>, swept_at: Option<DateTime<Utc>>) -> bool {
+    enabled_at
+        .zip(swept_at)
+        .is_some_and(|(enabled_at, swept_at)| *enabled_at <= (swept_at - STALE_AFTER).timestamp())
+}
+
 pub async fn read_last_sweep_at(
     client: &ArrowClickHouseClient,
     schema: &SchemaSnapshot,
@@ -154,8 +150,6 @@ pub async fn read_last_sweep_at(
             .param("key", SWEEP_CHECKPOINT_KEY)
     })
     .await?;
-
-    let swept_at =
-        DateTime::<Utc>::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
+    let swept_at = DateTime::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     Ok(swept_at.into_iter().next())
 }

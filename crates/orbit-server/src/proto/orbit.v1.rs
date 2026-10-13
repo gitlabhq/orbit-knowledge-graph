@@ -639,12 +639,9 @@ pub struct GetIndexingStatusRequest {
     /// 1 to 100 group or project paths (e.g. "1/2/")
     #[prost(string, repeated, tag = "1")]
     pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// traversal path => RFC 3339 time Orbit was turned on for its top-level group
-    #[prost(map = "string, string", tag = "2")]
-    pub enabled_at: ::std::collections::HashMap<
-        ::prost::alloc::string::String,
-        ::prost::alloc::string::String,
-    >,
+    /// traversal path => Unix seconds when Orbit was turned on for its top-level group
+    #[prost(map = "string, int64", tag = "2")]
+    pub enabled_at: ::std::collections::HashMap<::prost::alloc::string::String, i64>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetIndexingStatusResponse {

@@ -48,7 +48,7 @@ impl IndexingStatusService {
         &self,
         schema: &SchemaSnapshot,
         scopes: &[TraversalPath],
-        enabled_at: &HashMap<String, DateTime<Utc>>,
+        enabled_at: Option<&HashMap<String, i64>>,
     ) -> Vec<ScopeStatus> {
         if scopes.is_empty() {
             return Vec::new();
@@ -74,8 +74,8 @@ impl IndexingStatusService {
             .ok();
         let swept_at = swept_at
             .inspect_err(|error| warn!(%error, "Indexing status could not read the last sweep"))
-            .ok()
-            .flatten();
+            .unwrap_or_default();
+        let coverage = coverage.as_ref();
 
         let now = Utc::now();
         let plans: Vec<PipelineDescriptor> = schema
@@ -88,22 +88,9 @@ impl IndexingStatusService {
         scopes
             .iter()
             .map(|scope| {
-                let missed_by_sweep = scope
-                    .top_level_namespace_id()
-                    .and_then(|root| checkpoints.get(&root))
-                    .is_some_and(|by_plan| {
-                        by_plan
-                            .was_missed_by_sweep(enabled_at.get(scope.as_str()).copied(), swept_at)
-                    });
-                build_scope_status(
-                    schema,
-                    &plans,
-                    scope,
-                    &checkpoints,
-                    coverage.as_ref(),
-                    missed_by_sweep,
-                    now,
-                )
+                let enabled_at = enabled_at.and_then(|by_path| by_path.get(scope.as_str()));
+                let overdue = checkpoints::is_dispatch_overdue(enabled_at, swept_at);
+                build_scope_status(schema, &plans, scope, &checkpoints, coverage, overdue, now)
             })
             .collect()
     }
@@ -115,7 +102,7 @@ fn build_scope_status(
     scope: &TraversalPath,
     checkpoints: &HashMap<i64, PlanCheckpoints>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
-    missed_by_sweep: bool,
+    dispatch_overdue: bool,
     now: DateTime<Utc>,
 ) -> ScopeStatus {
     let root_checkpoints = scope
@@ -125,13 +112,9 @@ fn build_scope_status(
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
         .map(|plan| {
-            let phase = if missed_by_sweep {
-                Phase::Error
-            } else {
-                root_checkpoints
-                    .map(|by_plan| by_plan.get_plan_phase(&plan.name, now))
-                    .unwrap_or(Phase::Unknown)
-            };
+            let phase = root_checkpoints
+                .map(|by_plan| by_plan.get_plan_phase(&plan.name, dispatch_overdue, now))
+                .unwrap_or(Phase::Unknown);
             (plan, phase)
         })
         .collect();

@@ -3823,8 +3823,8 @@ func (x *GraphStatusItem) GetState() IndexingState {
 
 type GetIndexingStatusRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	TraversalPaths []string               `protobuf:"bytes,1,rep,name=traversal_paths,json=traversalPaths,proto3" json:"traversal_paths,omitempty"`                                                            // 1 to 100 group or project paths (e.g. "1/2/")
-	EnabledAt      map[string]string      `protobuf:"bytes,2,rep,name=enabled_at,json=enabledAt,proto3" json:"enabled_at,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // traversal path => RFC 3339 time Orbit was turned on for its top-level group
+	TraversalPaths []string               `protobuf:"bytes,1,rep,name=traversal_paths,json=traversalPaths,proto3" json:"traversal_paths,omitempty"`                                                             // 1 to 100 group or project paths (e.g. "1/2/")
+	EnabledAt      map[string]int64       `protobuf:"bytes,2,rep,name=enabled_at,json=enabledAt,proto3" json:"enabled_at,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // traversal path => Unix seconds when Orbit was turned on for its top-level group
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -3866,7 +3866,7 @@ func (x *GetIndexingStatusRequest) GetTraversalPaths() []string {
 	return nil
 }
 
-func (x *GetIndexingStatusRequest) GetEnabledAt() map[string]string {
+func (x *GetIndexingStatusRequest) GetEnabledAt() map[string]int64 {
 	if x != nil {
 		return x.EnabledAt
 	}
@@ -4499,7 +4499,7 @@ const file_orbit_proto_rawDesc = "" +
 	"enabled_at\x18\x02 \x03(\v21.orbit.v1.GetIndexingStatusRequest.EnabledAtEntryR\tenabledAt\x1a<\n" +
 	"\x0eEnabledAtEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Z\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"Z\n" +
 	"\x19GetIndexingStatusResponse\x12=\n" +
 	"\bstatuses\x18\x01 \x03(\v2!.orbit.v1.NamespaceIndexingStatusR\bstatuses\"\xf0\x01\n" +
 	"\x17NamespaceIndexingStatus\x12%\n" +

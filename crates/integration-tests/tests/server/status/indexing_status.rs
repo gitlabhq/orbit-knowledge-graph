@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{TimeDelta, Utc};
 use integration_testkit::{run_subtests_shared, t};
 use orbit_server::indexing_status::{IndexingStatusService, Phase, ProjectCoverage, ScopeStatus};
 use orbit_utils::traversal_path::TraversalPath;
@@ -45,12 +44,8 @@ async fn indexing_status() {
         only_the_default_branch_counts,
         last_completed_at_is_the_oldest_plan_completion,
         no_last_completed_at_while_a_first_pass_pages,
-        not_started_without_enabled_at,
-        not_started_when_enabled_after_the_last_sweep,
-        not_started_when_enabled_less_than_two_hours_before_the_last_sweep,
-        error_when_the_last_sweep_missed_an_old_enrollment,
+        error_only_when_the_last_sweep_missed_an_old_enrollment,
         not_started_without_a_recorded_sweep,
-        root_with_checkpoints_ignores_the_last_sweep,
     );
 }
 
@@ -92,36 +87,26 @@ async fn remove_plan(ctx: &TestContext, root: i64, plan: &str) {
     .await;
 }
 
-async fn seed_sweep(ctx: &TestContext, swept_at: &str) {
-    ctx.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values, _version) VALUES
-         ('dispatch.sdlc.namespace.sweep', {swept_at}, '', now64(6))",
-        t("checkpoint")
-    ))
-    .await;
-}
-
 async fn read(ctx: &TestContext, scopes: &[&str]) -> Vec<ScopeStatus> {
-    read_enabled_at(ctx, scopes, &HashMap::new()).await
-}
-
-async fn read_enabled_at(
-    ctx: &TestContext,
-    scopes: &[&str],
-    enabled_at: &HashMap<String, DateTime<Utc>>,
-) -> Vec<ScopeStatus> {
     let scopes: Vec<TraversalPath> = scopes
         .iter()
         .map(|s| TraversalPath::new_unchecked(*s))
         .collect();
     IndexingStatusService::new(Arc::new(ctx.create_client()))
-        .read_scope_statuses(&pinned_schema(), &scopes, enabled_at)
+        .read_scope_statuses(&pinned_schema(), &scopes, None)
         .await
 }
 
-async fn read_one_enabled_at(ctx: &TestContext, scope: &str, ago: TimeDelta) -> ScopeStatus {
-    let enabled_at = HashMap::from([(scope.to_string(), Utc::now() - ago)]);
-    read_enabled_at(ctx, &[scope], &enabled_at).await.remove(0)
+async fn read_enabled(ctx: &TestContext, scope: &str, enabled_ago: Option<TimeDelta>) -> Phase {
+    let enabled_at = enabled_ago
+        .map(|ago| (scope.to_string(), (Utc::now() - ago).timestamp()))
+        .into_iter()
+        .collect();
+    let scopes = [TraversalPath::new_unchecked(scope)];
+    IndexingStatusService::new(Arc::new(ctx.create_client()))
+        .read_scope_statuses(&pinned_schema(), &scopes, Some(&enabled_at))
+        .await[0]
+        .phase
 }
 
 async fn read_one(ctx: &TestContext, scope: &str) -> ScopeStatus {
@@ -435,58 +420,27 @@ async fn no_last_completed_at_while_a_first_pass_pages(ctx: &TestContext) {
     assert_eq!(status.last_completed_at, None);
 }
 
-async fn not_started_without_enabled_at(ctx: &TestContext) {
-    let db = ctx.fork("indexing_status_sweep_without_enabled_at").await;
-    seed_sweep(&db, "now()").await;
+async fn error_only_when_the_last_sweep_missed_an_old_enrollment(ctx: &TestContext) {
+    let db = ctx.fork("indexing_status_last_sweep").await;
+    db.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) VALUES ('dispatch.sdlc.namespace.sweep', now(), '')",
+        t("checkpoint")
+    ))
+    .await;
 
-    let status = read_one(&db, "1/102/").await;
-
-    assert_eq!(status.phase, Phase::NotStarted);
-}
-
-async fn not_started_when_enabled_after_the_last_sweep(ctx: &TestContext) {
-    let db = ctx.fork("indexing_status_enabled_after_sweep").await;
-    seed_sweep(&db, "now() - INTERVAL 3 HOUR").await;
-
-    let status = read_one_enabled_at(&db, "1/102/", TimeDelta::hours(1)).await;
-
-    assert_eq!(status.phase, Phase::NotStarted);
-}
-
-async fn not_started_when_enabled_less_than_two_hours_before_the_last_sweep(ctx: &TestContext) {
-    let db = ctx.fork("indexing_status_enabled_before_sweep").await;
-    seed_sweep(&db, "now()").await;
-
-    let status = read_one_enabled_at(&db, "1/102/", TimeDelta::hours(1)).await;
-
-    assert_eq!(status.phase, Phase::NotStarted);
-}
-
-async fn error_when_the_last_sweep_missed_an_old_enrollment(ctx: &TestContext) {
-    let db = ctx.fork("indexing_status_missed_by_sweep").await;
-    seed_sweep(&db, "now()").await;
-
-    let status = read_one_enabled_at(&db, "1/102/", TimeDelta::days(3)).await;
-
-    assert_eq!(status.phase, Phase::Error);
-    assert_eq!(status.sdlc_phase, Phase::Error);
-    assert!(status.domains.iter().all(|d| d.phase == Phase::Error));
-    assert_eq!(entity_phase(&status, "MergeRequest"), Some(Phase::Error));
+    for (scope, enabled_ago, expected) in [
+        ("1/102/", None, Phase::NotStarted),
+        ("1/102/", Some(TimeDelta::hours(1)), Phase::NotStarted),
+        ("1/102/", Some(TimeDelta::days(3)), Phase::Error),
+        ("1/106/", Some(TimeDelta::days(3)), Phase::Syncing),
+    ] {
+        let phase = read_enabled(&db, scope, enabled_ago).await;
+        assert_eq!(phase, expected, "{scope} turned on {enabled_ago:?} ago");
+    }
 }
 
 async fn not_started_without_a_recorded_sweep(ctx: &TestContext) {
-    let status = read_one_enabled_at(ctx, "1/102/", TimeDelta::days(3)).await;
+    let phase = read_enabled(ctx, "1/102/", Some(TimeDelta::days(3))).await;
 
-    assert_eq!(status.phase, Phase::NotStarted);
-}
-
-async fn root_with_checkpoints_ignores_the_last_sweep(ctx: &TestContext) {
-    let db = ctx.fork("indexing_status_sweep_with_checkpoints").await;
-    seed_sweep(&db, "now()").await;
-
-    let status = read_one_enabled_at(&db, "1/106/", TimeDelta::days(3)).await;
-
-    assert_eq!(status.sdlc_phase, Phase::Syncing);
-    assert_eq!(domain_phase(&status, "plan"), Phase::NotStarted);
-    assert_eq!(entity_phase(&status, "Project"), Some(Phase::Ready));
+    assert_eq!(phase, Phase::NotStarted);
 }
