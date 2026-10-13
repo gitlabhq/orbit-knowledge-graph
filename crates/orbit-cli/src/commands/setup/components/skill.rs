@@ -11,9 +11,9 @@ use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_files};
 
+const MANIFEST: &str = "SKILL.md";
 /// Written into every directory this component installs. Content cannot identify it, because the
 /// full skill depends on the instance.
-const MANIFEST: &str = "SKILL.md";
 const MARKER_FILE: &str = ".orbit-managed";
 const MARKER_CONTENTS: &str =
     "Installed by `orbit setup`; `orbit uninstall` removes this directory.\n";
@@ -381,7 +381,7 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
         if path.exists() {
             report.note(
                 label,
-                "kept (has files that changed since install; delete it by hand)",
+                "kept (has files that differ from this release, edited or from an older one; delete it by hand)",
             );
             return Ok(());
         }
@@ -393,7 +393,7 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
     Ok(())
 }
 
-/// An edited manifest must stop being a skill, or the agent would list `orbit-cli` next to
+/// A manifest that differs from this release's (edited, or from an older release) must stop being a skill, or the agent would list `orbit-cli` next to
 /// `orbit`. The unedited one is removed with the other shipped files.
 fn retire_legacy_manifest(dir: &Path, label: &str, report: &mut Report) -> Result<()> {
     let manifest = dir.join(MANIFEST);
@@ -407,12 +407,27 @@ fn retire_legacy_manifest(dir: &Path, label: &str, report: &mut Report) -> Resul
     if shipped.is_some_and(|shipped| shipped == current) {
         return Ok(());
     }
-    let backup = backup_path(&manifest);
+    let first_backup = backup_path(&manifest);
+    if std::fs::read(&first_backup).is_ok_and(|backup| backup == current) {
+        return std::fs::remove_file(&manifest)
+            .with_context(|| format!("failed to remove {}", manifest.display()));
+    }
+    // Never overwrite an earlier backup; it may hold the user's own edit.
+    let mut backup = first_backup.clone();
+    for attempt in 1.. {
+        if !backup.exists() {
+            break;
+        }
+        backup = first_backup.with_extension(format!("orbit-backup.{attempt}"));
+    }
     std::fs::rename(&manifest, &backup)
         .with_context(|| format!("failed to rename {}", manifest.display()))?;
+    let name = backup.file_name().unwrap_or_default().to_string_lossy();
     report.note(
         label,
-        format!("{MANIFEST} edited; kept as {MANIFEST}.orbit-backup"),
+        format!(
+            "{MANIFEST} differs from this release (edited or from an older one); kept as {name}"
+        ),
     );
     Ok(())
 }
