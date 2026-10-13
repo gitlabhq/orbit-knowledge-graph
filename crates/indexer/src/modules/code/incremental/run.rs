@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use super::super::pipeline::IndexingReport;
@@ -180,8 +180,15 @@ pub(in crate::modules::code) fn run(
 const SLOWEST_FILES: usize = 100;
 
 fn file_timings(timings: &[FileTiming]) -> Vec<FileTimingEntry> {
+    // Unparsed placeholder trees (excluded, binary, over max_files) still get
+    // resolve timings; only paths with a parse entry are real files.
+    let parsed: HashSet<&str> = timings
+        .iter()
+        .filter(|timing| timing.phase != "resolve")
+        .map(|timing| timing.path.as_str())
+        .collect();
     let mut by_path: HashMap<&str, FileTimingEntry> = HashMap::new();
-    for timing in timings {
+    for timing in timings.iter().filter(|t| parsed.contains(t.path.as_str())) {
         let ms = timing.elapsed.as_secs_f64() * 1000.0;
         let file = by_path
             .entry(&timing.path)
