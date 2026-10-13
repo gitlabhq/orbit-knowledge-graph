@@ -58,14 +58,14 @@ fixtures:
       }
 
 tests:
-  - name: "Positional record Point is extracted as definition_type Record"
+  - name: "Positional record Point is a Class with language_type Record"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Point'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.definition_type AS type, d.language_type AS language_type
     assert:
       - { row_count: 1 }
-      - { row: { name: "Point", type: "Class" } }
+      - { row: { name: "Point", type: "Class", language_type: "Record" } }
 
   - name: "Record implementing interface is extracted"
     query: |
@@ -77,14 +77,14 @@ tests:
       - { row: { type: "Class" } }
 
   # corrected: a record struct is a value type (C# spec 16.1), so it is a Struct
-  - name: "record struct Range is extracted as Record"
+  - name: "record struct Range is a Struct with language_type Record"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Range'
-      RETURN d.definition_type AS type
+      RETURN d.definition_type AS type, d.language_type AS language_type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Struct" } }
+      - { row: { type: "Struct", language_type: "Record" } }
 
   - name: "Method on a record is extracted"
     query: |

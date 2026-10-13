@@ -1327,6 +1327,7 @@ impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> 
         b.col("name")?.push_str(self.pool.get(self.def.name))?;
         b.col("definition_type")?
             .push_str(self.def.definition_type)?;
+        b.col("language_type")?.push_str(self.def.definition_type)?;
         write_range(b, &self.def.range)?;
         Ok(())
     }

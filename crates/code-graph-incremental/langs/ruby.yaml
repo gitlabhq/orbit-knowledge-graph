@@ -291,6 +291,7 @@ stages:
         replace: '(__def (__defname @$N) (__method) $P $B)'
       - match: '(singleton_method object: (self) name: $N parameters:? $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $P $B)'
+        tag: { language_type: SingletonMethod }
       - match: '(singleton_class value: (self) body: $B)'
         replace: '(rb_singleton $B)'
       - match: '(class name: $N superclass: (rb_super $S:__supertype $I:__import) body:? $B)'
@@ -299,6 +300,7 @@ stages:
         replace: '(__def (__defname @$N|strip=::) (__class) $B)'
       - match: '(module name: $N body:? $B)'
         replace: '(__def (__defname @$N|strip=::) (__class) $B)'
+        tag: { language_type: Module }
 
   - name: refs
     rules:

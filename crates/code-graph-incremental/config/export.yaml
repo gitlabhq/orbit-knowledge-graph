@@ -69,6 +69,7 @@ entities:
       - { name: fqn, type: Utf8, from: tag("fqn") }
       - { name: name, type: Utf8, from: child_sym("__defname") }
       - { name: definition_type, type: Utf8, from: tag("def_type") }
+      - { name: language_type, type: Utf8, from: 'or("tag:language_type", "tag:def_type")' }
       - { name: start_line, type: Int64, position: start_line, span: [tag:definition_span, __defname] }
       - { name: end_line, type: Int64, position: end_line, span: [tag:definition_span, __defname] }
       - { name: start_byte, type: Int64, position: start_byte, span: [tag:definition_span, __defname] }

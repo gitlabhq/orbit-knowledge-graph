@@ -285,12 +285,14 @@ stages:
       # Record components become implicit accessor methods (see the records stage)
       - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
+        tag: { language_type: Record }
       - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'
         replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - match: '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))'
         replace: '(__def (__defname @$N) (__enum) $M $$$ANN $$$B)'
       - match: '(annotation_type_declaration $M?:modifiers name: $N:identifier body: $B)'
         replace: '(__def (__defname @$N) (__interface) $M $B)'
+        tag: { language_type: AnnotationDeclaration }
 
   - name: records
     rules:

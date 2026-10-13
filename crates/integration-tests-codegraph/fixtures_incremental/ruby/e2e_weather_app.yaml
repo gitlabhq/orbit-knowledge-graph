@@ -103,6 +103,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp'
         AND d.definition_type = 'Class'
+        AND d.language_type = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -111,6 +112,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Class'
+        AND d.language_type = 'Class'
         AND d.fqn IN ['WeatherApp::Forecast', 'WeatherApp::CLI',
                        'WeatherApp::Formatter', 'WeatherApp::WeatherService',
                        'WeatherApp::UnknownCityError']
@@ -128,25 +130,25 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Instance method run uses :: separator"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
         AND d.definition_type = 'Method'
+        AND d.language_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Singleton method uses :: separator"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
         AND d.definition_type = 'Method'
+        AND d.language_type = 'SingletonMethod'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # ── Containment edges ─────────────────────────────────────────
   - name: "Module defines Class"

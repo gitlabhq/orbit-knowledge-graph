@@ -53,7 +53,8 @@ mod tests {
             .execute(
                 "CREATE TABLE gl_definition (
                     id BIGINT, project_id BIGINT, commit_sha VARCHAR, fqn VARCHAR, name VARCHAR,
-                    definition_type VARCHAR, file_path VARCHAR, start_line BIGINT, end_line BIGINT
+                    definition_type VARCHAR, language_type VARCHAR, file_path VARCHAR,
+                    start_line BIGINT, end_line BIGINT
                 )",
                 &[],
             )
@@ -61,12 +62,12 @@ mod tests {
         client
             .execute(
                 "INSERT INTO gl_definition VALUES
-                    (7, 11, 'current', 'Same::name', 'name', 'Method', 'src/a.rs', 3, 5),
-                    (8, 11, 'current', 'Same::name', 'name', 'Method', 'src/b.rs', 7, 9),
-                    (7, 12, 'current', 'Wrong::project', 'name', 'Method', 'src/x.rs', 1, 1),
-                    (8, 11, 'old', 'Wrong::commit', 'name', 'Method', 'src/y.rs', 1, 1),
-                    (9, 12, 'current', 'Only::other_project', 'name', 'Method', 'src/x.rs', 1, 1),
-                    (10, 11, 'old', 'Only::old_commit', 'name', 'Method', 'src/y.rs', 1, 1)",
+                    (7, 11, 'current', 'Same::name', 'name', 'Method', 'Method', 'src/a.rs', 3, 5),
+                    (8, 11, 'current', 'Same::name', 'name', 'Method', 'Method', 'src/b.rs', 7, 9),
+                    (7, 12, 'current', 'Wrong::project', 'name', 'Method', 'Method', 'src/x.rs', 1, 1),
+                    (8, 11, 'old', 'Wrong::commit', 'name', 'Method', 'Method', 'src/y.rs', 1, 1),
+                    (9, 12, 'current', 'Only::other_project', 'name', 'Method', 'Method', 'src/x.rs', 1, 1),
+                    (10, 11, 'old', 'Only::old_commit', 'name', 'Method', 'Method', 'src/y.rs', 1, 1)",
                 &[],
             )
             .unwrap();

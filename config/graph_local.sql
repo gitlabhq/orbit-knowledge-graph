@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     fqn VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
     definition_type VARCHAR NOT NULL,
+    language_type VARCHAR NOT NULL,
     start_line BIGINT NOT NULL,
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,

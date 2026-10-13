@@ -1,0 +1,54 @@
+name: JVM language-specific definition types next to the canonical type
+fixtures:
+  - path: app/Config.kt
+    content: |
+      object Config {
+          fun load() {}
+      }
+
+      class Service {
+          companion object {
+              fun create() {}
+          }
+      }
+  - path: app/Registry.scala
+    content: |
+      object Registry {
+        def lookup(): Unit = {}
+      }
+  - path: src/Audited.java
+    content: |
+      public @interface Audited {
+          String value();
+      }
+
+tests:
+  - name: Kotlin objects keep the Object language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['Config', 'Companion', 'Service']
+      RETURN d.name AS name, d.definition_type AS type, d.language_type AS language_type
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "Companion", type: "Class", language_type: "Object" } }
+      - { row: { name: "Config", type: "Class", language_type: "Object" } }
+      - { row: { name: "Service", type: "Class", language_type: "Class" } }
+
+  - name: Scala object keeps the Object language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Registry'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class", language_type: "Object" } }
+
+  - name: Java annotation keeps the AnnotationDeclaration language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Audited'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Interface", language_type: "AnnotationDeclaration" } }

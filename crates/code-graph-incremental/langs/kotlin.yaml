@@ -226,10 +226,13 @@ stages:
       # Class-likes
       - match: '(companion_object $N:type_identifier $B:class_body)'
         replace: '(__def (__defname @$N) (__class) (__impl) $B)'
+        tag: { language_type: Object }
       - match: '(companion_object $B:class_body)'
         replace: '(__def (__defname "Companion") (__class) (__impl) $B)'
+        tag: { language_type: Object }
       - match: '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $$$D $B)'
+        tag: { language_type: Object }
       - match: '(class_declaration $M?:modifiers (interface) $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__interface) $M $$$D $B)'
       - match: '(class_declaration $M?:modifiers (enum) $N:type_identifier $P?:primary_constructor $$$D:__supertype $B?:enum_class_body)'

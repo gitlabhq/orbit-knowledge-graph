@@ -138,8 +138,10 @@ stages:
         replace: '(__def (__defname @$N) (__trait) $M $$$PRE $B)'
       - match: '(object_definition $M?:modifiers name: $N:identifier $$$PRE (extends_clause $S:__supertype $$$W:__supertype) $B?:template_body)'
         replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$W (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+        tag: { language_type: Object }
       - match: '(object_definition $M?:modifiers name: $N:identifier $$$PRE $B?:template_body)'
         replace: '(__def (__defname @$N) (__class) $M $$$PRE $B)'
+        tag: { language_type: Object }
 
   - name: ssa-cleanup
     rules:

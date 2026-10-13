@@ -5,7 +5,7 @@ domain: source_code
 description: A code definition such as a class, function, method, or module
 label: name
 destination_table: gl_definition
-default_columns: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
+default_columns: [id, name, fqn, definition_type, language_type, file_path, commit_sha, start_line, end_line]
 sort_key: [traversal_path, project_id, branch, id]
 
 style:
@@ -84,7 +84,15 @@ properties:
     source: definition_type
     nullable: false
     mutable: false
-    description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda)."
+    description: "Definition type, the same across languages (e.g., Class, Method, Function, Struct, Interface, Enum, Trait, Lambda). Use language_type for the name the source language uses."
+    selectivity: low
+
+  language_type:
+    type: string
+    source: language_type
+    nullable: false
+    mutable: false
+    description: "Definition type as the source language names it (e.g., Module, SingletonMethod, Record, Object). Equal to definition_type when the language has no more specific name."
     selectivity: low
 
   start_line:
@@ -152,6 +160,7 @@ storage:
     - {name: fqn, type: "String", codec: ["ZSTD(9)"]}
     - {name: name, type: "String", codec: ["ZSTD(9)"]}
     - {name: definition_type, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: language_type, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: start_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
@@ -165,3 +174,4 @@ storage:
     - {name: idx_fqn, column: fqn, type: text, granularity: 1}
     - {name: idx_file_path, column: file_path, type: text, granularity: 1}
     - {name: idx_definition_type, column: definition_type, type: "set(20)", granularity: 2}
+    - {name: idx_language_type, column: language_type, type: "set(50)", granularity: 2}

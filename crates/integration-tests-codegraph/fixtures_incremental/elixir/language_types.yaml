@@ -1,0 +1,26 @@
+name: Elixir language-specific definition types next to the canonical type
+fixtures:
+  - path: lib/greeter.ex
+    content: |
+      defmodule Greeter do
+        def hello(name), do: name
+      end
+
+tests:
+  - name: Elixir defmodule keeps the Module language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Greeter'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class", language_type: "Module" } }
+
+  - name: A definition with no language-specific name repeats its canonical type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'hello'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Function", language_type: "Function" } }

@@ -2912,6 +2912,7 @@ style:
                 "name",
                 "fqn",
                 "definition_type",
+                "language_type",
                 "file_path",
                 "commit_sha",
                 "start_line",

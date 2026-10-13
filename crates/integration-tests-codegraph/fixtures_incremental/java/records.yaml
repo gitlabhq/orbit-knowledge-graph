@@ -223,14 +223,14 @@ fixtures:
 tests:
   # ── Record definitions ────────────────────────────────────────────
 
-  - name: "Simple record is extracted as definition_type Record"
+  - name: "Simple record is a Class with language_type Record"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.records.Point'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.definition_type AS type, d.language_type AS language_type
     assert:
       - { row_count: 1 }
-      - { row: { name: "Point", type: "Class" } }
+      - { row: { name: "Point", type: "Class", language_type: "Record" } }
 
   - name: "Record with constructor and method is extracted"
     query: |
@@ -250,11 +250,11 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Class" } }
 
-  # corrected: records display as the canonical Class, so the ten are named
   - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn IN ['com.example.records.Bounds', 'com.example.records.Circle', 'com.example.records.Pair', 'com.example.records.Point', 'com.example.records.Range', 'com.example.records.Rectangle', 'com.example.records.Vector', 'com.example.records.Wrapped', 'com.example.records.Pair.Swap', 'com.example.records.Outer.Inner']
+      WHERE d.language_type = 'Record'
+        AND d.fqn IN ['com.example.records.Bounds', 'com.example.records.Circle', 'com.example.records.Pair', 'com.example.records.Point', 'com.example.records.Range', 'com.example.records.Rectangle', 'com.example.records.Vector', 'com.example.records.Wrapped', 'com.example.records.Pair.Swap', 'com.example.records.Outer.Inner']
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:

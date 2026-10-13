@@ -220,8 +220,10 @@ stages:
         replace: '(__def (__defname @$N) (__class) $$$PRE $$$ANN $$$B)'
       - match: '(record_declaration $$$PRE ("struct") name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $P $$$B)'
+        tag: { language_type: Record }
       - match: '(record_declaration $$$PRE name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__class) $$$PRE $$$ANN $P $$$B)'
+        tag: { language_type: Record }
       - match: '(struct_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $$$B)'
       - match: '(interface_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))'

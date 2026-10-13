@@ -74,6 +74,7 @@ A function, class, method, module, or other named symbol declared in a file.
 | `fqn` | Fully qualified name of a function, class, module, method, struct, enum, or trait |
 | `name` | Short name, without namespace qualification |
 | `definition_type` | Kind of definition, such as `Class`, `Function`, `Method`, or `Struct`. Values are capitalized and language-specific. |
+| `language_type` | Same value as `definition_type` in a local index. |
 | `start_line` | First line of the definition |
 | `end_line` | Last line of the definition |
 | `start_byte` | Byte offset where the definition starts |

@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     fqn String CODEC(ZSTD(9)),
     name String CODEC(ZSTD(9)),
     definition_type LowCardinality(String) CODEC(LZ4),
+    language_type LowCardinality(String) CODEC(LZ4),
     start_line Int64 CODEC(T64, ZSTD(1)),
     end_line Int64 CODEC(T64, ZSTD(1)),
     start_byte Int64 CODEC(T64, ZSTD(1)),
@@ -115,7 +116,8 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_fqn_ngram lower(fqn) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_file_path lower(file_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_file_path_ngram lower(file_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2
+    INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2,
+    INDEX idx_language_type language_type TYPE set(50) GRANULARITY 2
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, auto_statistics_types = 'minmax, uniq, countmin';
