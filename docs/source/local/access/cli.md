@@ -192,8 +192,21 @@ For every agent it configures, `orbit setup`:
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- Installs the `orbit-cli` skill into `.agents/skills/`. Claude Code does not
-  scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
+- Installs one skill named `orbit` into `.agents/skills/`. Claude Code does not
+  scan that directory, so it also gets a `.claude/skills/orbit` link. By default
+  this is a thin wrapper that runs `orbit skills get orbit` when the agent loads
+  it, so installing needs no network. Pass `--skill full` to write the skill
+  files themselves, for agents that cannot run a command when they load a skill,
+  such as GitLab Duo CLI. `full` uses the skill your instance serves when
+  credentials resolve and the instance answers, and the skill embedded in the
+  binary otherwise. The directory name stays `orbit` in both cases. Setup
+  overwrites an existing `orbit` skill, such as one from `glab skills install`,
+  and removes the `orbit-cli` skill and link that earlier releases installed.
+- For Claude Code, adds `Bash(orbit skills get orbit)` and
+  `Bash(orbit skills get orbit *)` to `permissions.allow` in `settings.json`, so
+  the wrapper skill loads without a permission prompt. Under `glab orbit` the
+  rules read `Bash(glab orbit skills get orbit)` and
+  `Bash(glab orbit skills get orbit *)`.
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
 - Adds entries to that agent's JSON configuration, where the agent
@@ -225,8 +238,9 @@ orbit uninstall
 
 It lists the detected agents that have GitLab Orbit installed in that scope.
 Name agents to target only those. It removes what `orbit setup` wrote and leaves
-the rest of each file untouched. Files you edited after setup are kept, and so
-are their backups. A backup goes away once its file is back to the original.
+the rest of each file untouched. Setup marks the skill directory it writes with a `.orbit-managed` file, and
+uninstall removes only directories that carry it. Other files you edited after
+setup are kept, and so are their backups. A backup goes away once its file is back to the original.
 `--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
@@ -248,6 +262,12 @@ Tables combine by column name across revision schemas.
 
 If you used the earlier shared `graph.duckdb`, run `orbit index` to populate the new layout.
 The old file remains on disk.
+
+To keep the graph and settings somewhere else, set `ORBIT_DATA_DIR` to a directory.
+Every command that reads the graph, such as `index` and `sql`, then uses
+`$ORBIT_DATA_DIR/graph.duckdb`, and `orbit config` uses
+`$ORBIT_DATA_DIR/settings.json`. The directory is created when needed.
+`--db` still overrides the graph file for a single command.
 
 ## Configure the CLI
 
