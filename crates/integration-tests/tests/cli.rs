@@ -252,7 +252,18 @@ fn incremental_reindex_follows_the_working_tree() {
         );
     };
     let names = |sql: &str| -> Vec<String> {
-        rows(&orbit_sql(sql, data_dir.path()))
+        let output = orbit_cmd()
+            .args(["sql", "-F", "json", "--repo", repo.to_str().unwrap(), sql])
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "sql failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output: Value = serde_json::from_slice(&output.stdout).unwrap();
+        rows(&output)
             .iter()
             .map(|r| r["n"].as_str().unwrap().to_string())
             .collect()
@@ -277,6 +288,17 @@ fn incremental_reindex_follows_the_working_tree() {
     assert_eq!(
         names(definitions),
         sorted(&[&["run", "util::helper"][..], &ruby].concat())
+    );
+
+    std::fs::write(
+        repo.join("src/util.rs"),
+        "pub fn helper() {}\npub fn uncommitted() {}\n",
+    )
+    .unwrap();
+    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    assert_eq!(
+        names(definitions),
+        sorted(&[&["run", "util::helper", "util::uncommitted"][..], &ruby].concat())
     );
 
     std::fs::write(
