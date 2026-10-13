@@ -8,6 +8,7 @@ use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
+use circuit_breaker::CircuitBreakableError;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;

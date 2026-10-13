@@ -159,6 +159,16 @@ The query engine fires a single counter during compilation, with a closed-enum `
 |---|---|---|---|
 | `gkg.query.engine.compiler.rejected` | Counter | `failure_reason` (parse/schema/reference/pagination/ontology/ontology_internal/authorization/depth/limit/security/lowering/enforcement/codegen/pipeline) | Total queries the compiler rejected before execution. Filter on `failure_reason` to recover per-class breakdowns previously held in the per-variant threat counters. |
 
+*Circuit breaker metrics (resilience):*
+
+The circuit breaker wraps external service calls (initially ClickHouse) and tracks state transitions and call outcomes. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.circuit_breaker.state.transitions` | Counter | count | `service`, `from`, `to` | Circuit breaker state transitions (closed→open, open→half_open, half_open→closed, etc.) |
+| `gkg.circuit_breaker.calls.rejected` | Counter | count | `service` | Calls rejected because the circuit was open |
+| `gkg.circuit_breaker.calls` | Counter | count | `service`, `outcome` (success/failure) | Classified call outcomes through the circuit breaker |
+
 *Billing event metrics:*
 
 The billing observer instruments the path from a successful query to a Snowplow billing event handed to the labkit tracker. Used to detect when the emission pipeline silently fails. For example, the realm claim disappears from JWTs upstream, or the tracker refuses events at enqueue. All three series are pre-registered at zero on startup so `rate(...) == 0` alerts compare against an actual zero rather than an absent series.
@@ -214,6 +224,13 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the Orb
 | `OrbitExecutionFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="execution"}` | > 1/min | warning | 5m | ClickHouse query execution is failing |
 | `OrbitAuthorizationFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="authorization"}` | > 1/min | warning | 5m | Rails authorization exchange is failing |
 | `OrbitPipelineLatencyP95High` | `gkg_query_pipeline_duration_seconds` (histogram) | > 5s | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
+
+**Resilience alerts** (circuit breaker):
+
+| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
+|---|---|---|---|---|---|
+| `OrbitCircuitBreakerOpen` | `gkg_circuit_breaker_state_transitions_total{to="open"}` | > 0 in 5m | warning | 1m | A circuit breaker opened, meaning an external service is unreachable and calls are being shed |
+| `OrbitCircuitBreakerRejectRateHigh` | `gkg_circuit_breaker_calls_rejected_total` | > 10/min | warning | 5m | High rate of rejected calls — circuit is open and shedding significant traffic |
 
 **Capacity alerts** (traffic and limit pressure):
 

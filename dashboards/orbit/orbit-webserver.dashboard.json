@@ -6261,7 +6261,7 @@
       "type": "row"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -6269,6 +6269,173 @@
         "y": 354
       },
       "id": 122,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Classified call outcomes through the circuit breaker.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 355
+          },
+          "id": 123,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (service, outcome) (rate(gkg_circuit_breaker_calls_total{container=~\"(gkg|orbit)-.*\", cluster=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{service}} / {{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_circuit_breaker_calls_total — rate/s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Calls rejected by an open circuit breaker.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 355
+          },
+          "id": 124,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (service) (rate(gkg_circuit_breaker_calls_rejected_total{container=~\"(gkg|orbit)-.*\", cluster=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_circuit_breaker_calls_rejected_total — rate/s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Circuit-breaker state transitions, labelled by service and direction.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 355
+          },
+          "id": 125,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (service, from, to) (rate(gkg_circuit_breaker_state_transitions_total{container=~\"(gkg|orbit)-.*\", cluster=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{service}} / {{from}} / {{to}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_circuit_breaker_state_transitions_total — rate/s",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Circuit breaker (reference)",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 363
+      },
+      "id": 126,
       "panels": [],
       "title": "Rails Orbit — request (reference)",
       "type": "row"
@@ -6294,9 +6461,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 355
+        "y": 364
       },
-      "id": 123,
+      "id": 127,
       "options": {
         "legend": {
           "calcs": [
@@ -6363,9 +6530,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 355
+        "y": 364
       },
-      "id": 124,
+      "id": 128,
       "options": {
         "legend": {
           "calcs": [
@@ -6414,9 +6581,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 355
+        "y": 364
       },
-      "id": 125,
+      "id": 129,
       "options": {
         "legend": {
           "calcs": [
@@ -6465,9 +6632,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 363
+        "y": 372
       },
-      "id": 126,
+      "id": 130,
       "options": {
         "legend": {
           "calcs": [
@@ -6534,9 +6701,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 363
+        "y": 372
       },
-      "id": 127,
+      "id": 131,
       "options": {
         "legend": {
           "calcs": [
@@ -6585,9 +6752,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 363
+        "y": 372
       },
-      "id": 128,
+      "id": 132,
       "options": {
         "legend": {
           "calcs": [
@@ -6654,9 +6821,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 371
+        "y": 380
       },
-      "id": 129,
+      "id": 133,
       "options": {
         "legend": {
           "calcs": [
@@ -6705,9 +6872,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 371
+        "y": 380
       },
-      "id": 130,
+      "id": 134,
       "options": {
         "legend": {
           "calcs": [
@@ -6774,9 +6941,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 371
+        "y": 380
       },
-      "id": 131,
+      "id": 135,
       "options": {
         "legend": {
           "calcs": [
@@ -6825,9 +6992,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 379
+        "y": 388
       },
-      "id": 132,
+      "id": 136,
       "options": {
         "legend": {
           "calcs": [
@@ -6894,9 +7061,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 379
+        "y": 388
       },
-      "id": 133,
+      "id": 137,
       "options": {
         "legend": {
           "calcs": [
@@ -6945,9 +7112,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 379
+        "y": 388
       },
-      "id": 134,
+      "id": 138,
       "options": {
         "legend": {
           "calcs": [
@@ -7014,9 +7181,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 387
+        "y": 396
       },
-      "id": 135,
+      "id": 139,
       "options": {
         "legend": {
           "calcs": [
@@ -7050,9 +7217,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 395
+        "y": 404
       },
-      "id": 136,
+      "id": 140,
       "panels": [],
       "title": "Rails Orbit — traversal (reference)",
       "type": "row"
@@ -7078,9 +7245,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 396
+        "y": 405
       },
-      "id": 137,
+      "id": 141,
       "options": {
         "legend": {
           "calcs": [
@@ -7147,9 +7314,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 396
+        "y": 405
       },
-      "id": 138,
+      "id": 142,
       "options": {
         "legend": {
           "calcs": [
@@ -7198,9 +7365,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 396
+        "y": 405
       },
-      "id": 139,
+      "id": 143,
       "options": {
         "legend": {
           "calcs": [
@@ -7267,9 +7434,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 404
+        "y": 413
       },
-      "id": 140,
+      "id": 144,
       "options": {
         "legend": {
           "calcs": [
@@ -7318,9 +7485,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 404
+        "y": 413
       },
-      "id": 141,
+      "id": 145,
       "options": {
         "legend": {
           "calcs": [
@@ -7369,9 +7536,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 404
+        "y": 413
       },
-      "id": 142,
+      "id": 146,
       "options": {
         "legend": {
           "calcs": [

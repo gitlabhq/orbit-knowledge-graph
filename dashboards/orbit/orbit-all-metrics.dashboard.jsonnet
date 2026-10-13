@@ -18,6 +18,7 @@ local items =
   + o.section('Schema watcher (webserver)', o.metricsInDomain('server.schema_watcher'), 'ORBIT_DS', o.GKG_WEB_SEL)
   + o.section('Billing events (webserver)', o.metricsInDomain('billing.events'), 'ORBIT_DS', o.GKG_WEB_SEL)
   + o.section('Billing quota (webserver)', o.metricsInDomain('billing.quota'), 'ORBIT_DS', o.GKG_WEB_SEL)
+  + o.section('Circuit breaker (CH / NATS / GitLab clients)', o.metricsInDomain('resilience.circuit_breaker'), 'ORBIT_DS', o.GKG_ANY_SEL)
   + o.externalSection('Siphon producers', ext.SIPHON_PRODUCERS, 'ORBIT_DS', o.SIPHON_SEL)
   + o.externalSection('Siphon ClickHouse consumers', ext.SIPHON_CONSUMERS, 'ORBIT_DS', o.SIPHON_SEL)
   + o.externalSection('NATS JetStream + varz', ext.NATS_METRICS, 'ORBIT_DS', o.NATS_SEL)

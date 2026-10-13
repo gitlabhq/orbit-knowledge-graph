@@ -1,3 +1,4 @@
+use circuit_breaker::CircuitBreakableError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,6 +17,9 @@ pub enum ClickHouseError {
 
     #[error("bad response ({status}): {body}")]
     BadResponse { status: u16, body: String },
+
+    #[error("circuit open for service {service}")]
+    CircuitOpen { service: &'static str },
 }
 
 fn is_clickhouse_error_transient(error: &clickhouse::error::Error) -> bool {
@@ -32,12 +36,16 @@ fn is_memory_limit_exceeded(message: &str) -> bool {
     message.contains("MEMORY_LIMIT_EXCEEDED")
 }
 
-impl ClickHouseError {
-    pub(crate) fn is_transient(&self) -> bool {
+impl CircuitBreakableError for ClickHouseError {
+    fn is_transient(&self) -> bool {
         match self {
             Self::Query(inner) | Self::Insert(inner) => is_clickhouse_error_transient(inner),
             Self::BadResponse { status, .. } => *status >= 500,
             _ => false,
         }
+    }
+
+    fn circuit_open(service: &'static str) -> Self {
+        Self::CircuitOpen { service }
     }
 }
