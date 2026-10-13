@@ -833,7 +833,7 @@ fn setup_full_falls_back_to_the_embedded_skill_when_the_instance_fails() {
         installed_manifest(&skills);
         assert!(skills.join("orbit/references/local/cli.md").is_file());
         assert!(!skills.join("orbit/references/remote.md").exists());
-        server.join().unwrap();
+        assert_eq!(server.join().unwrap().len(), 1, "{status}");
     }
 }
 

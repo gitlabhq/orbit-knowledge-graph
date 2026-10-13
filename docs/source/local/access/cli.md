@@ -239,8 +239,10 @@ orbit uninstall
 It lists the detected agents that have GitLab Orbit installed in that scope.
 Name agents to target only those. It removes what `orbit setup` wrote and leaves
 the rest of each file untouched. Setup marks the skill directory it writes with a `.orbit-managed` file, and
-uninstall removes only directories that carry it. Other files you edited after
-setup are kept, and so are their backups. A backup goes away once its file is back to the original.
+uninstall removes only directories that carry it. It also removes the `orbit-cli`
+skill that earlier releases installed, but only the files Orbit shipped when
+that directory has no marker. Other files you edited after setup are kept, and
+so are their backups. A backup goes away once its file is back to the original.
 `--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the

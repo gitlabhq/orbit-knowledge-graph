@@ -817,6 +817,72 @@ mod tests {
         assert!(legacy.join("SKILL.md").is_file());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn setup_replaces_a_foreign_claude_skill_with_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let foreign = dir.path().join(".claude/skills/orbit");
+        std::fs::create_dir_all(&foreign).unwrap();
+        std::fs::write(foreign.join("SKILL.md"), "---\nname: orbit\n---\nforeign\n").unwrap();
+        let elsewhere = dir.path().join(".claude/skills/other");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        install_with_mcp(&["claude"], dir.path());
+
+        let expected = Path::new("../../.agents/skills/orbit");
+        assert_eq!(std::fs::read_link(&foreign).unwrap(), expected);
+        assert!(
+            std::fs::read_to_string(foreign.join("SKILL.md"))
+                .unwrap()
+                .contains("skills get orbit")
+        );
+
+        std::fs::remove_file(&foreign).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &foreign).unwrap();
+        install_with_mcp(&["claude"], dir.path());
+        assert_eq!(std::fs::read_link(&foreign).unwrap(), expected);
+        assert!(elsewhere.is_dir());
+    }
+
+    #[test]
+    fn migration_keeps_files_the_user_added_to_an_unmarked_legacy_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        std::fs::create_dir_all(legacy.join("references/local")).unwrap();
+        std::fs::write(legacy.join("SKILL.md"), "---\nname: orbit-cli\n---\n").unwrap();
+        std::fs::write(legacy.join("references/local/sql.md"), "shipped\n").unwrap();
+        std::fs::write(legacy.join("my-notes.md"), "mine\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("my-notes.md")).unwrap(),
+            "mine\n"
+        );
+        assert!(!legacy.join("SKILL.md").exists());
+        assert!(!legacy.join("references").exists());
+        assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn uninstall_removes_allow_rules_written_under_either_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            r#"{"permissions":{"allow":["Bash(glab orbit skills get orbit)","Bash(glab orbit skills get orbit *)","Bash(ls)"]}}"#,
+        )
+        .unwrap();
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(
+            read_json(&settings)["permissions"]["allow"],
+            json!(["Bash(ls)"])
+        );
+    }
+
     #[test]
     fn claude_may_run_the_wrapper_command_without_asking() {
         let dir = tempfile::tempdir().unwrap();

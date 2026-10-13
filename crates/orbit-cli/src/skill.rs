@@ -34,6 +34,11 @@ pub(crate) const INSTALL_DIR_NAME: &str = "orbit";
 pub(crate) const LEGACY_INSTALL_DIR_NAME: &str = "orbit-cli";
 const GLAB_SKILLS_GET: &str = "glab orbit skills get orbit";
 
+/// Paths the embedded local skill ships; earlier releases installed exactly these as `orbit-cli`.
+pub(crate) fn embedded_paths() -> Vec<String> {
+    SkillAssets::iter().map(|path| path.to_string()).collect()
+}
+
 /// The thin skill that loads the real one when the agent reads it. No network is needed to install it.
 pub(crate) fn wrapper_tree() -> Result<BTreeMap<String, Vec<u8>>> {
     let launcher = crate::commands::setup::spec::launcher();

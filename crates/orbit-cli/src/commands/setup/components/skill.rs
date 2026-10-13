@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -7,7 +7,7 @@ use super::json;
 use super::{Installer, Report, backup_once, file_mentions, remove_empty_parents, write_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
-use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME};
+use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_paths};
 
 /// Written into every directory this component installs. Content cannot identify it, because the
 /// full skill depends on the instance.
@@ -44,7 +44,13 @@ impl Installer for Skill<'_> {
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for skill in skill_targets(agents, target)? {
             if let Some(legacy_link) = &skill.legacy_link {
-                remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
+                remove_legacy_link(
+                    legacy_link,
+                    &skill.legacy_link_label,
+                    &skill.legacy_root,
+                    target,
+                    report,
+                )?;
             }
             remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
             write_skill_files(&skill.root, &skill.label, self.tree, report)?;
@@ -68,7 +74,13 @@ impl Installer for Skill<'_> {
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for skill in skill_targets(agents, target)? {
             if let Some(legacy_link) = &skill.legacy_link {
-                remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
+                remove_legacy_link(
+                    legacy_link,
+                    &skill.legacy_link_label,
+                    &skill.legacy_root,
+                    target,
+                    report,
+                )?;
             }
             remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
             if let Some(link) = &skill.link {
@@ -193,9 +205,12 @@ fn remove_permissions(agent: Agent, target: &Target, report: &mut Report) -> Res
     }
     let mut root = json::read_object(&path)?;
     let mut changed = false;
-    for rule in &permissions.rules {
-        let rule = rule.replace("{{orbit}}", spec::launcher());
-        changed |= json::remove_value(&mut root, &ALLOW_PATH.map(String::from), &rule);
+    // Either distribution may have written the rules, whichever one runs the uninstall.
+    for launcher in [spec::DIRECT_LAUNCHER, spec::GLAB_LAUNCHER] {
+        for rule in &permissions.rules {
+            let rule = rule.replace("{{orbit}}", launcher);
+            changed |= json::remove_value(&mut root, &ALLOW_PATH.map(String::from), &rule);
+        }
     }
     if changed {
         json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
@@ -266,21 +281,19 @@ fn link_skill_dir(
     tree: &BTreeMap<String, Vec<u8>>,
     report: &mut Report,
 ) -> Result<()> {
-    if let Ok(metadata) = std::fs::symlink_metadata(link_path) {
-        let state = if metadata.is_symlink() {
-            "already linked"
-        } else {
-            "kept (exists)"
-        };
-        report.note(label, state);
+    let link_target = relative_path_from_link(link_path, skill_root);
+    if std::fs::read_link(link_path).is_ok_and(|current| current == link_target) {
+        report.note(label, "already linked");
         return Ok(());
     }
+    // Anything else here (a foreign skill, a stale copy, another link) would shadow the install.
+    remove_path(link_path)?;
     if let Some(parent) = link_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    match symlink_dir(&relative_path_from_link(link_path, skill_root), link_path) {
+    match symlink_dir(&link_target, link_path) {
         Ok(()) => {
             report.note(label, format!("linked to {skill_label}"));
             Ok(())
@@ -311,23 +324,65 @@ fn remove_skill_files(
     Ok(())
 }
 
-/// Removes what an earlier release installed as `orbit-cli`: a link into the shared directory,
-/// or a directory that is marked or still has the old manifest name. Anything else is the user's.
+/// Removes the link an earlier release made to the `orbit-cli` skill. Other links are the user's.
+fn remove_legacy_link(
+    link: &Path,
+    label: &str,
+    legacy_root: &Path,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
+    let ours = std::fs::read_link(link)
+        .is_ok_and(|current| current == relative_path_from_link(link, legacy_root));
+    if !ours {
+        return Ok(());
+    }
+    remove_path(link)?;
+    remove_empty_parents(link, &target.root()?);
+    report.note(label, "legacy skill removed");
+    Ok(())
+}
+
+/// Removes what an earlier release installed as `orbit-cli`. A marked directory goes whole. An
+/// unmarked one with the old manifest name loses only the files release shipped; anything the
+/// user added stays.
 fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
     };
-    let owned = match metadata.is_symlink() {
-        true => std::fs::read_link(path).is_ok_and(|to| {
-            to.file_name()
-                .is_some_and(|name| name == LEGACY_INSTALL_DIR_NAME)
-        }),
-        false => path.join(MARKER_FILE).exists() || has_legacy_manifest(path),
-    };
-    if !owned {
+    if metadata.is_symlink() || !path.is_dir() {
         return Ok(());
     }
-    remove_path(path)?;
+    if path.join(MARKER_FILE).exists() {
+        remove_path(path)?;
+    } else if has_legacy_manifest(path) {
+        let mut directories = BTreeSet::new();
+        for relative in embedded_paths() {
+            let file = path.join(&relative);
+            if std::fs::remove_file(&file).is_ok() {
+                directories.extend(
+                    file.ancestors()
+                        .skip(1)
+                        .take_while(|directory| directory.starts_with(path))
+                        .map(Path::to_path_buf),
+                );
+            }
+        }
+        let mut deepest_first: Vec<PathBuf> = directories.into_iter().collect();
+        deepest_first.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
+        for directory in &deepest_first {
+            let _ = std::fs::remove_dir(directory);
+        }
+        if path.exists() {
+            report.note(
+                label,
+                "kept (has files that are not Orbit's; delete it by hand)",
+            );
+            return Ok(());
+        }
+    } else {
+        return Ok(());
+    }
     remove_empty_parents(path, &target.root()?);
     report.note(label, "legacy skill removed");
     Ok(())
