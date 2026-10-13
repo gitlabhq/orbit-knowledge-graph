@@ -195,30 +195,14 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Que
         .count_err()
 }
 
-/// Compile a pre-built hydration `Input` into ClickHouse SQL.
-///
-/// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
-/// Skips validation, normalization, security, check, and hydrate plan passes.
-/// Codegen defaults to `HydrationPlan::None`.
-pub fn compile_input(
-    input: Input,
-    options: HydrationCompileOptions,
-    ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_input_model(input, options, &data_model, ctx)
-}
-
-pub fn compile_input_model(
-    input: Input,
+pub fn compile_hydration(
+    query: Query,
     options: HydrationCompileOptions,
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
-    ctx.set_input(input);
+    ctx.set_query(query);
     ctx.set_hydration_options(options);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {

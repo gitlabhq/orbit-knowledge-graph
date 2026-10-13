@@ -636,7 +636,8 @@ fn name<'i>(node: &Node<'i>) -> Result<Name<'i>> {
         .strip_prefix('`')
         .and_then(|s| s.strip_suffix('`'))
         .map_or_else(|| raw.to_owned(), |s| s.replace("``", "`"));
-    crate::input::validate_identifier(&value).map_err(|error| node.error(error))?;
+    crate::passes::bind::validate_identifier(&value)
+        .map_err(|error| node.error(error.to_string()))?;
     Ok(Name {
         span: node.as_span(),
         value,

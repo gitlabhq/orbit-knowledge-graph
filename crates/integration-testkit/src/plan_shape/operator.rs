@@ -29,6 +29,7 @@ operators! {
     Hole => "_",
     Sequence => "...",
     Input => "Input",
+    Query => "Query",
     NodeScan => "NodeScan",
     EdgeScan => "EdgeScan",
     Filter => "Filter",

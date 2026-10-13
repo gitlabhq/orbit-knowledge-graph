@@ -6,11 +6,11 @@ query:
     MATCH (f:File {id: 1}) RETURN f.path
 hydration: {}
 logical:
-  expect: ["(Input hydration (...))"]
+  expect: ["(Query hydration (...))"]
 physical:
   clickhouse:
     planned:
-      expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
+      expect: ["(Hydration (Project hydrate.path (Filter hydrate._deleted = false (Deduplicate LimitBy hydrate.traversal_path, hydrate.project_id, hydrate.branch, hydrate.id (_)))))"]
     emitted:
-      expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
-      reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]
+      expect: ["(Project hydrate.id AS id, hydrate._deleted AS _deleted, hydrate.path AS path (_))"]
+      reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(hydrate.traversal_path, ?), ... (_))"]

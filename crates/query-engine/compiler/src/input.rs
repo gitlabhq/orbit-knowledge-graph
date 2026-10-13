@@ -1,7 +1,6 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -52,20 +51,6 @@ fn aggregation_sort_regex() -> &'static regex::Regex {
     })
 }
 
-pub(crate) fn validate_identifier(identifier: &str) -> Result<(), String> {
-    let mut chars = identifier.chars();
-    if identifier.len() <= crate::query_limits::MAX_IDENTIFIER_LEN
-        && chars
-            .next()
-            .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
-    {
-        Ok(())
-    } else {
-        Err(format!("invalid identifier {identifier:?}"))
-    }
-}
-
 /// Optional presentation hints that control response shape without affecting query
 /// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -106,22 +91,6 @@ pub struct JoinPredicate {
     pub op: FilterOp,
     pub rhs_node: String,
     pub rhs_prop: String,
-}
-
-impl Input {
-    /// Whether this query has the "search shape": a single-node table scan
-    /// with no relationships (traversal with 1 node + 0 relationships).
-    pub fn is_search(&self) -> bool {
-        self.query_type == QueryType::Traversal
-            && self.nodes.len() == 1
-            && self.relationships.is_empty()
-    }
-
-    /// Rows to fetch from ClickHouse: the page window plus one probe row that
-    /// proves `has_more` without being returned.
-    pub fn fetch_limit(&self) -> u32 {
-        self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
-    }
 }
 
 impl Default for Input {
@@ -174,11 +143,6 @@ pub struct InputNode {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub id_property: String,
-    /// Narrowed traversal paths extracted from base query results. Used by the
-    /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
-    /// queries, pruning granules through the primary key.
-    #[serde(skip)]
-    pub traversal_paths: Vec<TraversalPath>,
 }
 
 impl Default for InputNode {
@@ -191,7 +155,6 @@ impl Default for InputNode {
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
-            traversal_paths: Vec::new(),
         }
     }
 }
@@ -274,12 +237,6 @@ pub struct InputFilter {
     /// When set, compare against another node's column instead of a literal.
     /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
-}
-
-impl InputFilter {
-    pub fn value_str(&self) -> Option<&str> {
-        self.value.as_ref().and_then(Value::as_str)
-    }
 }
 
 fn deserialize_filters<'de, D>(
@@ -734,33 +691,6 @@ impl InputGroupByKey {
                 None => format!("{}_{}", node, property),
             }),
         }
-    }
-}
-
-pub fn group_by_output_names(groups: &[InputGroupByKey]) -> Vec<String> {
-    groups.iter().map(InputGroupByKey::output_name).collect()
-}
-
-pub fn node_group_ids(groups: &[InputGroupByKey]) -> impl Iterator<Item = &str> {
-    groups.iter().filter_map(|group| match group {
-        InputGroupByKey::Node { node, .. } => Some(node.as_str()),
-        InputGroupByKey::Property { .. } => None,
-    })
-}
-
-pub fn property_groups(groups: &[InputGroupByKey]) -> impl Iterator<Item = (&str, &str)> {
-    groups.iter().filter_map(|group| match group {
-        InputGroupByKey::Property { node, property, .. } => {
-            Some((node.as_str(), property.as_str()))
-        }
-        InputGroupByKey::Node { .. } => None,
-    })
-}
-
-pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
-    match group {
-        InputGroupByKey::Node { .. } => "node",
-        InputGroupByKey::Property { .. } => "property",
     }
 }
 
@@ -1451,28 +1381,6 @@ mod tests {
     }
 
     #[test]
-    fn group_by_output_names_derive_and_alias() {
-        let input = parse_input(
-            r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "u"}, {"id": "mr"}],
-            "group_by": [
-                "u",
-                "mr.state",
-                {"key": "mr.created_at", "truncate": "month"},
-                {"key": "mr.target_branch", "as": "branch"}
-            ],
-            "aggregations": [{"count": "mr", "as": "count"}]
-        }"#,
-        )
-        .unwrap();
-        assert_eq!(
-            group_by_output_names(&input.aggregation.group_by),
-            vec!["u", "mr_state", "mr_created_at_month", "branch"]
-        );
-    }
-
-    #[test]
     fn path_finding() {
         let input = parse_input(
             r#"{
@@ -1513,7 +1421,7 @@ mod tests {
         assert_eq!(input.query_type, QueryType::Traversal);
         assert_eq!(input.nodes.len(), 1);
         assert_eq!(input.nodes[0].id, "u");
-        assert!(input.is_search());
+        assert!(input.relationships.is_empty());
     }
 
     #[test]

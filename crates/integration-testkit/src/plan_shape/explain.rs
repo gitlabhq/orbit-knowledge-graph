@@ -3,7 +3,7 @@ use compiler::input::{ColumnSelection, Input, InputFilter};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
-use compiler::query::Predicate as QueryPredicate;
+use compiler::query::{Predicate as QueryPredicate, Query};
 use compiler::{FilterOp, OrderDirection};
 use query_engine::compiler;
 use std::collections::HashMap;
@@ -156,6 +156,40 @@ pub fn logical(input: &Input) -> Tree {
         );
     }
     Tree::node(Operator::Limit, input.limit.to_string(), vec![tree])
+}
+
+pub fn hydration(query: &Query) -> Tree {
+    let children = query
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut predicates = Vec::new();
+            if !node.node_ids.is_empty() {
+                predicates.push(format!("{}.id IN {:?}", node.alias, node.node_ids));
+            }
+            let scan = filter(
+                predicates,
+                leaf(
+                    Operator::NodeScan,
+                    format!("{} AS {}", node.entity_name, node.alias),
+                ),
+            );
+            if node.columns.is_empty() {
+                scan
+            } else {
+                Tree::node(
+                    Operator::Project,
+                    node.columns
+                        .iter()
+                        .map(|column| format!("{}.{}", node.alias, column.name))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    vec![scan],
+                )
+            }
+        })
+        .collect();
+    Tree::node(Operator::Query, query.query_type.to_string(), children)
 }
 
 fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<String> {

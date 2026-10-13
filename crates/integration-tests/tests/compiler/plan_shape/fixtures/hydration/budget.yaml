@@ -11,12 +11,12 @@ hydration:
     f: ["1/100/10/", "1/200/20/"]
 logical:
   expect:
-    - (Input hydration (...))
+    - (Query hydration (...))
 physical:
   clickhouse:
     planned:
       expect:
-        - (Filter f.traversal_path PREFIX UNION ['1/'], f.id IN [1] (_))
+        - (Filter hydrate.traversal_path PREFIX UNION ['1/'], hydrate.id IN [1] (_))
     emitted:
       expect:
-        - (Filter StartsWith(f.traversal_path, '1/'), f.id = 1 (_))
+        - (Filter StartsWith(hydrate.traversal_path, '1/'), hydrate.id = 1 (_))

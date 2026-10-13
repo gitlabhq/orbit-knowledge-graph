@@ -10,9 +10,7 @@ use compiler::constants::{
     HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column, traversal_path_column,
 };
 use compiler::query::Predicate;
-use compiler::{
-    ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputNode, QueryType,
-};
+use compiler::{DynamicEntityColumns, FilterOp, HydrationTemplate, Query};
 use ontology::{DataType, Ontology};
 use orbit_utils::arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
@@ -20,6 +18,8 @@ use pipeline::PipelineError;
 use types::QueryResult;
 
 pub use crate::content::PropertyMap;
+
+type HydrationNode = (String, Vec<String>, Vec<i64>, Vec<TraversalPath>);
 
 /// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
 /// redaction ID column (`_orbit_{alias}_id`).
@@ -105,16 +105,6 @@ pub fn extract_dynamic_refs(
         ids.dedup();
     }
     refs
-}
-
-/// Caps limit at `u32::MAX` to prevent truncation.
-pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
-    Input {
-        query_type: QueryType::Hydration,
-        nodes,
-        limit: total_ids.min(u32::MAX as usize) as u32,
-        ..Input::default()
-    }
 }
 
 /// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
@@ -284,7 +274,8 @@ pub fn strip_injected_columns<'a>(
 pub fn hydrate_static(
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
-) -> Result<(Vec<InputNode>, usize), PipelineError> {
+    model: &query_data_model::ClickHouseDataModel,
+) -> Result<Option<Query>, PipelineError> {
     let all_tps = collect_all_traversal_paths(query_result, templates);
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
@@ -307,17 +298,15 @@ pub fn hydrate_static(
         };
 
         total_ids += ids.len();
-        nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
-            entity: Some(template.entity_type.clone()),
-            columns: Some(ColumnSelection::List(template.columns.clone())),
-            node_ids: ids,
+        nodes.push((
+            template.entity_type.clone(),
+            template.columns.clone(),
+            ids,
             traversal_paths,
-            ..InputNode::default()
-        });
+        ));
     }
 
-    Ok((nodes, total_ids))
+    bind_hydration(nodes, total_ids, model)
 }
 
 /// For PathFinding queries where no static nodes have TP columns, returns an
@@ -352,7 +341,8 @@ pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
     traversal_paths: &[TraversalPath],
-) -> Result<(Vec<InputNode>, usize), PipelineError> {
+    model: &query_data_model::ClickHouseDataModel,
+) -> Result<Option<Query>, PipelineError> {
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
 
@@ -383,17 +373,23 @@ pub fn hydrate_dynamic(
             Vec::new()
         };
 
-        nodes.push(InputNode {
-            id: HYDRATION_NODE_ALIAS.to_string(),
-            entity: Some(entity_type.clone()),
-            columns: Some(ColumnSelection::List(spec.columns.clone())),
-            node_ids: capped_ids,
-            traversal_paths: tps,
-            ..InputNode::default()
-        });
+        nodes.push((entity_type.clone(), spec.columns.clone(), capped_ids, tps));
     }
 
-    Ok((nodes, total_ids))
+    bind_hydration(nodes, total_ids, model)
+}
+
+fn bind_hydration(
+    nodes: Vec<HydrationNode>,
+    total_ids: usize,
+    model: &query_data_model::ClickHouseDataModel,
+) -> Result<Option<Query>, PipelineError> {
+    if nodes.is_empty() {
+        return Ok(None);
+    }
+    compiler::passes::bind::bind_hydration(nodes, total_ids.min(u32::MAX as usize) as u32, model)
+        .map(Some)
+        .map_err(|error| PipelineError::Execution(error.to_string()))
 }
 
 fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &Predicate) -> bool {

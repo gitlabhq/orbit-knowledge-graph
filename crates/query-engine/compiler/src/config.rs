@@ -70,10 +70,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [data_model]
             mutates: [input, query]
         }
-        bind_hydration {
-            reads_env: [data_model]
-            mutates: [input, query]
-        }
         restrict {
             reads_env: [data_model, security_ctx]
             mutates: [query, scope_proofs]
@@ -89,6 +85,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [query, query_plan]
         }
         lower {
+            reads_env: [data_model]
             reads_state: [query]
             mutates: [query_plan, ast, lowered_metadata]
         }
@@ -159,8 +156,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, query, pagination, scope_proofs, hydration_options, query_plan, ast, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [bind_hydration, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
+            state: [query, pagination, scope_proofs, hydration_options, query_plan, ast, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -232,13 +229,6 @@ fn bind(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn bind_local(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.take_input(), "input")?;
     let query = bind::bind(input, ctx.data_model(), bind::Mode::Local)?;
-    ctx.set_query(query);
-    Ok(())
-}
-
-fn bind_hydration(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.take_input(), "input")?;
-    let query = bind::bind(input, ctx.data_model(), bind::Mode::Hydration)?;
     ctx.set_query(query);
     Ok(())
 }

@@ -135,7 +135,9 @@ impl QueryRequirements for Input {
     }
 
     fn is_search(&self) -> bool {
-        self.is_search()
+        self.query_type == QueryType::Traversal
+            && self.nodes.len() == 1
+            && self.relationships.is_empty()
     }
 }
 

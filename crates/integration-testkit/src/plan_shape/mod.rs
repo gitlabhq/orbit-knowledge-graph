@@ -244,39 +244,49 @@ fn check<M: OrbitQueryModel>(
             _ => panic!("{label}: unknown frontend"),
         }
         .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let mut input = input;
+        let input_logical = explain::logical(&input);
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
-            input.query_type = compiler::QueryType::Hydration;
-            for (alias, paths) in &hydration.paths {
-                let node = input
-                    .nodes
-                    .iter_mut()
-                    .find(|node| &node.id == alias)
-                    .unwrap_or_else(|| panic!("{label}: unknown hydration node '{alias}'"));
-                node.traversal_paths = paths
-                    .iter()
-                    .map(|path| {
-                        orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone())
-                    })
-                    .collect();
-            }
             options = plan::HydrationCompileOptions {
                 dynamic: hydration.dynamic,
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
+        let query = if let Some(hydration) = &scenario.hydration {
+            let nodes = input.nodes.into_iter().map(|node| {
+                let paths = hydration
+                    .paths
+                    .get(&node.id)
+                    .into_iter()
+                    .flatten()
+                    .map(|path| {
+                        orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone())
+                    })
+                    .collect();
+                (
+                    node.entity.expect("hydration node entity"),
+                    match node.columns {
+                        Some(compiler::ColumnSelection::List(columns)) => columns,
+                        _ => panic!("{label}: hydration fixtures require explicit columns"),
+                    },
+                    node.node_ids,
+                    paths,
+                )
+            });
+            bind::bind_hydration(nodes, input.limit, model)
+        } else {
+            bind::bind(input, model, bind::Mode::Local)
+        };
+        let query = query.unwrap_or_else(|error| panic!("{label}: {error}"));
+        let logical = if scenario.hydration.is_some() {
+            explain::hydration(&query)
+        } else {
+            input_logical
+        };
         scenario
             .logical
-            .check(&explain::logical(&input), &format!("{label}.logical"))
+            .check(&logical, &format!("{label}.logical"))
             .unwrap_or_else(|error| panic!("{error}"));
-        let mode = if input.query_type == compiler::QueryType::Hydration {
-            bind::Mode::Hydration
-        } else {
-            bind::Mode::Local
-        };
-        let query =
-            bind::bind(input, model, mode).unwrap_or_else(|error| panic!("{label}: {error}"));
         let plan = build(&query, options).unwrap_or_else(|error| panic!("{label}: {error}"));
         let lowered =
             lower::emit(&plan, &query, model).unwrap_or_else(|error| panic!("{label}: {error}"));
@@ -640,9 +650,6 @@ reject:
 
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
-    use compiler::Input;
-    use compiler::QueryType;
-    use compiler::input::InputNode;
     use compiler::passes::plan::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 
@@ -654,20 +661,19 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         (257, false, None, false, 257),
         (257, true, Some(1), false, 1),
     ] {
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes: vec![InputNode {
-                id: "f".into(),
-                entity: Some("File".into()),
-                node_ids: vec![1],
-                traversal_paths: (0..count)
+        let query = bind::bind_hydration(
+            [(
+                "File".into(),
+                Vec::new(),
+                vec![1],
+                (0..count)
                     .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
                     .collect(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let query = bind::bind(input, &model, bind::Mode::Hydration).unwrap();
+            )],
+            30,
+            &model,
+        )
+        .unwrap();
         let plan = plan::plan_clickhouse(
             &query,
             &model,
@@ -697,7 +703,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
         let mode = if set { "SET" } else { "UNION" };
         Assertions {
             expect: vec![format!(
-                "(Filter f.traversal_path PREFIX {mode} ?, ... (_))"
+                "(Filter hydrate.traversal_path PREFIX {mode} ?, ... (_))"
             )],
             ..Default::default()
         }

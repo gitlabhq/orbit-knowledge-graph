@@ -6,7 +6,7 @@ use query_data_model::{OrbitQueryModel, PropertyRealization};
 
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Input, InputFilter, InputGroupByKey, group_by_output_names};
+use crate::input::{ColumnSelection, Input, InputFilter, InputGroupByKey};
 use crate::query::{
     AggFunction, AggregationSort, Comparison, Cursor, Direction, Filter, FilterOp, Group, IdRange,
     Metric, Neighbors, Node, NodeId, Order, Path, Predicate, Property, PropertyRef, Query,
@@ -18,11 +18,10 @@ use crate::types::SecurityContext;
 pub enum Mode {
     Public,
     Local,
-    Hydration,
 }
 
 pub fn bind<M: OrbitQueryModel>(mut input: Input, model: &M, mode: Mode) -> Result<Query> {
-    check_shape(&input, mode)?;
+    check_shape(&input)?;
     let mut query = Query::new(input.query_type);
     query.limit = input.limit;
     query.cursor = input.cursor.take().map(|cursor| Cursor {
@@ -50,10 +49,69 @@ pub fn bind<M: OrbitQueryModel>(mut input: Input, model: &M, mode: Mode) -> Resu
     Ok(query)
 }
 
-fn check_shape(input: &Input, mode: Mode) -> Result<()> {
-    if input.nodes.is_empty()
-        || matches!(mode, Mode::Public | Mode::Local) && input.query_type == QueryType::Hydration
-    {
+pub fn bind_hydration<M, I>(nodes: I, limit: u32, model: &M) -> Result<Query>
+where
+    M: OrbitQueryModel,
+    I: IntoIterator<Item = (String, Vec<String>, Vec<i64>, Vec<TraversalPath>)>,
+{
+    let mut query = Query::new(QueryType::Hydration);
+    query.limit = limit;
+    for (entity_name, columns, node_ids, traversal_paths) in nodes {
+        let entity = model.entity(&entity_name).ok_or_else(|| {
+            QueryError::AllowlistRejected(format!("unknown entity '{entity_name}'"))
+        })?;
+        let table = model.entity_table(&entity_name).ok_or_else(|| {
+            QueryError::AllowlistRejected(format!(
+                "entity '{entity_name}' is not available in this data model"
+            ))
+        })?;
+        let id_property = resolve_property(
+            model,
+            entity.id,
+            &entity_name,
+            ontology::constants::DEFAULT_PRIMARY_KEY,
+        )?;
+        let columns = if columns.is_empty() {
+            Vec::new()
+        } else {
+            bind_columns(
+                model,
+                entity.id,
+                &entity_name,
+                Some(ColumnSelection::List(columns)),
+                false,
+            )?
+        };
+        query.add_node(Node {
+            id: NodeId::default(),
+            alias: crate::constants::HYDRATION_NODE_ALIAS.into(),
+            entity: entity.id,
+            entity_name: entity_name.clone(),
+            table: table.to_string(),
+            columns,
+            filters: Vec::new(),
+            node_ids,
+            id_range: None,
+            id_property,
+            traversal_paths,
+            has_traversal_path: model.entity_has_traversal_path(&entity_name),
+            is_global: model.entity_is_global(&entity_name),
+            redaction_id_column: model
+                .redaction_id_column(entity.id)
+                .unwrap_or(ontology::constants::DEFAULT_PRIMARY_KEY)
+                .to_string(),
+        });
+    }
+    if query.nodes.is_empty() || query.limit == 0 {
+        return Err(QueryError::Validation(
+            "hydration requires at least one node and a positive limit".into(),
+        ));
+    }
+    Ok(query)
+}
+
+fn check_shape(input: &Input) -> Result<()> {
+    if input.nodes.is_empty() || input.query_type == QueryType::Hydration {
         return Err(QueryError::Validation(
             "a public query requires at least one node and cannot request internal hydration"
                 .into(),
@@ -118,7 +176,7 @@ fn bind_node<M: OrbitQueryModel>(
 ) -> Result<()> {
     validate_identifier(&input.id)?;
     check_reserved_prefix("node id", &input.id, &format!("{}_", input.id))?;
-    if !matches!(mode, Mode::Hydration) && query.node_id(&input.id).is_some() {
+    if query.node_id(&input.id).is_some() {
         return Err(QueryError::ReferenceError(format!(
             "duplicate node id \"{}\"",
             input.id
@@ -145,7 +203,13 @@ fn bind_node<M: OrbitQueryModel>(
             input.id_property
         )));
     }
-    let columns = bind_columns(model, entity.id, &entity_name, input.columns, mode)?;
+    let columns = bind_columns(
+        model,
+        entity.id,
+        &entity_name,
+        input.columns,
+        matches!(mode, Mode::Local),
+    )?;
     query.add_node(Node {
         id: NodeId::default(),
         alias: input.id,
@@ -160,7 +224,7 @@ fn bind_node<M: OrbitQueryModel>(
             end: range.end,
         }),
         id_property,
-        traversal_paths: input.traversal_paths,
+        traversal_paths: Vec::new(),
         has_traversal_path: model.entity_has_traversal_path(&entity_name),
         is_global: model.entity_is_global(&entity_name),
         redaction_id_column: model
@@ -176,13 +240,13 @@ fn bind_columns<M: OrbitQueryModel>(
     entity: query_data_model::EntityId,
     entity_name: &str,
     selection: Option<ColumnSelection>,
-    mode: Mode,
+    local: bool,
 ) -> Result<Vec<Property>> {
     let entity_record = model.graph().entity(entity);
     let explicit = matches!(selection, Some(ColumnSelection::List(_)));
     let properties: Vec<_> = match selection {
         Some(ColumnSelection::List(columns)) => {
-            if columns.is_empty() && !matches!(mode, Mode::Hydration) {
+            if columns.is_empty() {
                 return Err(QueryError::Validation(
                     "column selection must list at least one column".into(),
                 ));
@@ -223,10 +287,7 @@ fn bind_columns<M: OrbitQueryModel>(
                 .collect()
         }
     };
-    if explicit
-        && matches!(mode, Mode::Local)
-        && properties.iter().any(|property| !property.is_stored())
-    {
+    if explicit && local && properties.iter().any(|property| !property.is_stored()) {
         return Err(QueryError::Validation(format!(
             "{entity_name} contains a requested property unavailable in the local data model"
         )));
@@ -275,6 +336,16 @@ fn resolve_property<M: OrbitQueryModel>(
         has_text_index: model.has_text_index(property.id),
         selectivity: model.property_selectivity(property.id),
     })
+}
+
+fn resolve_node_property<M: OrbitQueryModel>(
+    query: &Query,
+    node: NodeId,
+    property: &str,
+    model: &M,
+) -> Result<Property> {
+    let node = query.node(node);
+    resolve_property(model, node.entity, &node.entity_name, property)
 }
 
 fn bind_filters<M: OrbitQueryModel>(
@@ -653,12 +724,10 @@ fn bind_aggregation<M: OrbitQueryModel>(
             "aggregation requires at least one metric".into(),
         ));
     }
-    let group_names = group_by_output_names(&input.group_by);
     let mut outputs = HashSet::new();
-    for (index, (input_group, alias)) in input.group_by.into_iter().zip(group_names).enumerate() {
-        validate_identifier(&alias)?;
-        check_reserved_prefix("output column", &alias, &alias)?;
-        if !outputs.insert(alias.clone()) {
+    for (index, input_group) in input.group_by.into_iter().enumerate() {
+        let alias = input_group.output_name();
+        if !register_output(&mut outputs, &alias)? {
             return Err(QueryError::Validation(format!(
                 "duplicate group_by output column \"{alias}\""
             )));
@@ -674,9 +743,7 @@ fn bind_aggregation<M: OrbitQueryModel>(
             InputGroupByKey::Property {
                 property, truncate, ..
             } => {
-                let entity = query.node(node);
-                let property =
-                    resolve_property(model, entity.entity, &entity.entity_name, &property)?;
+                let property = resolve_node_property(query, node, &property, model)?;
                 if !property.filterable || !property.is_stored() {
                     return Err(QueryError::Validation(format!(
                         "group_by[{index}] field \"{}\" must be stored and filterable",
@@ -712,9 +779,7 @@ fn bind_aggregation<M: OrbitQueryModel>(
     }
     for input_metric in input.metrics {
         let alias = input_metric.output_name();
-        validate_identifier(&alias)?;
-        check_reserved_prefix("output column", &alias, &alias)?;
-        if !outputs.insert(alias.clone()) {
+        if !register_output(&mut outputs, &alias)? {
             return Err(QueryError::Validation(format!(
                 "aggregation \"{alias}\" conflicts with another output column"
             )));
@@ -732,10 +797,7 @@ fn bind_aggregation<M: OrbitQueryModel>(
         let property = input_metric
             .expr
             .property()
-            .map(|name| {
-                let entity = query.node(target);
-                resolve_property(model, entity.entity, &entity.entity_name, name)
-            })
+            .map(|name| resolve_node_property(query, target, name, model))
             .transpose()?;
         if let Some(property) = &property {
             if !property.is_stored() {
@@ -773,6 +835,12 @@ fn bind_aggregation<M: OrbitQueryModel>(
     Ok(())
 }
 
+fn register_output(outputs: &mut HashSet<String>, alias: &str) -> Result<bool> {
+    validate_identifier(alias)?;
+    check_reserved_prefix("output column", alias, alias)?;
+    Ok(outputs.insert(alias.to_string()))
+}
+
 fn bind_order<M: OrbitQueryModel>(
     query: &mut Query,
     input: Option<crate::input::InputOrderBy>,
@@ -790,8 +858,7 @@ fn bind_order<M: OrbitQueryModel>(
             input.node
         ))
     })?;
-    let entity = query.node(node);
-    let property = resolve_property(model, entity.entity, &entity.entity_name, &input.property)?;
+    let property = resolve_node_property(query, node, &input.property, model)?;
     if !property.is_stored() {
         return Err(QueryError::Validation(format!(
             "order_by field \"{}\" is not stored",
@@ -944,8 +1011,7 @@ fn bind_property_ref<M: OrbitQueryModel>(
     let node = query
         .node_id(node)
         .ok_or_else(|| QueryError::ReferenceError(format!("undefined node \"{node}\"")))?;
-    let entity = query.node(node);
-    let property = resolve_property(model, entity.entity, &entity.entity_name, property)?;
+    let property = resolve_node_property(query, node, property, model)?;
     Ok(PropertyRef { node, property })
 }
 
@@ -1223,7 +1289,7 @@ fn check_value(predicate: &Predicate, data_type: DataType, label: &str) -> Resul
     Ok(())
 }
 
-fn validate_identifier(identifier: &str) -> Result<()> {
+pub(crate) fn validate_identifier(identifier: &str) -> Result<()> {
     let mut chars = identifier.chars();
     if identifier.len() <= MAX_IDENTIFIER_LEN
         && chars
@@ -1231,11 +1297,12 @@ fn validate_identifier(identifier: &str) -> Result<()> {
             .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
     {
-        return Ok(());
+        Ok(())
+    } else {
+        Err(QueryError::Validation(format!(
+            "invalid identifier {identifier:?}"
+        )))
     }
-    Err(QueryError::Validation(format!(
-        "invalid identifier {identifier:?}"
-    )))
 }
 
 fn check_reserved_prefix(kind: &str, name: &str, column: &str) -> Result<()> {

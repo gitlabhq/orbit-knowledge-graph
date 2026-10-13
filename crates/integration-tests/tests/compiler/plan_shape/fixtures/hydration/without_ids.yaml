@@ -9,16 +9,16 @@ hydration:
     f: ["1/", "1/100/"]
 logical:
   expect:
-    - (Input hydration (...))
+    - (Query hydration (...))
 physical:
   clickhouse:
     planned:
       expect:
-        - (Filter f.traversal_path PREFIX UNION ['1/100/'] (Scan Table(gl_file) AS f))
+        - (Filter hydrate.traversal_path PREFIX UNION ['1/100/'] (Scan Table(gl_file) AS hydrate))
       reject:
-        - (Filter f.id IN ?, ... (_))
+        - (Filter hydrate.id IN ?, ... (_))
     emitted:
       expect:
-        - (Filter StartsWith(f.traversal_path, '1/100/') (Scan Table(gl_file) AS f))
+        - (Filter StartsWith(hydrate.traversal_path, '1/100/') (Scan Table(gl_file) AS hydrate))
       reject:
-        - (Filter f.id IN ?, ... (_))
+        - (Filter hydrate.id IN ?, ... (_))

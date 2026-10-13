@@ -7,10 +7,10 @@ query:
 hydration:
   dynamic: true
 logical:
-  expect: ["(Input hydration (...))"]
+  expect: ["(Query hydration (...))"]
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]
+      expect: ["(Filter hydrate.id IN [1, 2] (Scan Table(gl_file) AS hydrate))"]
     emitted:
-      expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]
+      expect: ["(Filter hydrate.id IN [1, 2] (Scan Table(gl_file) AS hydrate))"]

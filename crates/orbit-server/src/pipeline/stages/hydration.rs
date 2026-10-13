@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use query_engine::compiler::{
-    HydrationCompileOptions, HydrationPlan, InputNode, QueryType, compile_input_model,
+    HydrationCompileOptions, HydrationPlan, Query, QueryType, compile_hydration,
 };
 
 use query_engine::pipeline::{
@@ -63,17 +63,15 @@ impl HydrationStage {
 
     async fn execute_hydration(
         ctx: &QueryPipelineContext,
-        nodes: Vec<InputNode>,
-        total_ids: usize,
+        query: Option<Query>,
         kind: &str,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
-        if nodes.is_empty() {
+        let Some(query) = query else {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
-        }
+        };
 
         let client = Self::client(ctx)?;
 
-        let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
         let options = HydrationCompileOptions {
             dynamic: matches!(
                 ctx.compiled()?.query.query_type,
@@ -86,17 +84,12 @@ impl HydrationStage {
             .server_extensions
             .get::<Arc<query_data_model::ClickHouseDataModel>>()
             .ok_or_else(|| PipelineError::custom("query data model missing"))?;
-        let compiled = compile_input_model(
-            hydration_input,
-            options,
-            data_model,
-            ctx.security_context()?,
-        )
-        .map_err(|e| PipelineError::Compile {
-            client_safe: false,
-            reason: e.rejection_reason(),
-            message: e.to_string(),
-        })?;
+        let compiled = compile_hydration(query, options, data_model, ctx.security_context()?)
+            .map_err(|e| PipelineError::Compile {
+                client_safe: false,
+                reason: e.rejection_reason(),
+                message: e.to_string(),
+            })?;
 
         let rendered_sql = compiled.base.render();
         let debug = if ctx.compiled()?.query.include_debug_sql {
@@ -180,11 +173,14 @@ impl PipelineStage for HydrationStage {
         match &hydration_plan {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
-                let (nodes, ids_count) =
-                    hydration_helpers::hydrate_static(templates, &query_result)
-                        .inspect_err(|e| obs.record_error(e))?;
+                let data_model = ctx
+                    .server_extensions
+                    .get::<Arc<query_data_model::ClickHouseDataModel>>()
+                    .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+                let query = hydration_helpers::hydrate_static(templates, &query_result, data_model)
+                    .inspect_err(|e| obs.record_error(e))?;
                 let (property_map, debug, executions) =
-                    Self::execute_hydration(ctx, nodes, ids_count, "static")
+                    Self::execute_hydration(ctx, query, "static")
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
@@ -246,11 +242,15 @@ impl PipelineStage for HydrationStage {
                             .map(|tp| tp.path.clone())
                             .collect();
                     }
-                    let (nodes, ids_count) =
-                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)
+                    let data_model = ctx
+                        .server_extensions
+                        .get::<Arc<query_data_model::ClickHouseDataModel>>()
+                        .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+                    let query =
+                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps, data_model)
                             .inspect_err(|e| obs.record_error(e))?;
                     let (property_map, debug, executions) =
-                        Self::execute_hydration(ctx, nodes, ids_count, "dynamic")
+                        Self::execute_hydration(ctx, query, "dynamic")
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;

@@ -36,11 +36,11 @@ hydration:
       "1/250/", "1/251/", "1/252/", "1/253/", "1/254/", "1/255/", "1/256/"
     ]
 logical:
-  expect: ["(Input hydration (...))"]
+  expect: ["(Query hydration (...))"]
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter f.traversal_path PREFIX SET ?, f.id IN [1] (_))"]
-      reject: ["(Filter f.traversal_path PREFIX UNION ?, ... (_))"]
+      expect: ["(Filter hydrate.traversal_path PREFIX SET ?, hydrate.id IN [1] (_))"]
+      reject: ["(Filter hydrate.traversal_path PREFIX UNION ?, ... (_))"]
     emitted:
-      expect: ["(Filter ArrayExists(_orbit_path -> StartsWith(f.traversal_path, _orbit_path), ?), f.id = 1 (_))"]
+      expect: ["(Filter ArrayExists(_orbit_path -> StartsWith(hydrate.traversal_path, _orbit_path), ?), hydrate.id = 1 (_))"]
