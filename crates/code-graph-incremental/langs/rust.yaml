@@ -326,7 +326,7 @@ stages:
       - match: '(union_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
         tag: { flavor: union }
-      # Inline modules: a scope in the FQN, exported as a Module definition
+      # Inline modules: a scope in the FQN, exported as a Class with language_type Module
       - match: '(mod_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__class) $B)'
         tag: { flavor: module }

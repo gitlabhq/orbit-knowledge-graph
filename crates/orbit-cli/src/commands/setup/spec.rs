@@ -82,9 +82,10 @@ fn describe_graph_contents() -> String {
                     .iter()
                     .find(|field| field.name == "definition_type")
                     .and_then(|field| field.description.as_deref())
-                    .expect("ontology Definition must describe definition_type");
+                    .expect("ontology Definition must describe definition_type")
+                    .trim_end_matches('.');
                 format!(
-                    "`{}` (`definition_type`: {def_types})",
+                    "`{}` (`definition_type`: {def_types}; not an exhaustive list)",
                     node.destination_table
                 )
             } else {

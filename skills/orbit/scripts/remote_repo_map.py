@@ -195,7 +195,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
             {
                 "id": "child", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "language_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
@@ -224,7 +224,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
     print("-" * 110)
     for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
         fqn  = n.get("fqn", n.get("name", "?"))
-        kind = n.get("language_type") or n.get("definition_type", "?")
+        kind = n.get("definition_type", "?")
         loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
         print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
     print(f"\n{len(rows)} descendant(s) found")
@@ -257,7 +257,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
             {
                 "id": "ancestor", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "language_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
@@ -288,7 +288,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
     print("-" * 110)
     for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
         fqn  = n.get("fqn", n.get("name", "?"))
-        kind = n.get("language_type") or n.get("definition_type", "?")
+        kind = n.get("definition_type", "?")
         loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
         print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
     print(f"\n{len(rows)} ancestor(s) found")
@@ -333,7 +333,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
             {
                 "id": "descendant", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "language_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
@@ -370,7 +370,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
                 "id": "concern", "entity": "Definition",
                 "filters": {**_base_filters(pid, branch),
                             "file_path": {"starts_with": norm_prefix}},
-                "columns": ["id", "fqn", "name", "definition_type", "language_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         # Direct includes only (single hop, intentional): the concerns each
@@ -436,7 +436,7 @@ def cmd_class(args: argparse.Namespace) -> None:
             "filters": {**_base_filters(pid, branch),
                         filter_key: {"eq": filter_val},
                         "definition_type": {"in": TYPE_KINDS}},
-            "columns": ["id", "fqn", "file_path", "start_line", "definition_type", "language_type"],
+            "columns": ["id", "fqn", "file_path", "start_line", "definition_type"],
         }],
         "limit": 5,
     }})
@@ -448,7 +448,7 @@ def cmd_class(args: argparse.Namespace) -> None:
         print("(class not found — may not be indexed on this branch)")
         return
     for p in parents:
-        print(f"  {(p.get('language_type') or p.get('definition_type','?'))}  {p.get('fqn','?')}  @ {p.get('file_path','')}:{p.get('start_line','')}")
+        print(f"  {p.get('definition_type','?')}  {p.get('fqn','?')}  @ {p.get('file_path','')}:{p.get('start_line','')}")
 
     # Step 2: fetch members via DEFINES traversal
     body = {"query": {
@@ -467,7 +467,7 @@ def cmd_class(args: argparse.Namespace) -> None:
                     **_base_filters(pid, branch),
                     "definition_type": {"in": MEMBER_KINDS},
                 },
-                "columns": ["id", "name", "fqn", "definition_type", "language_type", "file_path", "start_line"],
+                "columns": ["id", "name", "fqn", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [{"type": "DEFINES", "from": "parent", "to": "member"}],
@@ -484,7 +484,7 @@ def cmd_class(args: argparse.Namespace) -> None:
     print("-" * 90)
     for m in sorted(members, key=lambda x: int(x.get("start_line") or 0)):
         name = m.get("name") or "?"
-        kind = m.get("language_type") or m.get("definition_type") or "?"
+        kind = m.get("definition_type") or "?"
         loc  = f"{m.get('file_path','')}:{m.get('start_line','')}"
         print(f"{kind:12}  {name:<40}  {loc}")
     print(f"\n{len(members)} member(s)")
@@ -505,7 +505,7 @@ def cmd_api(args: argparse.Namespace) -> None:
                 "file_path":       {"starts_with": prefix + "/"},
                 "definition_type": {"in": TYPE_KINDS + CALLABLE_KINDS},
             },
-            "columns": ["fqn", "name", "definition_type", "language_type", "file_path", "start_line"],
+            "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
         }],
         "limit": 100,
     }}
@@ -526,7 +526,7 @@ def cmd_api(args: argparse.Namespace) -> None:
     for fpath in sorted(by_file):
         print(f"\n{fpath}")
         for d in sorted(by_file[fpath], key=lambda x: int(x.get("start_line") or 0)):
-            kind = d.get("language_type") or d.get("definition_type", "?")
+            kind = d.get("definition_type", "?")
             display = d.get("fqn", d.get("name", "?"))
             print(f"  {kind:12}  {display}  [L{d.get('start_line','')}]")
 
@@ -568,7 +568,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
             {
                 "id": "caller", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "language_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "target"}],
@@ -604,7 +604,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
     print("-" * 100)
     for c in sorted(callers, key=lambda x: x.get("file_path", "")):
         loc = f"{c.get('file_path','')}:{c.get('start_line','')}"
-        print(f"{(c.get('language_type') or c.get('definition_type','?')):12}  {c.get('fqn','?')[:60]:<60}  {loc}")
+        print(f"{c.get('definition_type','?'):12}  {c.get('fqn','?')[:60]:<60}  {loc}")
     print(f"\n{len(callers)} caller(s) found")
 
 

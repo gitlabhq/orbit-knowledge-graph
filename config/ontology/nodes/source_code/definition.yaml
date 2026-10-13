@@ -84,7 +84,7 @@ properties:
     source: definition_type
     nullable: false
     mutable: false
-    description: "Definition type, such as Class, Module, Method, Function, Struct, Interface, Enum, or Trait. Some indexes put a language-specific type here. To filter on a language-specific type, use language_type."
+    description: "Definition type, such as Class, Method, Function, Struct, Interface, Enum, or Trait. Some indexes put a language-specific type here. To filter on a language-specific type, use language_type."
     selectivity: low
 
   language_type:

@@ -119,10 +119,10 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name = 'Ready'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.definition_type AS type, d.language_type AS language_type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'inner::Status::Ready', type: 'EnumVariant' } }
+      - { row: { fqn: 'inner::Status::Ready', type: 'EnumVariant', language_type: 'Variant' } }
 
   - name: "trait and union definitions are retained"
     query: |
