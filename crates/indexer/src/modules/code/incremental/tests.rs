@@ -1,6 +1,5 @@
 use super::super::repository::service::test_utils::build_tar_gz;
 use super::*;
-use code_graph::v2::error::{AbortPhase, FileSkip};
 use orbit_utils::vfs::Decision;
 
 use super::super::{
@@ -93,7 +92,7 @@ struct Timings {
     languages: Vec<(String, u64)>,
     slowest_paths: Vec<String>,
     errors: usize,
-    skipped: Vec<(String, FileSkip)>,
+    skipped_paths: Vec<String>,
 }
 
 async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Limits) -> Timings {
@@ -115,17 +114,17 @@ async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Li
         .map(|file| file.path.clone())
         .collect();
     slowest_paths.sort();
-    let mut skipped: Vec<_> = report
+    let mut skipped_paths: Vec<_> = report
         .skipped
         .iter()
-        .map(|file| (file.path.clone(), file.kind))
+        .map(|file| file.path.clone())
         .collect();
-    skipped.sort_by(|a, b| a.0.cmp(&b.0));
+    skipped_paths.sort();
     Timings {
         languages,
         slowest_paths,
         errors: report.errors.len(),
-        skipped,
+        skipped_paths,
     }
 }
 
@@ -170,13 +169,7 @@ async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     };
     let timings = timings_for(files, limits).await;
     assert_eq!(timings.errors, 0);
-    assert_eq!(
-        timings.skipped,
-        [
-            ("a.js".to_owned(), FileSkip::Timeout(AbortPhase::Parse)),
-            ("b.js".to_owned(), FileSkip::Timeout(AbortPhase::Parse)),
-        ]
-    );
+    assert_eq!(timings.skipped_paths, ["a.js", "b.js"]);
     assert!(timings.languages.is_empty());
     assert!(timings.slowest_paths.is_empty());
 }

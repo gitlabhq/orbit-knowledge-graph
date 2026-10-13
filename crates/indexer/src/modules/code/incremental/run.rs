@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use super::super::pipeline::IndexingReport;
@@ -179,44 +179,54 @@ pub(in crate::modules::code) fn run(
 
 const SLOWEST_FILES: usize = 100;
 
+/// Per-file accumulation: the timing entry plus the facts that decide whether
+/// the file counts as parsed.
+struct FileStats {
+    entry: FileTimingEntry,
+    parsed: bool,
+    killed_before_resolve: bool,
+}
+
 fn file_timings(timings: &[FileTiming], skipped: &[Killed]) -> Vec<FileTimingEntry> {
-    // Unparsed placeholder trees get resolve timings too. Resolve-budget kills
-    // were parsed, so they still count.
-    let killed_before_resolve: HashSet<&str> = skipped
-        .iter()
-        .filter(|killed| matches!(killed.label, "tree-sitter" | "rewrite" | "link"))
-        .map(|killed| killed.path.as_str())
-        .collect();
-    let parsed: HashSet<&str> = timings
-        .iter()
-        .filter(|timing| timing.phase != "resolve")
-        .map(|timing| timing.path.as_str())
-        .filter(|path| !killed_before_resolve.contains(path))
-        .collect();
-    let mut by_path: HashMap<&str, FileTimingEntry> = HashMap::new();
-    for timing in timings
-        .iter()
-        .filter(|timing| parsed.contains(timing.path.as_str()))
-    {
+    let mut by_path: HashMap<&str, FileStats> = HashMap::new();
+    for timing in timings {
         let ms = timing.elapsed.as_secs_f64() * 1000.0;
-        let file = by_path
-            .entry(&timing.path)
-            .or_insert_with(|| FileTimingEntry {
+        let file = by_path.entry(&timing.path).or_insert_with(|| FileStats {
+            entry: FileTimingEntry {
                 path: timing.path.clone(),
                 size_bytes: 0,
                 parse_ms: 0.0,
                 resolve_ms: 0.0,
                 total_ms: 0.0,
                 language: <&str>::from(timing.language).to_owned(),
-            });
-        file.size_bytes += timing.bytes;
-        file.total_ms += ms;
+            },
+            parsed: false,
+            killed_before_resolve: false,
+        });
+        file.entry.size_bytes += timing.bytes;
+        file.entry.total_ms += ms;
         match timing.phase.as_str() {
-            "resolve" => file.resolve_ms += ms,
-            _ => file.parse_ms += ms,
+            "resolve" => file.entry.resolve_ms += ms,
+            _ => {
+                file.entry.parse_ms += ms;
+                file.parsed = true;
+            }
         }
     }
-    let mut files: Vec<_> = by_path.into_values().collect();
+    // Unparsed placeholder trees get resolve timings too. Resolve-budget kills
+    // were parsed, so they still count.
+    for killed in skipped {
+        if matches!(killed.label, "tree-sitter" | "rewrite" | "link")
+            && let Some(file) = by_path.get_mut(killed.path.as_str())
+        {
+            file.killed_before_resolve = true;
+        }
+    }
+    let mut files: Vec<_> = by_path
+        .into_values()
+        .filter(|file| file.parsed && !file.killed_before_resolve)
+        .map(|file| file.entry)
+        .collect();
     files.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
     files
 }
