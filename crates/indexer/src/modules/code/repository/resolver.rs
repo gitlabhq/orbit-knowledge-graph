@@ -161,7 +161,10 @@ impl RepositoryResolver {
     ) -> Result<Repository, ResolveError> {
         info!(
             project_id,
-            branch, ref_name, "downloading repository archive"
+            branch,
+            ref_name,
+            incremental = virtual_config.is_some(),
+            "downloading repository archive"
         );
 
         drive(&ARCHIVE_DOWNLOAD_RETRY, |attempt| async move {
