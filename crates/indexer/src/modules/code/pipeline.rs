@@ -333,10 +333,7 @@ impl CodeIndexer {
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
         let lane = self
-            .acquire_indexing_lane(
-                &repository,
-                lock.time_left().saturating_sub(clock.remaining),
-            )
+            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
             .await?;
 
         let indexed = clock
@@ -447,24 +444,25 @@ impl CodeIndexer {
         &self,
         repository: &Repository,
         within: Duration,
+        cancel: &CancellationToken,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = match repository {
-            Repository::Extracted(repository) => repository.file_inventory.count_by(|e| {
-                e.decision == code_graph::v2::Decision::Parse
-                    && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
-            }),
-            Repository::IncrementalEngine(repository) => {
-                code_graph_incremental::pipeline::candidates(repository, 0).count()
-            }
-        };
-        let lane = if parseable <= self.small_repo_max_files {
+        let lane = if repository.parseable_files() <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
             &self.big_indexing_slots
         };
         let queued = Instant::now();
-        match tokio::time::timeout(within, acquire(lane, "indexing")).await {
+        let permit = tokio::select! {
+            biased;
+            permit = tokio::time::timeout(within, acquire(lane, "indexing")) => permit,
+            () = lock_lost(cancel) => {
+                return Err(IndexError::NoLane {
+                    waited: queued.elapsed(),
+                });
+            }
+        };
+        match permit {
             Ok(permit) => {
                 self.metrics
                     .record_slot_wait("indexing_lane_wait", queued.elapsed());
@@ -603,26 +601,7 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         cancel: CancellationToken,
     ) -> Result<(IndexingReport, Arc<ProjectCommit>, Arc<AtomicU64>), HandlerError> {
-        let defaults = code_graph_incremental::Limits::load()
-            .map_err(|error| HandlerError::Processing(error.to_string()))?;
-        let config = &self.pipeline_config;
-        let timeout = |configured, default| if configured == 0 { default } else { configured };
-        let limits = code_graph_incremental::Limits {
-            max_files: if config.max_files == 0 {
-                defaults.max_files
-            } else {
-                config.max_files
-            },
-            file_parse_ms: timeout(config.per_file_parse_timeout_ms, defaults.file_parse_ms),
-            file_rewrite_ms: timeout(config.per_file_walk_timeout_ms, defaults.file_rewrite_ms),
-            file_link_ms: timeout(config.per_file_ssa_timeout_ms, defaults.file_link_ms),
-            file_resolve_ms: timeout(config.per_file_timeout_ms, defaults.file_resolve_ms),
-            cross_file_resolve_ms: timeout(
-                config.cross_file_resolve_timeout_ms,
-                defaults.cross_file_resolve_ms,
-            ),
-            ..defaults
-        };
+        let limits = super::incremental::limits(&self.pipeline_config);
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -695,6 +674,10 @@ impl CodeIndexer {
         };
         let options = super::incremental::Options {
             limits,
+            worker_threads: legacy_config.worker_threads,
+            concurrent_families: legacy_config.concurrent_languages(),
+            small_family_files: self.small_repo_max_files,
+            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
         };
@@ -857,6 +840,12 @@ async fn acquire(
             .map(Some)
             .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
         None => Ok(None),
+    }
+}
+
+async fn lock_lost(cancel: &CancellationToken) {
+    while !cancel.is_cancelled() {
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 

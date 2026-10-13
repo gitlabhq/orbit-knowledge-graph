@@ -59,6 +59,12 @@ webserver:
     type: ClusterIP
     grpcPort: 50054
 
+{{- if eq (env "E2E_CODE_GRAPH_INCREMENTAL") "true" }}
+features:
+  code_graph_incremental:
+    enabled: true
+{{- end }}
+
 indexer:
   enabled: true
   # One universal pool: the suite is sized for a single indexer deployment.

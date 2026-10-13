@@ -193,6 +193,7 @@ pub struct ExportPlan {
     pub(super) edge_columns: Vec<Column>,
     pub(super) containment: Vec<Containment>,
     pub(super) graph: Vec<GraphEdge>,
+    pub batch_bytes: usize,
 }
 
 impl ExportPlan {
@@ -304,6 +305,7 @@ impl ExportPlan {
             edge_columns,
             containment,
             graph,
+            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
         })
     }
 }

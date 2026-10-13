@@ -193,9 +193,3 @@ fn item_phases_pipe_into_one_named_pass() {
         .unwrap_err();
     assert_eq!(killed.label, "run");
 }
-
-#[test]
-fn limits_load_from_the_shipped_config() {
-    let env = Env::for_lang(SupportLang::Python).unwrap();
-    assert_eq!(env.limits.total_ms, Limits::UNLIMITED.total_ms);
-}

@@ -351,6 +351,15 @@ impl Col {
         }
     }
 
+    fn offsets_used(&self) -> usize {
+        match self {
+            Self::Str(b, _) => b.values_slice().len(),
+            Self::StrList(b, _) => b.values_ref().values_slice().len(),
+            Self::DictStrList(b, _) => b.values_ref().len(),
+            _ => 0,
+        }
+    }
+
     fn kind(&self) -> &'static str {
         match self {
             Self::Str(..) => "Str",
@@ -542,6 +551,7 @@ impl ColRef<'_> {
 /// ```
 #[derive(Debug)]
 pub struct BatchBuilder {
+    specs: Vec<ColumnSpec>,
     names: Vec<String>,
     cols: Vec<Col>,
     index: FxHashMap<String, usize>,
@@ -550,6 +560,8 @@ pub struct BatchBuilder {
 /// Distinct values a `LowCardinality` column is expected to hold before its
 /// dictionary has to grow.
 const DICT_VALUES_HINT: usize = 64;
+
+pub const BATCH_BYTES: usize = i32::MAX as usize / 2;
 
 impl BatchBuilder {
     pub fn new(specs: &[ColumnSpec], cap: usize) -> BatchResult<Self> {
@@ -603,7 +615,12 @@ impl BatchBuilder {
             cols.push(col);
         }
 
-        Ok(Self { names, cols, index })
+        Ok(Self {
+            specs: specs.to_vec(),
+            names,
+            cols,
+            index,
+        })
     }
 
     pub fn col(&mut self, name: &str) -> BatchResult<ColRef<'_>> {
@@ -629,6 +646,14 @@ impl BatchBuilder {
             fill(item, &mut self)?;
         }
         self.finish()
+    }
+
+    pub fn take_if_over(&mut self, max_bytes: usize) -> BatchResult<Option<RecordBatch>> {
+        if self.cols.iter().all(|col| col.offsets_used() < max_bytes) {
+            return Ok(None);
+        }
+        let empty = Self::new(&self.specs, 0)?;
+        std::mem::replace(self, empty).finish().map(Some)
     }
 
     /// Finalize into a `RecordBatch`. Use with `col(...)` when rows come from

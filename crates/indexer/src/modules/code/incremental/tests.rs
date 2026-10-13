@@ -179,17 +179,94 @@ async fn archive_indexes_multiple_families_into_server_batches() {
 }
 
 #[tokio::test]
-async fn cancelled_run_emits_no_batches() {
+async fn tables_over_the_batch_byte_budget_index_the_same_rows() {
+    let files: &[(&str, &[u8])] = &[
+        ("root/src/main.py", b"from helper import greet\ngreet()\n"),
+        ("root/src/helper.py", b"def greet():\n    pass\n"),
+        ("root/web/a.ts", b"export function hello() {}\n"),
+        ("root/web/b.js", b"import { hello } from './a';\nhello();\n"),
+    ];
+    let fixture = IndexFixture::new();
+    let index = async |batch_bytes| {
+        let batches = Arc::new(Mutex::new(Vec::new()));
+        let capture = batches.clone();
+        let mut options = options();
+        options.batch_bytes = batch_bytes;
+        let report = fixture
+            .run(
+                files,
+                options,
+                Arc::new(move |table: &str, batch: RecordBatch| {
+                    capture.lock().unwrap().push((table.to_owned(), batch));
+                    Ok(())
+                }),
+            )
+            .await
+            .unwrap();
+        let batches = std::mem::take(&mut *batches.lock().unwrap());
+        (report.stats, batches)
+    };
+    let rows = |batches: &[(String, RecordBatch)]| {
+        let mut tables = std::collections::BTreeMap::<_, Vec<_>>::new();
+        for (table, _) in batches {
+            tables.entry(table.clone()).or_insert_with(|| {
+                let mut rows: Vec<_> = collected_rows(batches, table)
+                    .into_iter()
+                    .map(|row| {
+                        format!(
+                            "{:?}",
+                            row.into_iter()
+                                .collect::<std::collections::BTreeMap<_, _>>()
+                        )
+                    })
+                    .collect();
+                rows.sort();
+                rows
+            });
+        }
+        tables
+    };
+    let (whole_stats, whole) = index(orbit_utils::arrow::BATCH_BYTES).await;
+    let (split_stats, split) = index(1).await;
+    assert!(split.len() > whole.len());
+    assert_eq!(rows(&split), rows(&whole));
+    assert_eq!(split_stats.files_indexed, whole_stats.files_indexed);
+    assert_eq!(split_stats.definitions_count, whole_stats.definitions_count);
+    assert_eq!(split_stats.edges_count, whole_stats.edges_count);
+}
+
+#[tokio::test]
+async fn a_family_panic_is_a_fatal_error() {
+    let report = IndexFixture::new()
+        .run(
+            &[("root/file.py", b"def f(): pass")],
+            options(),
+            Arc::new(|_, _| panic!("sink panicked")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.errors.len(), 1);
+    assert!(report.errors[0].fatal);
+    assert!(
+        report.errors[0].to_string().contains("panic"),
+        "{}",
+        report.errors[0]
+    );
+}
+
+#[tokio::test]
+async fn cancelled_run_emits_no_batches_and_no_errors() {
     let mut options = options();
     options.cancelled = Arc::new(|| true);
-    let result = IndexFixture::new()
+    let report = IndexFixture::new()
         .run(
             &[("root/file.py", b"def f(): pass")],
             options,
             Arc::new(|_, _| panic!("cancelled run must not emit")),
         )
-        .await;
-    assert!(result.is_err());
+        .await
+        .unwrap();
+    assert!(report.errors.is_empty());
 }
 
 #[tokio::test]
@@ -235,6 +312,24 @@ async fn sink_failure_aborts_the_run() {
     assert!(error.to_string().contains("write failed"));
 }
 
+#[tokio::test]
+async fn an_ontology_the_export_cannot_map_is_a_fatal_error() {
+    let fixture = IndexFixture {
+        ontology: Arc::new(ontology::Ontology::new()),
+        ..IndexFixture::new()
+    };
+    let report = fixture
+        .run(
+            &[("root/file.py", b"def f(): pass")],
+            options(),
+            Arc::new(|_, _| Ok(())),
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.errors.len(), 1);
+    assert!(report.errors[0].fatal);
+}
+
 fn stream(bytes: Vec<u8>) -> ByteStream {
     Box::pin(futures::stream::once(async move { Ok(bytes.into()) }))
 }
@@ -250,9 +345,47 @@ fn config() -> CodeIndexingPipelineConfig {
 fn options() -> Options {
     Options {
         limits: code_graph_incremental::Limits::UNLIMITED,
+        worker_threads: config().worker_threads,
+        concurrent_families: code_graph::v2::PipelineConfig::default().concurrent_languages(),
+        small_family_files: config().small_repo_max_files,
+        batch_bytes: orbit_utils::arrow::BATCH_BYTES,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| {}),
     }
+}
+
+#[test]
+fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
+    let configured = config();
+    let mapped = limits(&configured);
+    assert_eq!(
+        [
+            mapped.file_parse_ms,
+            mapped.file_rewrite_ms,
+            mapped.file_link_ms,
+            mapped.file_resolve_ms,
+            mapped.cross_file_resolve_ms,
+        ],
+        [
+            configured.per_file_parse_timeout_ms,
+            configured.per_file_walk_timeout_ms,
+            configured.per_file_ssa_timeout_ms,
+            configured.per_file_timeout_ms,
+            configured.cross_file_resolve_timeout_ms,
+        ]
+    );
+    assert_eq!(mapped.max_files, configured.max_files);
+
+    let unlimited = limits(&CodeIndexingPipelineConfig {
+        max_files: 0,
+        per_file_timeout_ms: 0,
+        per_file_parse_timeout_ms: 0,
+        per_file_walk_timeout_ms: 0,
+        per_file_ssa_timeout_ms: 0,
+        cross_file_resolve_timeout_ms: 0,
+        ..configured
+    });
+    assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);
 }
 
 #[tokio::test]
