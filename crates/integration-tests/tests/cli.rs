@@ -78,32 +78,35 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
         )
         .unwrap();
     drop(manifest);
-    for change in ["DELETE FROM _orbit_meta", "DROP TABLE _orbit_meta"] {
-        let graph = duckdb_client::DuckDbClient::open(&broken).unwrap();
-        graph.execute(change, &[]).unwrap();
-        drop(graph);
+    for (change, diagnostic) in [
+        (
+            Some("DELETE FROM _orbit_meta"),
+            "skipping incomplete revision",
+        ),
+        (
+            Some("DROP TABLE _orbit_meta"),
+            "skipping incomplete revision",
+        ),
+        (None, "skipping missing revision"),
+    ] {
+        match change {
+            Some(sql) => {
+                let graph = duckdb_client::DuckDbClient::open(&broken).unwrap();
+                graph.execute(sql, &[]).unwrap();
+            }
+            None => std::fs::remove_file(&broken).unwrap(),
+        }
         let (output, error, ok) = run_cmd(
             &["sql", "-F", "json", "SELECT * FROM gl_probe"],
             data.path(),
         );
         assert!(ok, "{error}");
-        assert!(error.contains("skipping incomplete revision"), "{error}");
+        assert!(error.contains(diagnostic), "{error}");
         assert_eq!(
             serde_json::from_str::<Value>(&output).unwrap(),
             json!([{"id":42}])
         );
     }
-    std::fs::remove_file(&broken).unwrap();
-    let (output, error, ok) = run_cmd(
-        &["sql", "-F", "json", "SELECT * FROM gl_probe"],
-        data.path(),
-    );
-    assert!(ok, "{error}");
-    assert!(error.contains("skipping missing revision"), "{error}");
-    assert_eq!(
-        serde_json::from_str::<Value>(&output).unwrap(),
-        json!([{"id":42}])
-    );
     let responses = mcp_roundtrip(
         data.path(),
         &[
@@ -559,16 +562,19 @@ fn index_db_flag_writes_to_custom_path() {
     let repo = create_test_repo();
 
     let workspace_dir = tempfile::TempDir::new().unwrap();
-    let out = orbit_cmd()
-        .args([
-            "index",
-            repo.path.to_str().unwrap(),
-            "--db",
-            db_path.to_str().unwrap(),
-        ])
-        .env("ORBIT_DATA_DIR", workspace_dir.path())
-        .output()
-        .unwrap();
+    let index = || {
+        orbit_cmd()
+            .args([
+                "index",
+                repo.path.to_str().unwrap(),
+                "--db",
+                db_path.to_str().unwrap(),
+            ])
+            .env("ORBIT_DATA_DIR", workspace_dir.path())
+            .output()
+            .unwrap()
+    };
+    let out = index();
     assert!(
         out.status.success(),
         "index --db failed: {}",
@@ -595,16 +601,7 @@ fn index_db_flag_writes_to_custom_path() {
         &repo.path,
         &["commit", "--allow-empty", "-m", "new revision"],
     );
-    let output = orbit_cmd()
-        .args([
-            "index",
-            repo.path.to_str().unwrap(),
-            "--db",
-            db_path.to_str().unwrap(),
-        ])
-        .env("ORBIT_DATA_DIR", workspace_dir.path())
-        .output()
-        .unwrap();
+    let output = index();
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
@@ -618,16 +615,7 @@ fn index_db_flag_writes_to_custom_path() {
         .unwrap();
     drop(client);
     let before = std::fs::read(&db_path).unwrap();
-    let output = orbit_cmd()
-        .args([
-            "index",
-            repo.path.to_str().unwrap(),
-            "--db",
-            db_path.to_str().unwrap(),
-        ])
-        .env("ORBIT_DATA_DIR", workspace_dir.path())
-        .output()
-        .unwrap();
+    let output = index();
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
