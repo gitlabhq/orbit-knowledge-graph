@@ -1548,6 +1548,7 @@ fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
                 url: "http://127.0.0.1:1".into(),
                 ..orbit_server_config::AppConfig::embedded_defaults().graph
             },
+            &orbit_observability::resilience::CircuitBreakers::default().graph,
             Arc::new(indexer::metrics::EngineMetrics::new()),
         )
         .expect("config is valid"),

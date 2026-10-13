@@ -12,6 +12,7 @@ publish = false
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics" }
+orbit-observability = { workspace = true }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
 orbit-server = { path = "../orbit-server", features = ["testkit"] }

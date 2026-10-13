@@ -242,6 +242,7 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
 
     let result = indexer::run_dispatcher(
         &context.config,
+        orbit_observability::resilience::CircuitBreakers::default(),
         &conflicting,
         serving_flag(),
         CancellationToken::new(),
@@ -268,6 +269,7 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
 
     let result = indexer::run_dispatcher(
         &context.config,
+        orbit_observability::resilience::CircuitBreakers::default(),
         &invalid,
         serving_flag(),
         CancellationToken::new(),

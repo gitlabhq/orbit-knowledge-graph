@@ -9,6 +9,10 @@ use tracing::info;
 
 const CONTRACT: &str = include_str!(concat!(env!("CONFIG_DIR"), "/clickhouse-setup.sql"));
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a one-shot setup job has no later calls to protect"
+)]
 pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     let setup = &config.clickhouse_setup;
     let admin_password = required(&setup.admin_password, "admin_password")?;

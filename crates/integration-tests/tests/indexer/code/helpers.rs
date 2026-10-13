@@ -100,6 +100,7 @@ impl CodeIndexingDeps {
         let writer = Arc::new(
             indexer::clickhouse::ClickHouseWriter::new(
                 clickhouse.config.clone(),
+                &orbit_observability::resilience::CircuitBreakers::default().graph,
                 Arc::new(indexer::metrics::EngineMetrics::new()),
             )
             .expect("writer must build"),

@@ -10,6 +10,7 @@ use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_migrations::version::SCHEMA_VERSION;
+use orbit_observability::resilience::CircuitBreakers;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::SnowplowAnalyticsTracker;
 use orbit_server::auth::JwtValidator;
@@ -85,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!(mode = ?args.mode, aws_lc_fips = aws_lc_version, "starting");
 
+    let breakers = CircuitBreakers::new();
     let shutdown = CancellationToken::new();
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
@@ -97,12 +99,14 @@ async fn main() -> anyhow::Result<()> {
                 include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
             )?;
 
-            let graph = config.graph.build_client();
+            let graph = config
+                .graph
+                .build_client_with_circuit_breaker(&breakers.graph);
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, breakers, &archive, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
@@ -111,13 +115,13 @@ async fn main() -> anyhow::Result<()> {
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, serving, shutdown)
+            indexer::run(&indexer_config, breakers, ontology, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, active_schema, serving, shutdown.clone()).await
+            run_webserver(&config, breakers, active_schema, serving, shutdown.clone()).await
         }
     };
 
@@ -129,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run_webserver(
     config: &AppConfig,
+    breakers: CircuitBreakers,
     active_schema: Arc<ActiveSchema>,
     serving: Arc<AtomicBool>,
     shutdown: CancellationToken,
@@ -150,17 +155,26 @@ async fn run_webserver(
              the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
         )
     })?;
-    let gitlab_client = Arc::new(
-        gitlab_client::GitlabClient::new(gitlab_client_config)
-            .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
-    );
-
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "cluster health must see the real state of ClickHouse and GitLab"
+    )]
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
         Some(config.graph.build_client()),
-        Some(gitlab_client.clone()),
+        Some(Arc::new(
+            gitlab_client::GitlabClient::new(gitlab_client_config.clone())
+                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+        )),
     )
     .into_arc();
+    let gitlab_client = Arc::new(
+        gitlab_client::GitlabClient::new_with_circuit_breaker(
+            gitlab_client_config,
+            &breakers.gitlab,
+        )
+        .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+    );
 
     let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
     resolver_registry.register(
@@ -182,7 +196,11 @@ async fn run_webserver(
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
     ActiveSchema::spawn(
         &active_schema,
-        Arc::new(config.graph.build_client()),
+        Arc::new(
+            config
+                .graph
+                .build_client_with_circuit_breaker(&breakers.graph),
+        ),
         archive,
         catalog,
         config,
@@ -199,7 +217,9 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         validator,
         active_schema,
-        &config.graph,
+        config
+            .graph
+            .build_client_with_circuit_breaker(&breakers.graph),
         cluster_health,
         tls_config,
         config.grpc.clone(),

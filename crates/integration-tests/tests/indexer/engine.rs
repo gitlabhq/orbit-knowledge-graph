@@ -247,6 +247,7 @@ impl TestContext {
                         .graph
                         .profiling,
                 },
+                &orbit_observability::resilience::CircuitBreakers::default().graph,
                 Arc::new(EngineMetrics::default()),
             )
             .expect("failed to create writer"),

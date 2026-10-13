@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use circuit_breaker::CircuitBreaker;
 use orbit_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
@@ -14,6 +15,10 @@ const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
 
 pub trait ClickHouseConfigurationExt {
     fn build_client(&self) -> ArrowClickHouseClient;
+
+    fn build_client_with_circuit_breaker(&self, breaker: &CircuitBreaker) -> ArrowClickHouseClient {
+        self.build_client().with_circuit_breaker(breaker.clone())
+    }
 }
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
@@ -230,6 +235,20 @@ mod tests {
         let settings = build_session_settings_with_quorum_defaults(&config);
 
         assert!(settings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn client_built_with_a_circuit_breaker_reports_failures_to_it() {
+        let config = ClickHouseConfiguration {
+            url: crate::testing::UNREACHABLE_URL.to_string(),
+            ..AppConfig::embedded_defaults().graph
+        };
+        let breaker = crate::testing::circuit_breaker(1);
+
+        let client = config.build_client_with_circuit_breaker(&breaker);
+        let _ = client.execute("SELECT 1").await;
+
+        assert!(!breaker.is_available());
     }
 
     #[test]

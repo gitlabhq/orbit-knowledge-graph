@@ -3935,6 +3935,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "circuit-breaker",
  "clickhouse",
  "clickhouse-client",
  "code-graph",
@@ -4127,6 +4128,7 @@ dependencies = [
  "opentelemetry_sdk",
  "orbit-analytics",
  "orbit-migrations",
+ "orbit-observability",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
@@ -5649,6 +5651,7 @@ dependencies = [
  "circuit-breaker",
  "opentelemetry",
  "serde",
+ "tokio",
  "tracing",
 ]
 

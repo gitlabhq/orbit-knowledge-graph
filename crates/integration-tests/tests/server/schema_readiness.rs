@@ -229,7 +229,7 @@ impl Cluster {
         let service = OrbitServiceImpl::new(
             Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
             active_schema.clone(),
-            &config.graph,
+            config.graph.build_client(),
             ClusterHealthChecker::default().into_arc(),
             WAIT_LIMIT.as_secs(),
             Arc::new(config.analytics.clone()),

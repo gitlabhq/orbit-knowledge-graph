@@ -6,7 +6,7 @@ pub mod observer;
 pub mod service;
 pub(crate) mod state;
 
-pub use breaker::{CircuitBreaker, CircuitBreakerRegistry};
+pub use breaker::{CircuitBreaker, CircuitBreakerRegistry, call_transient};
 pub use classifiable::CircuitBreakableError;
 pub use config::CircuitConfig;
 pub use error::CircuitBreakerError;

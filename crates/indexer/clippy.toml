@@ -1,0 +1,4 @@
+disallowed-methods = [
+  { path = "clickhouse_client::ClickHouseConfigurationExt::build_client", reason = "use build_client_with_circuit_breaker so calls stop while ClickHouse is down or overloaded" },
+  { path = "gitlab_client::GitlabClient::new", reason = "use GitlabClient::new_with_circuit_breaker so calls stop while GitLab is unreachable" },
+]

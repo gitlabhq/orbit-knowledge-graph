@@ -1,4 +1,10 @@
-use circuit_breaker::{CircuitBreakerObserver, StateLabel, Transition};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use circuit_breaker::{
+    CircuitBreaker, CircuitBreakerObserver, CircuitBreakerRegistry, ServiceName, StateLabel,
+    Transition,
+};
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue};
 
@@ -43,6 +49,48 @@ const SERVICE_KEY: Key = Key::from_static_str(labels::SERVICE);
 const FROM_KEY: Key = Key::from_static_str(labels::FROM);
 const TO_KEY: Key = Key::from_static_str(labels::TO);
 const OUTCOME_KEY: Key = Key::from_static_str(labels::OUTCOME);
+
+#[derive(Clone, Copy)]
+enum ExternalService {
+    Graph,
+    Datalake,
+    Gitlab,
+}
+
+impl ServiceName for ExternalService {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Graph => "graph",
+            Self::Datalake => "datalake",
+            Self::Gitlab => "gitlab",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CircuitBreakers {
+    pub graph: CircuitBreaker,
+    pub datalake: CircuitBreaker,
+    pub gitlab: CircuitBreaker,
+}
+
+impl CircuitBreakers {
+    pub fn new() -> Self {
+        let registry =
+            CircuitBreakerRegistry::new(HashMap::new(), Arc::new(MetricsObserver::new()));
+        Self {
+            graph: registry.circuit_breaker(ExternalService::Graph),
+            datalake: registry.circuit_breaker(ExternalService::Datalake),
+            gitlab: registry.circuit_breaker(ExternalService::Gitlab),
+        }
+    }
+}
+
+impl Default for CircuitBreakers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub struct MetricsObserver {
     state_transitions: Counter<u64>,
@@ -126,5 +174,28 @@ impl CircuitBreakerObserver for MetricsObserver {
                 KeyValue::new(OUTCOME_KEY.clone(), "failure"),
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn fail_until_open(breaker: &CircuitBreaker) {
+        while breaker.is_available() {
+            let _ = breaker.call(|| async { Err::<(), _>("down") }).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn each_service_has_its_own_circuit_shared_by_every_clone() {
+        let breakers = CircuitBreakers::new();
+        let clone = breakers.clone();
+
+        fail_until_open(&breakers.graph).await;
+
+        assert!(!clone.graph.is_available());
+        assert!(clone.datalake.is_available());
+        assert!(clone.gitlab.is_available());
     }
 }

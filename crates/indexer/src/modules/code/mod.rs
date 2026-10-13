@@ -23,6 +23,7 @@ use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
+use orbit_observability::resilience::CircuitBreakers;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
@@ -50,6 +51,7 @@ pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    breakers: &CircuitBreakers,
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
@@ -65,9 +67,15 @@ pub async fn register_handlers(
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
 
-    let gitlab_client =
-        Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
-    let client = Arc::new(config.graph.build_client());
+    let gitlab_client = Arc::new(
+        GitlabClient::new_with_circuit_breaker(gitlab_config.clone(), &breakers.gitlab)
+            .map_err(HandlerInitError::new)?,
+    );
+    let client = Arc::new(
+        config
+            .graph
+            .build_client_with_circuit_breaker(&breakers.graph),
+    );
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));

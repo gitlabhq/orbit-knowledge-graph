@@ -63,6 +63,7 @@ use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
 use orbit_migrations::catalog::OntologyCatalog;
+use orbit_observability::resilience::CircuitBreakers;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
@@ -79,6 +80,7 @@ use tracing::{info, warn};
 
 pub async fn run(
     config: &IndexerConfig,
+    breakers: CircuitBreakers,
     ontology: Arc<ontology::Ontology>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
@@ -93,7 +95,9 @@ pub async fn run(
 
     info!(modules = ?config.engine.modules, "indexer module selection");
 
-    let graph_client = config.graph.build_client();
+    let graph_client = config
+        .graph
+        .build_client_with_circuit_breaker(&breakers.graph);
     info!(url = %config.graph.url, "initializing schema version table");
     schema::version::init(&graph_client).await?;
 
@@ -139,6 +143,7 @@ pub async fn run(
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
     let writer = Arc::new(ClickHouseWriter::new(
         config.graph.clone(),
+        &breakers.graph,
         metrics.clone(),
     )?);
 
@@ -157,6 +162,7 @@ pub async fn run(
         modules::sdlc::register_handlers(
             &registry,
             config,
+            &breakers,
             &ontology,
             writer.clone(),
             analytics.clone(),
@@ -172,6 +178,7 @@ pub async fn run(
         modules::code::register_handlers(
             &registry,
             config,
+            &breakers,
             &ontology,
             writer.clone(),
             analytics.clone(),
@@ -187,7 +194,7 @@ pub async fn run(
         .is_module_enabled(IndexerModule::NamespaceDeletion)
     {
         info!("initializing Namespace Deletion handler");
-        modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
+        modules::namespace_deletion::register_handlers(&registry, config, &breakers, &ontology)?;
     } else {
         info!("Namespace Deletion handler disabled by engine.modules");
     }
@@ -238,16 +245,28 @@ pub async fn run(
 
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
+    breakers: CircuitBreakers,
     archive: &ontology::archive::OntologyArchive,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
+    let graph_client = || {
+        config
+            .graph
+            .build_client_with_circuit_breaker(&breakers.graph)
+    };
+    let datalake_client = || {
+        config
+            .datalake
+            .build_client_with_circuit_breaker(&breakers.datalake)
+    };
+
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
     let ontology = catalog.publish(archive).await?;
 
-    let graph = config.graph.build_client();
+    let graph = graph_client();
     if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
         && active_version != archive.schema_version()
     {
@@ -263,7 +282,7 @@ pub async fn run_dispatcher(
         warn!(%error, "release GC failed, will retry next startup");
     }
 
-    let datalake = config.datalake.build_client();
+    let datalake = datalake_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
 
@@ -333,8 +352,8 @@ pub async fn run_dispatcher(
         }
     }
 
-    let deletion_graph = Arc::new(config.graph.build_client());
-    let deletion_datalake = Arc::new(config.datalake.build_client());
+    let deletion_graph = Arc::new(graph_client());
+    let deletion_datalake = Arc::new(datalake_client());
     let deletion_store: Arc<dyn NamespaceDeletionStore> =
         Arc::new(ClickHouseNamespaceDeletionStore::new(
             deletion_datalake,
@@ -345,8 +364,8 @@ pub async fn run_dispatcher(
 
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
-        config.graph.build_client(),
-        config.datalake.build_client(),
+        graph_client(),
+        datalake_client(),
         metrics.clone(),
         campaign.clone(),
         config.schedule.tasks.code_backfill.publish_window,
@@ -363,7 +382,7 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             datalake,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
+                graph_client(),
             ))),
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
@@ -373,7 +392,7 @@ pub async fn run_dispatcher(
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
-                config.graph.build_client(),
+                graph_client(),
                 &modules::code::config::CodeTableNames::from_ontology(&ontology)
                     .expect("code tables must resolve from the archived ontology"),
                 checkpoint_store.clone(),
@@ -395,17 +414,17 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace_deletion.clone(),
         )),
         Box::new(StaleEdgeReconciliation::new(
-            config.graph.build_client(),
+            graph_client(),
             &ontology,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
+                graph_client(),
             ))),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),
         Box::new(MigrationCompletionChecker::new(
-            config.graph.build_client(),
-            config.datalake.build_client(),
+            graph_client(),
+            datalake_client(),
             lock_service.clone(),
             Arc::new(ontology),
             config.schema.clone(),
@@ -425,7 +444,7 @@ pub async fn run_dispatcher(
         Arc::new(EnabledNamespacesRoute::new(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
-            config.datalake.build_client(),
+            datalake_client(),
         )),
     ];
 

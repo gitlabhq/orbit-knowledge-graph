@@ -36,8 +36,12 @@ impl TestContext {
         let (container, host, port) = start_clickhouse_container().await;
         setup_database(&host, port).await;
         let config = create_config(&host, port);
-        let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-            .expect("failed to create writer");
+        let writer = ClickHouseWriter::new(
+            config,
+            &orbit_observability::resilience::CircuitBreakers::default().graph,
+            Arc::new(EngineMetrics::default()),
+        )
+        .expect("failed to create writer");
 
         Self {
             _container: container,
@@ -329,8 +333,12 @@ async fn connection_failure_returns_error() {
             .profiling,
     };
 
-    let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-        .expect("failed to create writer");
+    let writer = ClickHouseWriter::new(
+        config,
+        &orbit_observability::resilience::CircuitBreakers::default().graph,
+        Arc::new(EngineMetrics::default()),
+    )
+    .expect("failed to create writer");
 
     let result = writer
         .write(

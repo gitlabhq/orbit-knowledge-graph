@@ -343,6 +343,10 @@ impl Default for ClusterHealthChecker {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "cluster health must see the real state of GitLab"
+)]
 mod tests {
     use super::*;
     use axum::http::StatusCode as HttpStatus;

@@ -35,6 +35,10 @@ pub async fn run(config: &AppConfig, tls: Option<labkit::tls::ServerTls>) -> Res
     Ok(())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "health checks must see the real state of ClickHouse"
+)]
 fn build_clickhouse_instances(config: &AppConfig) -> Vec<ClickHouseInstance> {
     let same_host = config.graph.url == config.datalake.url;
 

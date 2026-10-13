@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
+use circuit_breaker::CircuitBreaker;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::ClickHouseConfiguration;
 use thiserror::Error;
@@ -55,12 +56,13 @@ pub struct ClickHouseWriter {
 impl ClickHouseWriter {
     pub fn new(
         configuration: ClickHouseConfiguration,
+        breaker: &CircuitBreaker,
         metrics: Arc<EngineMetrics>,
     ) -> Result<Self, WriteError> {
         configuration
             .validate()
             .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client();
+        let client = configuration.build_client_with_circuit_breaker(breaker);
         Ok(Self {
             client,
             metrics,
@@ -70,6 +72,10 @@ impl ClickHouseWriter {
 
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a no-op writer never calls ClickHouse"
+    )]
     pub fn noop() -> Self {
         Self {
             client: orbit_server_config::AppConfig::embedded_defaults()
