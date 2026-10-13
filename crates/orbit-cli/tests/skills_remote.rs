@@ -447,6 +447,11 @@ fn https_gitlab_url_with_uppercase_scheme_emits_no_plaintext_warning() {
         "{}",
         stderr(&output)
     );
+    assert!(
+        !stderr(&output).contains("must be an absolute"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
