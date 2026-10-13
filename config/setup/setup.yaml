@@ -1,17 +1,23 @@
 # yaml-language-server: $schema=../schemas/setup.schema.json
 # Every string `orbit setup` writes into an assistant's files: the managed instruction block, the
 # two hook nudges, the MCP server entry, and the `template_vars` that fill `{{name}}` placeholders
-# in the templates assistants declare.
+# in the templates assistants declare. `remote` fills `{{name}}` placeholders in `instructions` when
+# Orbit can reach GitLab at setup time, and they render empty otherwise.
 mcp_server:
   name: orbit
   command: "{{orbit}} mcp serve"
 instructions: |
   ## Orbit
 
-  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.
+  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.{{remote_grep}}
   - `{{orbit}} context path:120-180` can be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
-  - MANDATORY: read all the code definitions you need in one call, plus independent searches: `{{orbit}} context a.rs:10-40; {{orbit}} grep 'x'`. Then follow new leads.
+  - MANDATORY: read all the code definitions you need in one call{{remote_context}}, plus independent searches: `{{orbit}} context a.rs:10-40{{remote_context_example}}; {{orbit}} grep 'x'`. Then follow new leads.
   - Reuse shown source instead of rereading unchanged files.
+
+remote:
+  remote_grep: " Also searches GitLab issues and MRs, here or in a `group/project` path."
+  remote_context: ", plus GitLab MRs and URLs"
+  remote_context_example: " MergeRequest[42]"
 
 nudge_search: |
   MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.

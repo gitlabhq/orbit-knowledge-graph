@@ -1,5 +1,5 @@
 name: grep
-version: 2.4.0
+version: 2.5.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -18,3 +18,9 @@ description: >-
   -A, -l, -w, and -g work. `--kind` takes definition kinds such as
   `Class,Method`, languages such as `py` as with rg -t, or `File` and `Directory`
   to list where matches are.
+  A plain search without paths or file filters also searches the GitLab project
+  behind `origin`. Its work items, merge requests, commits, notes, and milestones
+  print after local results, with tokens for `context`. Name a GitLab project,
+  group, URL, `Project[id]`, or `Group[id]` as a path to search it instead. An
+  indexed checkout of that project is also searched locally.
+  `--kind MergeRequest,WorkItem` searches only GitLab.

@@ -15,7 +15,7 @@ Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still pre
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:
-The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The flat `orbit` command tree reaches it with the `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` verbs.
+The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The flat `orbit` command tree reaches it with the `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` verbs. `grep` also searches GitLab entities, and `context` reads GitLab entity tokens such as `MergeRequest[42]`, through the GitLab grep and context endpoints.
 _Avoid_: "the server", "production GKG"
 
 **Orbit Local**:

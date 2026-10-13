@@ -43,10 +43,214 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
     })
 }
 
-pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
+pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
+    let ontology = ontology::Ontology::load_embedded()?;
+    let nodes: Vec<&str> = ontology.node_names().collect();
+    let (mut local, mut remote) = (Vec::new(), Vec::new());
+    let dir = args.repo.clone().unwrap_or_else(|| ".".into());
+    let mut client = None;
+    let mut origin = None;
+    for target in &args.target {
+        let token = match route(target, &nodes) {
+            Route::Local(target) => {
+                local.push(target);
+                continue;
+            }
+            Route::Remote(token) => token,
+            Route::Relative(reference) => {
+                let (host, project) = origin
+                    .get_or_insert_with(|| crate::remote::origin::project(&dir))
+                    .as_ref()
+                    .with_context(|| {
+                        format!(
+                            "{reference} needs a GitLab `origin` remote; name the project, as in \
+                             group/project{reference}"
+                        )
+                    })?;
+                let api_host = match &client {
+                    Some(client) => client,
+                    None => client.insert(crate::remote::client::OrbitClient::from_env_in(&dir)?),
+                }
+                .get_host()?;
+                anyhow::ensure!(
+                    *host == api_host,
+                    "{reference} names a merge request or issue in {project} on {host}, but Orbit \
+                     uses {api_host}; pass its URL or {project}{reference} with Orbit pointed at {host}"
+                );
+                format!("{project}{reference}")
+            }
+        };
+        if !remote.contains(&token) {
+            remote.push(token);
+        }
+    }
+    let pending = match remote.is_empty() {
+        true => None,
+        false => {
+            let client = match client {
+                Some(client) => client,
+                None => crate::remote::client::OrbitClient::from_env_in(&dir)?,
+            };
+            Some(tokio::spawn(async move {
+                crate::remote::context::fetch(client, &remote).await
+            }))
+        }
+    };
+    let requested = args.repo.clone();
+    let groups = match local.is_empty() {
+        true => Vec::new(),
+        false => by_checkout(args.repo, args.db.clone(), local),
+    };
+    let printed = !groups.is_empty();
+    for (index, (repo, targets)) in groups.into_iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        if let Some(repo) = repo
+            .as_ref()
+            .filter(|repo| requested.as_ref() != Some(repo))
+        {
+            println!("repo: {}", repo.display());
+        }
+        print!("{}", run_local(repo, args.db.clone(), &targets)?);
+    }
+    let Some(pending) = pending else {
+        return Ok(());
+    };
+    let mut bytes = pending.await??;
+    if !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    if printed {
+        println!();
+    }
+    Ok(crate::remote::write_stdout_raw(&bytes)?)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    Local(String),
+    Remote(String),
+    Relative(String),
+}
+
+const LOCAL_NODES: &[&str] = &["Definition", "File"];
+
+fn route(target: &str, nodes: &[&str]) -> Route {
+    use crate::remote::token;
+    if let Some(token) = token::entity_reference(target) {
+        return Route::Remote(token);
+    }
+    if token::is_relative_reference(target) {
+        return Route::Relative(target.to_string());
+    }
+    let Some(typed) = token::typed(target) else {
+        return Route::Local(target.to_string());
+    };
+    let named = |name: &&str| typed.names(name);
+    if let Some(local) = LOCAL_NODES.iter().copied().find(named) {
+        return Route::Local(format!("{local}:{}", typed.id));
+    }
+    match ["Issue"].iter().chain(nodes).copied().find(named) {
+        Some(node) => Route::Remote(format!("{node}[{}]", typed.id)),
+        None => Route::Local(target.to_string()),
+    }
+}
+
+fn by_checkout(
+    repo: Option<std::path::PathBuf>,
+    db: Option<std::path::PathBuf>,
+    targets: Vec<String>,
+) -> Vec<(Option<std::path::PathBuf>, Vec<String>)> {
+    let typed = |target: &str| {
+        crate::remote::token::typed(target)
+            .filter(|typed| LOCAL_NODES.iter().any(|node| typed.names(node)))
+            .map(|typed| (typed.node.to_string(), typed.id))
+    };
+    let ids: Vec<(String, i64)> = targets.iter().filter_map(|target| typed(target)).collect();
+    let owners = match repo.is_some() || ids.is_empty() {
+        true => BTreeMap::new(),
+        false => id_checkouts(db, &ids).unwrap_or_default(),
+    };
+    let here = workspace::git_toplevel(std::path::Path::new("."))
+        .ok()
+        .and_then(|root| dunce::canonicalize(root).ok());
+    let mut groups: Vec<(Option<std::path::PathBuf>, Vec<String>)> = vec![(repo, Vec::new())];
+    for target in targets {
+        let owner = typed(&target)
+            .and_then(|id| owners.get(&id))
+            .filter(|repos| !here.as_ref().is_some_and(|here| repos.contains(here)))
+            .and_then(|repos| match repos.as_slice() {
+                [only] => Some(only.clone()),
+                _ => None,
+            });
+        match owner {
+            Some(owner) => match groups
+                .iter_mut()
+                .find(|(repo, _)| repo.as_ref() == Some(&owner))
+            {
+                Some((_, group)) => group.push(target),
+                None => groups.push((Some(owner), vec![target])),
+            },
+            None => groups[0].1.push(target),
+        }
+    }
+    groups.retain(|(_, targets)| !targets.is_empty());
+    groups
+}
+
+fn id_checkouts(
+    db: Option<std::path::PathBuf>,
+    ids: &[(String, i64)],
+) -> Result<BTreeMap<(String, i64), Vec<std::path::PathBuf>>> {
+    let client = crate::database::GraphReader::open(db)?;
+    let list = |node: &str| {
+        let ids: Vec<String> = ids
+            .iter()
+            .filter(|(kind, _)| kind == node)
+            .map(|(_, id)| id.to_string())
+            .collect();
+        match ids.is_empty() {
+            true => "NULL".to_string(),
+            false => ids.join(", "),
+        }
+    };
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT 'Definition' AS node, d.id, m.repo_path FROM gl_definition d
+             JOIN _orbit_manifest m ON d.project_id = m.project_id AND d.commit_sha = m.commit_sha
+             WHERE d.id IN ({definitions})
+             UNION ALL
+             SELECT 'File' AS node, f.id, m.repo_path FROM gl_file f
+             JOIN _orbit_manifest m ON f.project_id = m.project_id AND f.commit_sha = m.commit_sha
+             WHERE f.id IN ({files})",
+            definitions = list("Definition"),
+            files = list("File"),
+        ),
+        &[],
+    )?;
+    let mut owners: BTreeMap<(String, i64), Vec<std::path::PathBuf>> = BTreeMap::new();
+    for ((node, id), repo) in string_column(&batches, "node")
+        .into_iter()
+        .zip(i64_column(&batches, "id"))
+        .zip(string_column(&batches, "repo_path"))
+    {
+        owners
+            .entry((node, id))
+            .or_default()
+            .push(std::path::PathBuf::from(repo));
+    }
+    Ok(owners)
+}
+
+fn run_local(
+    repo: Option<std::path::PathBuf>,
+    db: Option<std::path::PathBuf>,
+    targets: &[String],
+) -> Result<String> {
+    let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
-    let targets = resolve_targets(&client, &git, &hydrator, &target.target)?;
+    let targets = resolve_targets(&client, &git, &hydrator, targets)?;
     let mut out = String::new();
     for dir in &targets.dirs {
         render_dir(&mut out, &client, &git, dir)?;
@@ -60,8 +264,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         .map(|(path, ..)| path.clone())
         .collect();
     if targets.files.is_empty() && targets.file_ids.is_empty() && targets.ids.is_empty() {
-        print!("{}{out}", edited_note(&git, &shown));
-        return Ok(());
+        return Ok(format!("{}{out}", edited_note(&git, &shown)));
     }
     shown.extend(targets.files.iter().cloned());
     let (paths, file_ids, ids) = (targets.files, targets.file_ids, targets.ids);
@@ -101,8 +304,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     out.push_str(&relations::render(
         &client, &git, &hydrator, &nodes, &members,
     )?);
-    print!("{}{out}", edited_note(&git, &shown));
-    Ok(())
+    Ok(format!("{}{out}", edited_note(&git, &shown)))
 }
 
 /// Warns that the graph describes the indexed commit when a shown file has changed since.
@@ -593,6 +795,47 @@ fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gitlab_tokens_route_remotely_and_code_targets_stay_local() {
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let nodes: Vec<&str> = ontology.node_names().collect();
+        let remote = |token: &str| Route::Remote(token.to_string());
+        let local = |target: &str| Route::Local(target.to_string());
+        for (target, expected) in [
+            ("MergeRequest[42]", remote("MergeRequest[42]")),
+            ("mergerequest[42]", remote("MergeRequest[42]")),
+            ("MergeRequest:42", remote("MergeRequest[42]")),
+            ("Issue:7", remote("Issue[7]")),
+            ("WorkItem[7]", remote("WorkItem[7]")),
+            ("gitlab-org/gitlab!123", remote("gitlab-org/gitlab!123")),
+            ("gitlab-org/sub/proj#9", remote("gitlab-org/sub/proj#9")),
+            (
+                "gid://gitlab/MergeRequest/1",
+                remote("gid://gitlab/MergeRequest/1"),
+            ),
+            (
+                "https://gitlab.com/g/p/-/merge_requests/1",
+                remote("https://gitlab.com/g/p/-/merge_requests/1"),
+            ),
+            (
+                "gitlab.com/g/p/-/merge_requests/1",
+                remote("https://gitlab.com/g/p/-/merge_requests/1"),
+            ),
+            ("gitlab-org#5", remote("gitlab-org#5")),
+            ("!42", Route::Relative("!42".into())),
+            ("Definition:5", local("Definition:5")),
+            ("Definition[5]", local("Definition:5")),
+            ("File[3]", local("File:3")),
+            ("note:3", local("note:3")),
+            ("src/main.rs:10-20", local("src/main.rs:10-20")),
+            ("Foo#bar", local("Foo#bar")),
+            ("Module::Class#method", local("Module::Class#method")),
+            ("crates/orbit-cli", local("crates/orbit-cli")),
+        ] {
+            assert_eq!(route(target, &nodes), expected, "{target}");
+        }
+    }
 
     fn def(fqn: &str, kind: &str, start: usize, end: usize) -> SourceRange {
         SourceRange {
