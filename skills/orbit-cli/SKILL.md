@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.24.0
+version: 0.24.1
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -77,8 +77,8 @@ orbit repo-map overview                 # then tree, api, class, extends, import
 Gotchas:
 
 - Queries are SQL against `gl_definition`, `gl_edge`, `gl_file`,
-  `gl_directory`, and `gl_imported_symbol`. They are not the JSON DSL, which
-  belongs to Orbit Remote.
+  `gl_directory`, and `gl_imported_symbol`. They are not the GQL that Orbit
+  Remote accepts.
 - `definition_type` values are capitalized. `WHERE definition_type='function'`
   returns zero rows.
 - `sql` queries all indexed revisions by default. Use `--repo .` for the current

@@ -122,7 +122,7 @@ Then `scripts/ci/open-e2e-bump-mr.sh` pushes `automation/e2e-pin-bump` and opens
 
 Every suite sends GQL text to `POST /api/v4/orbit/query`. Suite 01 turns on the
 `orbit_gql_queries` feature flag for the instance, so Rails selects the GQL
-frontend for every user. With the flag on, Orbit rejects JSON DSL queries. See
+frontend for every user. Orbit rejects the removed JSON Query DSL. See
 [Orbit query frontend](../design-documents/querying/orbit_query_frontend.md).
 
 ## Parallel execution

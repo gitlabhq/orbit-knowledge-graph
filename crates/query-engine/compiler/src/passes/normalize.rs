@@ -238,11 +238,11 @@ fn coerce_filter(filter: &mut InputFilter, property: Option<&query_data_model::P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::parse_input;
+    use crate::gql::parse;
     use serde_json::json;
 
-    fn normalize_query(json: &str) -> Input {
-        let input = parse_input(json).unwrap();
+    fn normalize_query(query: &str) -> Input {
+        let input = parse(query).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
         normalize(input, model.as_ref()).unwrap()
@@ -250,70 +250,49 @@ mod tests {
 
     #[test]
     fn enum_coercion_all_variants() {
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (mr:MergeRequest {state: 1}) RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!("opened"))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2, 3, 4]}}}]}"#,
-        );
+        let r =
+            normalize_query(r#"MATCH (mr:MergeRequest) WHERE mr.state IN [1, 2, 3, 4] RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!(["opened", "closed", "merged", "locked"]))
         );
 
         // Mixed valid/invalid ints in array - unknown values pass through
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 999, 3]}}}]}"#,
-        );
+        let r =
+            normalize_query(r#"MATCH (mr:MergeRequest) WHERE mr.state IN [1, 999, 3] RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!(["opened", 999, "merged"]))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (mr:MergeRequest {state: 'opened'}) RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!("opened"))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (mr:MergeRequest {state: 999}) RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!(999))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"is_null": true}}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (mr:MergeRequest) WHERE mr.state IS NULL RETURN mr"#);
         assert_eq!(r.nodes[0].filters.get("state").unwrap()[0].value, None);
     }
 
     #[test]
     fn full_traversal_normalization() {
         let result = normalize_query(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "filters": {"username": "admin", "id": 42}},
-                    {"id": "mr", "entity": "MergeRequest", "filters": {"state": 3, "draft": false, "title": {"contains": "fix"}}},
-                    {"id": "p", "entity": "Pipeline", "filters": {"source": 10, "failure_reason": 1}},
-                    {"id": "wi", "entity": "WorkItem", "filters": {"state": 2, "work_item_type": 8}},
-                    {"id": "n"}
-                ],
-                "relationships": [
-                    {"type": "AUTHORED", "from": "u", "to": "mr"},
-                    {"type": "TRIGGERED", "from": "mr", "to": "p"}
-                ]
-            }"#,
+            "MATCH (u:User {username: 'admin'})-[:AUTHORED]->(mr:MergeRequest {state: 3, draft: false})-[:TRIGGERED]->(p:Pipeline {source: 10, failure_reason: 1}), \
+             (mr)-[:CLOSES]->(wi:WorkItem {state: 2, work_item_type: 8}) \
+             WHERE u.id = 42 AND mr.title CONTAINS 'fix' RETURN u, mr, p, wi",
         );
 
         assert_eq!(
@@ -359,41 +338,33 @@ mod tests {
 
     #[test]
     fn edge_cases() {
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (mr:MergeRequest {nonexistent_field: 42}) RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("nonexistent_field").unwrap()[0].value,
             Some(json!(42))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"id": 1}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (u:User) WHERE u.id = 1 RETURN u"#);
         assert_eq!(
             r.nodes[0].filters.get("id").unwrap()[0].value,
             Some(json!(1))
         );
 
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}]}"#,
-        );
+        let r = normalize_query(r#"MATCH (mr:MergeRequest {squash: true}) RETURN mr"#);
         assert_eq!(
             r.nodes[0].filters.get("squash").unwrap()[0].value,
             Some(json!(true))
         );
 
         let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"in": ["main", "develop"]}}}]}"#,
+            r#"MATCH (mr:MergeRequest) WHERE mr.source_branch IN ['main', 'develop'] RETURN mr"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("source_branch").unwrap()[0].value,
             Some(json!(["main", "develop"]))
         );
 
-        let input = parse_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}]}"#,
-        ).unwrap();
+        let input = parse(r#"MATCH (x:UnknownEntity {foo: 123}) RETURN x"#).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
         let err = normalize(input, model.as_ref()).unwrap_err();

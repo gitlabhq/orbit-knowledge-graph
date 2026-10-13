@@ -14,21 +14,6 @@ config:
       merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9210]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "node_ids": [9210]},
-        {"id": "label", "entity": "Label", "filters": {"title": "bug"}},
-        {"id": "project", "entity": "Project", "node_ids": [1000]}
-      ],
-      "relationships": [
-        {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-        {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-      ],
-      "aggregations": [{"count": "mr", "as": "n"}],
-      "limit": 1
-    }
   gql: |
     MATCH (label:Label)<-[:HAS_LABEL]-(mr:MergeRequest {id: 9210})-[:IN_PROJECT]->(project:Project {id: 1000}) WHERE label.title = 'bug' RETURN count(mr) AS n LIMIT 1
 

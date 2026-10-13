@@ -24,7 +24,7 @@ use crate::common::{
     DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model,
     load_ontology,
 };
-use compiler::{Frontend, parse_input};
+use compiler::Frontend;
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
@@ -125,36 +125,21 @@ impl ColumnResolver for MockColumnResolver {
     }
 }
 
-fn resolve_placeholders(query: &str) -> serde_json::Result<String> {
+/// Binds `{{TOKEN}}` to `1`, `$sample` to `1`, and `$sample:N` to `[1, ..., N]`.
+fn resolve_placeholders(query: &str) -> String {
     let token_re = regex::Regex::new(r"\{\{[^}]+\}\}").unwrap();
-    let s = token_re.replace_all(query, "1");
-
-    let mut value: serde_json::Value = serde_json::from_str(&s)?;
-    if let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-        for node in nodes.iter_mut() {
-            resolve_sample_node_ids(node);
-        }
-    }
-    if let Some(node) = value.get_mut("node") {
-        resolve_sample_node_ids(node);
-    }
-    serde_json::to_string(&value)
-}
-
-fn resolve_sample_node_ids(node: &mut serde_json::Value) {
-    let Some(obj) = node.as_object_mut() else {
-        return;
-    };
-    let count = match obj.get("node_ids").and_then(|v| v.as_str()) {
-        Some("$sample") => 1,
-        Some(s) => match s.strip_prefix("$sample:") {
-            Some(n) => n.parse().unwrap_or(1),
-            None => return,
-        },
-        None => return,
-    };
-    let ids: Vec<i64> = (1..=count).collect();
-    obj.insert("node_ids".to_string(), serde_json::json!(ids));
+    let sample_re = regex::Regex::new(r"\$sample(?::(\d+))?").unwrap();
+    let query = token_re.replace_all(query, "1");
+    sample_re
+        .replace_all(&query, |caps: &regex::Captures| match caps.get(1) {
+            Some(count) => {
+                let count: i64 = count.as_str().parse().unwrap_or(1);
+                let ids: Vec<String> = (1..=count).map(|id| id.to_string()).collect();
+                format!("[{}]", ids.join(", "))
+            }
+            None => "1".to_string(),
+        })
+        .into_owned()
 }
 
 fn load_corpus() -> Vec<SmokeCase> {
@@ -185,7 +170,7 @@ fn load_corpus() -> Vec<SmokeCase> {
                 key: format!("{file}::{key}"),
                 query: entry.query,
                 expects_error,
-                frontend: Frontend::JsonDsl,
+                frontend: Frontend::Gql,
             });
         }
     }
@@ -198,17 +183,14 @@ fn load_named_queries() -> Vec<SmokeCase> {
             .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
 
     let values = named_queries::BindingValues { current_user_id: 1 };
-    let spellings = [
-        (named_queries::Language::Json, Frontend::JsonDsl),
-        (named_queries::Language::Gql, Frontend::Gql),
-    ];
+    let spellings = [(named_queries::Language::Gql, Frontend::Gql)];
     queries
         .iter()
         .flat_map(|query| {
             spellings.map(|(language, frontend)| SmokeCase {
                 key: format!("named_query::{}::{language:?}", query.name),
                 query: query
-                    .render_language(language, &values, &query.example_parameters())
+                    .render(language, &values, &query.example_parameters())
                     .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
                 expects_error: false,
                 frontend,
@@ -317,7 +299,7 @@ fn handle_doc_code_block(
     }
 
     if marked {
-        match normalize_marked_doc_query(first_token, &block.literal) {
+        match marked_doc_query(first_token, &block.literal) {
             Ok((query, frontend)) => {
                 cases.push(SmokeCase {
                     key: format!("{path_label}:{line}"),
@@ -337,42 +319,32 @@ fn handle_doc_code_block(
                 && orbit_query_value(&value).is_some()
             {
                 failures.push(format!(
-                    "{path_label}:{line}: Orbit query JSON fence must use `json {DOC_QUERY_MARKER}`"
+                    "{path_label}:{line}: the JSON Query DSL was removed; rewrite this query as a `gql {DOC_QUERY_MARKER}` fence"
                 ));
             }
         }
         Some("bash" | "sh" | "shell") if block.literal.contains("\"query_type\"") => {
             failures.push(format!(
-                "{path_label}:{line}: shell fence contains Orbit query JSON; move the query body to a `json {DOC_QUERY_MARKER}` fence"
+                "{path_label}:{line}: shell fence contains a JSON Query DSL query, which was removed; use GQL"
             ));
         }
         _ => {}
     }
 }
 
-fn normalize_marked_doc_query(
-    first_token: Option<&str>,
-    body: &str,
-) -> Result<(String, Frontend), String> {
-    match first_token {
-        Some("json") => Ok((normalize_doc_query(body)?, Frontend::JsonDsl)),
-        Some("gql") if !body.trim().is_empty() => Ok((body.trim().to_string(), Frontend::Gql)),
-        Some("gql") => Err("marked fence does not contain an Orbit query".to_string()),
-        _ => Err(format!(
-            "`{DOC_QUERY_MARKER}` fences must use `json` or `gql` as the first info token"
-        )),
+fn marked_doc_query(first_token: Option<&str>, body: &str) -> Result<(String, Frontend), String> {
+    let frontend = first_token
+        .and_then(|token| token.parse::<Frontend>().ok())
+        .ok_or_else(|| {
+            format!(
+                "`{DOC_QUERY_MARKER}` fences must name a query language ({}) as the first info token",
+                Frontend::names().join(", ")
+            )
+        })?;
+    if body.trim().is_empty() {
+        return Err("marked fence does not contain an Orbit query".to_string());
     }
-}
-
-fn normalize_doc_query(body: &str) -> Result<String, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
-    let query = orbit_query_value(&value)
-        .ok_or_else(|| "marked fence does not contain an Orbit query".to_string())?;
-    let json =
-        serde_json::to_string(query).map_err(|e| format!("serialize Orbit query JSON: {e}"))?;
-    parse_input(&json).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
-    Ok(json)
+    Ok((body.trim().to_string(), frontend))
 }
 
 fn orbit_query_value(value: &serde_json::Value) -> Option<&serde_json::Value> {
@@ -408,7 +380,7 @@ fn relative_path(path: &Path) -> String {
 
 async fn run_pipeline(
     db: &TestContext,
-    json: &str,
+    query: &str,
     frontend: Frontend,
     (data_model, ontology): (
         &Arc<query_data_model::ClickHouseDataModel>,
@@ -426,7 +398,7 @@ async fn run_pipeline(
 
     let mut ctx = QueryPipelineContext {
         frontend,
-        query_json: json.to_string(),
+        query: query.to_string(),
         compiled: None,
         ontology: Arc::clone(ontology),
         security_context: None,
@@ -483,23 +455,10 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let json = match case.frontend {
-            Frontend::Gql => Ok(case.query.clone()),
-            Frontend::JsonDsl => resolve_placeholders(&case.query),
-        };
-        let json = match json {
-            Ok(j) => j,
-            Err(e) => {
-                if !case.expects_error {
-                    failures.push(format!("{}: invalid query JSON: {e}", case.key));
-                }
-                continue;
-            }
-        };
-
+        let query = resolve_placeholders(&case.query);
         let outcome = run_pipeline(
             &ctx,
-            &json,
+            &query,
             case.frontend,
             (&data_model, &ontology),
             &claims,

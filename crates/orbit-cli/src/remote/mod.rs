@@ -3,7 +3,6 @@ use std::io::Write;
 use self::error::{EXIT_GENERIC, RemoteError};
 
 pub(crate) mod client;
-pub(crate) mod dsl;
 pub(crate) mod error;
 pub(crate) mod graph_status;
 pub(crate) mod ontology;
@@ -11,7 +10,6 @@ pub(crate) mod query;
 pub(crate) mod status;
 pub(crate) mod tools;
 
-pub(crate) use dsl::run_dsl;
 pub(crate) use graph_status::run_graph_status;
 pub(crate) use ontology::run_ontology;
 pub(crate) use query::{QueryInput, run_query};

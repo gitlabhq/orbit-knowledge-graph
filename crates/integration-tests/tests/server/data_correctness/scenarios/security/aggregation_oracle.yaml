@@ -7,8 +7,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"resolved_on_default_branch":{"ne":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.resolved_on_default_branch = true RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -41,8 +39,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"critical"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -59,8 +55,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"severity":{"in":["critical","high"]}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity IN ['critical', 'high'] RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -77,8 +71,6 @@ cases:
         paths: [1/100/]
         access_level: 10
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"columns":["name"]},{"id":"b","entity":"Definition","not":{"name":{"in":["missing"]}}}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["a"],"aggregations":[{"count":"b","as":"calls"}],"limit":10}
       gql: |
         MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition) WHERE NOT b.name IN ['missing'] RETURN a{.name}, count(b) AS calls LIMIT 10
     expect: { empty_aggregation: true }
@@ -91,8 +83,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"id":{"lt":8001}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.id < 8001 RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -109,8 +99,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"id":{"gte":8000,"lte":8001}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT (v.id >= 8000 AND v.id <= 8001) RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -127,8 +115,6 @@ cases:
           - { path: 1/100/, access_level: 20 }
           - { path: 1/101/, access_level: 30 }
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","id_range":{"start":1,"end":10000},"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"severity":{"in":["critical"]}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
       gql: |
         MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT v.severity IN ['critical'] RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
     expect:
@@ -150,8 +136,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"detected_at":{"is_not_null":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.detected_at IS NULL RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -168,8 +152,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"low"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["v.severity"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'low' RETURN v.severity, count(v) AS vuln_count LIMIT 10
     expect:
@@ -204,8 +186,6 @@ cases:
         paths: [1/100/]
         access_level: 25
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"high"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'high' RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:
@@ -239,8 +219,6 @@ cases:
         paths: [1/100/]
         access_level: 20
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"title":{"token_match":"SQLi"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT token_match(v.title, 'SQLi') RETURN p{.id, .name}, count(v) AS c LIMIT 10
     expect:

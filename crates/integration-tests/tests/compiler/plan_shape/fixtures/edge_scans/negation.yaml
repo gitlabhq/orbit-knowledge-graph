@@ -5,7 +5,6 @@ cases:
         MATCH (mr:MergeRequest {project_id: 1000})-[:CLOSES]->(wi:WorkItem)
         WHERE NOT (mr.state = 'merged' AND wi.state = 'closed')
         RETURN count(mr) AS n
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
         - "(Filter NOT ((mr.state = 'merged') AND (wi.state = 'closed')) (_))"
@@ -18,8 +17,6 @@ cases:
 
   - name: NOT over a non-nullable denormalized property reads edge tags instead of the node table
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
       gql: |
         MATCH (a:Definition)-[:CALLS]->(b:Definition)
         WHERE a.id IN [12000] AND NOT a.definition_type IN ['function', 'method']
@@ -41,7 +38,6 @@ cases:
         MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
         WHERE NOT (r.source_id < 50 AND u.state = 'active')
         RETURN count(u) AS n
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
         - "(Filter NOT ((e0.source_id < 50) AND (u.state = 'active')) (_))"
@@ -58,7 +54,6 @@ cases:
         MATCH (wi:WorkItem {id: 100})-[:HAS_NOTE]->(n:Note)
         WHERE NOT (n.confidential = true AND n.internal = true)
         RETURN count(n) AS c
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
         - (Filter NOT ((n.confidential = true) AND (n.internal = true)) (_))
@@ -73,8 +68,6 @@ cases:
 
   - name: A NOT leaf on a node that also has an untagged filter reads the node row and the edge tag
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"starts_with":"ali"}},"not":{"state":{"in":["blocked"]}}},{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}]}
       gql: |
         MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100})-[:CONTAINS]->(p:Project)
         WHERE u.username STARTS WITH 'ali' AND NOT u.state IN ['blocked']

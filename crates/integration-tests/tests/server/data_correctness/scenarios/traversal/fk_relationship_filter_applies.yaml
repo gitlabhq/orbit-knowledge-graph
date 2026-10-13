@@ -4,8 +4,6 @@ description: >
   filter matches nothing.
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["name"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p","filters":{"source_kind":{"ne":"MergeRequest"}}}],"limit":20}
   gql: |
     MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
     WHERE r.source_kind <> 'MergeRequest'

@@ -137,7 +137,7 @@ func (FormatName) EnumDescriptor() ([]byte, []int) {
 type QueryType int32
 
 const (
-	QueryType_QUERY_TYPE_JSON  QueryType = 0
+	QueryType_QUERY_TYPE_JSON  QueryType = 0 // `query` is ad hoc query text in the selected language
 	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 )
 
@@ -180,10 +180,11 @@ func (QueryType) EnumDescriptor() ([]byte, []int) {
 	return file_orbit_proto_rawDescGZIP(), []int{2}
 }
 
+// Selects the compiler frontend. Add a value per new query language.
 type QueryLanguage int32
 
 const (
-	QueryLanguage_QUERY_LANGUAGE_JSON QueryLanguage = 0
+	QueryLanguage_QUERY_LANGUAGE_JSON QueryLanguage = 0 // Removed JSON Query DSL; servers reject it with INVALID_ARGUMENT
 	QueryLanguage_QUERY_LANGUAGE_GQL  QueryLanguage = 1
 )
 
@@ -1466,10 +1467,9 @@ func (x *SchemaNodeStyle) GetColor() string {
 	return ""
 }
 
-// Request for the query DSL grammar.
 type GetQueryDslRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Format        ResponseFormat         `protobuf:"varint,1,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: full JSON Schema; LLM: condensed TOON
+	Format        ResponseFormat         `protobuf:"varint,1,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"`
 	Language      QueryLanguage          `protobuf:"varint,2,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1519,7 +1519,6 @@ func (x *GetQueryDslRequest) GetLanguage() QueryLanguage {
 	return QueryLanguage_QUERY_LANGUAGE_JSON
 }
 
-// Response carrying the DSL grammar in the requested format.
 type GetQueryDslResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // semver string for the query DSL grammar, e.g. "1.0.0"

@@ -1,8 +1,6 @@
 name: Additional filters prevent pinned FK target elimination
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"v","entity":"User","node_ids":[2]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1],"filters":{"username":"nonexistent"}}],"relationships":[{"type":"APPROVED","from":"v","to":"mr"},{"type":"AUTHORED","from":"u","to":"mr"}]}
   gql: |
     MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1, username: 'nonexistent'})
     RETURN v, mr, u

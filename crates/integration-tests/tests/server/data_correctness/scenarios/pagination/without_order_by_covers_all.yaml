@@ -1,13 +1,6 @@
 description: Cursor without order_by covers all users via synthesized PK tie-breaker
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username"]}],
-      "cursor": {"page_size": 2}
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username PAGE 2
 

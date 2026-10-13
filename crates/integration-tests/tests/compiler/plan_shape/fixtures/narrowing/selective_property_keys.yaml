@@ -1,8 +1,6 @@
 name: A high-selectivity property creates candidate keys for an ordered node
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"},"columns":["name"]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"order_by":"a.name"}
   gql: |
     MATCH (a:Definition {name: 'compile'})-[:CALLS]->(b:Definition) RETURN a.name, b ORDER BY a.name
 

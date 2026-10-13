@@ -1,8 +1,6 @@
 cases:
   - name: Merge request pipeline branch chain composes default CI and code tables
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
       gql: |
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     logical:
@@ -22,8 +20,6 @@ cases:
 
   - name: Merge request diff branch chain composes default diff and code tables
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_DIFF","from":"mr","to":"diff"},{"type":"IN_PROJECT","from":"diff","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
       gql: |
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
     logical:
@@ -43,8 +39,6 @@ cases:
 
   - name: Security scan project branch chain composes security and code tables
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"},{"type":"CONTAINS","from":"branch","to":"directory"}]}
       gql: |
         MATCH (scan:SecurityScan {id: 1})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
     logical:
@@ -62,8 +56,6 @@ cases:
 
   - name: Untyped merge request alternatives union default CI and diff tables
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE","HAS_DIFF"]}}
       gql: |
         MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) RETURN mr, target
     logical:
@@ -81,8 +73,6 @@ cases:
 
   - name: Split AUTHORED neighbors retain default and security routes
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"user","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED"]}}
       gql: |
         MATCH (user:User {id: 1})-[:AUTHORED]->(neighbor) RETURN user, neighbor
     logical:
@@ -99,8 +89,6 @@ cases:
 
   - name: Cross-table shortest path keeps scoped CI and code frontiers
     query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1]},{"id":"branch","entity":"Branch","node_ids":[2]}],"path":{"type":"shortest","from":"pipeline","to":"branch","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]}}
       gql: |
         MATCH path = ANY SHORTEST (pipeline:Pipeline {id: 1})-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch {id: 2}) RETURN path
     logical:

@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+use compiler::Frontend;
 use compiler::input::Input;
 use compiler::passes::{frontend, lower, normalize, plan};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
@@ -29,11 +30,11 @@ struct Scenario {
 impl Scenario {
     fn validate_frontends(&self) -> Result<(), String> {
         for language in self.query.keys().chain(self.missing_frontends.keys()) {
-            if !matches!(language.as_str(), "json" | "gql") {
+            if language.parse::<Frontend>().is_err() {
                 return Err(format!("unknown frontend {language}"));
             }
         }
-        for language in ["json", "gql"] {
+        for &language in Frontend::names() {
             match (
                 self.query.get(language),
                 self.missing_frontends.get(language),
@@ -239,10 +240,9 @@ fn check<M: OrbitQueryModel>(
             path.display(),
             scenario.name
         );
-        let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
-            "gql" => frontend::gql::parse(raw),
-            _ => panic!("{label}: unknown frontend"),
+        let input = match language.parse::<Frontend>() {
+            Ok(Frontend::Gql) => frontend::gql::parse(raw),
+            Err(_) => panic!("{label}: unknown frontend"),
         }
         .unwrap_or_else(|error| panic!("{label}: {error}"));
         let mut input =
@@ -352,28 +352,15 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
 }
 
 #[test]
-fn yaml_requires_both_frontends_or_an_explicit_exception() {
+fn yaml_requires_every_frontend_or_an_explicit_exception() {
     for (query, exceptions, valid) in [
-        ("{json: query, gql: query}", "{}", true),
-        (
-            "{json: query}",
-            "{gql: Normalizes the tested direction}",
-            true,
-        ),
-        (
-            "{gql: query}",
-            "{json: Cannot express property comparisons}",
-            true,
-        ),
-        ("{json: query}", "{}", false),
-        ("{json: query}", "{gql: ' '}", false),
-        (
-            "{json: query, gql: query}",
-            "{gql: Redundant exception}",
-            false,
-        ),
-        ("{json: query, gql: query, sql: query}", "{}", false),
-        ("{json: query, gql: ' '}", "{}", false),
+        ("{gql: query}", "{}", true),
+        ("{}", "{gql: Cannot express the tested shape}", true),
+        ("{}", "{}", false),
+        ("{gql: ' '}", "{}", false),
+        ("{gql: query}", "{gql: Redundant exception}", false),
+        ("{gql: query, json: query}", "{}", false),
+        ("{gql: query}", "{json: Removed frontend}", false),
     ] {
         let yaml = format!(
             "name: frontends\nquery: {query}\nmissing_frontends: {exceptions}\nlogical: {{}}\nphysical: {{}}"

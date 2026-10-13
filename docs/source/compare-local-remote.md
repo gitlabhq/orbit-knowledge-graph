@@ -260,7 +260,7 @@ turned GitLab Orbit on
 | Querying | GitLab Orbit Local | GitLab Orbit Remote |
 |----------|--------------------|---------------------|
 | Read-only SQL | {{< yes >}} | {{< no >}} |
-| JSON query DSL | {{< no >}} | {{< yes >}} |
+| GitLab Orbit query language | {{< no >}} | {{< yes >}} |
 | Natural language through an agent | {{< yes >}} | {{< yes >}} |
 | Query results scoped by permissions | {{< no >}} | {{< yes >}} |
 
@@ -274,7 +274,7 @@ For more information, see
 
 | Skill capability | GitLab Orbit Local | GitLab Orbit Remote |
 |------------------|--------------------|---------------------|
-| Query language guidance | Read-only SQL | JSON query DSL |
+| Query language guidance | Read-only SQL | GitLab Orbit query language |
 | Paste-ready query recipes | {{< no >}} | {{< yes >}} |
 | Repository map helper | {{< yes >}} | {{< yes >}} |
 | Reporting and coverage guidance | {{< no >}} | {{< yes >}} |

@@ -5,7 +5,7 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
-use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
+use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile, gql};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -233,11 +233,13 @@ impl QueryExecutor {
             .map_err(|e| anyhow::anyhow!("Invalid security context: {}", e))
     }
 
+    /// Binds each `$sample` / `$sample:N` placeholder to IDs sampled for the
+    /// entity of the node it identifies.
     async fn substitute_parameters(
         &self,
-        mut query_value: serde_json::Value,
+        query: &str,
         security_ctx: &SecurityContext,
-    ) -> Result<(serde_json::Value, SamplingInfo)> {
+    ) -> Result<(String, SamplingInfo)> {
         let traversal_path: Option<String> = security_ctx
             .traversal_paths
             .first()
@@ -249,70 +251,54 @@ impl QueryExecutor {
             global_fallback_count: 0,
         };
 
+        let placeholders = sample_placeholders(query);
+        let entities = placeholder_entities(query, &placeholders)?;
+
         // Track sampled IDs to ensure path-finding queries get distinct start/end
         let mut sampled_by_entity: std::collections::HashMap<String, Vec<i64>> =
             std::collections::HashMap::new();
-
-        if let Some(nodes) = query_value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-            for node in nodes.iter_mut() {
-                if let Some(obj) = node.as_object_mut() {
-                    self.substitute_node_ids(
-                        obj,
-                        &traversal_path,
-                        security_ctx,
-                        &mut sampling_info,
-                        &mut sampled_by_entity,
-                    )
-                    .await?;
-                }
+        let mut bound = Vec::with_capacity(placeholders.len());
+        for (placeholder, entity) in placeholders.iter().zip(entities) {
+            let ids = self
+                .sample_ids(
+                    &entity,
+                    placeholder.count,
+                    &traversal_path,
+                    security_ctx,
+                    &mut sampling_info,
+                    &mut sampled_by_entity,
+                )
+                .await?;
+            if ids.is_empty() {
+                anyhow::bail!("no {entity} IDs to sample");
             }
+            bound.push(ids);
         }
 
-        if let Some(node) = query_value.get_mut("node").and_then(|n| n.as_object_mut()) {
-            self.substitute_node_ids(
-                node,
-                &traversal_path,
-                security_ctx,
-                &mut sampling_info,
-                &mut sampled_by_entity,
-            )
-            .await?;
-        }
-
-        Ok((query_value, sampling_info))
+        let rendered = render_placeholders(query, &placeholders, |index| {
+            id_literal(&bound[index], placeholders[index].list)
+        });
+        Ok((rendered, sampling_info))
     }
 
-    /// Supports placeholder syntax:
-    /// - `"$sample"` - sample 1 ID
-    /// - `"$sample:N"` - sample N IDs (e.g., `"$sample:3"` for 3 IDs)
-    async fn substitute_node_ids(
+    async fn sample_ids(
         &self,
-        obj: &mut serde_json::Map<String, serde_json::Value>,
+        entity: &str,
+        count: usize,
         traversal_path: &Option<String>,
         security_ctx: &SecurityContext,
         sampling_info: &mut SamplingInfo,
         sampled_by_entity: &mut std::collections::HashMap<String, Vec<i64>>,
-    ) -> Result<()> {
-        if !obj.contains_key("node_ids") {
-            return Ok(());
-        }
-
-        let entity = match obj.get("entity").and_then(|e| e.as_str()) {
-            Some(e) => e.to_string(),
-            None => return Ok(()),
-        };
-
-        let count = parse_sample_count(obj.get("node_ids"));
-
+    ) -> Result<Vec<i64>> {
         let mut sampled_ids = if let Some(path) = traversal_path {
             let ids = self
                 .sampler
-                .random_ids_in_path(&entity, count, path, &self.ontology)
+                .random_ids_in_path(entity, count, path, &self.ontology)
                 .await?;
             if ids.is_empty() {
                 sampling_info.global_fallback_count += 1;
                 self.sampler
-                    .random_ids_in_org(&entity, count, security_ctx.org_id, &self.ontology)
+                    .random_ids_in_org(entity, count, security_ctx.org_id, &self.ontology)
                     .await?
             } else {
                 sampling_info.path_scoped_count += 1;
@@ -321,22 +307,22 @@ impl QueryExecutor {
         } else {
             sampling_info.global_fallback_count += 1;
             self.sampler
-                .random_ids_in_org(&entity, count, security_ctx.org_id, &self.ontology)
+                .random_ids_in_org(entity, count, security_ctx.org_id, &self.ontology)
                 .await?
         };
 
         // For path-finding queries, ensure we don't reuse IDs for the same entity type.
         // This prevents start/end being the same node.
-        if let Some(already_sampled) = sampled_by_entity.get(&entity) {
+        if let Some(already_sampled) = sampled_by_entity.get(entity) {
             sampled_ids.retain(|id| !already_sampled.contains(id));
             if sampled_ids.is_empty() {
                 let extra_ids = if let Some(path) = traversal_path {
                     self.sampler
-                        .random_ids_in_path(&entity, count * 2, path, &self.ontology)
+                        .random_ids_in_path(entity, count * 2, path, &self.ontology)
                         .await?
                 } else {
                     self.sampler
-                        .random_ids_in_org(&entity, count * 2, security_ctx.org_id, &self.ontology)
+                        .random_ids_in_org(entity, count * 2, security_ctx.org_id, &self.ontology)
                         .await?
                 };
                 sampled_ids = extra_ids
@@ -347,16 +333,11 @@ impl QueryExecutor {
             }
         }
 
-        if !sampled_ids.is_empty() {
-            sampled_by_entity
-                .entry(entity)
-                .or_default()
-                .extend(&sampled_ids);
-
-            obj.insert("node_ids".to_string(), serde_json::to_value(&sampled_ids)?);
-        }
-
-        Ok(())
+        sampled_by_entity
+            .entry(entity.to_string())
+            .or_default()
+            .extend(&sampled_ids);
+        Ok(sampled_ids)
     }
 
     /// Safety settings applied via `query_settings`:
@@ -454,10 +435,11 @@ impl QueryExecutor {
         let start = Instant::now();
         let display_name = format!("{} ({})", key, entry.desc);
 
-        let original_query = match entry.parse_query() {
-            Ok(v) => v,
-            Err(e) => {
-                let error_msg = format!("Invalid query JSON: {}", e);
+        let original_query = entry.query.clone();
+        if let Err(e) = placeholder_entities(&original_query, &sample_placeholders(&original_query))
+        {
+            {
+                let error_msg = format!("Invalid query: {}", e);
                 let result = ExecutionResult::failure(
                     display_name.clone(),
                     error_msg.clone(),
@@ -475,8 +457,8 @@ impl QueryExecutor {
             }
         };
 
-        let mut builder =
-            QueryMetadataBuilder::new(&display_name).original_query(original_query.clone());
+        let mut builder = QueryMetadataBuilder::new(&display_name)
+            .original_query(serde_json::Value::String(original_query.clone()));
 
         let security_ctx = match self.random_security_context() {
             Ok(ctx) => ctx,
@@ -500,7 +482,7 @@ impl QueryExecutor {
         };
 
         let (substituted, sampling_info) = match self
-            .substitute_parameters(original_query, &security_ctx)
+            .substitute_parameters(&original_query, &security_ctx)
             .await
         {
             Ok(result) => result,
@@ -523,30 +505,9 @@ impl QueryExecutor {
             }
         };
 
-        builder = builder.substituted_query(substituted.clone());
+        builder = builder.substituted_query(serde_json::Value::String(substituted.clone()));
 
-        let json_str = match serde_json::to_string(&substituted) {
-            Ok(s) => s,
-            Err(e) => {
-                let error_msg = format!("JSON serialization failed: {}", e);
-                let result = ExecutionResult::failure(
-                    display_name.clone(),
-                    error_msg.clone(),
-                    start.elapsed(),
-                );
-                let metadata = builder
-                    .execution_time(start.elapsed())
-                    .failure(ErrorInfo {
-                        message: error_msg,
-                        category: "SERIALIZATION_ERROR".to_string(),
-                        code: None,
-                    })
-                    .build();
-                return (result, metadata);
-            }
-        };
-
-        let compiled = match compile(&json_str, Frontend::JsonDsl, &self.ontology, &security_ctx) {
+        let compiled = match compile(&substituted, Frontend::Gql, &self.ontology, &security_ctx) {
             Ok(c) => c,
             Err(e) => {
                 let error_msg = format!("Query compilation failed: {}", e);
@@ -839,21 +800,115 @@ fn params_to_json(params: &std::collections::HashMap<String, ParamValue>) -> ser
     )
 }
 
-/// - `"$sample"` -> 1
-/// - `"$sample:N"` -> N (e.g., `"$sample:3"` -> 3)
-fn parse_sample_count(value: Option<&serde_json::Value>) -> usize {
-    let Some(v) = value else { return 1 };
+/// Placeholder IDs are negative and far below any real node ID.
+const SENTINEL_BASE: i64 = 9_000_000_000_000_000;
+const SENTINEL_STRIDE: i64 = 1_000;
 
-    let Some(s) = v.as_str() else { return 1 };
+/// A `$sample` (one ID) or `$sample:N` (a list of N IDs) placeholder in query text.
+#[derive(Debug, PartialEq)]
+struct SamplePlaceholder {
+    range: std::ops::Range<usize>,
+    count: usize,
+    list: bool,
+}
 
-    if s == "$sample" {
-        return 1;
+fn sample_placeholders(query: &str) -> Vec<SamplePlaceholder> {
+    const TOKEN: &str = "$sample";
+    query
+        .match_indices(TOKEN)
+        .map(|(start, _)| {
+            let rest = &query[start + TOKEN.len()..];
+            let digits = rest
+                .strip_prefix(':')
+                .map(|tail| {
+                    tail.len() - tail.trim_start_matches(|c: char| c.is_ascii_digit()).len()
+                })
+                .filter(|digits| *digits > 0);
+            let end = start + TOKEN.len() + digits.map_or(0, |digits| digits + 1);
+            let count = digits.map(|digits| rest[1..=digits].parse().unwrap_or(1));
+            SamplePlaceholder {
+                range: start..end,
+                count: count.unwrap_or(1).max(1),
+                list: count.is_some(),
+            }
+        })
+        .collect()
+}
+
+fn render_placeholders(
+    query: &str,
+    placeholders: &[SamplePlaceholder],
+    literal: impl Fn(usize) -> String,
+) -> String {
+    let mut rendered = String::with_capacity(query.len());
+    let mut cursor = 0;
+    for (index, placeholder) in placeholders.iter().enumerate() {
+        rendered.push_str(&query[cursor..placeholder.range.start]);
+        rendered.push_str(&literal(index));
+        cursor = placeholder.range.end;
     }
-    if let Some(count_str) = s.strip_prefix("$sample:") {
-        return count_str.parse().unwrap_or(1);
-    }
+    rendered.push_str(&query[cursor..]);
+    rendered
+}
 
-    1
+fn id_literal(ids: &[i64], list: bool) -> String {
+    let ids: Vec<String> = ids.iter().map(i64::to_string).collect();
+    if list {
+        format!("[{}]", ids.join(", "))
+    } else {
+        ids[0].clone()
+    }
+}
+
+/// Parses the query with sentinel IDs to find the entity each placeholder identifies.
+fn placeholder_entities(query: &str, placeholders: &[SamplePlaceholder]) -> Result<Vec<String>> {
+    let sentinel = |index: usize, offset: usize| -> i64 {
+        -(SENTINEL_BASE + index as i64 * SENTINEL_STRIDE + offset as i64)
+    };
+    let text = render_placeholders(query, placeholders, |index| {
+        let ids: Vec<i64> = (0..placeholders[index].count)
+            .map(|offset| sentinel(index, offset))
+            .collect();
+        id_literal(&ids, placeholders[index].list)
+    });
+    let input = gql::parse(&text).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut entities: Vec<Option<String>> = vec![None; placeholders.len()];
+    for node in &input.nodes {
+        let filter_ids = node
+            .filters
+            .get("id")
+            .into_iter()
+            .flatten()
+            .filter_map(|f| f.value.as_ref());
+        let ids = node
+            .node_ids
+            .iter()
+            .copied()
+            .chain(filter_ids.flat_map(|value| {
+                match value {
+                    serde_json::Value::Array(values) => values
+                        .iter()
+                        .filter_map(serde_json::Value::as_i64)
+                        .collect(),
+                    value => value.as_i64().into_iter().collect::<Vec<_>>(),
+                }
+            }));
+        for id in ids.filter(|id| *id <= -SENTINEL_BASE) {
+            let index = ((-id - SENTINEL_BASE) / SENTINEL_STRIDE) as usize;
+            if let (Some(slot), Some(entity)) = (entities.get_mut(index), &node.entity) {
+                *slot = Some(entity.clone());
+            }
+        }
+    }
+    entities
+        .into_iter()
+        .enumerate()
+        .map(|(index, entity)| {
+            entity.ok_or_else(|| {
+                anyhow::anyhow!("placeholder {} does not identify a labeled node", index + 1)
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -861,17 +916,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_sample_count() {
-        assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample"))), 1);
-        assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample:1"))), 1);
-        assert_eq!(parse_sample_count(Some(&serde_json::json!("$sample:3"))), 3);
+    fn sample_placeholders_bind_to_the_nodes_they_identify() {
+        let query = "MATCH (u:User {id: $sample})-[:AUTHORED]->(mr:MergeRequest) \
+                     WHERE mr.id IN $sample:3 RETURN u, mr";
+        let placeholders = sample_placeholders(query);
         assert_eq!(
-            parse_sample_count(Some(&serde_json::json!("$sample:10"))),
-            10
+            placeholders
+                .iter()
+                .map(|p| (p.count, p.list))
+                .collect::<Vec<_>>(),
+            [(1, false), (3, true)]
         );
-
-        assert_eq!(parse_sample_count(None), 1);
-        assert_eq!(parse_sample_count(Some(&serde_json::json!(42))), 1);
+        assert_eq!(
+            placeholder_entities(query, &placeholders).unwrap(),
+            ["User", "MergeRequest"]
+        );
+        let bound = [vec![7], vec![1, 2, 3]];
+        assert_eq!(
+            render_placeholders(query, &placeholders, |i| id_literal(
+                &bound[i],
+                placeholders[i].list
+            )),
+            "MATCH (u:User {id: 7})-[:AUTHORED]->(mr:MergeRequest) \
+             WHERE mr.id IN [1, 2, 3] RETURN u, mr"
+        );
+        assert!(
+            placeholder_entities("MATCH (u:User) WHERE u.name = 'x' RETURN u", &[])
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

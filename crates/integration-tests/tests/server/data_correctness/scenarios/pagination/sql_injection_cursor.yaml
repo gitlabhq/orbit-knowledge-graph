@@ -3,15 +3,6 @@
 description: SQL injection payload in a well-formed cursor token is parameterized away
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username"]}],
-      "order_by": "-u.username",
-      "cursor": {"page_size": 2,
-                 "after": "eyJoIjoiNDUzMzNmMDg3NWU5NzJjYSIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19"}
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.username DESC PAGE 2 AFTER 'eyJoIjoiMDA0ZDhkYzZjYzc1NmEwMSIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19'
 

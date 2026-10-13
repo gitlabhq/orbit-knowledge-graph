@@ -1,14 +1,6 @@
 name: Property aggregation keeps grouping and measure inputs off the node projection
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1, 2]}],
-      "group_by": ["d.name"],
-      "aggregations": [{"count": "d", "as": "n"}],
-      "limit": 5
-    }
   gql: |
     MATCH (d:Definition) WHERE d.id IN [1, 2]
     RETURN d.name, count(d) AS n LIMIT 5

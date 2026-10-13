@@ -32,15 +32,10 @@ impl PipelineStage for CompilationStage {
                 None => compiler::gql::compile_query(query.clone(), ontology, security_context),
             },
             None => match data_model {
-                Some(data_model) => compiler::compile_model(
-                    &ctx.query_json,
-                    ctx.frontend,
-                    data_model,
-                    security_context,
-                ),
-                None => {
-                    compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context)
+                Some(data_model) => {
+                    compiler::compile_model(&ctx.query, ctx.frontend, data_model, security_context)
                 }
+                None => compiler::compile(&ctx.query, ctx.frontend, ontology, security_context),
             },
         }
         .map_err(PipelineError::from)

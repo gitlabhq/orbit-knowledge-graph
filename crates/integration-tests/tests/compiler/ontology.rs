@@ -7,25 +7,21 @@ use orbit_utils::traversal_path::TraversalPath;
 
 #[test]
 fn valid_column_in_order_by() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-        "limit": 10,
-        "order_by": "u.username"
-    }"#;
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_ok());
+    let query = r#"MATCH (u:User {id: 1})
+        RETURN u{.username}
+        ORDER BY u.username
+        LIMIT 10"#;
+    assert!(compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
 fn invalid_column_in_order_by() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-        "limit": 10,
-        "order_by": "u.nonexistent_column"
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {id: 1})
+            RETURN u{.username}
+            ORDER BY u.nonexistent_column
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -35,21 +31,23 @@ fn invalid_column_in_order_by() {
 
 #[test]
 fn valid_column_in_filter() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}}],
-        "limit": 10
-    }"#;
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_ok());
+    let query = r#"MATCH (u:User {username: 'admin'})
+        RETURN u{.username}
+        LIMIT 10"#;
+    assert!(compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).is_ok());
 }
 
 #[test]
 fn invalid_column_in_filter() {
-    let err = compile(r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}}],
-        "limit": 10
-    }"#, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap_err();
+    let err = compile(
+        r#"MATCH (u:User {nonexistent_column: 'value'})
+        RETURN u{.username}
+        LIMIT 10"#,
+        Frontend::Gql,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("nonexistent_column"));
 }
 
@@ -57,13 +55,8 @@ fn invalid_column_in_filter() {
 fn valid_column_in_aggregation() {
     assert!(
         compile(
-            r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-            "aggregations": [{"count": "p.name", "as": "name_count"}],
-            "limit": 10
-        }"#,
-            Frontend::JsonDsl,
+            "MATCH (p:Project {id: 1}) RETURN count(p.name) AS name_count LIMIT 10",
+            Frontend::Gql,
             &embedded_ontology(),
             &test_ctx(),
         )
@@ -74,13 +67,8 @@ fn valid_column_in_aggregation() {
 #[test]
 fn invalid_column_in_aggregation() {
     let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-        "aggregations": [{"sum": "p.invalid_property", "as": "total"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        "MATCH (p:Project {id: 1}) RETURN sum(p.invalid_property) AS total LIMIT 10",
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -89,61 +77,47 @@ fn invalid_column_in_aggregation() {
 }
 
 #[test]
-fn invalid_entity_type_rejected() {
+fn invalid_entity_type_names_the_label() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "n", "entity": "NonexistentType", "node_ids": [1], "columns": ["name"]}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (n:NonexistentType {id: 1})
+            RETURN n{.name}
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("NonexistentType"), "got: {msg}");
-    // The enrichment must surface valid candidates, not strip or truncate them.
-    assert!(msg.contains("Valid values:"), "got: {msg}");
-    assert!(msg.contains("Branch"), "got: {msg}");
-    assert!(msg.contains("WorkItem"), "got: {msg}");
-    assert!(!msg.contains("more —"), "got: {msg}");
+    assert!(
+        msg.contains("unknown entity 'NonexistentType'"),
+        "got: {msg}"
+    );
 }
 
 #[test]
 fn invalid_filter_key_lists_valid_candidates() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "columns": ["username"],
-                 "filters": {"project_full_path": "x"}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {project_full_path: 'x'})
+            RETURN u{.username}
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("project_full_path"), "got: {msg}");
-    assert!(msg.contains("Valid values:"), "got: {msg}");
+    assert!(msg.contains("Valid fields:"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
-    assert!(!msg.contains("more —"), "got: {msg}");
-    // The opaque "or N other candidates" truncation must not leak through.
-    assert!(!msg.contains("other candidates"), "got: {msg}");
 }
 
 #[test]
 fn invalid_group_by_property_lists_valid_fields() {
     let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "group_by": ["p.reviewer_count"],
-        "aggregations": [{"count": "p", "as": "c"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (p:Project {id: 1})
+            RETURN p.reviewer_count, count(p) AS c
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -156,62 +130,10 @@ fn invalid_group_by_property_lists_valid_fields() {
 }
 
 #[test]
-fn malformed_group_by_entry_shows_expected_shapes() {
-    let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "group_by": [{"node": "p", "property": "name"}],
-        "aggregations": [{"count": "p", "as": "c"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
-        &embedded_ontology(),
-        &test_ctx(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(
-        msg.contains("\"<node-id>.<property>\"") && msg.contains("\"truncate\""),
-        "got: {msg}"
-    );
-}
-
-#[test]
-fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
-    let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "group_by": ["p.name.x"],
-        "aggregations": [{"count": "p", "as": "c"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
-        &embedded_ontology(),
-        &test_ctx(),
-    )
-    .unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(
-        msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
-        "got: {msg}"
-    );
-}
-
-#[test]
 fn bare_string_group_by_unknown_node_names_the_reference() {
     let err = compile(
-        r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "group_by": ["name"],
-        "aggregations": [{"count": "p", "as": "c"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        "MATCH (p:Project {id: 1}) RETURN name, count(p) AS c LIMIT 10",
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -223,64 +145,46 @@ fn bare_string_group_by_unknown_node_names_the_reference() {
 #[test]
 fn invalid_column_lists_valid_candidates() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "columns": ["bogus_col"]}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            RETURN u{.bogus_col}
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("bogus_col"), "got: {msg}");
-    assert!(msg.contains("/nodes/0/columns"), "got: {msg}");
-    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("Valid fields:"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
-    // The opaque oneOf fallthrough must not leak through.
-    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
 }
 
 #[test]
-fn invalid_relationship_type_lists_valid_candidates() {
+fn invalid_relationship_type_names_the_type() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "n", "entity": "Note"}
-        ],
-        "relationships": [{"type": "BOGUS_REL", "from": "u", "to": "n"}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {id: 1})-[:BOGUS_REL]->(n:Note)
+            RETURN u, n
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
     .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("BOGUS_REL"), "got: {msg}");
-    assert!(msg.contains("/relationships/0/type"), "got: {msg}");
-    assert!(msg.contains("Valid values"), "got: {msg}");
-    assert!(msg.contains("AUTHORED"), "got: {msg}");
-    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+    assert!(
+        msg.contains("unknown relationship type \"BOGUS_REL\""),
+        "got: {msg}"
+    );
 }
 
 #[test]
 fn full_pipeline() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
-            {"id": "u", "entity": "User", "columns": ["username"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "limit": 25,
-        "order_by": "-n.created_at"
-    }"#;
+    let query = r#"MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User)
+        RETURN n{.confidential}, u{.username}
+        ORDER BY n.created_at DESC
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     // AUTHORED is FK-elided via author_id — no edge table scan.
@@ -291,17 +195,11 @@ fn full_pipeline() {
 
 #[test]
 fn package_built_by_pipeline_traversal() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "pkg", "entity": "Package", "columns": ["name", "version", "package_type"], "filters": {"package_type": "npm"}},
-            {"id": "pl", "entity": "Pipeline", "columns": ["id", "status"]}
-        ],
-        "relationships": [{"type": "BUILT_BY", "from": "pkg", "to": "pl"}],
-        "limit": 25
-    }"#;
+    let query = r#"MATCH (pkg:Package {package_type: 'npm'})-[:BUILT_BY]->(pl:Pipeline)
+        RETURN pkg{.name, .version, .package_type}, pl{.id, .status}
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_package"));
@@ -314,18 +212,12 @@ fn package_built_by_pipeline_traversal() {
 
 #[test]
 fn basic_search_query() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "u",
-            "entity": "User",
-            "columns": ["username"],
-            "filters": { "username": {"eq": "admin"} }
-        }],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (u:User)
+        WHERE u.username = 'admin'
+        RETURN u{.username}
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -346,23 +238,13 @@ fn basic_search_query() {
 
 #[test]
 fn complex_search_query() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "u",
-            "entity": "User",
-            "columns": ["username", "state", "created_at"],
-            "filters": {
-                "username": {"starts_with": "admin"},
-                "state": {"in": ["active", "blocked"]},
-                "created_at": {"gte": "2024-01-01"}
-            }
-        }],
-        "limit": 50,
-        "order_by": "-u.created_at"
-    }"#;
+    let query = r#"MATCH (u:User)
+        WHERE u.username STARTS WITH 'admin' AND u.state IN ['active', 'blocked'] AND u.created_at >= '2024-01-01'
+        RETURN u{.username, .state, .created_at}
+        ORDER BY u.created_at DESC
+        LIMIT 50"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
@@ -382,13 +264,11 @@ fn complex_search_query() {
 
 #[test]
 fn search_with_specific_columns() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{ "id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"] }],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (u:User {id: 1})
+        RETURN u{.username, .state}
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -399,13 +279,11 @@ fn search_with_specific_columns() {
 
 #[test]
 fn search_with_wildcard_columns() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{ "id": "u", "entity": "User", "node_ids": [1], "columns": "*" }],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (u:User {id: 1})
+        RETURN properties(u)
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -415,17 +293,11 @@ fn search_with_wildcard_columns() {
 
 #[test]
 fn traversal_with_columns() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project)
+        RETURN u{.username}, p{.name}
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -436,19 +308,9 @@ fn traversal_with_columns() {
 
 #[test]
 fn aggregation_includes_mandatory_columns_for_group_by_node() {
-    let json = r#"{
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": ["u"],
-        "aggregations": [{"count": "mr", "as": "mr_count"}],
-        "limit": 10
-    }"#;
+    let query = "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username}, count(mr) AS mr_count LIMIT 10";
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_u_id"));
@@ -461,17 +323,9 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
 
 #[test]
 fn path_finding_uses_orbit_path_not_node_columns() {
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "Project", "node_ids": [100], "columns": ["name"]},
-            {"id": "end", "entity": "Project", "node_ids": [200], "columns": ["name"]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                 "rel_types": ["CONTAINS"]}
-    }"#;
+    let query = "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p";
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_path"));
@@ -480,17 +334,11 @@ fn path_finding_uses_orbit_path_not_node_columns() {
 
 #[test]
 fn result_context_populated() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (u:User {id: 1})-[:CONTAINS]->(p:Project)
+        RETURN u{.username}, p{.name}
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert_eq!(result.base.result_context.len(), 2);
@@ -513,17 +361,11 @@ fn result_context_populated() {
 
 #[test]
 fn single_hop_does_not_generate_recursive_cte() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "n", "entity": "Note", "columns": ["confidential"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "hops": [1, 1]}],
-        "limit": 25
-    }"#;
+    let query = r#"MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note)
+        RETURN u{.username}, n{.confidential}
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -534,19 +376,9 @@ fn single_hop_does_not_generate_recursive_cte() {
 
 #[test]
 fn multi_hop_aggregation() {
-    let json = r#"{
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 2]}],
-        "group_by": ["u"],
-        "aggregations": [{"count": "p", "as": "project_count"}],
-        "limit": 10
-    }"#;
+    let query = "MATCH (u:User {id: 1})-[:MEMBER_OF*1..2]->(p:Project) RETURN u{.username}, count(p) AS project_count LIMIT 10";
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("UNION ALL"));
@@ -556,13 +388,11 @@ fn multi_hop_aggregation() {
 
 #[test]
 fn definition_uses_project_id_for_redaction() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1], "columns": ["name", "project_id"]}],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (d:Definition {id: 1})
+        RETURN d{.name, .project_id}
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_d_id"));
@@ -575,13 +405,11 @@ fn definition_uses_project_id_for_redaction() {
 
 #[test]
 fn project_still_uses_id_for_redaction() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (p:Project {id: 1})
+        RETURN p{.name}
+        LIMIT 10"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("_orbit_p_id"));
@@ -594,17 +422,13 @@ fn project_still_uses_id_for_redaction() {
 #[test]
 fn cursor_pagination_validation() {
     use compiler::QueryError;
-    use compiler::passes::cursor::{canonical_hash, encode};
+    use compiler::passes::cursor::encode;
 
     let ontology = embedded_ontology();
     let ctx = test_ctx();
 
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-        "cursor": {"page_size": 20}
-    }"#;
-    let result = compile(json, Frontend::JsonDsl, &ontology, &ctx);
+    let query = "MATCH (u:User {id: 1}) RETURN u{.username} PAGE 20";
+    let result = compile(query, Frontend::Gql, &ontology, &ctx);
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
     let rendered = result.unwrap().base.render();
     assert!(
@@ -616,13 +440,17 @@ fn cursor_pagination_validation() {
         "cursor queries select hidden key readback columns: {rendered}"
     );
 
-    let hash = canonical_hash(&serde_json::from_str(json).unwrap());
-    let paged: serde_json::Value = {
-        let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
-        v["cursor"]["after"] = encode(hash, &[Some("7".into())]).into();
-        v
-    };
-    let result = compile(&paged.to_string(), Frontend::JsonDsl, &ontology, &ctx);
+    let hash = compile(query, Frontend::Gql, &ontology, &ctx)
+        .unwrap()
+        .pagination
+        .query_hash;
+    let after = |token: &str| format!("{query} AFTER '{token}'");
+    let result = compile(
+        &after(&encode(hash, &[Some("7".into())])),
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    );
     assert!(
         result.is_ok(),
         "after token from same query should compile: {result:?}"
@@ -633,76 +461,48 @@ fn cursor_pagination_validation() {
         "after token should lower to a seek predicate: {rendered}"
     );
 
-    let mut foreign: serde_json::Value = serde_json::from_str(json).unwrap();
-    foreign["cursor"]["after"] = encode(hash ^ 1, &[Some("7".into())]).into();
-    let err = compile(&foreign.to_string(), Frontend::JsonDsl, &ontology, &ctx).unwrap_err();
+    let err = compile(
+        &after(&encode(hash ^ 1, &[Some("7".into())])),
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    )
+    .unwrap_err();
     assert!(
         matches!(err, QueryError::PaginationError(_)),
         "token minted for a different query should be a pagination error, got: {err}"
     );
 
-    let mut garbled: serde_json::Value = serde_json::from_str(json).unwrap();
-    garbled["cursor"]["after"] = "not-base64!".into();
-    let err = compile(&garbled.to_string(), Frontend::JsonDsl, &ontology, &ctx).unwrap_err();
+    let err = compile(&after("not-base64!"), Frontend::Gql, &ontology, &ctx).unwrap_err();
     assert!(
         matches!(err, QueryError::PaginationError(_)),
         "malformed token should be a pagination error, got: {err}"
     );
 
     let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {"offset": 0, "page_size": 10}
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "offset cursors are gone in schema v3");
-
-    let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {}
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "cursor missing page_size should fail");
-
-    let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {"page_size": 0}
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {id: 1})
+            RETURN u
+            PAGE 0"#,
+        Frontend::Gql,
         &ontology,
         &ctx,
     );
     assert!(err.is_err(), "page_size = 0 should fail");
 
     let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {"page_size": 1001}
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {id: 1})
+            RETURN u
+            PAGE 1001"#,
+        Frontend::Gql,
         &ontology,
         &ctx,
     );
     assert!(err.is_err(), "page_size above 1000 should fail");
 
     let result = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {id: 1})
+            RETURN u"#,
+        Frontend::Gql,
         &ontology,
         &ctx,
     );
@@ -723,16 +523,10 @@ fn cursor_pagination_validation() {
 #[test]
 fn render_traversal_inlines_all_params() {
     let rendered = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-        {"id": "u", "entity": "User"}
-    ],
-    "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-    "limit": 10
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (mr:MergeRequest {state: 'opened'})<-[:AUTHORED]-(u:User)
+            RETURN mr, u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -754,14 +548,11 @@ fn render_traversal_inlines_all_params() {
 #[test]
 fn render_in_filter_inlines_array() {
     let rendered = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "filters": {
-        "user_type": {"in": ["project_bot", "service_account"]}
-    }}],
-    "limit": 10
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.user_type IN ['project_bot', 'service_account']
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -779,12 +570,11 @@ fn render_in_filter_inlines_array() {
 #[test]
 fn render_node_ids_inlines_array() {
     let rendered = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [100, 200, 300]}],
-    "limit": 10
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.id IN [100, 200, 300]
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -802,16 +592,10 @@ fn render_node_ids_inlines_array() {
 #[test]
 fn debug_json_round_trip() {
     let compiled = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-        {"id": "u", "entity": "User"}
-    ],
-    "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-    "limit": 10
-        }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (mr:MergeRequest {state: 'opened'})<-[:AUTHORED]-(u:User)
+            RETURN mr, u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1179,13 +963,11 @@ fn hydration_id_column_included_in_map() {
 #[test]
 fn like_rejects_short_contains_pattern() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"username": {"contains": "ab"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.username CONTAINS 'ab'
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1200,13 +982,11 @@ fn like_rejects_short_contains_pattern() {
 #[test]
 fn like_rejects_single_char_starts_with() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"username": {"starts_with": "a"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.username STARTS WITH 'a'
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1221,13 +1001,11 @@ fn like_rejects_single_char_starts_with() {
 #[test]
 fn like_rejects_empty_ends_with() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"username": {"ends_with": ""}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.username ENDS WITH ''
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1242,13 +1020,11 @@ fn like_rejects_empty_ends_with() {
 #[test]
 fn like_rejects_contains_on_email() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"email": {"contains": "example"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.email CONTAINS 'example'
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1262,13 +1038,11 @@ fn like_rejects_contains_on_email() {
 #[test]
 fn like_rejects_starts_with_on_email() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"email": {"starts_with": "alice"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User)
+            WHERE u.email STARTS WITH 'alice'
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1286,13 +1060,10 @@ fn like_equality_on_email_compiles_for_admin() {
     // RestrictPass enforces ahead of like_allowed.
     assert!(
         compile(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": "alice@example.com"}}],
-            "limit": 10
-        }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (u:User {email: 'alice@example.com'})
+                RETURN u
+                LIMIT 10"#,
+            Frontend::Gql,
             &embedded_ontology(),
             &admin_ctx(),
         )
@@ -1303,13 +1074,10 @@ fn like_equality_on_email_compiles_for_admin() {
 #[test]
 fn equality_on_email_rejected_for_non_admin() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"email": "alice@example.com"}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (u:User {email: 'alice@example.com'})
+            RETURN u
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1324,13 +1092,11 @@ fn equality_on_email_rejected_for_non_admin() {
 #[test]
 fn filterable_allows_traversal_path_starts_with_inside_scope() {
     compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "g", "entity": "Group",
-                 "filters": {"traversal_path": {"starts_with": "1/100/"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (g:Group)
+            WHERE g.traversal_path STARTS WITH '1/100/'
+            RETURN g
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1340,13 +1106,11 @@ fn filterable_allows_traversal_path_starts_with_inside_scope() {
 #[test]
 fn filterable_allows_traversal_path_root_starts_with_inside_scope() {
     compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "g", "entity": "Group",
-                 "filters": {"traversal_path": {"starts_with": "1/"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (g:Group)
+            WHERE g.traversal_path STARTS WITH '1/'
+            RETURN g
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1356,13 +1120,10 @@ fn filterable_allows_traversal_path_root_starts_with_inside_scope() {
 #[test]
 fn filterable_allows_traversal_path_equality_inside_scope() {
     compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project",
-                 "filters": {"traversal_path": "1/100/1000/"}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (p:Project {traversal_path: '1/100/1000/'})
+            RETURN p
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1372,13 +1133,10 @@ fn filterable_allows_traversal_path_equality_inside_scope() {
 #[test]
 fn filterable_rejects_traversal_path_outside_scope() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest",
-                 "filters": {"traversal_path": "2/"}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (mr:MergeRequest {traversal_path: '2/'})
+            RETURN mr
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1392,13 +1150,10 @@ fn filterable_rejects_traversal_path_outside_scope() {
 #[test]
 fn filterable_rejects_traversal_path_above_scope() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project",
-                 "filters": {"traversal_path": "1/"}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (p:Project {traversal_path: '1/'})
+            RETURN p
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &compiler::SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
     )
@@ -1412,13 +1167,11 @@ fn filterable_rejects_traversal_path_above_scope() {
 #[test]
 fn filterable_rejects_traversal_path_without_trailing_slash() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "g", "entity": "Group",
-                 "filters": {"traversal_path": {"starts_with": "1/100"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (g:Group)
+            WHERE g.traversal_path STARTS WITH '1/100'
+            RETURN g
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1432,13 +1185,11 @@ fn filterable_rejects_traversal_path_without_trailing_slash() {
 #[test]
 fn filterable_rejects_traversal_path_contains_operator() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project",
-                 "filters": {"traversal_path": {"contains": "100"}}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (p:Project)
+            WHERE p.traversal_path CONTAINS '100'
+            RETURN p
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &test_ctx(),
     )
@@ -1452,13 +1203,10 @@ fn filterable_rejects_traversal_path_contains_operator() {
 #[test]
 fn filterable_rejects_traversal_path_below_entity_role_floor() {
     let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "v", "entity": "Vulnerability",
-                 "filters": {"traversal_path": "1/100/1000/"}}],
-        "limit": 10
-    }"#,
-        Frontend::JsonDsl,
+        r#"MATCH (v:Vulnerability {traversal_path: '1/100/1000/'})
+            RETURN v
+            LIMIT 10"#,
+        Frontend::Gql,
         &embedded_ontology(),
         &compiler::SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap(),
@@ -1474,14 +1222,10 @@ fn filterable_rejects_traversal_path_below_entity_role_floor() {
 fn filterable_allows_traversal_path_in_columns() {
     assert!(
         compile(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "columns": ["name", "traversal_path"],
-                     "node_ids": [100]}],
-            "limit": 10
-        }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (g:Group {id: 100})
+                RETURN g{.name, .traversal_path}
+                LIMIT 10"#,
+            Frontend::Gql,
             &embedded_ontology(),
             &test_ctx(),
         )
@@ -1495,13 +1239,10 @@ fn filterable_allows_traversal_path_in_columns() {
 // table before aggregation.
 #[test]
 fn aggregation_count_pushes_project_id_into_dedup_subquery() {
-    let json = r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "d", "entity": "Definition",
-                   "filters": {"project_id": {"eq": 278964}}}],
-        "aggregations": [{"count": "d", "as": "total"}]
-    }"#;
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let query = r#"MATCH (d:Definition)
+        WHERE d.project_id = 278964
+        RETURN count(d) AS total"#;
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -1525,16 +1266,10 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
     // from the pinned source. Without the fix, the joined Definition table
     // dedups the full authorized scope (~tens of millions of rows on
     // production data) before the JOIN.
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "f", "entity": "File", "node_ids": ["12345"], "columns": ["path"]},
-            {"id": "d", "entity": "Definition", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
-        "limit": 50
-    }"#;
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let query = r#"MATCH (f:File {id: 12345})-[:DEFINES]->(d:Definition)
+        RETURN f{.path}, d{.name}
+        LIMIT 50"#;
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -1553,17 +1288,11 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
 
 #[test]
 fn calls_traversal_compiles_against_embedded_ontology() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
-            {"id": "callee", "entity": "Definition", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "limit": 25
-    }"#;
+    let query = r#"MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
+        RETURN caller{.name}, callee{.name}
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1577,13 +1306,10 @@ fn calls_traversal_compiles_against_embedded_ontology() {
 
 #[test]
 fn aggregation_count_in_clause_pushes_project_id() {
-    let json = r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "d", "entity": "Definition",
-                   "filters": {"project_id": {"in": [69095239, 278964, 74646916]}}}],
-        "aggregations": [{"count": "d", "as": "total"}]
-    }"#;
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let query = r#"MATCH (d:Definition)
+        WHERE d.project_id IN [69095239, 278964, 74646916]
+        RETURN count(d) AS total"#;
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
     let inner = rendered
@@ -1598,17 +1324,11 @@ fn aggregation_count_in_clause_pushes_project_id() {
 
 #[test]
 fn extends_traversal_compiles_against_embedded_ontology() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "child", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
-            {"id": "parent", "entity": "Definition", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "EXTENDS", "from": "child", "to": "parent"}],
-        "limit": 25
-    }"#;
+    let query = r#"MATCH (child:Definition {id: 1})-[:EXTENDS]->(parent:Definition)
+        RETURN child{.name}, parent{.name}
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1622,51 +1342,29 @@ fn extends_traversal_compiles_against_embedded_ontology() {
 
 #[test]
 fn calls_to_imported_symbol_variant_compiles() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
-            {"id": "sym", "entity": "ImportedSymbol", "columns": ["identifier_name"]}
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "sym"}],
-        "limit": 10
-    }"#;
+    let query = r#"MATCH (caller:Definition {id: 1})-[:CALLS]->(sym:ImportedSymbol)
+        RETURN caller{.name}, sym{.identifier_name}
+        LIMIT 10"#;
 
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).is_ok());
+    assert!(compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).is_ok());
 }
 
 #[test]
 fn calls_aggregation_compiles() {
-    let json = r#"{
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "caller", "entity": "Definition", "node_ids": [1]},
-            {"id": "callee", "entity": "Definition"}
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "group_by": ["callee"],
-        "aggregations": [{"count": "caller", "as": "callers"}],
-        "limit": 1
-    }"#;
+    let query = r#"MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
+        RETURN callee, count(caller) AS callers
+        LIMIT 1"#;
 
-    assert!(compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).is_ok());
+    assert!(compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).is_ok());
 }
 
 #[test]
 fn code_graph_edge_union_routes_to_code_table() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "a", "entity": "Definition", "node_ids": [1]},
-            {"id": "b", "entity": "Definition"}
-        ],
-        "relationships": [
-            {"type": ["CALLS", "EXTENDS", "DEFINES"], "from": "a", "to": "b"}
-        ],
-        "limit": 25
-    }"#;
+    let query = r#"MATCH (a:Definition {id: 1})-[:CALLS|EXTENDS|DEFINES]->(b:Definition)
+        RETURN a, b
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_code_edge"),
@@ -1704,15 +1402,9 @@ fn agent_session_detail_columns_are_not_queryable() {
         "external_xid",
         "session_finished_at",
     ] {
-        let json = format!(
-            r#"{{
-            "query_type": "traversal",
-            "nodes": [{{"id": "w", "entity": "AgentSession", "columns": ["{column}"]}}],
-            "limit": 10
-        }}"#
-        );
+        let query = format!("MATCH (w:AgentSession) RETURN w{{.{column}}} LIMIT 10");
         assert!(
-            compile(&json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_err(),
+            compile(&query, Frontend::Gql, &embedded_ontology(), &test_ctx()).is_err(),
             "AgentSession.{column} must not be selectable"
         );
     }
@@ -1720,17 +1412,11 @@ fn agent_session_detail_columns_are_not_queryable() {
 
 #[test]
 fn agent_session_created_mr_traversal_compiles() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "w", "entity": "AgentSession", "columns": ["flow_type"], "filters": {"flow_type": "developer"}},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-        ],
-        "relationships": [{"type": "CREATED_MR", "from": "w", "to": "mr"}],
-        "limit": 25
-    }"#;
+    let query = r#"MATCH (w:AgentSession {flow_type: 'developer'})-[:CREATED_MR]->(mr:MergeRequest)
+        RETURN w{.flow_type}, mr{.title}
+        LIMIT 25"#;
 
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let result = compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_agent_session"));

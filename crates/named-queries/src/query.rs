@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
-use crate::{Language, NamedQueryError, gql, invalid, json};
+use crate::{Language, NamedQueryError, gql, invalid};
 
 const CURRENT_USER_ID: &str = "current_user_id";
 
@@ -49,13 +49,6 @@ impl ParameterSpec {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct QueryTexts {
-    json: Value,
-    gql: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct NamedQueryYaml {
     name: String,
     description: String,
@@ -66,6 +59,13 @@ struct NamedQueryYaml {
     #[serde(default)]
     parameters: BTreeMap<String, ParameterSpecYaml>,
     query: QueryTexts,
+}
+
+/// One spelling per query language; adding a language adds a field.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryTexts {
+    gql: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -140,7 +140,6 @@ pub struct NamedQuery {
     pub default: bool,
     bindings: Vec<String>,
     parameters: BTreeMap<String, ParameterSpec>,
-    json: Value,
     gql: String,
 }
 
@@ -187,7 +186,6 @@ impl NamedQuery {
             default: yaml.default,
             bindings: yaml.bindings,
             parameters,
-            json: yaml.query.json,
             gql: yaml.query.gql,
         };
         query.validate()?;
@@ -199,20 +197,12 @@ impl NamedQuery {
             return Err(self.invalid(format!("uses unknown binding `{name}`")));
         }
         for language in Language::ALL {
-            self.render_example_language(language)?;
+            self.render_example(language)?;
         }
         Ok(())
     }
 
     pub fn render(
-        &self,
-        values: &BindingValues,
-        params: &Map<String, Value>,
-    ) -> Result<String, NamedQueryError> {
-        self.render_language(Language::Json, values, params)
-    }
-
-    pub fn render_language(
         &self,
         language: Language,
         values: &BindingValues,
@@ -221,7 +211,6 @@ impl NamedQuery {
         self.check_parameters(params)?;
         let lookup = Lookup::new(&self.bindings, values, params);
         let (rendered, lookup) = match language {
-            Language::Json => json::render(&self.json, lookup),
             Language::Gql => gql::render(&self.gql, lookup),
         }
         .map_err(|message| self.invalid(message))?;
@@ -231,12 +220,8 @@ impl NamedQuery {
         Ok(rendered)
     }
 
-    pub fn render_example(&self) -> Result<String, NamedQueryError> {
-        self.render_example_language(Language::Json)
-    }
-
-    pub fn render_example_language(&self, language: Language) -> Result<String, NamedQueryError> {
-        self.render_language(
+    pub fn render_example(&self, language: Language) -> Result<String, NamedQueryError> {
+        self.render(
             language,
             &BindingValues { current_user_id: 0 },
             &self.example_parameters(),

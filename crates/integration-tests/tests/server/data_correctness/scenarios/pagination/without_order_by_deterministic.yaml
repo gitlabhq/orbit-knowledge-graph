@@ -1,13 +1,6 @@
 description: First page without order_by is deterministic across runs
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username"]}],
-      "cursor": {"page_size": 3}
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username PAGE 3
 

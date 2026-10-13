@@ -7,8 +7,8 @@ This repository implements both Orbit Remote and Orbit Local. They share the Rus
 Today, the repository includes the following major components:
 
 - Orbit Remote's `gkg-server` binary, which runs in five modes: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`, and `ClickhouseSetup`.
-- A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
-- Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [Orbit query frontend](querying/orbit_query_frontend.md) compiles it into parameterized ClickHouse SQL.
+- A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and query validation. The authoritative ontology lives in `config/ontology/`.
+- Remote HTTP, gRPC, REST, and MCP query surfaces accept read-only GQL text. The [Orbit query frontend](querying/orbit_query_frontend.md) compiles it into parameterized ClickHouse SQL.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
 - Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.
@@ -161,7 +161,7 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
-Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline.
+Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote query language and authorization pipeline.
 
 Local `grep` scans the working tree with ripgrep's engine (`grep-searcher`,
 `grep-regex`, `ignore`). Results follow `.gitignore` and see unsaved edits.
@@ -291,7 +291,7 @@ graph TD
 
 #### 1. AI Works Best with Property Graph Data Models
 
-Our [research and live prototypes](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) showed that LLMs reliably generate property graph tool calls because their structure mirrors natural “find-things-connected-to-X” reasoning. The current Query DSL represents that structure with explicit node selectors, typed relationships, filters, and bounded hops.
+Our [research and live prototypes](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) showed that LLMs reliably generate property graph tool calls because their structure mirrors natural “find-things-connected-to-X” reasoning. The query language represents that structure with graph patterns: labeled nodes, typed relationships, predicates, and bounded hops.
 
 By contrast, GraphQL and REST require schema introspection and nested field expansion. LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
 
@@ -303,7 +303,7 @@ Neither REST nor GraphQL provides a clean or efficient way to express variable-l
 - REST would require chained requests or recursive pagination.
 - GraphQL can express limited nesting but not dynamic-depth traversal (*..N); resolvers explode in complexity and performance cost.
 
-The Query DSL makes these traversals first-class through typed relationships and bounded `hops`, and the compiler turns them into authorization-scoped ClickHouse SQL.
+The query language makes these traversals first-class through typed relationships and bounded repeats such as `*1..3`, and the compiler turns them into authorization-scoped ClickHouse SQL.
 
 #### 3. Aggregations and Analytics Are Essential
 
@@ -311,30 +311,12 @@ Orbit is not just a document API. It is an analytical OLAP system.
 For example, this query counts work items by project within a group. Replace
 `your-group/` with your group's full path before running it.
 
-```json orbit-query
-{
-  "query": {
-    "query_type": "aggregation",
-    "nodes": [
-      {
-        "id": "p",
-        "entity": "Project",
-        "columns": ["name"],
-        "filters": {"full_path": {"starts_with": "your-group/"}}
-      },
-      {"id": "w", "entity": "WorkItem"}
-    ],
-    "relationships": [
-      {"type": "IN_PROJECT", "from": "w", "to": "p"}
-    ],
-    "group_by": ["p"],
-    "aggregations": [
-      {"count": "w", "as": "work_item_count"}
-    ],
-    "aggregation_sort": "-work_item_count",
-    "limit": 10
-  }
-}
+```gql orbit-query
+MATCH (p:Project)<-[:IN_PROJECT]-(w:WorkItem)
+WHERE p.full_path STARTS WITH 'your-group/'
+RETURN p{.name}, count(w) AS work_item_count
+ORDER BY work_item_count DESC
+LIMIT 10
 ```
 
 Implementing equivalent groupings via GraphQL or REST would either require bespoke endpoints or push heavy joins into the application layer. Orbit executes the compiled aggregation in ClickHouse, using adjacency-oriented graph tables and columnar execution.
@@ -343,13 +325,13 @@ Implementing equivalent groupings via GraphQL or REST would either require bespo
 
 Customers will eventually need to be able to add their own data to the graph. Also, Orbit’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
 
-Orbit declares node types, relationships, properties, and pipelines in one ontology. The same declarations drive indexing, query validation, authorization metadata, and storage code generation, so existing Query DSL requests remain stable as the graph grows. User-defined data types remain a possible future extension.
+Orbit declares node types, relationships, properties, and pipelines in one ontology. The same declarations drive indexing, query validation, authorization metadata, and storage code generation, so existing queries remain stable as the graph grows. User-defined data types remain a possible future extension.
 
 This makes property graphs a flexible choice for both AI-driven analytics and human consumers.
 
 #### 5. Property Graphs are Standard
 
-Property graphs are standardized by [SQL 2023's ISO/IEC 9075-16:2023](https://www.iso.org/standard/79473.html). The team evaluated Cypher and dedicated graph databases during the original storage and query-language design; those decisions remain documented in [ADR 000](decisions/000_clickhouse_graph_storage.md). The client contract is the JSON Query DSL or the Orbit query frontend's read-only text; neither exposes generated SQL.
+Property graphs are standardized by [SQL 2023's ISO/IEC 9075-16:2023](https://www.iso.org/standard/79473.html). The team evaluated Cypher and dedicated graph databases during the original storage and query-language design; those decisions remain documented in [ADR 000](decisions/000_clickhouse_graph_storage.md). The client contract is the Orbit query frontend's read-only text, which does not expose generated SQL.
 
 See the [querying design documents](./querying/) for the current query architecture.
 

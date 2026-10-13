@@ -8,165 +8,136 @@ nb_group_both_many_ids:
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "g", "entity": "Group", "node_ids": "$sample:20", "columns": ["id", "full_path"]}],
-      "neighbors": {"direction": "both"},
-      "limit": 500
-    }
+    MATCH (g:Group)--(neighbor)
+    WHERE g.id IN $sample:20
+    RETURN g{.id, .full_path}, neighbor
+    LIMIT 500
 
 nb_group_incoming:
   desc: "Group center, incoming-only (members, work items, labels pointing at the group)."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "g", "entity": "Group", "node_ids": "$sample:20"}],
-      "neighbors": {"direction": "incoming"},
-      "limit": 500
-    }
+    MATCH (g:Group)<--(neighbor)
+    WHERE g.id IN $sample:20
+    RETURN g, neighbor
+    LIMIT 500
 
 nb_group_outgoing:
   desc: "Group center, outgoing-only (CONTAINS subgroups and projects)."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "g", "entity": "Group", "node_ids": "$sample:20"}],
-      "neighbors": {"direction": "outgoing"},
-      "limit": 500
-    }
+    MATCH (g:Group)-->(neighbor)
+    WHERE g.id IN $sample:20
+    RETURN g, neighbor
+    LIMIT 500
 
 nb_group_single_both:
   desc: "Single Group center, both directions (control for the many-id variant)."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "g", "entity": "Group", "node_ids": "$sample"}],
-      "neighbors": {"direction": "both"},
-      "limit": 500
-    }
+    MATCH (g:Group {id: $sample})--(neighbor)
+    RETURN g, neighbor
+    LIMIT 500
 
 nb_project_both:
   desc: "Project center, both directions, no rel filter."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "p", "entity": "Project", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "both"},
-      "limit": 500
-    }
+    MATCH (p:Project)--(neighbor)
+    WHERE p.id IN $sample:5
+    RETURN p, neighbor
+    LIMIT 500
 
 nb_project_incoming:
   desc: "Project center, incoming (MRs, work items, pipelines pointing at the project)."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "p", "entity": "Project", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "incoming"},
-      "limit": 500
-    }
+    MATCH (p:Project)<--(neighbor)
+    WHERE p.id IN $sample:5
+    RETURN p, neighbor
+    LIMIT 500
 
 nb_project_outgoing:
   desc: "Project center, outgoing (CONTAINS files, IN_GROUP namespace)."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "p", "entity": "Project", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "outgoing"},
-      "limit": 500
-    }
+    MATCH (p:Project)-->(neighbor)
+    WHERE p.id IN $sample:5
+    RETURN p, neighbor
+    LIMIT 500
 
 nb_file_both:
   desc: "File center, both directions (DEFINES definitions; CONTAINS from project)."
   category: neighbors
   suite: code_graph
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "f", "entity": "File", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "both"},
-      "limit": 200
-    }
+    MATCH (f:File)--(neighbor)
+    WHERE f.id IN $sample:5
+    RETURN f, neighbor
+    LIMIT 200
 
 nb_file_outgoing_defines:
   desc: "File outgoing DEFINES: every definition declared in the file."
   category: neighbors
   suite: code_graph
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "f", "entity": "File", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]},
-      "limit": 200
-    }
+    MATCH (f:File)-[:DEFINES]->(neighbor)
+    WHERE f.id IN $sample:5
+    RETURN f, neighbor
+    LIMIT 200
 
 nb_definition_both:
   desc: "Definition center, both directions (CALLS, DEFINES, IMPORTS)."
   category: neighbors
   suite: code_graph
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "d", "entity": "Definition", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "both"},
-      "limit": 200
-    }
+    MATCH (d:Definition)--(neighbor)
+    WHERE d.id IN $sample:5
+    RETURN d, neighbor
+    LIMIT 200
 
 nb_definition_calls_outgoing:
   desc: "Definition outgoing CALLS: direct callees."
   category: neighbors
   suite: code_graph
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "d", "entity": "Definition", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]},
-      "limit": 200
-    }
+    MATCH (d:Definition)-[:CALLS]->(neighbor)
+    WHERE d.id IN $sample:5
+    RETURN d, neighbor
+    LIMIT 200
 
 nb_definition_callers_incoming:
   desc: "Definition incoming CALLS: direct callers (find-usages shape)."
   category: neighbors
   suite: code_graph
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "d", "entity": "Definition", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "incoming", "rel_types": ["CALLS"]},
-      "limit": 200
-    }
+    MATCH (d:Definition)<-[:CALLS]-(neighbor)
+    WHERE d.id IN $sample:5
+    RETURN d, neighbor
+    LIMIT 200
 
 nb_merge_request_both:
   desc: "MergeRequest center, both directions."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "both"},
-      "limit": 200
-    }
+    MATCH (mr:MergeRequest)--(neighbor)
+    WHERE mr.id IN $sample:5
+    RETURN mr, neighbor
+    LIMIT 200
 
 nb_work_item_both:
   desc: "WorkItem center, both directions."
   category: neighbors
   suite: neighbors
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "wi", "entity": "WorkItem", "node_ids": "$sample:5"}],
-      "neighbors": {"direction": "both"},
-      "limit": 200
-    }
+    MATCH (wi:WorkItem)--(neighbor)
+    WHERE wi.id IN $sample:5
+    RETURN wi, neighbor
+    LIMIT 200

@@ -1,8 +1,6 @@
 name: Convergent joined targets avoid an edge-derived narrowing rescan
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}],"group_by":["c.name"],"aggregations":[{"count":"a","as":"n"}]}
   gql: |
     MATCH (a:Definition {name: 'compile'})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition) RETURN c.name, count(a) AS n
 

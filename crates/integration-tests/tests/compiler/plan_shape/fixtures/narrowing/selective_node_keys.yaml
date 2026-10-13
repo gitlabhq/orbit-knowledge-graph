@@ -1,16 +1,6 @@
 name: Selective joined nodes plan narrowing keys before lowering
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
-        {"id": "b", "entity": "Definition", "columns": ["id"]}
-      ],
-      "relationships": [{"type": "CALLS", "from": "a", "to": "b"}],
-      "order_by": "a.id"
-    }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)
     RETURN a.id, b.id ORDER BY a.id

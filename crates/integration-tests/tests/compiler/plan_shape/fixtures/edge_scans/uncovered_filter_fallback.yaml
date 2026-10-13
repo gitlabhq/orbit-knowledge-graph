@@ -1,8 +1,6 @@
 name: Uncovered filters keep the node scan alongside covered edge tags
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function","name":"compile"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
   gql: |
     MATCH (a:Definition {definition_type: 'function', name: 'compile'})-[:CALLS]->(b:Definition) RETURN a, b
 

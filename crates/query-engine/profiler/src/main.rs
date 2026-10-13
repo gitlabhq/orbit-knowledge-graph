@@ -28,7 +28,7 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// JSON query string or @filepath (single query or named query collection)
+    /// GQL query text or @filepath (a single query, or a JSON object mapping names to query text)
     query: String,
 
     /// ClickHouse HTTP URL
@@ -130,14 +130,14 @@ struct RunContext<'a> {
 
 async fn run_single(
     ctx: &RunContext<'_>,
-    query_json: &str,
+    query: &str,
     instance_health: Option<serde_json::Value>,
 ) -> Result<ProfilerOutput> {
     let correlation_id = labkit::correlation::generate_id();
     let span = labkit::context::span_with_id("profile", &correlation_id);
     let mut output = ctx
         .service
-        .run_query(ctx.security_ctx.clone(), query_json)
+        .run_query(ctx.security_ctx.clone(), query)
         .instrument(span)
         .await
         .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
@@ -150,7 +150,7 @@ async fn run_single(
     });
 
     Ok(build_output(
-        query_json,
+        query,
         ctx.org_id,
         ctx.traversal_paths,
         &output,
@@ -242,17 +242,12 @@ fn embedded_schema_version() -> u32 {
 }
 
 fn compile_one(
-    query_json: &str,
+    query: &str,
     ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(
-        query_json,
-        compiler::Frontend::JsonDsl,
-        ontology,
-        security_ctx,
-    )
-    .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
+    compiler::compile(query, compiler::Frontend::Gql, ontology, security_ctx)
+        .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
 fn format_hydration(plan: &compiler::HydrationPlan) -> String {
@@ -277,37 +272,32 @@ fn format_hydration(plan: &compiler::HydrationPlan) -> String {
     }
 }
 
+/// A JSON object of named query texts is a collection; anything else is one query.
+fn query_collection(input: &str) -> Option<BTreeMap<String, String>> {
+    serde_json::from_str(input).ok()
+}
+
 fn run_compile_only(
-    query_json: &str,
+    query: &str,
     ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
     show: &CompileShow,
     cli: &Cli,
 ) -> Result<()> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(query_json).context("failed to parse query JSON")?;
-
-    let is_single = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
-
-    let entries: Vec<(String, String)> = if is_single {
-        vec![("query".to_string(), query_json.to_string())]
-    } else {
-        let obj = parsed
-            .as_object()
-            .context("multi-query file must be a JSON object")?;
-        let mut entries: Vec<_> = obj
-            .iter()
-            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap()))
-            .collect();
-        if let Some(ref f) = cli.filter {
-            let re = regex::Regex::new(f)?;
-            entries.retain(|(k, _)| re.is_match(k));
+    let entries: Vec<(String, String)> = match query_collection(query) {
+        None => vec![("query".to_string(), query.to_string())],
+        Some(collection) => {
+            let mut entries: Vec<_> = collection.into_iter().collect();
+            if let Some(ref f) = cli.filter {
+                let re = regex::Regex::new(f)?;
+                entries.retain(|(k, _)| re.is_match(k));
+            }
+            entries
         }
-        entries
     };
 
-    for (name, json) in &entries {
-        let compiled = compile_one(json, ontology, security_ctx)?;
+    for (name, query) in &entries {
+        let compiled = compile_one(query, ontology, security_ctx)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -348,7 +338,7 @@ async fn main() -> Result<()> {
         .with(labkit::correlation::CorrelationCaptureLayer::new())
         .init();
 
-    let query_json = if cli.query.starts_with('@') {
+    let query = if cli.query.starts_with('@') {
         std::fs::read_to_string(&cli.query[1..])
             .context(format!("failed to read query file: {}", &cli.query[1..]))?
     } else {
@@ -376,7 +366,7 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
     if let Some(show) = &cli.compile_only {
-        return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);
+        return run_compile_only(&query, &ontology, &security_ctx, show, &cli);
     }
 
     let custom_settings: std::collections::HashMap<String, String> = cli
@@ -407,13 +397,10 @@ async fn main() -> Result<()> {
     };
 
     if cli.raw_sql {
-        return run_raw_sql(&client, &query_json, &cli, &profiling_config).await;
+        return run_raw_sql(&client, &query, &cli, &profiling_config).await;
     }
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(&query_json).context("failed to parse query JSON")?;
-
-    let is_single_query = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
+    let collection = query_collection(&query);
 
     let instance_health = if profiling_config.instance_health {
         match client.fetch_instance_health().await {
@@ -438,21 +425,7 @@ async fn main() -> Result<()> {
         emit_response: cli.emit_response.clone(),
     };
 
-    if is_single_query {
-        if cli.filter.is_some() {
-            eprintln!("warning: --filter is ignored for single-query input");
-        }
-
-        let profiler_output = run_single(&run_ctx, &query_json, instance_health).await?;
-
-        emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
-    } else {
-        let queries = parsed.as_object().context(if parsed.is_array() {
-            "input is a JSON array; expected a single query object or a named query collection"
-        } else {
-            "multi-query file must be a JSON object with named queries"
-        })?;
-
+    if let Some(queries) = collection {
         let entries: Vec<_> = match &cli.filter {
             Some(f) => {
                 let re =
@@ -472,13 +445,10 @@ async fn main() -> Result<()> {
         let total = entries.len();
         let mut results: BTreeMap<String, serde_json::Value> = BTreeMap::new();
 
-        for (i, (name, query_value)) in entries.into_iter().enumerate() {
+        for (i, (name, query)) in entries.into_iter().enumerate() {
             eprintln!("[{}/{}] {}...", i + 1, total, name);
 
-            let single_json =
-                serde_json::to_string(query_value).context("failed to serialize query value")?;
-
-            match run_single(&run_ctx, &single_json, instance_health.clone()).await {
+            match run_single(&run_ctx, query, instance_health.clone()).await {
                 Ok(output) => {
                     let value = serde_json::to_value(&output)
                         .context("failed to serialize profiler output")?;
@@ -495,6 +465,14 @@ async fn main() -> Result<()> {
         }
 
         emit_output(&cli.format, &results, cli.output.as_ref())?;
+    } else {
+        if cli.filter.is_some() {
+            eprintln!("warning: --filter is ignored for single-query input");
+        }
+
+        let profiler_output = run_single(&run_ctx, &query, instance_health).await?;
+
+        emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
     }
 
     Ok(())

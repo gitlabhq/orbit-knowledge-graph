@@ -61,8 +61,6 @@ cases:
           - { id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/ }
           - { id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/ }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","id_range":{"start":9500,"end":9502},"not":{"discussion_id":{"contains":"abc"}},"columns":["discussion_id"]}],"limit":10}
       gql: |
         MATCH (n:Note)
         WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id CONTAINS 'abc'
@@ -120,8 +118,6 @@ cases:
   - name: not_eq_excludes_null
     description: NOT = becomes <> and drops rows whose value is NULL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"ne":3}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
@@ -154,8 +150,6 @@ cases:
   - name: not_is_not_null
     description: NOT IS NOT NULL matches the same rows as IS NULL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_null":true}},"columns":["weight","state"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NOT NULL
@@ -171,8 +165,6 @@ cases:
   - name: not_is_null
     description: NOT IS NULL matches the same rows as IS NOT NULL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_not_null":true}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NULL
@@ -209,8 +201,6 @@ cases:
   - name: not_range_complement
     description: NOT over a range keeps the smaller weights and drops NULL weights
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"gte":8}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight >= 8
@@ -225,8 +215,6 @@ cases:
   - name: not_single_value_in
     description: NOT IN with one value stays a NOT condition and drops the NULL weight
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
@@ -283,8 +271,6 @@ cases:
   - name: nullable_not_in
     description: NOT IN a nonempty list excludes both matching weights and NULL weights
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3,8]}},"columns":["weight"]}],"order_by":"wi.id","limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3, 8]
@@ -301,8 +287,6 @@ cases:
   - name: transform_null_in_pinned_for_not_tree
     description: A NOT that survives normalization pins transform_null_in = 0, so NULL under NOT IN stays NULL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
@@ -314,8 +298,6 @@ cases:
   - name: transform_null_in_absent_without_not
     description: A query without NOT leaves transform_null_in at the server default
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3]
@@ -327,8 +309,6 @@ cases:
   - name: transform_null_in_absent_when_not_folds
     description: A NOT that folds to an ordinary filter does not set transform_null_in
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3

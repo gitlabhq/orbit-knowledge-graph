@@ -1,167 +1,54 @@
 # Optimizer showcase corpus.
 #
 # Queries that exercise SIP / cascade / namespace-scoped optimizer passes.
-# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
-# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+# Canonical corpus entry: desc / category / suite / query (inline GQL).
+# Placeholders: $sample / $sample:N bind to real in-scope ids at run time.
 
 01_cascading_sip_3node_chain:
   desc: "Cascading sip 3node chain"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User",
-          "node_ids": "$sample:3"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE u.id IN $sample:3
+    RETURN u, mr, p
+    LIMIT 50
 
 02_cascading_sip_4node_fan_out:
   desc: "Cascading sip 4node fan out"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "author",
-          "entity": "User"
-        },
-        {
-          "id": "note",
-          "entity": "Note"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        },
-        {
-          "type": "AUTHORED",
-          "from": "author",
-          "to": "mr"
-        },
-        {
-          "type": "HAS_NOTE",
-          "from": "mr",
-          "to": "note"
-        }
-      ],
-      "limit": 30
-    }
+    MATCH (p:Project {id: $sample})<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(author:User), (mr)-[:HAS_NOTE]->(note:Note)
+    RETURN p, mr, author, note
+    LIMIT 30
 
 03_neighbors_both_directions:
   desc: "Neighbors both directions"
   category: neighbors
   suite: showcase
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "mr",
-        "entity": "MergeRequest",
-        "node_ids": "$sample:3"
-      }],
-      "neighbors": {
-        "direction": "both"
-      },
-      "limit": 100
-    }
+    MATCH (mr:MergeRequest)--(neighbor)
+    WHERE mr.id IN $sample:3
+    RETURN mr, neighbor
+    LIMIT 100
 
 04_neighbors_outgoing_with_rel_filter:
   desc: "Neighbors incoming with rel filter"
   category: neighbors
   suite: showcase
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "p",
-        "entity": "Project",
-        "node_ids": "$sample"
-      }],
-      "neighbors": {
-        "direction": "incoming",
-        "rel_types": [
-          "IN_PROJECT"
-        ]
-      },
-      "limit": 50
-    }
+    MATCH (p:Project {id: $sample})<-[:IN_PROJECT]-(neighbor)
+    RETURN p, neighbor
+    LIMIT 50
 
 05_path_finding_depth3:
   desc: "Path finding depth3"
   category: path_finding
   suite: showcase
   query: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {
-          "id": "start",
-          "entity": "Project",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "end",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "path": {
-        "type": "shortest",
-        "from": "start",
-        "to": "end",
-        "max_depth": 2,
-        "rel_types": [
-          "IN_PROJECT",
-          "AUTHORED"
-        ]
-      }
-    }
+    MATCH p = ANY SHORTEST (start:Project {id: $sample})-[:IN_PROJECT|AUTHORED*1..2]->(`end`:Project {id: $sample})
+    RETURN p
   expect: empty # two random Projects don't share a 2-hop directed path; every entity->Project edge goes IN_PROJECT inbound, so Project->Project via [AUTHORED, IN_PROJECT] loops back to self
 
 06_path_finding_depth2_user_to_project:
@@ -170,183 +57,48 @@
   suite: showcase
   expect: empty # random User->Project pair rarely has a bounded path in scope
   query: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {
-          "id": "start",
-          "entity": "User",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "end",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "path": {
-        "type": "shortest",
-        "from": "start",
-        "to": "end",
-        "max_depth": 2,
-        "rel_types": [
-          "AUTHORED",
-          "IN_PROJECT"
-        ]
-      }
-    }
+    MATCH p = ANY SHORTEST (start:User {id: $sample})-[:AUTHORED|IN_PROJECT*1..2]->(`end`:Project {id: $sample})
+    RETURN p
 
 07_aggregation_count_merged_mrs:
   desc: "Aggregation count merged mrs"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "merged_mr_count"
-        }
-      ],
-      "aggregation_sort": "-merged_mr_count",
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    RETURN p{.name}, count(mr) AS merged_mr_count
+    ORDER BY merged_mr_count DESC
+    LIMIT 20
 
 08_aggregation_sum_pipeline_duration:
   desc: "Aggregation sum pipeline duration"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "success"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "sum": "pipe.duration",
-          "as": "total_pipeline_seconds"
-        }
-      ],
-      "aggregation_sort": "-total_pipeline_seconds",
-      "limit": 15
-    }
+    MATCH (pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    RETURN p{.name}, sum(pipe.duration) AS total_pipeline_seconds
+    ORDER BY total_pipeline_seconds DESC
+    LIMIT 15
 
 09_cascading_sip_aggregation_mr_count_pinned:
   desc: "Cascading sip aggregation mr count pinned"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample:3",
-          "columns": [
-            "name"
-          ]
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "merged_mr_count"
-        }
-      ],
-      "aggregation_sort": "-merged_mr_count",
-      "limit": 10
-    }
+    MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})
+    WHERE p.id IN $sample:3
+    RETURN p{.name}, count(mr) AS merged_mr_count
+    ORDER BY merged_mr_count DESC
+    LIMIT 10
 
 10_traversal_user_to_group:
   desc: "Traversal user to group"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "g",
-          "entity": "Group"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "MEMBER_OF",
-          "from": "u",
-          "to": "g"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (u:User {id: $sample})-[:MEMBER_OF]->(g:Group)
+    RETURN u, g
+    LIMIT 50
 
 11_traversal_project_pipelines_jobs:
   desc: "Traversal project pipelines jobs"
@@ -354,103 +106,28 @@
   suite: showcase
   expect: empty # 3-hop Project->Pipeline->Job OOMs on large sampled projects at gitlab-org scope
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        },
-        {
-          "type": "IN_PIPELINE",
-          "from": "j",
-          "to": "pipe"
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (p:Project {id: $sample})<-[:IN_PROJECT]-(pipe:Pipeline {status: 'failed'})<-[:IN_PIPELINE]-(j:Job {status: 'failed'})
+    RETURN p, pipe, j
+    LIMIT 20
 
 12_ns_traversal_all_mrs_in_group:
   desc: "Ns traversal all mrs in group"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "closed", "merged"]}
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN u, mr
+    LIMIT 50
 
 13_ns_traversal_merged_mrs_with_notes:
   desc: "Ns traversal merged mrs with notes"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "n",
-          "entity": "Note"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_NOTE",
-          "from": "mr",
-          "to": "n"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})-[:HAS_NOTE]->(n:Note)
+    RETURN mr, n
+    LIMIT 50
   expect: empty # #582 silent-empty: state filter is pushed onto the HAS_NOTE edge denorm, which encodes no MR state, yielding zero rows
 
 14_ns_aggregation_mr_count_by_project_no_ids:
@@ -458,557 +135,159 @@
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "closed", "merged"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p{.name}, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 15_ns_aggregation_jobs_by_status:
   desc: "Ns aggregation jobs by status"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "j",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "j",
-          "as": "job_count"
-        }
-      ],
-      "aggregation_sort": "-job_count",
-      "limit": 20
-    }
+    MATCH (j:Job)-[:IN_PROJECT]->(p:Project)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN p{.name}, count(j) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 16_ns_search_pipelines_failed:
   desc: "Ns search pipelines failed"
   category: search
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [{
-        "id": "pipe",
-        "entity": "Pipeline",
-        "filters": {
-          "status": "failed"
-        },
-        "columns": [
-          "id",
-          "status",
-          "ref"
-        ]
-      }],
-      "limit": 50
-    }
+    MATCH (pipe:Pipeline {status: 'failed'})
+    RETURN pipe{.id, .status, .ref}
+    LIMIT 50
 
 17_ns_traversal_narrow_group_authored:
   desc: "Ns traversal narrow group authored"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "closed", "merged"]}
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN u, mr
+    LIMIT 50
 
 18_ns_aggregation_narrow_group_pipeline_duration:
   desc: "Ns aggregation narrow group pipeline duration"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 20
-    }
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN p{.name}, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 20
 
 19_complex_mr_full_context:
   desc: "Complex mr full context"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "author",
-          "entity": "User"
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "author",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "limit": 100
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(author:User), (mr)-[:IN_PROJECT]->(p:Project)
+    RETURN mr, author, p
+    LIMIT 100
 
 20_complex_pipeline_chain_no_ids:
   desc: "Complex pipeline chain no ids"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "j",
-          "entity": "Job"
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        },
-        {
-          "type": "HAS_JOB",
-          "from": "pipe",
-          "to": "j"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (pipe:Pipeline {status: 'failed'}), (j:Job), (p:Project), (pipe)-[:IN_PROJECT]->(p), (pipe)-[:HAS_JOB]->(j)
+    RETURN pipe, j, p
+    LIMIT 50
 
 21_complex_aggregation_multi_filter:
   desc: "Complex aggregation multi filter"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged",
-            "draft": false
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "merged_non_draft_count"
-        }
-      ],
-      "aggregation_sort": "-merged_non_draft_count",
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest {state: 'merged', draft: false})-[:IN_PROJECT]->(p:Project)
+    RETURN p{.name}, count(mr) AS merged_non_draft_count
+    ORDER BY merged_non_draft_count DESC
+    LIMIT 20
 
 22_complex_narrow_3node_no_ids:
   desc: "Complex narrow 3node no ids"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "limit": 50
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    RETURN u, mr, p
+    LIMIT 50
 
 23_complex_narrow_aggregation_jobs_per_project:
   desc: "Complex narrow aggregation jobs per project"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "j",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "j",
-          "as": "failed_job_count"
-        }
-      ],
-      "aggregation_sort": "-failed_job_count",
-      "limit": 20
-    }
+    MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    RETURN p{.name}, count(j) AS failed_job_count
+    ORDER BY failed_job_count DESC
+    LIMIT 20
 
 24_large_result_traversal_all_jobs:
   desc: "Large result traversal all jobs"
   category: traversal
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PIPELINE",
-          "from": "j",
-          "to": "pipe"
-        }
-      ],
-      "limit": 500
-    }
+    MATCH (j:Job)-[:IN_PIPELINE]->(pipe:Pipeline)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN j, pipe
+    LIMIT 500
 
 25_ns_search_all_mrs:
   desc: "Ns search all mrs"
   category: search
   suite: showcase
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [{
-        "id": "mr",
-        "entity": "MergeRequest",
-        "columns": [
-          "id",
-          "title",
-          "state"
-        ],
-        "filters": {
-          "state": {"in": ["opened", "closed", "merged"]}
-        }
-      }],
-      "limit": 100
-    }
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr{.id, .title, .state}
+    LIMIT 100
 
 26_property_group_vulnerabilities_by_severity:
   desc: "Property group vulnerabilities by severity"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
-          }
-        }
-      ],
-      "group_by": ["v.severity"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 20
-    }
+    MATCH (v:Vulnerability)
+    WHERE v.state IN ['detected', 'confirmed', 'resolved', 'dismissed']
+    RETURN v.severity, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 27_property_group_security_scans_by_type:
   desc: "Property group security scans by type"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "s",
-          "entity": "SecurityScan",
-          "filters": {
-            "latest": true
-          }
-        }
-      ],
-      "group_by": ["s.scan_type"],
-      "aggregations": [
-        {
-          "count": "s",
-          "as": "scan_count"
-        }
-      ],
-      "aggregation_sort": "-scan_count",
-      "limit": 20
-    }
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 28_property_group_pipeline_status_source:
   desc: "Property group pipeline status source"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        }
-      ],
-      "group_by": [
-        "pipe.status",
-        "pipe.source"
-      ],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 30
-    }
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, pipe.source, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 30
 
 29_node_and_property_group_project_pipeline_status:
   desc: "Node and property group project pipeline status"
   category: aggregation
   suite: showcase
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name",
-            "full_path"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": [
-        "p",
-        "pipe.status"
-      ],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        },
-        {
-          "avg": "pipe.duration",
-          "as": "avg_duration"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 30
-    }
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN p{.name, .full_path}, pipe.status, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 30

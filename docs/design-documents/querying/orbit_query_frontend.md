@@ -6,8 +6,7 @@ The Orbit query frontend accepts a read-only graph language based on openCypher 
 It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
 Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend.
-GitLab Rails selects GQL per user with the default-off `orbit_gql_queries` flag and sends text queries. The JSON Query DSL remains the default.
-The modes are mutually exclusive. Mismatched payload shapes reject without syntax inference or parser fallback.
+GQL is the only query language. The JSON Query DSL was removed; requests that select it reject with `INVALID_ARGUMENT`.
 
 A **Pest pair** is a matched grammar rule and its source span.
 A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
@@ -33,16 +32,14 @@ flowchart LR
     GqlPrepare -->|MATCH| Input[Compiler Input]
     GqlPrepare -->|CALL db.schema| Resolve[gql::resolve_schema]
     Resolve --> Schema[SchemaResponse]
-    JSON[JSON Query DSL] --> JsonDslParse[json_dsl_parse]
-    JsonDslParse --> Input
     Input --> Validate[validate]
     Validate --> Pipeline[Shared compiler phases]
     Pipeline --> SQL[Parameterized ClickHouse SQL]
 ```
 
 Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and lowers graph queries to the language-neutral Input.
-`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes; JSON is query-only.
-The GQL frontend uses one anchored `Statement` grammar root for queries and schema calls. Query lowering runs in two steps and never serializes a JSON query.
+Input has no wire format; frontends build it in Rust.
+The GQL frontend uses one anchored `Statement` grammar root for queries and schema calls. Query lowering runs in two steps.
 `syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
 Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
 The grammar enforces their order and cardinality, and the consumer rejects unexpected rules.
@@ -51,21 +48,19 @@ Lexical checks live here: identifier rules, string escapes, numeric ranges, `dat
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
-The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases. GQL presets add `validate_relationships` after `validate`.
+The `clickhouse_gql`, `duckdb_gql`, and `validate_normalize_gql` presets start with `gql_parse`, then run the shared phases from `validate` on, which any future frontend reuses. GQL presets add `validate_relationships` after `validate`.
 The `gql_parse` phase parses raw query text when supplied. Preparation supplies a `ParsedQuery` instead, so the wrapper leaves it unchanged without parsing twice.
 A `ParsedQuery` holds the lowered Input and its statement hash. `ParsedQuery::load` sets both the Input and the pagination hash on either path, so `PAGE ... AFTER` cursors bind to the same hash.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
 `compiler::gql::route` parses once and returns a `ParsedQuery` or resolved schema metadata. `compiler::gql::prepare` uses that result to compile MATCH or return CALL metadata.
-`compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
+`compiler::compile` remains query-only. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
-`validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
-Its limits are shared Rust constants in `query_limits` for both JSON and GQL.
-The compiler's build script checks matching constraints in the JSON schema.
+`validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership.
+Its limits are shared Rust constants in `query_limits` for every frontend.
 The shared validator also enforces the total predicate count, which spans multiple input fields.
-`validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
-JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
-Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
+The validator also rejects Input shapes that GQL lowering cannot produce, such as dangling node references. These checks keep the security boundary independent of any one frontend; their tests build Input by parsing GQL and editing the result.
+`validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so a new frontend can adopt it without changes.
 
 Normalization, restriction, security checks, hydration planning, and SQL generation remain shared.
 Shared normalization makes equality explicit in virtual-column filters before building hydration plans.
@@ -102,12 +97,13 @@ The gRPC transport separates query source from language:
 | Enum | Values | Purpose |
 |---|---|---|
 | `QueryType` | `QUERY_TYPE_JSON=0`, `QUERY_TYPE_NAMED=1` | Select raw query text or a named-query envelope |
-| `QueryLanguage` | `QUERY_LANGUAGE_JSON=0`, `QUERY_LANGUAGE_GQL=1` | Select `Frontend::JsonDsl` or `Frontend::Gql` |
+| `QueryLanguage` | `QUERY_LANGUAGE_JSON=0`, `QUERY_LANGUAGE_GQL=1` | Select a `Frontend`; JSON is removed and rejects |
 
 `QUERY_TYPE_JSON` keeps its existing name and value for compatibility. It identifies an ad hoc query; the separate `language` field selects its compiler.
+`QUERY_LANGUAGE_JSON` keeps its name and value so generated Rails, Workhorse, and Go clients still compile. Servers reject it with `INVALID_ARGUMENT` and name the removal, instead of parsing a JSON payload as GQL.
 
-`ExecuteQueryRequest.query_type` remains field 3. Either kind supports either language. NAMED with GQL renders the GQL template and compiles with the GQL frontend; the JSON spelling never enters that path.
-Rails derives `language` from the default-off, per-user `orbit_gql_queries` feature flag. Flag off selects JSON; flag on selects GQL. Both Workhorse streaming and direct Ruby gRPC requests carry it. Request authentication does not select a frontend, and metadata headers cannot override it. There is no language boolean.
+`ExecuteQueryRequest.query_type` remains field 3. Either kind supports any language. NAMED renders the template spelled in the selected language and compiles it with the matching frontend.
+Rails sets `language` on Workhorse streaming and direct Ruby gRPC requests. Request authentication does not select a frontend, and metadata headers cannot override it. There is no language boolean.
 
 | Request | `language` field tag |
 |---|---|
@@ -118,11 +114,11 @@ Rails derives `language` from the default-off, per-user `orbit_gql_queries` feat
 | `GetQueryDslRequest` | 2 |
 | `ListNamedQueriesRequest` | 1 |
 
-Missing kind defaults to `QUERY_TYPE_JSON` and missing language to JSON, preserving the original zero-valued wire behavior. Unknown kinds and languages reject without fallback. Unary discovery and guidance methods accept only a language, not a source kind, and reject unknown languages with `INVALID_ARGUMENT`.
-Language-neutral RPCs have no mode selector. Each language-sensitive method decodes its request's language through the same helper; there is no process-wide Orbit mode.
-The catalog renders `raw_query` in that mode, without a language field. Tool and command discovery describe only the active mode. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
-REST and MCP `query_graph` have no public language selector. Rails, not agents or public client input, sets the transport language. Payload shape only validates that selected language. Flag off accepts only JSON objects; flag on accepts only GQL strings. Existing JSON callers for opted-in users reject. Discovery results must not cross users or modes in caches.
-Orbit Remote does not evaluate the flag. The CLI sends its argument as the `query` string, for example `orbit query 'CALL db.schema()'`. `--file` reads a request envelope from a file, or from stdin with `--file -`; `query` is an object for JSON or a string for GQL. The CLI has no language selector.
+Missing kind defaults to `QUERY_TYPE_JSON`. A missing language is the zero value, `QUERY_LANGUAGE_JSON`, and rejects, so every caller sends `QUERY_LANGUAGE_GQL` explicitly. Unknown kinds and languages reject without fallback. Unary discovery and guidance methods accept only a language, not a source kind, and reject removed or unknown languages with `INVALID_ARGUMENT`.
+Language-neutral RPCs have no mode selector. Each language-sensitive method decodes its request's language into a `Frontend` through one helper, `query_frontend` in the gRPC service; there is no process-wide Orbit mode.
+The catalog renders `raw_query` in the request's language, without a language field. `GetQueryDsl` and the `get_query_dsl` command name return `NOT_FOUND`; use `CALL db.schema()`. See [Named Queries](README.md#named-queries).
+REST and MCP `query_graph` have no public language selector. Rails, not agents or public client input, sets the transport language. Discovery results must not cross users in caches.
+The CLI sends its argument as the `query` string, for example `orbit query 'CALL db.schema()'`. `--file` reads a request envelope from a file, or from stdin with `--file -`. The CLI has no language selector.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
 For MATCH, it carries the `ParsedQuery` into path resolution and compilation; the `gql_parse` wrapper leaves it unchanged.
 For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
@@ -159,7 +155,7 @@ The frontend infers the query type:
 | Other supported patterns | Traversal |
 
 Path finding supports outgoing paths from one hop to an explicit maximum.
-Aggregation over shortest paths is unsupported; shared validation rejects it for both JSON and GQL.
+Aggregation over shortest paths is unsupported; shared validation rejects it.
 Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
 Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
 Write a relationship type after a colon, as in `-[:AUTHORED]->`. Without the colon, the name declares a variable that matches any relationship type. The frontend rejects an untyped relationship variable written in type style, such as `-[AUTHORED]->`, and suggests `-[:AUTHORED]->`.
@@ -227,21 +223,23 @@ Custom ID-property spellings remain outside the frontend.
 ## Pagination and presentation
 
 `PAGE rows` replaces `LIMIT` and requests keyset pagination. It lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
-`PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses reuse the JSON DSL's cursor and the shared validation, decoding, seek, and readback passes.
+`PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses lower to the compiler's cursor and use the shared validation, decoding, seek, and readback passes.
 
 A cursor token binds to the statement's lexical tokens, excluding the whole `PAGE` clause, whitespace, and comments.
 Changing the page size or formatting keeps the cursor valid, including changes to whitespace around `PAGE`.
 String literals and escaped identifiers retain their exact text. Changes inside them, including whitespace, reject the cursor with the "issued for a different query" error.
-Other token edits, such as keyword case changes, also reject the cursor. This is not the JSON DSL's structural comparison.
-JSON and text tokens never validate against each other because their hash sources differ.
+Other token edits, such as keyword case changes, also reject the cursor.
+A frontend supplies its own statement hash, so tokens from different frontends never validate against each other.
 
 `DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.
 
 ## Integration tests
 
-YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` are the canonical test surface for data correctness. Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations. The runner parses each key into a `Frontend` and passes it to `compiler::compile`. A scenario whose query has no text spelling carries only the `json` key. Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`. See the [integration-testkit README](../../../crates/integration-testkit/README.md) for the full `QueryScenario` format reference.
+YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` are the canonical test surface for data correctness. Each scenario declares its query once per frontend under `query:`, keyed by the `Frontend` name (`gql`). Every frontend present is checked against the same result expectations. The runner parses each key into a `Frontend` and rejects unknown keys. Paginated scenarios end their query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`. See the [integration-testkit README](../../../crates/integration-testkit/README.md) for the full `QueryScenario` format reference.
 
-Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs` for compiler-level parity (SQL output, parameters, hydration plans). These are separate from the data correctness scenarios.
+Plan-shape fixtures under `crates/integration-tests/tests/compiler/plan_shape/fixtures/` use the same keys. Each fixture supplies a query for every `Frontend` variant, or a `missing_frontends` reason for one that cannot express the tested shape.
+
+Compiler-level tests in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs` check SQL output, parameters, and hydration plans. `compile_equivalent` asserts that two spellings of one query compile identically, for example inline and `WHERE` equality, or hexadecimal and decimal literals.
 
 ### GQL fuzzing
 
@@ -251,19 +249,24 @@ Each derivation must be consumed by `syntax.rs`: a lowering error is acceptable,
 The real parser decides whether a derivation is faithful. Its pair tree for the generated text must equal the rules the walk produced. This discards derivations that PEG ordered choice or greedy repetition would read differently.
 
 The `fuzz_gql` target sends arbitrary text through the compiler and checks that errors are client-safe.
-Semantic checks remain in the JSON parity tests above, whose paired JSON and text queries must compile to matching SQL.
 
-JSON syntax-error tests remain JSON-only.
-The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
-its relationship order reaches the planner's fallback join between unconnected aliases.
-GQL rejects that disconnected hop order. The frontend does not reproduce or repair the separate planner issue.
+## Adding a frontend
 
-The data-correctness scenarios check both spellings against the same expected nodes, edges, groups, and values. Shared-node branches and repeated aggregation aliases have paired scenarios; GQL-only rejection scenarios cover ambiguous node declarations and invalid topology. SQL text need not be identical for results to be equivalent.
-These tests do not establish full Query DSL coverage or agent evaluation results. JSON removal still requires the remaining coverage and the token-cost and malformed-query measurements.
+A new query language, such as SQL, plugs in at these seams:
+
+1. Add a module under `passes/frontend/` that parses text and lowers it to Input, with its own statement hash for cursors.
+2. Add a `Frontend` variant, a parse phase, and presets in `config.rs` that run the shared phases from `validate` on. Every `match` on `Frontend` in `compile`, `compile_model`, `compile_local`, and `validate_normalize` fails to compile until the new arm exists.
+3. Add a `QueryLanguage` value in `orbit.proto` and map it in the gRPC service's `query_frontend` helper. Routing, compilation, and the attribution payload read the frontend from the pipeline context.
+4. Add a `named_queries::Language` value and a spelling to every file in `config/named_queries/`.
+5. Add the frontend's key to scenario and plan-shape fixtures. The plan-shape harness requires a query or a `missing_frontends` reason for every variant.
+6. Add discovery: a `query_graph` prompt, skill references, and docs for the new language.
+
+## Compilation security
+
+Queries never concatenate caller text into SQL. A frontend lowers text into typed Input. Validation checks every identifier, entity, relationship type, and property against allow-lists derived from the ontology. The planner and code generator accept only that Input and the internal AST, and every scalar value becomes a bound parameter. The security pass injects `traversal_path` filters from the caller's JWT into every namespaced table scan. ClickHouse runs the SQL as a read-only user restricted to Orbit graph tables. Resource limits in `query_limits`, per-request timeouts, and rate limits bound each query. For the security model, see [Security](../security.md).
 
 ## References
 
 - [Official openCypher 9 resources](https://opencypher.org/resources/)
 - [M23 EBNF grammar](https://s3.amazonaws.com/artifacts.opencypher.org/M23/cypher.ebnf)
-- [Existing Query DSL](intermediary_llm_query_language.md)
 - [Graph query engine](graph_engine.md)

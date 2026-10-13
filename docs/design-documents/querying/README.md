@@ -12,13 +12,9 @@ The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agent
 
 View the [Graph Query Engine](graph_engine.md) design document for more details on the graph query engine.
 
-### Intermediate Query Language
-
-View the [Intermediate Query Language](./intermediary_llm_query_language.md) design document for more details on the intermediate LLM query language.
-
 ### Orbit query frontend
 
-The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs become a typed syntax tree that lowers into compiler Input. Rails selects it per user with the default-off `orbit_gql_queries` flag and sets the protobuf `QueryLanguage` enum. The JSON Query DSL remains the default; each user has one active mode.
+The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs become a typed syntax tree that lowers into compiler Input. Rails sets the protobuf `QueryLanguage` enum, which selects a compiler `Frontend`. GQL is the only frontend; the document lists the seams for adding another.
 
 ### Unified Response Schema
 
@@ -32,9 +28,9 @@ A `GraphFormatter` in the Rust query pipeline handles the transformation from ra
 
 Orbit agents discover graph capabilities through a command catalog instead of relying on long MCP tool descriptions. `ListAgentCommands` returns command names, short descriptions, and parameter schemas. `InvokeAgentCommand` executes commands that do not need Rails-specific context.
 
-The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. When the request's `language` is `QUERY_LANGUAGE_GQL`, the catalog omits `get_query_dsl` and `query_graph` directs agents to `CALL db.schema()`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
+The catalog includes `query_graph`, `get_graph_schema`, and `get_response_format`. `query_graph` directs agents to `CALL db.schema()` for graph discovery. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema and response-format discovery directly from in-memory metadata and the checked-in response JSON Schema.
 
-Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml`. It is tied to the `graph_query` schema `$id` major version. The query response format version is the `raw_output_format` pin in the same file.
+Direct API consumers can call `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. `GetQueryDsl` remains on the wire for compatibility and returns `NOT_FOUND`. The accepted query language version is the `query_dsl` pin in `config/versions.yaml`. The query response format version is the `raw_output_format` pin in the same file.
 
 ### Agent Skill Source Trees
 
@@ -45,25 +41,25 @@ Skill requests resolve credentials with the same chain as the other remote comma
 Validated remote trees are cached below the operating system's user cache directory under `orbit/skills/<origin-hash>/<skill>/<version>/`. The origin hash includes the URL scheme, host, and port. Downloads verify normalized relative paths, every file SHA-256, the top-level `version` and `compatibility` front matter, and the item ETag (`"<version>"`, optionally weak). The CLI uses an OS advisory lock, then fsyncs and atomically renames a sibling staging directory; a killed process cannot strand the lock. If the cache is unwritable, the validated download still serves with a warning.
 The cache stores the byte-for-byte remote files and a validation manifest, never local files or composed output. Conditional requests use the cached version ETag; a new version refreshes the cache. Skill versions are identity, not content hashes: if a deployment reuses a version for different content, a `304` cannot detect the change. Pruning retains the two most recently validated versions per instance and skill.
 
-`GetSkill` and `ListSkills` take the caller's `language`. In GQL mode the server serves `SKILL.gql.md` as `SKILL.md`. Query references are mode-specific, and the remote repo-map helper is JSON-only. Setup and reporting guidance are shared. The GQL manifest's version carries `+gql`, so ETags and client caches differ by mode.
+`GetSkill` and `ListSkills` take the caller's `language` and reject removed or unknown languages. The server serves one skill tree.
 
-The remote manifest uses line-oriented HTML placeholders to show where the local manifest's sections belong. The `orbit-cli` build script and an `orbit-server` unit test call the shared validator in `orbit-prompts`. It checks the front matter and placeholders in both remote manifests. Every placeholder must have one matching local section, and paths cannot overlap across the combined trees. The shared validator also resolves relative Markdown links and checks documented remote commands against the clap command inventory. The runtime composer reuses the same marker parser but tolerates release skew: unmatched remote placeholders disappear and unmatched local sections are appended under `## Local CLI`. General Markdown checks remain responsible for prose, external URLs, and fragments.
+The remote manifest uses line-oriented HTML placeholders to show where the local manifest's sections belong. The `orbit-cli` build script and an `orbit-server` unit test call the shared validator in `orbit-prompts`. It checks the front matter and placeholders in the remote manifest. Every placeholder must have one matching local section, and paths cannot overlap across the combined trees. The shared validator also resolves relative Markdown links and checks documented remote commands against the clap command inventory. The runtime composer reuses the same marker parser but tolerates release skew: unmatched remote placeholders disappear and unmatched local sections are appended under `## Local CLI`. General Markdown checks remain responsible for prose, external URLs, and fragments.
 
 ### Named Queries
 
-Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. The 14 YAML definitions under `config/named_queries/` carry JSON Query DSL and GQL spellings of the same graph shape.
+Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. The 14 YAML definitions under `config/named_queries/` carry one spelling per query language under `query:`, keyed by language. Today that is `gql`.
 
 The `expand_merge_request` and `expand_work_item` queries return the immediate neighborhood of a node for entity context expansion. A merge request's notes, mentions, and diffs are left out, because the neighbors query allows 10 relationship types and diff files are two hops away. A neighbors query can order only by a property of the center node, so the cut at `limit` has no set order. Clients check `pagination.truncated`.
 
-The `named-queries` crate validates and embeds both spellings. JSON templates use `$binding` for trusted caller values and `$param` for client values. GQL templates use `binding`, `param`, `identifier`, and `integer` lookup functions. Each parameter has one JSON Schema and one example shared by both spellings.
+The `named-queries` crate validates and embeds every spelling. GQL templates use `binding`, `param`, `identifier`, and `integer` lookup functions. Each parameter has one JSON Schema and one example shared by all spellings.
 
-Rails sends `QUERY_TYPE_NAMED` with a separate language selected by the per-user `orbit_gql_queries` flag. Both languages use the same JSON envelope: `{"name": ..., "parameters": {...}}`. The server renders the selected spelling and compiles it with the matching frontend. Authentication, quota, redaction, and response formatting are the same for both modes.
+Rails sends `QUERY_TYPE_NAMED` with the request's language. The request body is a JSON envelope: `{"name": ..., "parameters": {...}}`. The server renders the spelling for that language and compiles it with the matching frontend. Authentication, quota, redaction, and response formatting are the same as for ad hoc queries.
 
 The GQL `param` function encodes strings, signed or unsigned 64-bit integers, booleans, and arrays. `identifier` accepts ASCII identifiers up to 64 bytes. `integer` accepts non-negative signed 64-bit IDs, including string-valued IDs that preserve JavaScript precision.
 
-Unknown names, missing values, and invalid parameters return client-safe errors. A JSON `"$param:name"` key lets a string parameter select a property. `ListNamedQueries`, surfaced as `GET /api/v4/orbit/templates`, lists parameterless queries with caller bindings resolved in the selected language.
+Unknown names, missing values, and invalid parameters return client-safe errors. `ListNamedQueries`, surfaced as `GET /api/v4/orbit/templates`, lists parameterless queries with caller bindings resolved in the selected language.
 
-The build and active-schema loader validate both spellings. Compiler parity tests require identical SQL, parameters, and query types. The corpus smoke test executes both spellings.
+The build and active-schema loader validate every spelling. When a query has more than one spelling, compiler tests require identical SQL, parameters, and query types. The corpus smoke test executes every spelling.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails. Three factors decide it: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 
@@ -106,6 +102,6 @@ flowchart LR
 
 ## Additional Notes
 
-- All query paths reuse the shared ontology and query infrastructure. That includes `config/ontology/`, `config/schemas/graph_query.schema.json`, and the `query-engine/*` crates. So code and namespace graphs adhere to the same entity and relationship definitions.
+- All query paths reuse the shared ontology and query infrastructure. That includes `config/ontology/` and the `query-engine/*` crates. So code and namespace graphs adhere to the same entity and relationship definitions.
 - SQL generation is guard-railed. Traversal shape limits and a maximum of three hops per relationship selector apply. A path-finding depth cap of three, explicit relationship lists, and schema-driven validation also prevent runaway queries.
 - The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` payload with deduplicated entity objects and instance-level edges. `format_version` is a semver string (the `raw_output_format` pin in `config/versions.yaml`) so consumers can detect breaking changes. Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output. Proto-level metadata (row count, generated SQL, pagination info, format name + version) travels alongside the JSON payload in `QueryMetadata`.

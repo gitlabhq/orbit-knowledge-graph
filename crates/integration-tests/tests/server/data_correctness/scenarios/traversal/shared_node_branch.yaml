@@ -1,22 +1,6 @@
 description: Three branches through a shared merge request return the same nodes and edges
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
-        {"id": "p", "entity": "Project", "columns": ["name"]},
-        {"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["note"]}
-      ],
-      "relationships": [
-        {"type": "AUTHORED", "from": "u", "to": "mr"},
-        {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-        {"type": "HAS_NOTE", "from": "mr", "to": "n"}
-      ],
-      "limit": 20
-    }
   gql: |
     MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest {id: 2000}),
           (mr)-[:IN_PROJECT]->(p:Project),

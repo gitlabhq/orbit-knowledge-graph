@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! raw → {JSON | GQL} frontend → Input → shared compiler passes → SQL
+//! GQL text → Input → shared compiler passes → SQL
 //! ```
 //!
 //! # Example
@@ -24,13 +24,9 @@
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
-//! let json = r#"{
-//!     "query_type": "traversal",
-//!     "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-//!     "limit": 10
-//! }"#;
+//! let query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
 //!
-//! let result = compile(json, Frontend::JsonDsl, &ontology, &ctx).unwrap();
+//! let result = compile(query, Frontend::Gql, &ontology, &ctx).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -60,7 +56,6 @@ pub use constants::{
 pub use error::{QueryError, RejectionReason, Result};
 pub use input::{
     ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
-    parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
@@ -121,11 +116,6 @@ pub fn compile_model(
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
         Frontend::Gql => {
             let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
@@ -150,11 +140,6 @@ pub fn compile_local(
     let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     match fe {
-        Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_json_dsl)
-        }
         Frontend::Gql => {
             let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
             c.set_raw(raw.to_string());
@@ -163,32 +148,24 @@ pub fn compile_local(
     }
 }
 
-/// Run only `validate` + `normalize`, returning the normalized [`Input`].
-pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+/// Run only parsing, validation, and normalization, returning the normalized [`Input`].
+pub fn validate_normalize(raw: &str, fe: Frontend, ontology: &Arc<Ontology>) -> Result<Input> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ValidateNormalizeCtx::new(data_model);
-    ctx.set_raw(json_input.to_string());
-    config::run_validate_normalize(&mut ctx)
+    let (result, input) = match fe {
+        Frontend::Gql => {
+            let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
+            ctx.set_raw(raw.to_string());
+            (
+                config::run_validate_normalize_gql(&mut ctx),
+                ctx.take_input(),
+            )
+        }
+    };
+    result
         .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
+            input.ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
-            })
-        })
-        .count_err()
-}
-
-pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
-    ctx.set_raw(raw.to_string());
-    config::run_validate_normalize_gql(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant(
-                    "validate_normalize_gql produced no input".into(),
-                )
             })
         })
         .count_err()
@@ -259,7 +236,7 @@ mod tests {
     }
 
     fn compile_sql(query: &str) -> String {
-        compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+        compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx())
             .expect("should compile")
             .base
             .render()
@@ -267,21 +244,10 @@ mod tests {
 
     #[test]
     fn relationship_filter_keeps_edge_column_type() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "p",
-                "filters": {"target_id": 2}
-            }]
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})-[r:MEMBER_OF {target_id: 2}]->(p:Project)
+            RETURN u, p"#;
 
-        let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+        let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx()).unwrap();
         let filter_param = compiled
             .base
             .params
@@ -297,33 +263,27 @@ mod tests {
     #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        for fe in [Frontend::JsonDsl, Frontend::Gql] {
-            let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-            let err =
-                compile("not a query", fe, &ONTOLOGY, &security_ctx()).expect_err("must reject");
-            let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-            assert!(
-                matches!(
-                    (fe, &err),
-                    (Frontend::JsonDsl, QueryError::Parse(_))
-                        | (Frontend::Gql, QueryError::Validation(_))
-                ),
-                "unexpected error: {err:?}"
-            );
-            assert!(
-                after > before,
-                "count_err must run on parse errors (before={before}, after={after})"
-            );
-        }
+        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        let err = compile("not a query", Frontend::Gql, &ONTOLOGY, &security_ctx())
+            .expect_err("must reject");
+        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        assert!(
+            matches!(err, QueryError::Validation(_)),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            after > before,
+            "count_err must run on parse errors (before={before}, after={after})"
+        );
     }
 
     #[test]
     fn allowlist_rejected_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
+        let query = r#"MATCH (x:NotARealEntity) RETURN x{.id} LIMIT 1"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err =
-            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
@@ -338,16 +298,14 @@ mod tests {
     #[test]
     fn traversal_path_scope_rejection_is_observable() {
         use std::sync::atomic::Ordering;
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
-            "limit": 1
-        }"#;
+        let query = r#"MATCH (p:Project)
+            WHERE p.traversal_path STARTS WITH '1/'
+            RETURN p
+            LIMIT 1"#;
         let ctx =
             SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid scoped context");
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, Frontend::JsonDsl, &ONTOLOGY, &ctx).expect_err("must reject");
+        let err = compile(query, Frontend::Gql, &ONTOLOGY, &ctx).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
 
         assert!(
@@ -370,14 +328,12 @@ mod tests {
 
     #[test]
     fn traversal_path_shape_rejection_is_validate_pass_error() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": 1}}}],
-            "limit": 1
-        }"#;
+        let query = r#"MATCH (p:Project)
+            WHERE p.traversal_path STARTS WITH 1
+            RETURN p
+            LIMIT 1"#;
         let err =
-            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let msg = err.to_string();
 
         assert!(
@@ -402,9 +358,9 @@ mod tests {
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
         let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
 
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
+        let query = r#"MATCH (g:Group {id: 1}) RETURN g{.name} LIMIT 1"#;
         let compiled =
-            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
+            compile(query, Frontend::Gql, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -417,9 +373,11 @@ mod tests {
     fn compile_with_prefixed_ontology_prefixes_edge_table() {
         let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
 
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
+        let query = r#"MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+            RETURN u{.username}, mr{.title}
+            LIMIT 1"#;
         let compiled =
-            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
+            compile(query, Frontend::Gql, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -435,7 +393,7 @@ mod tests {
     #[test]
     fn compile_uses_supplied_ontology_for_scoped_user_table() {
         let scoped_user = (**ONTOLOGY).clone().with_path_scopable_nodes(["User"]);
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
+        let query = r#"MATCH (u:User {id: 1}) RETURN u{.id} LIMIT 1"#;
 
         for (ontology, expected_table) in [
             (Arc::new(scoped_user.clone()), "gl_user"),
@@ -444,7 +402,7 @@ mod tests {
                 "v1_gl_user",
             ),
         ] {
-            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
+            let sql = compile(query, Frontend::Gql, &ontology, &security_ctx())
                 .expect("should compile")
                 .base
                 .render();
@@ -461,19 +419,9 @@ mod tests {
 
     #[test]
     fn compile_uses_each_ontologys_global_tables_and_keeps_join_filters() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "user", "entity": "User", "node_ids": [1], "filters": {"username": "alice"}},
-                {"id": "project", "entity": "Project", "filters": {"name": "orbit"}}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "user",
-                "to": "project"
-            }],
-            "limit": 1
-        }"#;
+        let query = r#"MATCH (user:User {id: 1, username: 'alice'})-[:MEMBER_OF]->(project:Project {name: 'orbit'})
+            RETURN user, project
+            LIMIT 1"#;
 
         let mut sources = ontology::migrations::embedded_sources();
         let user_source = sources.get_mut("nodes/core/user.yaml").unwrap();
@@ -497,7 +445,7 @@ mod tests {
             ),
             (Arc::new(archived_ontology), "gl_renamed_user"),
         ] {
-            let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
+            let sql = compile(query, Frontend::Gql, &ontology, &security_ctx())
                 .expect("should compile")
                 .base
                 .render();
@@ -522,17 +470,9 @@ mod tests {
 
     #[test]
     fn aggregation_with_relationship_emits_no_bare_node_ref() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{"count": "mr", "as": "total_mrs"}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964})
+            RETURN p, count(mr) AS total_mrs
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -548,20 +488,9 @@ mod tests {
 
     #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "parent", "entity": "Pipeline", "node_ids": [1]},
-                {"id": "child", "entity": "Pipeline"}
-            ],
-            "relationships": [{"type": "CHILD_OF", "from": "parent", "to": "child"}],
-            "group_by": ["parent"],
-            "aggregations": [{
-                "count": "child",
-                "as": "children"
-            }],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (parent:Pipeline {id: 1})-[:CHILD_OF]->(child:Pipeline)
+            RETURN parent, count(child) AS children
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -584,22 +513,10 @@ mod tests {
 
     #[test]
     fn filtered_edge_only_count_keeps_column_arg_for_count_if() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "opened"}
-                }}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "open_mrs"
-            }],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
+            WHERE mr.state = 'opened'
+            RETURN p, count(mr) AS open_mrs
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -615,20 +532,10 @@ mod tests {
 
     #[test]
     fn dedup_edge_scan_pushes_filter_cte_in_subquery_into_inner_where() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest {id: 490855697})-[:HAS_LABEL]->(label:Label {title: 'group::source code'}), (mr)-[:IN_PROJECT]->(project:Project)
+            WHERE project.full_path = 'gitlab-org/gitlab'
+            RETURN count(mr) AS n
+            LIMIT 1"#;
 
         let sql = compile_sql(query);
         let (e0_inner, rest) = sql
@@ -683,20 +590,10 @@ mod tests {
     /// `count(mr)` (observed 7, 49, 245 for an MR that should return 1).
     #[test]
     fn multi_edge_self_join_dedups_edge_versions() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest {id: 490855697})-[:HAS_LABEL]->(label:Label {title: 'group::source code'}), (mr)-[:IN_PROJECT]->(project:Project)
+            WHERE project.full_path = 'gitlab-org/gitlab'
+            RETURN count(mr) AS n
+            LIMIT 1"#;
 
         let sql = compile_sql(query);
 
@@ -711,18 +608,9 @@ mod tests {
     /// deduplicating the hot single-edge path would cost an unnecessary aggregation.
     #[test]
     fn single_edge_scan_stays_plain() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest {id: 490855697})-[:HAS_LABEL]->(label:Label {title: 'group::source code'})
+            RETURN count(mr) AS n
+            LIMIT 1"#;
 
         let sql = compile_sql(query);
 
@@ -734,15 +622,10 @@ mod tests {
 
     #[test]
     fn traversal_id_range_produces_range_conditions_in_sql() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+            WHERE u.id >= 1 AND u.id <= 100
+            RETURN u, mr
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -758,16 +641,10 @@ mod tests {
 
     #[test]
     fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["CALLS"]},
-            "limit": 10
-        }"#;
+        let query = r#"MATCH p = ANY SHORTEST (start:Definition)-[:CALLS*1..3]->(`end`:Definition)
+            WHERE start.name = 'compile' AND `end`.name = 'run_query'
+            RETURN p
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -801,15 +678,8 @@ mod tests {
 
     #[test]
     fn path_finding_cross_level_endpoints_union_traversal_scope() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "from", "entity": "Group",   "node_ids": [9970]},
-                {"id": "to",   "entity": "Project", "node_ids": [278964]}
-            ],
-            "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3,
-                     "rel_types": ["CONTAINS"]}
-        }"#;
+        let query = r#"MATCH p = ANY SHORTEST (from:Group {id: 9970})-[:CONTAINS*1..3]->(to:Project {id: 278964})
+            RETURN p"#;
         let sql = compile_sql(query);
         assert!(
             sql.contains("_path_scope_traversal_paths"),
@@ -827,16 +697,9 @@ mod tests {
 
     #[test]
     fn path_finding_without_cursor_orders_only_by_depth() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
+        let query = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100})
+            RETURN p
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -849,16 +712,9 @@ mod tests {
 
     #[test]
     fn path_finding_with_cursor_keeps_path_tie_break_order() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "cursor": {"page_size": 10}
-        }"#;
+        let query = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100})
+            RETURN p
+            PAGE 10"#;
 
         let sql = compile_sql(query);
 
@@ -871,16 +727,9 @@ mod tests {
 
     #[test]
     fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["*"]},
-            "limit": 10
-        }"#;
+        let query = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[*1..3]->(`end`:Project {id: 100})
+            RETURN p
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -900,15 +749,9 @@ mod tests {
 
     #[test]
     fn wildcard_traversal_infers_relationship_kinds_from_endpoint_entities() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})-->(mr:MergeRequest)
+            RETURN u, mr
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -924,12 +767,9 @@ mod tests {
 
     #[test]
     fn wildcard_neighbors_infers_relationship_kinds_from_center_entity() {
-        let query = r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "outgoing"},
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})-->(neighbor)
+            RETURN u, neighbor
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -945,12 +785,10 @@ mod tests {
 
     #[test]
     fn cursor_neighbors_both_orders_by_projected_columns() {
-        let query = r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]}],
-            "neighbors": {"direction": "both"},
-            "cursor": {"page_size": 20}
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest)--(neighbor)
+            WHERE mr.id IN [1, 2, 3]
+            RETURN mr, neighbor
+            PAGE 20"#;
 
         let sql = compile_sql(query);
 
@@ -966,16 +804,9 @@ mod tests {
 
     #[test]
     fn path_finding_clamps_settings_to_safety_floor() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
+        let query = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100})
+            RETURN p
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -991,19 +822,9 @@ mod tests {
 
     #[test]
     fn multi_hop_traversal_constrains_kind_on_every_edge() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "limit": 5
-        }"#;
+        let query = r#"MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User)
+            RETURN p, mr, u
+            LIMIT 5"#;
 
         let sql = compile_sql(query);
 
@@ -1027,26 +848,10 @@ mod tests {
 
     #[test]
     fn aggregation_prunes_unreferenced_node_table_join() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "merged"}
-                }},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "merged_mrs"
-            }],
-            "limit": 5
-        }"#;
+        let query = r#"MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User)
+            WHERE mr.state = 'merged'
+            RETURN p, count(mr) AS merged_mrs
+            LIMIT 5"#;
 
         let sql = compile_sql(query);
 
@@ -1071,24 +876,9 @@ mod tests {
 
     #[test]
     fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
+        let query = r#"MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+            RETURN p, count(mr) AS user_mrs
+            LIMIT 5"#;
 
         let sql = compile_sql(query);
 
@@ -1104,20 +894,9 @@ mod tests {
 
     #[test]
     fn multi_hop_traversal_generates_hop_frontier_ctes() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "p",
-                "hops": [1, 3]
-            }],
-            "limit": 25
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})-[:MEMBER_OF*1..3]->(p:Project)
+            RETURN u, p
+            LIMIT 25"#;
 
         let sql = compile_sql(query);
 
@@ -1137,20 +916,9 @@ mod tests {
 
     #[test]
     fn multi_hop_traversal_skips_frontiers_without_selectivity() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "p",
-                "hops": [1, 2]
-            }],
-            "limit": 25
-        }"#;
+        let query = r#"MATCH (u:User)-[:MEMBER_OF*1..2]->(p:Project {id: 1})
+            RETURN u, p
+            LIMIT 25"#;
 
         let sql = compile_sql(query);
 
@@ -1166,22 +934,9 @@ mod tests {
 
     #[test]
     fn multi_hop_aggregation_generates_cascade_cte() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [278964]},
-                {"id": "f", "entity": "File"}
-            ],
-            "relationships": [{
-                "type": "CONTAINS",
-                "from": "p",
-                "to": "f",
-                "hops": [1, 2]
-            }],
-            "group_by": ["p"],
-            "aggregations": [{"count": "f", "as": "count"}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (p:Project {id: 278964})-[:CONTAINS*1..2]->(f:File)
+            RETURN p, count(f) AS count
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1204,23 +959,9 @@ mod tests {
     /// granule pruning at every depth, instead of dynamic IN-subqueries.
     #[test]
     fn variable_length_traversal_emits_per_arm_kind_literals() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 3]}
-            ],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "n"}],
-            "limit": 3
-        }"#;
+        let query = r#"MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..3]-(g:Group)
+            RETURN g, count(u) AS n
+            LIMIT 3"#;
 
         let sql = compile_sql(query);
 
@@ -1243,19 +984,9 @@ mod tests {
 
     #[test]
     fn denorm_filter_pushed_onto_carrying_edge_not_first_hop() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "cl"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "aggregations": [{"count": "mr", "as": "c"}]
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest)-[:HAS_LABEL]->(cl:Label), (mr)-[:IN_PROJECT]->(p:Project)
+            WHERE mr.state = 'opened' AND cl.title = 'Community contribution'
+            RETURN count(mr) AS c"#;
         let sql = compile_sql(query);
         assert!(
             sql.contains("has(_orbit_edge_1.source_tags, 'state:opened')"),
@@ -1269,17 +1000,9 @@ mod tests {
 
     #[test]
     fn denorm_filter_uncovered_by_query_relationships_filters_node_table() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "cl"}
-            ],
-            "aggregations": [{"count": "mr", "as": "c"}]
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest)-[:HAS_LABEL]->(cl:Label)
+            WHERE mr.state = 'opened' AND cl.title = 'Community contribution'
+            RETURN count(mr) AS c"#;
         let sql = compile_sql(query);
         assert!(
             !sql.contains("source_tags, 'state:opened'"),
@@ -1298,15 +1021,7 @@ mod tests {
             ("MergeRequest", "HAS_NOTE", "Note"),
         ] {
             let query = format!(
-                r#"{{
-                    "query_type": "aggregation",
-                    "nodes": [
-                        {{"id": "a", "entity": "{entity}", "filters": {{"state": {{"eq": "opened"}}}}}},
-                        {{"id": "b", "entity": "{target}"}}
-                    ],
-                    "relationships": [{{"type": "{rel}", "from": "a", "to": "b"}}],
-                    "aggregations": [{{"count": "a", "as": "n"}}]
-                }}"#
+                "MATCH (a:{entity})-[:{rel}]->(b:{target}) WHERE a.state = 'opened' RETURN count(a) AS n"
             );
             let sql = compile_sql(&query);
             assert!(
@@ -1322,15 +1037,10 @@ mod tests {
 
     #[test]
     fn multi_hop_union_projects_denorm_tag_columns() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "a", "entity": "WorkItem", "filters": {"state": {"eq": "opened"}}, "columns": ["iid"]},
-                {"id": "b", "entity": "WorkItem", "columns": ["iid"]}
-            ],
-            "relationships": [{"type": "RELATED_TO", "from": "a", "to": "b", "hops": [1, 2]}],
-            "limit": 50
-        }"#;
+        let query = r#"MATCH (a:WorkItem)-[:RELATED_TO*1..2]->(b:WorkItem)
+            WHERE a.state = 'opened'
+            RETURN a{.iid}, b{.iid}
+            LIMIT 50"#;
         let sql = compile_sql(query);
         assert!(
             sql.contains("AS source_tags"),
@@ -1348,16 +1058,10 @@ mod tests {
 
     #[test]
     fn denorm_skips_rewrite_when_node_ids_present() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3],
-                 "filters": {"state": {"eq": "merged"}}}
-            ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest)
+            WHERE mr.id IN [1, 2, 3] AND mr.state = 'merged'
+            RETURN u, mr
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1373,22 +1077,10 @@ mod tests {
 
     #[test]
     fn denorm_aggregation_count_with_filter_uses_edge_column() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "merged"}
-                }}
-            ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "group_by": ["u"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "n"
-            }],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest)
+            WHERE mr.state = 'merged'
+            RETURN u, count(mr) AS n
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1404,24 +1096,9 @@ mod tests {
 
     #[test]
     fn count_with_property_on_skip_target_drops_column_arg() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "wi", "entity": "WorkItem", "filters": {"state": "closed"}},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-                {"type": "CLOSED", "from": "u", "to": "wi"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "u.id",
-                "as": "closers_count"
-            }],
-            "limit": 20
-        }"#;
+        let query = r#"MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem {state: 'closed'})<-[:CLOSED]-(u:User)
+            RETURN p, count(u.id) AS closers_count
+            LIMIT 20"#;
 
         let sql = compile_sql(query);
 
@@ -1437,22 +1114,10 @@ mod tests {
 
     #[test]
     fn denorm_preserves_role_gated_node_table_for_security() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "v", "entity": "Vulnerability", "filters": {
-                    "state": {"eq": "detected"}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
-            "group_by": ["proj"],
-            "aggregations": [{
-                "count": "v",
-                "as": "n"
-            }],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (v:Vulnerability)-[:IN_PROJECT]->(proj:Project {id: 1})
+            WHERE v.state = 'detected'
+            RETURN proj, count(v) AS n
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1464,18 +1129,9 @@ mod tests {
 
     #[test]
     fn aggregation_group_by_property_emits_scalar_group_key() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "group_by": ["p.visibility_level"],
-            "aggregations": [{
-                "count": "p",
-                "as": "project_count"
-            }],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (p:Project {id: 1})
+            RETURN p.visibility_level, count(p) AS project_count
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1495,20 +1151,9 @@ mod tests {
 
     #[test]
     fn aggregation_group_by_property_keeps_role_gated_target_table() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "v", "entity": "Vulnerability"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": ["v.severity"],
-            "aggregations": [{
-                "count": "v",
-                "as": "vulnerability_count"
-            }],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1})
+            RETURN v.severity, count(v) AS vulnerability_count
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1527,52 +1172,33 @@ mod tests {
         let queries = [
             (
                 "traversal",
-                r#"{
-                    "query_type": "traversal",
-                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
-                    "limit": 10
-                }"#,
+                r#"MATCH (mr:MergeRequest {state: 'merged'})
+                    RETURN mr
+                    LIMIT 10"#,
             ),
             (
                 "aggregation",
-                r#"{
-                    "query_type": "aggregation",
-                    "nodes": [
-                        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                        {"id": "p", "entity": "Project"}
-                    ],
-                    "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-                    "group_by": ["p"],
-                    "aggregations": [{"count": "mr", "as": "merged_mrs"}],
-                    "limit": 10
-                }"#,
+                r#"MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+                    RETURN p, count(mr) AS merged_mrs
+                    LIMIT 10"#,
             ),
             (
                 "path_finding",
-                r#"{
-                    "query_type": "path_finding",
-                    "nodes": [
-                        {"id": "start", "entity": "User", "filters": {"username": "root"}},
-                        {"id": "end", "entity": "Project", "node_ids": [100]}
-                    ],
-                    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                             "rel_types": ["MEMBER_OF", "CONTAINS"]},
-                    "limit": 10
-                }"#,
+                r#"MATCH p = ANY SHORTEST (start:User {username: 'root'})-[:MEMBER_OF|CONTAINS*1..2]->(`end`:Project {id: 100})
+                    RETURN p
+                    LIMIT 10"#,
             ),
             (
                 "neighbors",
-                r#"{
-                    "query_type": "neighbors",
-                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"title": {"contains": "fix"}}}],
-                    "neighbors": {"direction": "both"},
-                    "limit": 10
-                }"#,
+                r#"MATCH (mr:MergeRequest)--(neighbor)
+                    WHERE mr.title CONTAINS 'fix'
+                    RETURN mr, neighbor
+                    LIMIT 10"#,
             ),
         ];
 
         for (name, query) in queries {
-            let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+            let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
             assert!(
@@ -1590,19 +1216,9 @@ mod tests {
 
     #[test]
     fn fk_star_joined_nodes_use_candidate_ctes() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed", "source": "push"}},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "HAS_JOB", "from": "pipe", "to": "j"},
-                {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
-            ],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (pipe:Pipeline {status: 'failed', source: 'push'})-[:HAS_JOB]->(j:Job {status: 'failed'}), (pipe)-[:IN_PROJECT]->(p:Project {id: 278964})
+            RETURN pipe, j, p
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1629,17 +1245,9 @@ mod tests {
 
     #[test]
     fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
-            "group_by": ["j"],
-            "aggregations": [{"count": "j", "as": "fail_count"}],
-            "limit": 20
-        }"#;
+        let query = r#"MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project {id: 278964})
+            RETURN j, count(j) AS fail_count
+            LIMIT 20"#;
 
         let sql = compile_sql(query);
 
@@ -1656,7 +1264,10 @@ mod tests {
     #[test]
     fn narrowed_join_keeps_sort_key_filters_before_dedup() {
         let sql = compile_sql(
-            r#"{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}"#,
+            r#"MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+                WHERE p.traversal_path STARTS WITH '1/100/'
+                RETURN p, count(mr) AS c
+                LIMIT 10"#,
         );
         assert!(
             sql.contains(
@@ -1666,12 +1277,9 @@ mod tests {
         );
     }
 
-    fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
-        let query = format!(
-            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"count":"{agg}","as":"c"}}],"limit":20}}"#
-        );
+    fn compile_sql_scoped(query: &str) -> String {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
+        compile(query, Frontend::Gql, &ONTOLOGY, &ctx)
             .unwrap()
             .base
             .render()
@@ -1684,45 +1292,30 @@ mod tests {
     // data-correctness suite (`scope_implied_container_elision_*`).
     #[test]
     fn scope_implied_container_hop_elision() {
-        let cases: &[(&str, &str, &str, &str, &str)] = &[
+        let cases: &[(&str, &str)] = &[
             (
-                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
-                "p",
-                "f",
+                "MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) RETURN p, count(f) AS c LIMIT 20",
                 "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group AS g",
             ),
             (
-                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}"#,
-                "p",
-                "n",
+                "MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_NOTE]->(n:Note) RETURN p, count(n) AS c LIMIT 20",
                 "'CONTAINS'|'HAS_NOTE'",
             ),
             (
-                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
-                "u",
-                "p.created_at",
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u, count(p.created_at) AS c LIMIT 20",
                 "COUNT(p.created_at)|p.id = mr.project_id|countSubstrings(p.traversal_path, '/')|!gl_edge|!gl_group AS g",
             ),
             (
-                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
-                "d.state",
-                "d",
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff) WHERE mr.id >= 100 AND mr.id <= 100 RETURN d.state, count(d) AS c LIMIT 20",
                 "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
             ),
             (
-                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
-                "u",
-                "mr",
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u, count(mr) AS c LIMIT 20",
                 "_filter_p|gl_project AS p FINAL|countSubstrings(p.traversal_path, '/')|!_candidate_p",
             ),
         ];
-        for (nodes, rels, group, agg, expect) in cases {
-            let sql = compile_sql_scoped(nodes, rels, group, agg);
+        for (query, expect) in cases {
+            let sql = compile_sql_scoped(query);
             for e in expect.split('|') {
                 match e.strip_prefix('!') {
                     Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
@@ -1803,55 +1396,41 @@ mod tests {
     fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
         let cases = [
             (
-                "Group",
-                "Project",
-                r#""from":"a","to":"x""#,
+                "MATCH (a:Group {id: 1})-[:CONTAINS]->(x:Project) RETURN count(x) AS c LIMIT 20",
                 "countSubstrings(x.traversal_path, '/') >=",
             ),
             (
-                "Group",
-                "Group",
-                r#""from":"a","to":"x","hops":[2,3]"#,
+                "MATCH (a:Group {id: 1})-[:CONTAINS*2..3]->(x:Group) RETURN count(x) AS c LIMIT 20",
                 "countSubstrings(x.traversal_path, '/') <=",
             ),
             (
-                "Project",
-                "Branch",
-                r#""from":"a","to":"x""#,
+                "MATCH (a:Project {id: 1})-[:CONTAINS]->(x:Branch) RETURN count(x) AS c LIMIT 20",
                 "(x.traversal_path = (SELECT",
             ),
             (
-                "Project",
-                "Branch",
-                r#""from":"a","to":"x","direction":"incoming""#,
+                "MATCH (a:Directory {id: 1})-[:CONTAINS]->(x:File) RETURN count(x) AS c LIMIT 20",
+                "gl_code_edge",
+            ),
+            (
+                "MATCH (a:Project {id: 1})<-[:CONTAINS]-(x:Group) RETURN count(x) AS c LIMIT 20",
                 "gl_edge",
             ),
             (
-                "Directory",
-                "File",
-                r#""from":"a","to":"x""#,
-                "gl_code_edge",
+                "MATCH (a:Group {id: 1})<-[:CONTAINS]-(x:Group) RETURN count(x) AS c LIMIT 20",
+                "gl_edge",
             ),
-            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
-            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
         ];
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        for (anchor, far, rel, expect) in cases {
-            let query = format!(
-                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
-            );
-            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
+        for (query, expect) in cases {
+            let sql = compile(query, Frontend::Gql, &ONTOLOGY, &ctx)
                 .unwrap()
                 .base
                 .render();
-            assert!(
-                sql.contains(expect),
-                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
-            );
+            assert!(sql.contains(expect), "{query}: {expect} missing:\n{sql}");
             if expect != "gl_edge" {
                 assert!(
                     !sql.contains("gl_edge"),
-                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
+                    "{query} kept the edge scan:\n{sql}"
                 );
             }
         }
@@ -1859,21 +1438,9 @@ mod tests {
 
     #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "n", "entity": "Note"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"name": "gitlab-org"}}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "n", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{"count": "n", "as": "note_count"}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (n:Note)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group {name: 'gitlab-org'})
+            RETURN p, count(n) AS note_count
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1889,15 +1456,10 @@ mod tests {
 
     #[test]
     fn filtered_redaction_joins_push_filters_into_subquery() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "f", "entity": "File", "filters": {"path": {"ends_with": ".rb"}}},
-                {"id": "d", "entity": "Definition", "filters": {"name": {"starts_with": "process"}}}
-            ],
-            "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
-            "limit": 20
-        }"#;
+        let query = r#"MATCH (f:File)-[:DEFINES]->(d:Definition)
+            WHERE f.path ENDS WITH '.rb' AND d.name STARTS WITH 'process'
+            RETURN f, d
+            LIMIT 20"#;
 
         let sql = compile_sql(query);
 
@@ -1916,19 +1478,13 @@ mod tests {
     #[test]
     fn local_string_filters_fold_case_with_lower_on_both_sides() {
         for (operator, function) in [
-            ("contains", "contains"),
-            ("starts_with", "starts_with"),
-            ("ends_with", "ends_with"),
+            ("CONTAINS", "contains"),
+            ("STARTS WITH", "starts_with"),
+            ("ENDS WITH", "ends_with"),
         ] {
-            let query = format!(
-                r#"{{
-                    "query_type": "traversal",
-                    "nodes": [{{"id": "f", "entity": "File", "filters": {{"path": {{"{operator}": "ALI"}}}}}}],
-                    "limit": 10
-                }}"#
-            );
+            let query = format!("MATCH (f:File) WHERE f.path {operator} 'ALI' RETURN f LIMIT 10");
 
-            let sql = compile_local(&query, Frontend::JsonDsl, &ONTOLOGY)
+            let sql = compile_local(&query, Frontend::Gql, &ONTOLOGY)
                 .expect("should compile")
                 .base
                 .render();
@@ -1940,21 +1496,9 @@ mod tests {
 
     #[test]
     fn cross_namespace_fk_chain_elides_to_node_joins() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}},
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "pipe", "entity": "Pipeline"},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pipe"},
-                {"type": "HAS_JOB", "from": "pipe", "to": "j"}
-            ],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+            RETURN u, mr, pipe, j
+            LIMIT 10"#;
         let sql = compile_sql(query);
         assert!(
             !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
@@ -1979,11 +1523,9 @@ mod tests {
 
     #[test]
     fn single_ref_cte_is_not_materialized() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (u:User {id: 1})
+            RETURN u
+            LIMIT 10"#;
 
         let sql = compile_sql(query);
 
@@ -1999,26 +1541,10 @@ mod tests {
 
     #[test]
     fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "merged"}
-                }},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
+        let query = r#"MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+            WHERE mr.state = 'merged'
+            RETURN p, count(mr) AS user_mrs
+            LIMIT 5"#;
 
         let sql = compile_sql(query);
 
@@ -2036,21 +1562,12 @@ mod tests {
     #[test]
     fn multi_filter_range_compiles_both_predicates() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "node_ids": [1],
-                     "filters": {
-                         "created_at": [
-                             {"gte": "2026-04-01T00:00:00Z"},
-                             {"lt": "2026-05-01T00:00:00Z"}
-                         ]
-                     },
-                     "columns": ["id", "created_at"]}],
-            "limit": 10
-        }"#;
+        let query = r#"MATCH (mr:MergeRequest {id: 1})
+            WHERE mr.created_at >= '2026-04-01T00:00:00Z' AND mr.created_at < '2026-05-01T00:00:00Z'
+            RETURN mr{.id, .created_at}
+            LIMIT 10"#;
         let compiled =
-            compile(query, Frontend::JsonDsl, &ontology, &security_ctx()).expect("should compile");
+            compile(query, Frontend::Gql, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
@@ -2063,15 +1580,11 @@ mod tests {
     fn filter_on_virtual_column_compiles_without_sql_predicate() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1],
-                 "filters": {"content": {"eq": "x"}},
-                 "columns": ["path", "content"]}],
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File {id: 1})
+                WHERE f.content = 'x'
+                RETURN f{.path, .content}
+                LIMIT 5"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2097,16 +1610,11 @@ mod tests {
     fn filter_on_virtual_column_without_selecting_it_injects_resolution() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1, 2],
-                 "filters": {"content": {"contains": "needle"},
-                             "project_id": {"eq": 1000}},
-                 "columns": ["project_id", "path"]}],
-        "limit": 10
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File)
+                WHERE f.id IN [1, 2] AND f.content CONTAINS 'needle' AND f.project_id = 1000
+                RETURN f{.project_id, .path}
+                LIMIT 10"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2140,15 +1648,11 @@ mod tests {
     fn filter_on_selected_virtual_column_is_not_marked_injected() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1],
-                 "filters": {"content": {"contains": "needle"}},
-                 "columns": ["path", "content"]}],
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File {id: 1})
+                WHERE f.content CONTAINS 'needle'
+                RETURN f{.path, .content}
+                LIMIT 5"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2172,15 +1676,11 @@ mod tests {
     fn filter_on_virtual_column_rejected_without_node_ids() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "filters": {"content": {"contains": "needle"},
-                             "project_id": {"eq": 1000}},
-                 "columns": ["path"]}],
-        "limit": 10
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File)
+                WHERE f.content CONTAINS 'needle' AND f.project_id = 1000
+                RETURN f{.path}
+                LIMIT 10"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2198,15 +1698,11 @@ mod tests {
     fn filter_on_virtual_column_rejected_for_aggregation() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
-            r#"{
-        "query_type": "aggregation",
-        "nodes": [{"id": "f", "entity": "File",
-                 "filters": {"content": {"contains": "needle"}}}],
-        "aggregations": [{"count": "f", "as": "total"}],
-        "group_by": ["f.language"],
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File)
+                WHERE f.content CONTAINS 'needle'
+                RETURN f.language, count(f) AS total
+                LIMIT 5"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2224,14 +1720,11 @@ mod tests {
     fn filter_on_virtual_column_rejected_for_neighbors() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
-            r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "f", "entity": "File", "node_ids": [1],
-                 "filters": {"content": {"contains": "needle"}}}],
-        "neighbors": {"direction": "outgoing"},
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File {id: 1})-->(neighbor)
+                WHERE f.content CONTAINS 'needle'
+                RETURN f, neighbor
+                LIMIT 5"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2249,14 +1742,11 @@ mod tests {
     fn filter_on_virtual_column_rejects_unsupported_op() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
-            r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File",
-                 "node_ids": [1],
-                 "filters": {"content": {"gt": "x"}}}],
-        "limit": 5
-                }"#,
-            Frontend::JsonDsl,
+            r#"MATCH (f:File {id: 1})
+                WHERE f.content > 'x'
+                RETURN f
+                LIMIT 5"#,
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )
@@ -2276,9 +1766,7 @@ mod tests {
 
     #[test]
     fn final_prewhere_setting_follows_final_scans() {
-        let sql = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":10}"#,
-        );
+        let sql = compile_sql(r#"MATCH (u:User {id: 1}) RETURN u LIMIT 10"#);
         assert!(sql.contains(" FINAL"), "{sql}");
         assert!(
             sql.contains("optimize_move_to_prewhere_if_final = 1"),
@@ -2293,17 +1781,9 @@ mod tests {
     #[test]
     fn in_subquery_index_cap_follows_in_select() {
         let sql = compile_sql(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [116]},
-                    {"id": "mr", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"from": "u", "to": "mr", "type": "AUTHORED"}],
-                "group_by": ["u"],
-                "aggregations": [{"count": "mr", "as": "c"}],
-                "limit": 20
-            }"#,
+            r#"MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest)
+                RETURN u, count(mr) AS c
+                LIMIT 20"#,
         );
         assert!(sql.contains(" IN (SELECT"), "{sql}");
         assert!(
@@ -2315,14 +1795,8 @@ mod tests {
     fn note_excerpt_chars(limit: u32) -> u32 {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
-            &format!(
-                r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}}],
-                "limit": {limit}
-            }}"#
-            ),
-            Frontend::JsonDsl,
+            &format!("MATCH (n:Note {{id: 1}}) RETURN n.note LIMIT {limit}"),
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )

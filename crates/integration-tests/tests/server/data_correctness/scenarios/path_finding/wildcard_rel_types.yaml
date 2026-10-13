@@ -1,16 +1,6 @@
 description: Wildcard rel_types traverses User -> Group -> Project unconstrained
 
 query:
-  json: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {"id": "start", "entity": "User", "node_ids": [1]},
-        {"id": "end", "entity": "Project", "node_ids": [1004]}
-      ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-               "rel_types": ["*"]}
-    }
   gql: |
     MATCH p = ANY SHORTEST (start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004}) RETURN p
 

@@ -1,20 +1,6 @@
 name: Joined node narrowing plans an edge key scan with its upstream cascade
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "filters": {"name": "caller"}, "columns": ["id"]},
-        {"id": "b", "entity": "Definition", "columns": ["id"]},
-        {"id": "c", "entity": "Definition", "columns": ["id"]}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b"},
-        {"type": "CALLS", "from": "b", "to": "c"}
-      ],
-      "order_by": "c.id"
-    }
   gql: |
     MATCH (a:Definition {name: 'caller'})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
     RETURN a.id, b.id, c.id ORDER BY c.id

@@ -1,8 +1,6 @@
 name: A pinned final endpoint reverses the edge chain
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition","node_ids":[7]}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
   gql: |
     MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
 

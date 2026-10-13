@@ -49,7 +49,7 @@ impl PipelineStage for ClickHouseExecutor {
             .unwrap_or(0);
         let log_comment = correlation::log_comment_base(
             user_id,
-            &ctx.query_json,
+            &ctx.query,
             ctx.frontend,
             self.migration_version,
         );

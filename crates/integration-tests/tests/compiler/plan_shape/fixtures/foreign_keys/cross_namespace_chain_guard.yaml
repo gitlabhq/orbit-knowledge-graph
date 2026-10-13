@@ -1,8 +1,6 @@
 name: Cross-namespace FK chains retain edge scans
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"},{"id":"g","entity":"Group"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"CONTAINS","from":"g","to":"p"}]}
   gql: |
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group) RETURN mr, p, g
 

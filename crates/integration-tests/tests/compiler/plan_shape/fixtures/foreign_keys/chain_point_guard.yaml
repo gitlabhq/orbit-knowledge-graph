@@ -1,8 +1,6 @@
 name: Point-selective FK chains retain the edge path
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
   gql: |
     MATCH (mr:MergeRequest {id: 1})-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job) RETURN mr, pipe, j
 

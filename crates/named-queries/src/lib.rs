@@ -1,5 +1,4 @@
 mod gql;
-mod json;
 mod query;
 
 use std::collections::BTreeMap;
@@ -10,16 +9,16 @@ use serde_json::{Map, Value};
 
 pub use query::{BindingValues, NamedQuery};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
-    #[default]
-    Json,
     Gql,
 }
 
 impl Language {
-    pub const ALL: [Self; 2] = [Self::Json, Self::Gql];
+    pub const ALL: [Self; 1] = [Self::Gql];
 }
 
 #[derive(Embed)]
@@ -146,14 +145,6 @@ impl NamedQueries {
     pub fn render_request(
         &self,
         request: &str,
-        values: &BindingValues,
-    ) -> Result<String, NamedQueryError> {
-        self.render_request_language(request, Language::Json, values)
-    }
-
-    pub fn render_request_language(
-        &self,
-        request: &str,
         language: Language,
         values: &BindingValues,
     ) -> Result<String, NamedQueryError> {
@@ -164,7 +155,7 @@ impl NamedQueries {
                 available: self.names().map(String::from).collect(),
             });
         };
-        query.render_language(language, values, &envelope.parameters)
+        query.render(language, values, &envelope.parameters)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &NamedQuery> {
@@ -209,12 +200,6 @@ name: q
 description: A query.
 bindings: [current_user_id]
 query:
-  json:
-    query_type: traversal
-    nodes:
-      - id: n
-        entity: User
-        node_ids: [{ $binding: current_user_id }]
   gql: |
     MATCH (n:User {id: {{ binding("current_user_id") }}}) RETURN n
 "#;
@@ -223,17 +208,17 @@ query:
     fn render_request_substitutes_current_user_id() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let rendered = queries
-            .render_request(r#"{"name": "my_neighbors"}"#, &values())
+            .render_request(r#"{"name": "my_neighbors"}"#, Language::Gql, &values())
             .expect("known named query renders");
-        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
-        assert!(!rendered.contains("$binding"), "{rendered}");
+        assert!(rendered.contains("(me:User {id: 42})"), "{rendered}");
+        assert!(!rendered.contains("binding("), "{rendered}");
     }
 
     #[test]
     fn render_request_rejects_unknown_name_and_lists_available() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let err = queries
-            .render_request(r#"{"name": "nonexistent"}"#, &values())
+            .render_request(r#"{"name": "nonexistent"}"#, Language::Gql, &values())
             .unwrap_err();
         assert!(err.to_string().contains("nonexistent"), "{err}");
         assert!(err.to_string().contains("my_neighbors"), "{err}");
@@ -243,7 +228,7 @@ query:
     fn render_request_rejects_bare_name() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let err = queries
-            .render_request("my_neighbors", &values())
+            .render_request("my_neighbors", Language::Gql, &values())
             .unwrap_err();
         assert!(
             matches!(err, NamedQueryError::InvalidRequest { .. }),
@@ -257,13 +242,14 @@ query:
         let rendered = queries
             .render_request(
                 r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#,
+                Language::Gql,
                 &values(),
             )
             .expect("parameterized named query renders");
-        assert!(rendered.contains("\"entity\":\"Project\""), "{rendered}");
-        assert!(rendered.contains("\"node_ids\":[7,9]"), "{rendered}");
-        assert!(rendered.contains("\"limit\":50"), "{rendered}");
-        assert!(!rendered.contains("$param"), "{rendered}");
+        assert!(rendered.contains("(center:`Project`)"), "{rendered}");
+        assert!(rendered.contains("IN [7,9]"), "{rendered}");
+        assert!(rendered.contains("LIMIT 50"), "{rendered}");
+        assert!(!rendered.contains("param("), "{rendered}");
     }
 
     #[test]
@@ -272,6 +258,7 @@ query:
         let err = queries
             .render_request(
                 r#"{"name": "expand_neighbors", "unexpected": 1}"#,
+                Language::Gql,
                 &values(),
             )
             .unwrap_err();

@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use query_engine::compiler::Frontend;
 use query_engine::formatters::{GraphEdge, GraphResponse};
-use serde_json::Value;
 
 use super::format::AllPagesExpect;
 
@@ -27,27 +26,14 @@ fn canonical_json(value: &impl serde::Serialize) -> String {
 
 pub(super) fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {
     match frontend {
-        Frontend::JsonDsl => {
-            let mut query: Value =
-                serde_json::from_str(base_query).expect("query must be valid JSON");
-            query["cursor"]["after"] = Value::String(token.to_owned());
-            query.to_string()
-        }
         Frontend::Gql => format!("{} AFTER '{token}'", base_query.trim_end()),
     }
 }
 
 pub(super) fn without_cursor(frontend: Frontend, base_query: &str) -> String {
     match frontend {
-        Frontend::JsonDsl => {
-            let mut query: Value =
-                serde_json::from_str(base_query).expect("query must be valid JSON");
-            query.as_object_mut().unwrap().remove("cursor");
-            query["limit"] = Value::from(1000);
-            query.to_string()
-        }
         Frontend::Gql => {
-            let query = base_query.trim_end();
+            let query = strip_after(base_query.trim_end());
             let (prefix, size) = query
                 .rsplit_once(char::is_whitespace)
                 .expect("paginated GQL must end with PAGE N");
@@ -65,6 +51,22 @@ pub(super) fn without_cursor(frontend: Frontend, base_query: &str) -> String {
             );
             format!("{} LIMIT 1000", query.trim_end())
         }
+    }
+}
+
+fn strip_after(query: &str) -> &str {
+    let Some(body) = query.strip_suffix('\'') else {
+        return query;
+    };
+    let Some((prefix, _)) = body.rsplit_once('\'') else {
+        return query;
+    };
+    let prefix = prefix.trim_end();
+    match prefix.len().checked_sub("AFTER".len()) {
+        Some(at) if prefix.is_char_boundary(at) && prefix[at..].eq_ignore_ascii_case("AFTER") => {
+            prefix[..at].trim_end()
+        }
+        _ => query,
     }
 }
 

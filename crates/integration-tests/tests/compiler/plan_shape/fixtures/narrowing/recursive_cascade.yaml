@@ -1,21 +1,6 @@
 name: Selective flat chain retains current-row scans and a dependent cascade anchor
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
-        {"id": "b", "entity": "Definition", "columns": ["id"]},
-        {"id": "c", "entity": "Definition", "columns": ["id"]},
-        {"id": "d", "entity": "Definition", "columns": ["id"]}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b"},
-        {"type": "CALLS", "from": "b", "to": "c"},
-        {"type": "CALLS", "from": "c", "to": "d"}
-      ]
-    }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(d:Definition)
     RETURN a.id, b.id, c.id, d.id

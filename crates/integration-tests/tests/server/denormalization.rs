@@ -61,7 +61,7 @@ async fn query_with_security(
     let data_model = derive_clickhouse_data_model(&ontology);
     let client = Arc::new(ctx.create_client());
     let compiled =
-        Arc::new(compile_model(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap());
+        Arc::new(compile_model(json, Frontend::Gql, &data_model, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
@@ -71,8 +71,8 @@ async fn query_with_security(
     server_extensions.insert(client);
     server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: query_engine::compiler::Frontend::JsonDsl,
-        query_json: String::new(),
+        frontend: query_engine::compiler::Frontend::Gql,
+        query: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),
@@ -133,15 +133,10 @@ async fn denormalization_correctness() {
 async fn count_opened_mrs_in_project(ctx: &TestContext) {
     let resp = query(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}, "columns": ["state"]},
-            {"id": "p", "entity": "Project", "node_ids": [20]}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 20})
+            WHERE mr.state = 'opened'
+            RETURN mr{.state}, p
+            LIMIT 10"#,
     )
     .await;
     resp.assert_node_count(3);
@@ -155,15 +150,10 @@ async fn count_opened_mrs_in_project(ctx: &TestContext) {
 async fn count_failed_pipelines_in_project(ctx: &TestContext) {
     let resp = query(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"eq": "failed"}}, "columns": ["status"]},
-            {"id": "p", "entity": "Project", "node_ids": [20]}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project {id: 20})
+            WHERE pipe.status = 'failed'
+            RETURN pipe{.status}, p
+            LIMIT 10"#,
     )
     .await;
     resp.assert_node_count(3);
@@ -177,15 +167,10 @@ async fn count_failed_pipelines_in_project(ctx: &TestContext) {
 async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
     let resp = query(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+            WHERE mr.state = 'opened'
+            RETURN u, mr
+            LIMIT 10"#,
     )
     .await;
     resp.assert_node_count(3);
@@ -199,18 +184,10 @@ async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
 async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
     let resp = query_with_security(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {
-                "state": {"eq": "detected"},
-                "severity": {"eq": "critical"}
-            }, "columns": ["state", "severity"]},
-            {"id": "p", "entity": "Project", "node_ids": [20]}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 20})
+            WHERE v.state = 'detected' AND v.severity = 'critical'
+            RETURN v{.state, .severity}, p
+            LIMIT 10"#,
         security_manager_context(),
     )
     .await;
@@ -229,18 +206,10 @@ async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
 async fn work_item_type_filter(ctx: &TestContext) {
     let resp = query(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "wi", "entity": "WorkItem", "filters": {
-                "state": {"eq": "opened"},
-                "work_item_type": {"eq": "issue"}
-            }, "columns": ["state", "work_item_type"]},
-            {"id": "g", "entity": "Group", "node_ids": [10]}
-        ],
-        "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (wi:WorkItem)-[:IN_GROUP]->(g:Group {id: 10})
+            WHERE wi.state = 'opened' AND wi.work_item_type = 'issue'
+            RETURN wi{.state, .work_item_type}, g
+            LIMIT 10"#,
     )
     .await;
     resp.assert_node_count(2);
@@ -257,15 +226,10 @@ async fn work_item_type_filter(ctx: &TestContext) {
 async fn single_severity_filter(ctx: &TestContext) {
     let resp = query_with_security(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"eq": "critical"}}, "columns": ["severity"]},
-            {"id": "p", "entity": "Project", "node_ids": [20]}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 20})
+            WHERE v.severity = 'critical'
+            RETURN v{.severity}, p
+            LIMIT 10"#,
         security_manager_context(),
     )
     .await;
@@ -280,15 +244,10 @@ async fn single_severity_filter(ctx: &TestContext) {
 async fn merged_mr_count_is_one(ctx: &TestContext) {
     let resp = query(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "merged"}}, "columns": ["state"]},
-            {"id": "p", "entity": "Project", "node_ids": [20]}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 20})
+            WHERE mr.state = 'merged'
+            RETURN mr{.state}, p
+            LIMIT 10"#,
     )
     .await;
     resp.assert_node_count(2);
@@ -302,15 +261,10 @@ async fn merged_mr_count_is_one(ctx: &TestContext) {
 async fn no_match_returns_zero(ctx: &TestContext) {
     let resp = query(
         ctx,
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "draft"}}, "columns": ["state"]},
-            {"id": "p", "entity": "Project", "node_ids": [20]}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "limit": 10
-    }"#,
+        r#"MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 20})
+            WHERE mr.state = 'draft'
+            RETURN mr{.state}, p
+            LIMIT 10"#,
     )
     .await;
     // No MR with state='draft' → only the pinned Project node, no MRs.

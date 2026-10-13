@@ -100,7 +100,7 @@ async fn compile_execute_hydrate(
     HydrationPlan,
 ) {
     let data_model = derive_clickhouse_data_model(ontology);
-    let compiled = compile_model(json, Frontend::JsonDsl, &data_model, security_ctx).unwrap();
+    let compiled = compile_model(json, Frontend::Gql, &data_model, security_ctx).unwrap();
     let plan = compiled.hydration.clone();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
@@ -115,8 +115,8 @@ async fn compile_execute_hydrate(
     server_extensions.insert(Arc::clone(client));
     server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: query_engine::compiler::Frontend::JsonDsl,
-        query_json: String::new(),
+        frontend: query_engine::compiler::Frontend::Gql,
+        query: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
@@ -143,7 +143,7 @@ async fn compile_execute_redact_hydrate(
     mock_service: &MockRedactionService,
 ) -> (QueryResult, query_engine::compiler::ResultContext, usize) {
     let data_model = derive_clickhouse_data_model(ontology);
-    let compiled = compile_model(json, Frontend::JsonDsl, &data_model, security_ctx).unwrap();
+    let compiled = compile_model(json, Frontend::Gql, &data_model, security_ctx).unwrap();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
@@ -159,8 +159,8 @@ async fn compile_execute_redact_hydrate(
     server_extensions.insert(Arc::clone(client));
     server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: query_engine::compiler::Frontend::JsonDsl,
-        query_json: String::new(),
+        frontend: query_engine::compiler::Frontend::Gql,
+        query: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
@@ -193,14 +193,8 @@ async fn path_finding_dynamic_hydration(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p"#;
 
     let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -253,14 +247,8 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p"#;
 
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -310,14 +298,8 @@ async fn path_finding_json_format(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p"#;
 
     let (result, ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -359,11 +341,8 @@ async fn neighbors_dynamic_hydration(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-        "neighbors": {"direction": "outgoing"}
-    }"#;
+    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+        RETURN u, neighbor"#;
 
     let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -385,11 +364,8 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-        "neighbors": {"direction": "outgoing"}
-    }"#;
+    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+        RETURN u, neighbor"#;
 
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -413,11 +389,8 @@ async fn neighbors_json_format(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-        "neighbors": {"direction": "outgoing"}
-    }"#;
+    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+        RETURN u, neighbor"#;
 
     let (result, ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -445,13 +418,12 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "limit": 10
-    }"#;
+    let json = r#"MATCH (u:User)
+        WHERE u.id >= 1 AND u.id <= 10000
+        RETURN u
+        LIMIT 10"#;
 
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+    let compiled = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
     assert!(
         matches!(compiled.hydration, HydrationPlan::None),
         "Search should produce None (static hydration disabled), got: {:?}",
@@ -463,17 +435,12 @@ async fn traversal_produces_static_hydration_plan(_ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]},
-            {"id": "g", "entity": "Group", "columns": ["name", "visibility_level"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 20
-    }"#;
+    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+        WHERE u.id >= 1 AND u.id <= 10000
+        RETURN u{.username, .name}, g{.name, .visibility_level}
+        LIMIT 20"#;
 
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+    let compiled = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
     assert!(
         matches!(compiled.hydration, HydrationPlan::Static(ref t) if t.len() == 2),
         "Edge-centric traversal should produce Static hydration with 2 templates, got: {:?}",
@@ -481,35 +448,13 @@ async fn traversal_produces_static_hydration_plan(_ctx: &TestContext) {
     );
 }
 
-async fn hydration_query_type_rejected_from_user_input(_ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "hydration",
-        "nodes": [{"id": "h", "entity": "User", "node_ids": [1]}],
-        "limit": 10
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &ontology, &security_ctx);
-    assert!(
-        result.is_err(),
-        "hydration query type must be rejected when submitted via user-facing compile(): {result:?}"
-    );
-}
-
 async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1, 2]},
-            {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+        WHERE start.id IN [1, 2] AND `end`.id IN [1000, 1001]
+        RETURN p"#;
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
@@ -568,11 +513,9 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [2, 3]}],
-        "neighbors": {"direction": "outgoing"}
-    }"#;
+    let json = r#"MATCH (u:User)-->(neighbor)
+        WHERE u.id IN [2, 3]
+        RETURN u, neighbor"#;
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[2]);
@@ -614,14 +557,8 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p"#;
 
     let mock_service = MockRedactionService::new();
 
@@ -641,14 +578,8 @@ async fn consolidated_path_hydrates_all_entity_types(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p"#;
 
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -687,11 +618,8 @@ async fn consolidated_hydration_filters_null_properties(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-        "neighbors": {"direction": "outgoing"}
-    }"#;
+    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+        RETURN u, neighbor"#;
 
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -713,14 +641,9 @@ async fn consolidated_hydration_multiple_ids_same_type(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1, 2]},
-            {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+        WHERE start.id IN [1, 2] AND `end`.id IN [1000, 1001]
+        RETURN p"#;
 
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -754,17 +677,11 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
     let security_ctx = test_security_context();
     let data_model = derive_clickhouse_data_model(&ontology);
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]},
-        "options": {"include_debug_sql": true}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+        RETURN p
+        DEBUG"#;
 
-    let compiled = compile_model(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap();
+    let compiled = compile_model(json, Frontend::Gql, &data_model, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -777,8 +694,8 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
     server_extensions.insert(Arc::clone(&client));
     server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
-        frontend: query_engine::compiler::Frontend::JsonDsl,
-        query_json: String::new(),
+        frontend: query_engine::compiler::Frontend::Gql,
+        query: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx.clone()),
@@ -816,15 +733,10 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "f", "entity": "File", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "path", "branch"]},
-            {"id": "d", "entity": "Definition", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
-        "limit": 10
-    }"#;
+    let json = r#"MATCH (f:File)-[:DEFINES]->(d:Definition)
+        WHERE f.id >= 1 AND f.id <= 10000
+        RETURN f{.name, .path, .branch}, d{.name}
+        LIMIT 10"#;
 
     let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -883,11 +795,8 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
-    let json = r#"{
-        "query_type": "neighbors",
-        "nodes": [{"id": "f", "entity": "File", "node_ids": [5001]}],
-        "neighbors": {"direction": "outgoing"}
-    }"#;
+    let json = r#"MATCH (f:File {id: 5001})-->(neighbor)
+        RETURN f, neighbor"#;
 
     let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -933,14 +842,8 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
-    let json = r#"{
-        "query_type": "path_finding",
-        "nodes": [
-            {"id": "start", "entity": "File", "node_ids": [5001]},
-            {"id": "end", "entity": "Definition", "node_ids": [6001]}
-        ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
-    }"#;
+    let json = r#"MATCH p = ANY SHORTEST (start:File {id: 5001})-[:DEFINES*1..2]->(`end`:Definition {id: 6001})
+        RETURN p"#;
 
     let (result, _ctx_ref, plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -995,15 +898,10 @@ async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "g", "entity": "Group", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 10
-    }"#;
+    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+        WHERE u.id >= 1 AND u.id <= 10000
+        RETURN u{.username}, g{.name}
+        LIMIT 10"#;
 
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
@@ -1042,7 +940,6 @@ async fn hydration_integration() {
         neighbors_json_format,
         search_produces_no_hydration_plan,
         traversal_produces_static_hydration_plan,
-        hydration_query_type_rejected_from_user_input,
         path_finding_hydration_after_partial_redaction,
         neighbors_hydration_after_partial_redaction,
         path_finding_all_denied_then_hydrate,

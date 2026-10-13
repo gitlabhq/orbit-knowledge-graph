@@ -1,21 +1,6 @@
 name: Branch joins and cascade bounds follow the shared alias rather than the preceding hop
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1]},
-        {"id": "b", "entity": "Definition"},
-        {"id": "c", "entity": "Definition"},
-        {"id": "d", "entity": "Definition"}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b"},
-        {"type": "CALLS", "from": "b", "to": "c"},
-        {"type": "CALLS", "from": "a", "to": "d"}
-      ]
-    }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
           (a)-[:CALLS]->(d:Definition)

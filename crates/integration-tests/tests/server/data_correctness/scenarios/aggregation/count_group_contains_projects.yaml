@@ -5,18 +5,6 @@ config:
     paths: ["1/"]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-        {"id": "p", "entity": "Project"}
-      ],
-      "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-      "group_by": ["g"],
-      "aggregations": [{"count": "p", "as": "project_count"}],
-      "limit": 10
-    }
   gql: |
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(p) AS project_count LIMIT 10
 

@@ -1,23 +1,6 @@
 name: A non-adjacent branch inherits its parent's upstream cascade
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1]},
-        {"id": "b", "entity": "Definition"},
-        {"id": "c", "entity": "Definition"},
-        {"id": "d", "entity": "Definition"},
-        {"id": "e", "entity": "Definition"}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b"},
-        {"type": "CALLS", "from": "b", "to": "c"},
-        {"type": "CALLS", "from": "b", "to": "d"},
-        {"type": "CALLS", "from": "c", "to": "e"}
-      ]
-    }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
           (b)-[:CALLS]->(d:Definition), (c)-[:CALLS]->(e:Definition)

@@ -1,25 +1,10 @@
-# JSON preserves incoming directions; branch_incoming_gql.yaml tests the equivalent GQL query's normalized plan.
-name: JSON incoming branches join and cascade through the shared physical target
-
-missing_frontends:
-  gql: branch_incoming_gql.yaml checks the same query after GQL arrow normalization and hop reordering.
+name: Incoming branches preserve shared nodes after normalization and reordering
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1]},
-        {"id": "b", "entity": "Definition"},
-        {"id": "c", "entity": "Definition"},
-        {"id": "d", "entity": "Definition"}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b", "direction": "incoming"},
-        {"type": "CALLS", "from": "b", "to": "c", "direction": "incoming"},
-        {"type": "CALLS", "from": "a", "to": "d", "direction": "incoming"}
-      ]
-    }
+  gql: |
+    MATCH (a:Definition {id: 1})<-[:CALLS]-(b:Definition)<-[:CALLS]-(c:Definition),
+          (a)<-[:CALLS]-(d:Definition)
+    RETURN a, b, c, d
 
 logical:
   expect:
@@ -31,12 +16,23 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON _orbit_edge_0.target_id = _orbit_edge_2.target_id (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (_) (_)) (_))
-        - (SemiJoin _orbit_edge_2.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
+        - (SemiJoin _orbit_edge_0.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+        - |
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
+            (Project e1p.source_id AS source_id
+              (SemiJoin e1p.target_id IN subquery (_)
+                (Project e0p.target_id AS target_id
+                  (Filter e0p.target_id = 1, ... (_))))))
     emitted:
       expect:
-        - (Join ON _orbit_edge_0.target_id = _orbit_edge_2.target_id (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (_) (_)) (_))
-        - (SemiJoin _orbit_edge_2.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
+        - |
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
+            (Project e1p.source_id AS source_id
+              (SemiJoin e1p.target_id IN subquery (_)
+                (Project e0p.target_id AS target_id
+                  (Filter e0p.target_id = 1, ... (_))))))
   duckdb:
     planned:
       expect:

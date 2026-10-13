@@ -1,8 +1,6 @@
 name: Covered center filters retain fused neighbor scans and filter both tag directions
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"filters":{"state":"merged"}}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT","AUTHORED"]}}
   gql: |
     MATCH (mr:MergeRequest {id: 1, state: 'merged'})-[:IN_PROJECT|AUTHORED]-(neighbor) RETURN mr, neighbor
 

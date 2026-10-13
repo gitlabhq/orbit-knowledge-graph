@@ -1,8 +1,6 @@
 name: Narrowed node scans push immutable sort-key filters inside latest-row resolution
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"p","entity":"Project","node_ids":[1000,1001],"filters":{"star_count":2}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"n"}]}
   gql: |
     MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT]->(p:Project {star_count: 2}) WHERE p.id IN [1000, 1001] RETURN p.name, count(mr) AS n
 

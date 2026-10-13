@@ -1,8 +1,6 @@
 name: Variable-hop endpoint hydration does not use a one-hop frontier
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[99000],"filters":{"branch":"main"},"columns":["id","branch"]},{"id":"b","entity":"Definition","columns":["name","branch"]}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[2,2]}]}
   gql: |
     MATCH (a:Definition {id: 99000, branch: 'main'})-[:CALLS*2]->(b:Definition)
     RETURN a.id, a.branch, b.name, b.branch

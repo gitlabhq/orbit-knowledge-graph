@@ -1,6 +1,6 @@
 # Query corpus
 
-A categorized set of Orbit JSON queries used to exercise the query engine.
+A categorized set of Orbit queries, written in GQL, used to exercise the query engine.
 Each YAML file groups queries by origin suite; every entry is self-describing:
 
 ```yaml
@@ -11,7 +11,8 @@ mrs_open_in_project:
   suite: sdlc                # origin grouping (one file per suite)
   expect: rows               # optional: rows (default) | empty | error
   query: |
-    { ...inline Orbit query JSON... }
+    MATCH (p:Project {id: $sample})<-[:IN_PROJECT]-(mr:MergeRequest {state: 'opened'})
+    RETURN mr.iid, mr.title LIMIT 20
 ```
 
 `category` is the query *shape* and is independent of which file the entry lives
@@ -19,7 +20,7 @@ in. Two placeholder kinds keep the queries portable across environments:
 
 | Placeholder | Meaning |
 |---|---|
-| `"$sample"` / `"$sample:N"` | a node's `node_ids`, bound to real ids at run time |
+| `$sample` / `$sample:N` | one ID, or a list of N IDs, for the node it identifies, bound to real IDs at run time |
 | `{{TOKEN}}` | a literal ID or `full_path`, substituted from a caller-supplied map |
 
 `expect` records intent:
@@ -36,13 +37,13 @@ The `corpus_smoke` test (`crates/integration-tests/tests/server/corpus_smoke.rs`
 runs in the `corpus-smoke-test` CI job. It starts ClickHouse with the graph schema
 from the ontology. Then it compiles and runs three families of queries:
 
-- every entry in this directory, as JSON. An `expect: error` entry must fail.
-- every named query in `config/named_queries`, in JSON and in GQL.
-- every `json orbit-query` and `gql orbit-query` code block in the root Markdown files,
+- every entry in this directory. An `expect: error` entry must fail.
+- every named query in `config/named_queries`, in every spelling.
+- every `gql orbit-query` code block in the root Markdown files,
   `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`.
 
-The test also fails on Orbit query JSON in an unmarked `json` or shell code block,
-and on a code block with no closing fence. It does not check result correctness.
+The test also fails on a removed JSON Query DSL query in an unmarked `json` or shell
+code block, and on a code block with no closing fence. It does not check result correctness.
 
 Run it locally with Docker: `mise test:integration:corpus`. See
 [Query corpus and executable docs](../../../docs/design-documents/testing.md#query-corpus-and-executable-docs).
@@ -50,4 +51,4 @@ Run it locally with Docker: `mise test:integration:corpus`. See
 ## `raw_sql_ab.yaml`
 
 `raw_sql_ab.yaml` is a raw-SQL A/B suite (control vs. optimized variants of the
-same workload), not DSL. The smoke test skips it.
+same workload), not GQL. The smoke test skips it.

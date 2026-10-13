@@ -48,7 +48,7 @@ format version (`0.1`).
 
 ### The `schema` pin in `config/versions.yaml`
 
-`config/versions.yaml` holds every pinned version in the repo (schema, query DSL, output
+`config/versions.yaml` holds every pinned version in the repo (schema, query language, output
 formats, vendored upstream revisions). It also holds a `vendored:` section for dependencies like DuckDB.
 That section has sub-pins, artifact directories, and vendor/check scripts (see
 [vendored dependencies runbook](../dev/runbooks/vendored_dependencies.md)). It is embedded at

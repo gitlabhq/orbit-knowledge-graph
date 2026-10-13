@@ -108,12 +108,12 @@ fn compile_errors_require_all_fragments_and_frontend_configuration() {
     );
     rejects(
         query.clone(),
-        "compile_error: {json: error}",
+        "compile_error: {other: error}",
         "compile_error missing frontend 'gql'",
     );
     rejects(
         query,
-        "compile_error: true\ncompile_error_not_contains: {json: []}",
+        "compile_error: true\ncompile_error_not_contains: {other: []}",
         "expectation missing frontend 'gql'",
     );
 }
@@ -134,11 +134,8 @@ fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
 }
 
 #[test]
-fn pages_check_exhaustion_and_global_node_order_on_both_frontends() {
-    let query = json!({
-        "json": json!({"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "columns": ["name"]}], "order_by": "d.id", "cursor": {"page_size": 2}}).to_string(),
-        "gql": "MATCH (d:Definition) RETURN d.name ORDER BY d.id PAGE 2",
-    });
+fn pages_check_exhaustion_and_global_node_order() {
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name ORDER BY d.id PAGE 2"});
     let pages = "pages:\n  - {node_count: 2, nodes: {Definition: {order: [1, 2]}}}\n  - {node_count: 2, nodes: {Definition: {order: [3, 4]}}}";
     run_suite(
         query.clone(),
@@ -197,9 +194,9 @@ fn repeated_aggregation_runs_check_row_values() {
 #[test]
 fn repeated_responses_reject_changes_that_individual_expectations_allow() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
-    use query_engine::compiler::input::parse_input;
+    use query_engine::compiler::gql::parse;
 
-    let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+    let input = parse("MATCH (u:User) RETURN u, count(u) AS c").unwrap();
     let expect = orbit_utils::yaml::from_str("groups: {u: {entity: User, count: 2}}").unwrap();
     let baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     super::assert_response(&input, baseline.clone(), &expect, "baseline");
@@ -297,9 +294,9 @@ fn compile_only_rejects_runtime_expectations() {
 #[test]
 fn empty_aggregation_requires_rows_and_column_metadata() {
     use crate::visitor::tests::sample_grouped_aggregation_response;
-    use query_engine::compiler::input::parse_input;
+    use query_engine::compiler::gql::parse;
 
-    let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+    let input = parse("MATCH (u:User) RETURN u, count(u) AS c").unwrap();
     let expect = orbit_utils::yaml::from_str("empty_aggregation: true").unwrap();
     let mut baseline = serde_json::to_value(sample_grouped_aggregation_response()).unwrap();
     baseline["rows"] = json!([]);
@@ -332,10 +329,9 @@ fn traversal_rejects_aggregation_and_path_assertions() {
 #[test]
 fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
     use crate::visitor::tests::sample_search_response;
-    use query_engine::compiler::input::parse_input;
+    use query_engine::compiler::gql::parse;
 
-    let input =
-        parse_input(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}"#).unwrap();
+    let input = parse("MATCH (u:User) RETURN u").unwrap();
     let mut full = serde_json::to_value(sample_search_response()).unwrap();
     full["pagination"] = json!({"has_more": false, "truncated": false});
     let mut page = full.clone();
@@ -358,14 +354,14 @@ fn pagination_coverage_compares_typed_node_identities_without_excerpt_values() {
 fn numeric_metric_assertions_reject_numeric_strings() {
     use crate::visitor::ResponseView;
     use crate::visitor::tests::{sample_aggregation_response, sample_grouped_aggregation_response};
-    use query_engine::compiler::input::parse_input;
+    use query_engine::compiler::gql::parse;
 
     for assertion in [
         (|view: &ResponseView| view.assert_row_value_i64(0, "c", 2)) as fn(&ResponseView),
         |view: &ResponseView| view.assert_aggregation_value_i64("c", 2),
     ] {
         let check = |metric: Value| {
-            let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+            let input = parse("MATCH (u:User) RETURN count(u) AS c").unwrap();
             let mut response = sample_aggregation_response();
             response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
             assertion(&ResponseView::for_query(&input, response));
@@ -375,7 +371,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     }
 
     let check_group = |metric: Value| {
-        let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"count":"u","as":"c"}]}"#).unwrap();
+        let input = parse("MATCH (u:User) RETURN u, count(u) AS c").unwrap();
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
         ResponseView::for_query(&input, response)
@@ -385,7 +381,7 @@ fn numeric_metric_assertions_reject_numeric_strings() {
     assert_panics(|| check_group(json!("2")), "column 'c' is not an integer");
 
     let check_average = |metric: Value| {
-        let input = parse_input(r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"}],"group_by":["u"],"aggregations":[{"avg":"u.id","as":"c"}]}"#).unwrap();
+        let input = parse("MATCH (u:User) RETURN u, avg(u.id) AS c").unwrap();
         let mut response = sample_grouped_aggregation_response();
         response.rows.as_mut().unwrap()[0].insert("c".into(), metric);
         ResponseView::for_query(&input, response)
@@ -397,25 +393,18 @@ fn numeric_metric_assertions_reject_numeric_strings() {
 
 #[test]
 fn full_result_comparison_rejects_missing_groups_even_when_page_counts_match() {
-    let mut query = json!({
-        "query_type": "aggregation",
-        "nodes": [{"id": "d", "entity": "Definition"}],
-        "group_by": ["d.name"],
-        "aggregations": [{"count": "d", "as": "total"}],
-        "cursor": {"page_size": 3},
-    });
+    let base = "MATCH (d:Definition) RETURN d.name, count(d) AS total PAGE 3";
     let compiled = query_engine::compiler::compile_local(
-        &query.to_string(),
-        query_engine::compiler::Frontend::JsonDsl,
+        base,
+        query_engine::compiler::Frontend::Gql,
         &std::sync::Arc::new(crate::load_unprefixed_ontology()),
     )
     .unwrap();
-    let hash = compiled.pagination.query_hash;
-    query["cursor"]["after"] = Value::String(query_engine::compiler::passes::cursor::encode(
-        hash,
+    let token = query_engine::compiler::passes::cursor::encode(
+        compiled.pagination.query_hash,
         &[Some("alpha".into())],
-    ));
-    let query = json!({"json": query.to_string()});
+    );
+    let query = json!({"gql": format!("{base} AFTER '{token}'")});
     let pages =
         "pages: [{row_count: 3, row_values: [{d_name: beta}, {d_name: delta}, {d_name: gamma}]}]";
     run_suite(
@@ -431,12 +420,7 @@ fn full_result_comparison_rejects_missing_groups_even_when_page_counts_match() {
 
 #[test]
 fn path_pages_compare_complete_signatures_against_unpaginated_output() {
-    let query = json!({"json": json!({
-        "query_type": "path_finding",
-        "nodes": [{"id": "source", "entity": "Definition", "node_ids": [1]}, {"id": "destination", "entity": "Definition", "node_ids": [3, 4]}],
-        "path": {"type": "shortest", "from": "source", "to": "destination", "max_depth": 3, "rel_types": ["CALLS"]},
-        "cursor": {"page_size": 1},
-    }).to_string()});
+    let query = json!({"gql": "MATCH p = ANY SHORTEST (source:Definition {id: 1})-[:CALLS*1..3]->(destination:Definition) WHERE destination.id IN [3, 4] RETURN p PAGE 1"});
     run_suite(
         query,
         "pages:\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [3]}}\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [4]}}\nall_pages: {matches_unpaginated: true, edge_count: 3}",

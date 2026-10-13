@@ -1,670 +1,213 @@
 # Property-grouping aggregation corpus.
 #
 # count / sum / avg grouped by a node property.
-# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
-# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+# Canonical corpus entry: desc / category / suite / query (inline GQL).
+# Placeholders: $sample / $sample:N bind to real in-scope ids at run time.
 
 vulnerabilities_by_severity:
   desc: "Vulnerabilities by severity"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "report_type": "sast"
-          }
-        }
-      ],
-      "group_by": ["v.severity"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 10
-    }
+    MATCH (v:Vulnerability {report_type: 'sast'})
+    RETURN v.severity, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 10
 
 vulnerabilities_by_state:
   desc: "Vulnerabilities by state"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "report_type": "sast"
-          }
-        }
-      ],
-      "group_by": ["v.state"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 10
-    }
+    MATCH (v:Vulnerability {report_type: 'sast'})
+    RETURN v.state, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 10
 
 vulnerabilities_by_report_type:
   desc: "Vulnerabilities by report type"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": "detected"
-          }
-        }
-      ],
-      "group_by": ["v.report_type"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 10
-    }
+    MATCH (v:Vulnerability {state: 'detected'})
+    RETURN v.report_type, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 10
 
 vulnerabilities_by_severity_and_state:
   desc: "Vulnerabilities by severity and state"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "report_type": {"in": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}
-          }
-        }
-      ],
-      "group_by": [
-        "v.severity",
-        "v.state"
-      ],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 30
-    }
+    MATCH (v:Vulnerability)
+    WHERE v.report_type IN ['sast', 'dependency_scanning', 'container_scanning', 'secret_detection']
+    RETURN v.severity, v.state, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 30
 
 vulnerabilities_by_project_and_severity:
   desc: "Vulnerabilities by project and severity"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": {"in": ["detected", "confirmed"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name",
-            "full_path"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        }
-      ],
-      "group_by": [
-        "p",
-        "v.severity"
-      ],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        },
-        {
-          "max": "v.updated_at",
-          "as": "latest_vulnerability_update"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 20
-    }
+    MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE v.state IN ['detected', 'confirmed']
+    RETURN p{.name, .full_path}, v.severity, count(v) AS vulnerability_count, max(v.updated_at) AS latest_vulnerability_update
+    ORDER BY vulnerability_count DESC
+    LIMIT 20
 
 security_scans_by_scan_type:
   desc: "Security scans by scan type"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "s",
-          "entity": "SecurityScan",
-          "filters": {
-            "latest": true
-          }
-        }
-      ],
-      "group_by": ["s.scan_type"],
-      "aggregations": [
-        {
-          "count": "s",
-          "as": "scan_count"
-        }
-      ],
-      "aggregation_sort": "-scan_count",
-      "limit": 10
-    }
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 10
 
 security_scans_by_status:
   desc: "Security scans by status"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "s",
-          "entity": "SecurityScan",
-          "filters": {
-            "latest": true
-          }
-        }
-      ],
-      "group_by": ["s.status"],
-      "aggregations": [
-        {
-          "count": "s",
-          "as": "scan_count"
-        }
-      ],
-      "aggregation_sort": "-scan_count",
-      "limit": 10
-    }
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.status, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 10
 
 security_scans_by_project_and_scan_type:
   desc: "Security scans by project and scan type"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "s",
-          "entity": "SecurityScan",
-          "filters": {
-            "latest": true
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name",
-            "full_path"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "s",
-          "to": "p"
-        }
-      ],
-      "group_by": [
-        "p",
-        "s.scan_type"
-      ],
-      "aggregations": [
-        {
-          "count": "s",
-          "as": "scan_count"
-        }
-      ],
-      "aggregation_sort": "-scan_count",
-      "limit": 20
-    }
+    MATCH (s:SecurityScan {latest: true})-[:IN_PROJECT]->(p:Project)
+    RETURN p{.name, .full_path}, s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 projects_by_visibility:
   desc: "Projects by visibility"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "visibility_level": {"in": ["private", "internal", "public"]}
-          }
-        }
-      ],
-      "group_by": ["p.visibility_level"],
-      "aggregations": [
-        {
-          "count": "p",
-          "as": "project_count"
-        }
-      ],
-      "aggregation_sort": "-project_count",
-      "limit": 10
-    }
+    MATCH (p:Project)
+    WHERE p.visibility_level IN ['private', 'internal', 'public']
+    RETURN p.visibility_level, count(p) AS project_count
+    ORDER BY project_count DESC
+    LIMIT 10
 
 merge_requests_by_state:
   desc: "Merge requests by state"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "closed", "merged"]}
-          }
-        }
-      ],
-      "group_by": ["mr.state"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "merge_request_count"
-        }
-      ],
-      "aggregation_sort": "-merge_request_count",
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.state, count(mr) AS merge_request_count
+    ORDER BY merge_request_count DESC
+    LIMIT 10
 
 merge_requests_by_state_and_draft:
   desc: "Merge requests by state and draft"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "merged", "closed"]}
-          }
-        }
-      ],
-      "group_by": [
-        "mr.state",
-        "mr.draft"
-      ],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "merge_request_count"
-        },
-        {
-          "avg": "mr.diff_size",
-          "as": "avg_diff_size"
-        }
-      ],
-      "aggregation_sort": "-merge_request_count",
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'merged', 'closed']
+    RETURN mr.state, mr.draft, count(mr) AS merge_request_count, avg(mr.diff_size) AS avg_diff_size
+    ORDER BY merge_request_count DESC
+    LIMIT 20
 
 pipelines_by_status:
   desc: "Pipelines by status"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        }
-      ],
-      "group_by": ["pipe.status"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 10
-    }
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 10
 
 pipeline_duration_by_status:
   desc: "Pipeline duration by status"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed"]}
-          }
-        }
-      ],
-      "group_by": ["pipe.status"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        },
-        {
-          "avg": "pipe.duration",
-          "as": "avg_duration"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 10
-    }
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed']
+    RETURN pipe.status, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 10
 
 jobs_by_status:
   desc: "Jobs by status"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        }
-      ],
-      "group_by": ["j.status"],
-      "aggregations": [
-        {
-          "count": "j",
-          "as": "job_count"
-        }
-      ],
-      "aggregation_sort": "-job_count",
-      "limit": 10
-    }
+    MATCH (j:Job)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN j.status, count(j) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 10
 
 jobs_by_status_and_when:
   desc: "Jobs by status and when"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        }
-      ],
-      "group_by": [
-        "j.status",
-        "j.when"
-      ],
-      "aggregations": [
-        {
-          "count": "j",
-          "as": "job_count"
-        }
-      ],
-      "aggregation_sort": "-job_count",
-      "limit": 20
-    }
+    MATCH (j:Job)
+    WHERE j.status IN ['success', 'failed', 'running', 'pending']
+    RETURN j.status, j.when, count(j) AS job_count
+    ORDER BY job_count DESC
+    LIMIT 20
 
 vulnerabilities_by_project_visibility:
   desc: "Vulnerabilities by project visibility"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": "detected"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p.visibility_level"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vulnerability_count"
-        }
-      ],
-      "aggregation_sort": "-vulnerability_count",
-      "limit": 10
-    }
+    MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(v) AS vulnerability_count
+    ORDER BY vulnerability_count DESC
+    LIMIT 10
 
 pipelines_by_project_visibility:
   desc: "Pipelines by project visibility"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p.visibility_level"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 10
-    }
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    RETURN p.visibility_level, count(pipe) AS pipeline_count
+    ORDER BY pipeline_count DESC
+    LIMIT 10
 
 project_pipeline_status_matrix:
   desc: "Project pipeline status matrix"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name",
-            "full_path"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": [
-        "p",
-        "pipe.status"
-      ],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipeline_count"
-        },
-        {
-          "avg": "pipe.duration",
-          "as": "avg_duration"
-        }
-      ],
-      "aggregation_sort": "-pipeline_count",
-      "limit": 30
-    }
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN p{.name, .full_path}, pipe.status, count(pipe) AS pipeline_count, avg(pipe.duration) AS avg_duration
+    ORDER BY pipeline_count DESC
+    LIMIT 30
 
 merged_mr_total_for_projects:
   desc: "Merged mr total for projects"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "archived": false
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "merged_mr_count"
-        }
-      ],
-      "limit": 1
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {archived: false})
+    RETURN count(mr) AS merged_mr_count
+    LIMIT 1
 
 failed_pipeline_total_for_projects:
   desc: "Failed pipeline total for projects"
   category: aggregation
   suite: grouping
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "archived": false
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "failed_pipeline_count"
-        }
-      ],
-      "limit": 1
-    }
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project {archived: false})
+    RETURN count(pipe) AS failed_pipeline_count
+    LIMIT 1

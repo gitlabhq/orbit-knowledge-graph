@@ -647,8 +647,6 @@ enum Commands {
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
     },
-    /// Show the Orbit query DSL JSON Schema.
-    Dsl,
     /// Show the Orbit MCP tool manifest.
     Tools,
     /// Show indexing progress for a namespace or project.
@@ -964,7 +962,6 @@ async fn dispatch(
         }
         Commands::Status => Ok(remote::run_status().await?),
         Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
-        Commands::Dsl => Ok(remote::run_dsl().await?),
         Commands::Tools => Ok(remote::run_tools().await?),
         Commands::GraphStatus {
             full_path,
@@ -1196,10 +1193,6 @@ mod tests {
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
             Commands::Status
-        ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "dsl"]).command,
-            Commands::Dsl
         ));
         assert!(matches!(
             Cli::parse_from(["orbit", "tools"]).command,

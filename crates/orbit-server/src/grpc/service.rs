@@ -9,7 +9,6 @@ use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
 use orbit_server_config::AnalyticsConfig;
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -42,19 +41,22 @@ use crate::proto::{
     QueryType, ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
     SchemaNode, SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary,
     StructuredSchema, ToolDefinition as ProtoToolDefinition, get_graph_schema_response,
-    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
+    get_response_format_response, invoke_agent_command_response,
 };
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
+use query_engine::compiler::Frontend;
 use query_engine::formatters::{
     FormatName, GqlFormatter, GraphFormatter, ResultFormatter, ToonFormatter,
 };
 
 fn query_frontend(language: i32) -> Result<Frontend, String> {
     match QueryLanguage::try_from(language) {
-        Ok(QueryLanguage::Json) => Ok(Frontend::JsonDsl),
         Ok(QueryLanguage::Gql) => Ok(Frontend::Gql),
+        Ok(QueryLanguage::Json) => Err(
+            "the JSON Query DSL was removed; send GQL text with language QUERY_LANGUAGE_GQL".into(),
+        ),
         Err(_) => Err(format!("Unknown language: {language}")),
     }
 }
@@ -72,7 +74,7 @@ fn resolve_raw_query(
     let text = match query_type {
         QueryType::Json => query,
         QueryType::Named => named_queries
-            .render_request_language(&query, named_language(frontend), values)
+            .render_request(&query, named_language(frontend), values)
             .map_err(|e| e.to_string())?,
     };
     Ok(RawQuery { text, frontend })
@@ -80,7 +82,6 @@ fn resolve_raw_query(
 
 fn named_language(frontend: Frontend) -> named_queries::Language {
     match frontend {
-        Frontend::JsonDsl => named_queries::Language::Json,
         Frontend::Gql => named_queries::Language::Gql,
     }
 }
@@ -239,8 +240,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let frontend =
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
+        query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
         let schema = inline_catalog
             .then(|| {
@@ -253,7 +253,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             })
             .flatten();
         let tools = ToolRegistry::tools_with_catalog(
-            frontend,
             inline_catalog,
             schema
                 .as_ref()
@@ -285,9 +284,8 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing agent commands for user"
         );
 
-        let all_commands = CommandRegistry::commands_for(
-            query_frontend(req.language).map_err(Status::invalid_argument)?,
-        );
+        query_frontend(req.language).map_err(Status::invalid_argument)?;
+        let all_commands = CommandRegistry::get_all_commands();
         let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
@@ -340,7 +338,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
 
         let req = request.get_ref();
-        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
+        query_frontend(req.language).map_err(Status::invalid_argument)?;
         if req.command_name.trim().is_empty() {
             return Err(Status::invalid_argument("command_name is required"));
         }
@@ -366,12 +364,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 let schema = self.active_schema.snapshot()?;
                 ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
             }
-            AgentCommand::QueryLanguage { .. } if frontend == Frontend::Gql => {
-                Err(ExecutorError::NotFound(
-                    "get_query_dsl is unavailable with GQL; run CALL db.schema()".into(),
-                ))
-            }
-            AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
             AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
         }
         .map_err(command_error_to_status)?;
@@ -574,31 +566,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
 
-        let req = request.get_ref();
-        if query_frontend(req.language).map_err(Status::invalid_argument)? == Frontend::Gql {
-            return Err(Status::not_found(
-                "GQL has no query DSL document; run CALL db.schema() for the graph shape",
-            ));
-        }
-        info!(format = ?req.format, "Fetching query DSL grammar for user");
-
-        let response = if req.format == ResponseFormat::Llm as i32 {
-            let toon =
-                ToolService::build_query_dsl_toon().map_err(|e| Status::internal(e.to_string()))?;
-            GetQueryDslResponse {
-                version: ToolService::build_query_dsl_version().to_string(),
-                content: Some(get_query_dsl_response::Content::FormattedText(toon)),
-            }
-        } else {
-            GetQueryDslResponse {
-                version: ToolService::build_query_dsl_version().to_string(),
-                content: Some(get_query_dsl_response::Content::RawJsonSchema(
-                    ToolService::build_query_dsl_raw().to_string(),
-                )),
-            }
-        };
-
-        Ok(Response::new(response))
+        query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
+        Err(Status::not_found(
+            "GQL has no query DSL document; run CALL db.schema() for the graph shape",
+        ))
     }
 
     #[instrument(
@@ -611,10 +582,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<ListSkillsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
-        let frontend =
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
+        query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
 
-        let skills: Vec<SkillSummary> = list_skills(frontend)
+        let skills: Vec<SkillSummary> = list_skills()
             .into_iter()
             .map(|skill| SkillSummary {
                 name: skill.name,
@@ -643,10 +613,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
 
         let req = request.get_ref();
-        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
-        info!(skill_name = %req.name, metadata_only = req.metadata_only, ?frontend, "Fetching embedded skill");
+        query_frontend(req.language).map_err(Status::invalid_argument)?;
+        info!(skill_name = %req.name, metadata_only = req.metadata_only, "Fetching embedded skill");
 
-        let skill = get_skill(&req.name, frontend, req.metadata_only)
+        let skill = get_skill(&req.name, req.metadata_only)
             .map_err(|error| Status::not_found(error.to_string()))?;
         let files = skill
             .files
@@ -941,7 +911,7 @@ fn named_query_definitions(
     queries
         .into_iter()
         .map(|query| {
-            let raw_query = query.render_language(language, values, &query.example_parameters())?;
+            let raw_query = query.render(language, values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
                 name: query.name.clone(),
                 description: query.description.clone(),
@@ -1418,28 +1388,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_raw_query_selects_frontend_by_language() {
+    fn resolve_raw_query_accepts_only_gql() {
         let queries = named_queries::NamedQueries::load_embedded().unwrap();
         let bindings = named_queries::BindingValues {
             current_user_id: 73,
         };
-        for (language, frontend, raw) in [
-            (
-                QueryLanguage::Json,
-                Frontend::JsonDsl,
-                r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User"}]}"#,
-            ),
-            (QueryLanguage::Gql, Frontend::Gql, "MATCH (n:User) RETURN n"),
-        ] {
-            let resolve = |kind, text: &str| {
-                resolve_raw_query(kind, text.into(), language as i32, &queries, &bindings).unwrap()
+        let gql = QueryLanguage::Gql as i32;
+        let resolve = |kind: QueryType, text: &str, language| {
+            resolve_raw_query(kind as i32, text.into(), language, &queries, &bindings)
+        };
+        let raw = resolve(QueryType::Json, "MATCH (n:User) RETURN n", gql).unwrap();
+        assert_eq!(raw.text, "MATCH (n:User) RETURN n");
+        assert_eq!(raw.frontend, Frontend::Gql);
+        let named = resolve(QueryType::Named, r#"{"name":"my_neighbors"}"#, gql).unwrap();
+        assert_eq!(named.frontend, Frontend::Gql);
+        assert!(named.text.contains("{id: 73}"), "{}", named.text);
+        let json = QueryLanguage::Json as i32;
+        for kind in [QueryType::Json, QueryType::Named] {
+            let Err(error) = resolve(kind, r#"{"name":"my_neighbors"}"#, json) else {
+                panic!("JSON must reject");
             };
-            assert_eq!(resolve(QueryType::Json as i32, raw).frontend, frontend);
-            let named = resolve(QueryType::Named as i32, r#"{"name":"my_neighbors"}"#);
-            assert_eq!(named.frontend, frontend);
-            assert!(named.text.contains("73"));
+            assert!(error.contains("JSON Query DSL was removed"), "{error}");
         }
-        assert!(resolve_raw_query(99, "".into(), 0, &queries, &bindings).is_err());
+        assert!(resolve_raw_query(99, "".into(), gql, &queries, &bindings).is_err());
         assert!(resolve_raw_query(0, "".into(), 99, &queries, &bindings).is_err());
     }
 

@@ -9,6 +9,8 @@ toc_hide: true
 
 Proposed
 
+> The JSON Query DSL described below was later removed. Queries are GQL text, `GetQueryDsl` returns `NOT_FOUND`, and `QUERY_LANGUAGE_JSON` rejects. See the [Orbit query frontend](../querying/orbit_query_frontend.md).
+
 ## Date
 
 2026-02-26
@@ -164,20 +166,10 @@ Execute an Orbit query.
 
 **Request body (pseudo code):**
 
-```json orbit-query
-{
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "mr",
-      "entity": "MergeRequest",
-      "filters": { "state": "merged" }
-    }],
-    "limit": 10
-  },
-  "query_type": "json",
-  "format": "raw"
-}
+```gql orbit-query
+MATCH (mr:MergeRequest {state: 'merged'})
+RETURN mr
+LIMIT 10
 ```
 
 **Response (`format=raw`), pseudo code:**
@@ -370,12 +362,10 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
 
 Query body:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
-  "limit": 5
-}
+```gql orbit-query
+MATCH (mr:MergeRequest {state: 'merged'})
+RETURN mr
+LIMIT 5
 ```
 
 ```shell

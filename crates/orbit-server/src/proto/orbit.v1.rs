@@ -202,16 +202,13 @@ pub struct SchemaNodeStyle {
     #[prost(string, tag = "2")]
     pub color: ::prost::alloc::string::String,
 }
-/// Request for the query DSL grammar.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetQueryDslRequest {
-    /// RAW: full JSON Schema; LLM: condensed TOON
     #[prost(enumeration = "ResponseFormat", tag = "1")]
     pub format: i32,
     #[prost(enumeration = "QueryLanguage", tag = "2")]
     pub language: i32,
 }
-/// Response carrying the DSL grammar in the requested format.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetQueryDslResponse {
     /// semver string for the query DSL grammar, e.g. "1.0.0"
@@ -764,6 +761,7 @@ impl FormatName {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
+    /// `query` is ad hoc query text in the selected language
     Json = 0,
     /// `query` is a named-query envelope: {"name": ..., "parameters": {...}}
     Named = 1,
@@ -788,9 +786,11 @@ impl QueryType {
         }
     }
 }
+/// Selects the compiler frontend. Add a value per new query language.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryLanguage {
+    /// Removed JSON Query DSL; servers reject it with INVALID_ARGUMENT
     Json = 0,
     Gql = 1,
 }
@@ -1182,9 +1182,8 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphSchema"));
             self.inner.unary(req, path, codec).await
         }
-        /// Returns the query DSL grammar (JSON Schema for query_graph input).
-        /// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-        /// command catalog and InvokeAgentCommand instead.
+        /// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
+        /// CALL db.schema(); kept so existing clients get a clear error.
         pub async fn get_query_dsl(
             &mut self,
             request: impl tonic::IntoRequest<super::GetQueryDslRequest>,
@@ -1287,9 +1286,8 @@ pub mod orbit_service_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns the JSON Schema describing the query response shape (the formatter
-        /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-        /// Direct API helper for REST consumers. MCP agents should use the command
-        /// catalog and InvokeAgentCommand instead.
+        /// output). Direct API helper for REST consumers. MCP agents should use the
+        /// command catalog and InvokeAgentCommand instead.
         pub async fn get_response_format(
             &mut self,
             request: impl tonic::IntoRequest<super::GetResponseFormatRequest>,
@@ -1485,9 +1483,8 @@ pub mod orbit_service_server {
             tonic::Response<super::GetGraphSchemaResponse>,
             tonic::Status,
         >;
-        /// Returns the query DSL grammar (JSON Schema for query_graph input).
-        /// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-        /// command catalog and InvokeAgentCommand instead.
+        /// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
+        /// CALL db.schema(); kept so existing clients get a clear error.
         async fn get_query_dsl(
             &self,
             request: tonic::Request<super::GetQueryDslRequest>,
@@ -1522,9 +1519,8 @@ pub mod orbit_service_server {
             tonic::Status,
         >;
         /// Returns the JSON Schema describing the query response shape (the formatter
-        /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-        /// Direct API helper for REST consumers. MCP agents should use the command
-        /// catalog and InvokeAgentCommand instead.
+        /// output). Direct API helper for REST consumers. MCP agents should use the
+        /// command catalog and InvokeAgentCommand instead.
         async fn get_response_format(
             &self,
             request: tonic::Request<super::GetResponseFormatRequest>,

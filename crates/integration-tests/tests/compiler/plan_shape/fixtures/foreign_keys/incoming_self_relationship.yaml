@@ -1,15 +1,6 @@
 name: Incoming FK self-relationship retains the physical holder
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "canceling", "entity": "Pipeline", "columns": ["id"], "filters": {"status": "success"}},
-        {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
-      ],
-      "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}]
-    }
   gql: |
     MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline)
     RETURN canceling.id, canceled.id

@@ -285,28 +285,6 @@ impl Input {
         Ok(())
     }
 
-    pub(crate) fn lift_negated_filters(&mut self) -> crate::error::Result<()> {
-        for index in 0..self.nodes.len() {
-            let alias = self.nodes[index].id.clone();
-            for (property, filters) in std::mem::take(&mut self.nodes[index].negated_filters) {
-                let leaves = filters
-                    .into_iter()
-                    .map(|filter| {
-                        BooleanExpression::Leaf(Condition {
-                            target: PredicateTarget::Node(alias.clone()),
-                            property: property.clone(),
-                            filter,
-                        })
-                    })
-                    .collect();
-                self.absorb(BooleanExpression::Not(Box::new(BooleanExpression::And(
-                    leaves,
-                ))))?;
-            }
-        }
-        Ok(())
-    }
-
     pub fn remove_relationship(&mut self, index: usize) -> InputRelationship {
         for root in &mut self.predicates {
             root.visit_mut(&mut |condition| {

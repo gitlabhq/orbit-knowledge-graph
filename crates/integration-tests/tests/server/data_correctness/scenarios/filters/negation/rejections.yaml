@@ -38,60 +38,20 @@ cases:
   - name: negated_ids_need_anchor
     description: Negated ID bounds do not become a selective positive anchor
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","not":{"id":{"in":[4000],"gte":4000,"lte":4010}}}],"limit":30}
       gql: MATCH (wi:WorkItem) WHERE NOT (wi.id IN [4000] AND wi.id >= 4000 AND wi.id <= 4010) RETURN wi.id
     expect: { compile_error: add filters or node_ids to at least one node (NOT conditions do not count) }
 
   - name: negation_complement_entry_cap_rejected
     description: Complemented NOT conditions count toward the per-property filter cap
     query:
-      gql: >-
-        MATCH (u:User {id: 1}) WHERE NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
-        = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
-        u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
-        NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1
-        AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
-        1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 RETURN u
+      {
+        gql:
+          "MATCH (u:User {id: 1}) WHERE NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id
+          = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT
+          u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND
+          NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id =
+          1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 AND NOT u.id = 1 RETURN u",
+      }
     expect: { compile_error: filter on "id" needs between 1 and 10 predicates }
 
   - name: negation_depth_rejected
@@ -103,59 +63,15 @@ cases:
   - name: negation_leaf_cap_rejected
     description: A NOT group cannot combine more than 256 conditions
     query:
-      gql: >-
-        MATCH (wi:WorkItem {id: 4000}) WHERE NOT (wi.weight = 0 AND wi.weight = 1 AND wi.weight = 2 AND
-        wi.weight = 3 AND wi.weight = 4 AND wi.weight = 5 AND wi.weight = 6 AND wi.weight = 7 AND wi.weight
-        = 8 AND wi.weight = 9 AND wi.weight = 10 AND wi.weight = 11 AND wi.weight = 12 AND wi.weight = 13
-        AND wi.weight = 14 AND wi.weight = 15 AND wi.weight = 16 AND wi.weight = 17 AND wi.weight = 18 AND
-        wi.weight = 19 AND wi.weight = 20 AND wi.weight = 21 AND wi.weight = 22 AND wi.weight = 23 AND
-        wi.weight = 24 AND wi.weight = 25 AND wi.weight = 26 AND wi.weight = 27 AND wi.weight = 28 AND
-        wi.weight = 29 AND wi.weight = 30 AND wi.weight = 31 AND wi.weight = 32 AND wi.weight = 33 AND
-        wi.weight = 34 AND wi.weight = 35 AND wi.weight = 36 AND wi.weight = 37 AND wi.weight = 38 AND
-        wi.weight = 39 AND wi.weight = 40 AND wi.weight = 41 AND wi.weight = 42 AND wi.weight = 43 AND
-        wi.weight = 44 AND wi.weight = 45 AND wi.weight = 46 AND wi.weight = 47 AND wi.weight = 48 AND
-        wi.weight = 49 AND wi.weight = 50 AND wi.weight = 51 AND wi.weight = 52 AND wi.weight = 53 AND
-        wi.weight = 54 AND wi.weight = 55 AND wi.weight = 56 AND wi.weight = 57 AND wi.weight = 58 AND
-        wi.weight = 59 AND wi.weight = 60 AND wi.weight = 61 AND wi.weight = 62 AND wi.weight = 63 AND
-        wi.weight = 64 AND wi.weight = 65 AND wi.weight = 66 AND wi.weight = 67 AND wi.weight = 68 AND
-        wi.weight = 69 AND wi.weight = 70 AND wi.weight = 71 AND wi.weight = 72 AND wi.weight = 73 AND
-        wi.weight = 74 AND wi.weight = 75 AND wi.weight = 76 AND wi.weight = 77 AND wi.weight = 78 AND
-        wi.weight = 79 AND wi.weight = 80 AND wi.weight = 81 AND wi.weight = 82 AND wi.weight = 83 AND
-        wi.weight = 84 AND wi.weight = 85 AND wi.weight = 86 AND wi.weight = 87 AND wi.weight = 88 AND
-        wi.weight = 89 AND wi.weight = 90 AND wi.weight = 91 AND wi.weight = 92 AND wi.weight = 93 AND
-        wi.weight = 94 AND wi.weight = 95 AND wi.weight = 96 AND wi.weight = 97 AND wi.weight = 98 AND
-        wi.weight = 99 AND wi.weight = 100 AND wi.weight = 101 AND wi.weight = 102 AND wi.weight = 103 AND
-        wi.weight = 104 AND wi.weight = 105 AND wi.weight = 106 AND wi.weight = 107 AND wi.weight = 108 AND
-        wi.weight = 109 AND wi.weight = 110 AND wi.weight = 111 AND wi.weight = 112 AND wi.weight = 113 AND
-        wi.weight = 114 AND wi.weight = 115 AND wi.weight = 116 AND wi.weight = 117 AND wi.weight = 118 AND
-        wi.weight = 119 AND wi.weight = 120 AND wi.weight = 121 AND wi.weight = 122 AND wi.weight = 123 AND
-        wi.weight = 124 AND wi.weight = 125 AND wi.weight = 126 AND wi.weight = 127 AND wi.weight = 128 AND
-        wi.weight = 129 AND wi.weight = 130 AND wi.weight = 131 AND wi.weight = 132 AND wi.weight = 133 AND
-        wi.weight = 134 AND wi.weight = 135 AND wi.weight = 136 AND wi.weight = 137 AND wi.weight = 138 AND
-        wi.weight = 139 AND wi.weight = 140 AND wi.weight = 141 AND wi.weight = 142 AND wi.weight = 143 AND
-        wi.weight = 144 AND wi.weight = 145 AND wi.weight = 146 AND wi.weight = 147 AND wi.weight = 148 AND
-        wi.weight = 149 AND wi.weight = 150 AND wi.weight = 151 AND wi.weight = 152 AND wi.weight = 153 AND
-        wi.weight = 154 AND wi.weight = 155 AND wi.weight = 156 AND wi.weight = 157 AND wi.weight = 158 AND
-        wi.weight = 159 AND wi.weight = 160 AND wi.weight = 161 AND wi.weight = 162 AND wi.weight = 163 AND
-        wi.weight = 164 AND wi.weight = 165 AND wi.weight = 166 AND wi.weight = 167 AND wi.weight = 168 AND
-        wi.weight = 169 AND wi.weight = 170 AND wi.weight = 171 AND wi.weight = 172 AND wi.weight = 173 AND
-        wi.weight = 174 AND wi.weight = 175 AND wi.weight = 176 AND wi.weight = 177 AND wi.weight = 178 AND
-        wi.weight = 179 AND wi.weight = 180 AND wi.weight = 181 AND wi.weight = 182 AND wi.weight = 183 AND
-        wi.weight = 184 AND wi.weight = 185 AND wi.weight = 186 AND wi.weight = 187 AND wi.weight = 188 AND
-        wi.weight = 189 AND wi.weight = 190 AND wi.weight = 191 AND wi.weight = 192 AND wi.weight = 193 AND
-        wi.weight = 194 AND wi.weight = 195 AND wi.weight = 196 AND wi.weight = 197 AND wi.weight = 198 AND
-        wi.weight = 199 AND wi.weight = 200 AND wi.weight = 201 AND wi.weight = 202 AND wi.weight = 203 AND
-        wi.weight = 204 AND wi.weight = 205 AND wi.weight = 206 AND wi.weight = 207 AND wi.weight = 208 AND
-        wi.weight = 209 AND wi.weight = 210 AND wi.weight = 211 AND wi.weight = 212 AND wi.weight = 213 AND
-        wi.weight = 214 AND wi.weight = 215 AND wi.weight = 216 AND wi.weight = 217 AND wi.weight = 218 AND
-        wi.weight = 219 AND wi.weight = 220 AND wi.weight = 221 AND wi.weight = 222 AND wi.weight = 223 AND
-        wi.weight = 224 AND wi.weight = 225 AND wi.weight = 226 AND wi.weight = 227 AND wi.weight = 228 AND
-        wi.weight = 229 AND wi.weight = 230 AND wi.weight = 231 AND wi.weight = 232 AND wi.weight = 233 AND
-        wi.weight = 234 AND wi.weight = 235 AND wi.weight = 236 AND wi.weight = 237 AND wi.weight = 238 AND
-        wi.weight = 239 AND wi.weight = 240 AND wi.weight = 241 AND wi.weight = 242 AND wi.weight = 243 AND
-        wi.weight = 244 AND wi.weight = 245 AND wi.weight = 246 AND wi.weight = 247 AND wi.weight = 248 AND
-        wi.weight = 249 AND wi.weight = 250 AND wi.weight = 251 AND wi.weight = 252 AND wi.weight = 253 AND
-        wi.weight = 254 AND wi.weight = 255 AND wi.weight = 256) RETURN wi.id
+      {
+        gql:
+          "MATCH (wi:WorkItem {id: 4000}) WHERE NOT (wi.weight = 0 AND wi.weight = 1 AND wi.weight = 2 AND wi.weight = 3 AND wi.weight = 4 AND wi.weight = 5 AND wi.weight = 6 AND wi.weight = 7 AND wi.weight = 8 AND wi.weight = 9 AND wi.weight = 10 AND wi.weight = 11 AND wi.weight = 12 AND wi.weight = 13 AND wi.weight = 14 AND wi.weight = 15 AND wi.weight = 16 AND wi.weight = 17 AND wi.weight = 18 AND wi.weight = 19 AND wi.weight = 20 AND wi.weight = 21 AND wi.weight = 22 AND wi.weight = 23 AND wi.weight = 24 AND wi.weight = 25 AND wi.weight = 26 AND wi.weight = 27 AND wi.weight = 28 AND wi.weight = 29 AND wi.weight = 30 AND wi.weight = 31 AND wi.weight = 32 AND wi.weight = 33 AND wi.weight = 34 AND wi.weight = 35 AND wi.weight = 36 AND wi.weight = 37 AND wi.weight = 38 AND wi.weight = 39 AND wi.weight = 40 AND wi.weight = 41 AND wi.weight = 42 AND wi.weight = 43 AND wi.weight = 44 AND wi.weight = 45 AND wi.weight = 46 AND wi.weight = 47 AND wi.weight = 48 AND wi.weight = 49 AND wi.weight
+          = 50 AND wi.weight = 51 AND wi.weight = 52 AND wi.weight = 53 AND wi.weight = 54 AND wi.weight = 55 AND wi.weight = 56 AND wi.weight = 57 AND wi.weight = 58 AND wi.weight = 59 AND wi.weight = 60 AND wi.weight = 61 AND wi.weight = 62 AND wi.weight = 63 AND wi.weight = 64 AND wi.weight = 65 AND wi.weight = 66 AND wi.weight = 67 AND wi.weight = 68 AND wi.weight = 69 AND wi.weight = 70 AND wi.weight = 71 AND wi.weight = 72 AND wi.weight = 73 AND wi.weight = 74 AND wi.weight = 75 AND wi.weight = 76 AND wi.weight = 77 AND wi.weight = 78 AND wi.weight = 79 AND wi.weight = 80 AND wi.weight = 81 AND wi.weight = 82 AND wi.weight = 83 AND wi.weight = 84 AND wi.weight = 85 AND wi.weight = 86 AND wi.weight = 87 AND wi.weight = 88 AND wi.weight = 89 AND wi.weight = 90 AND wi.weight = 91 AND wi.weight = 92 AND wi.weight = 93 AND wi.weight = 94 AND wi.weight = 95 AND wi.weight = 96 AND wi.weight = 97 AND wi.weight = 98 AND wi.weight = 99 AND wi.weight = 100 AND wi.weight = 101 AND wi.weight = 102
+          AND wi.weight = 103 AND wi.weight = 104 AND wi.weight = 105 AND wi.weight = 106 AND wi.weight = 107 AND wi.weight = 108 AND wi.weight = 109 AND wi.weight = 110 AND wi.weight = 111 AND wi.weight = 112 AND wi.weight = 113 AND wi.weight = 114 AND wi.weight = 115 AND wi.weight = 116 AND wi.weight = 117 AND wi.weight = 118 AND wi.weight = 119 AND wi.weight = 120 AND wi.weight = 121 AND wi.weight = 122 AND wi.weight = 123 AND wi.weight = 124 AND wi.weight = 125 AND wi.weight = 126 AND wi.weight = 127 AND wi.weight = 128 AND wi.weight = 129 AND wi.weight = 130 AND wi.weight = 131 AND wi.weight = 132 AND wi.weight = 133 AND wi.weight = 134 AND wi.weight = 135 AND wi.weight = 136 AND wi.weight = 137 AND wi.weight = 138 AND wi.weight = 139 AND wi.weight = 140 AND wi.weight = 141 AND wi.weight = 142 AND wi.weight = 143 AND wi.weight = 144 AND wi.weight = 145 AND wi.weight = 146 AND wi.weight = 147 AND wi.weight = 148 AND wi.weight = 149 AND wi.weight = 150 AND wi.weight = 151 AND wi.weight =
+          152 AND wi.weight = 153 AND wi.weight = 154 AND wi.weight = 155 AND wi.weight = 156 AND wi.weight = 157 AND wi.weight = 158 AND wi.weight = 159 AND wi.weight = 160 AND wi.weight = 161 AND wi.weight = 162 AND wi.weight = 163 AND wi.weight = 164 AND wi.weight = 165 AND wi.weight = 166 AND wi.weight = 167 AND wi.weight = 168 AND wi.weight = 169 AND wi.weight = 170 AND wi.weight = 171 AND wi.weight = 172 AND wi.weight = 173 AND wi.weight = 174 AND wi.weight = 175 AND wi.weight = 176 AND wi.weight = 177 AND wi.weight = 178 AND wi.weight = 179 AND wi.weight = 180 AND wi.weight = 181 AND wi.weight = 182 AND wi.weight = 183 AND wi.weight = 184 AND wi.weight = 185 AND wi.weight = 186 AND wi.weight = 187 AND wi.weight = 188 AND wi.weight = 189 AND wi.weight = 190 AND wi.weight = 191 AND wi.weight = 192 AND wi.weight = 193 AND wi.weight = 194 AND wi.weight = 195 AND wi.weight = 196 AND wi.weight = 197 AND wi.weight = 198 AND wi.weight = 199 AND wi.weight = 200 AND wi.weight = 201 AND wi.weight
+          = 202 AND wi.weight = 203 AND wi.weight = 204 AND wi.weight = 205 AND wi.weight = 206 AND wi.weight = 207 AND wi.weight = 208 AND wi.weight = 209 AND wi.weight = 210 AND wi.weight = 211 AND wi.weight = 212 AND wi.weight = 213 AND wi.weight = 214 AND wi.weight = 215 AND wi.weight = 216 AND wi.weight = 217 AND wi.weight = 218 AND wi.weight = 219 AND wi.weight = 220 AND wi.weight = 221 AND wi.weight = 222 AND wi.weight = 223 AND wi.weight = 224 AND wi.weight = 225 AND wi.weight = 226 AND wi.weight = 227 AND wi.weight = 228 AND wi.weight = 229 AND wi.weight = 230 AND wi.weight = 231 AND wi.weight = 232 AND wi.weight = 233 AND wi.weight = 234 AND wi.weight = 235 AND wi.weight = 236 AND wi.weight = 237 AND wi.weight = 238 AND wi.weight = 239 AND wi.weight = 240 AND wi.weight = 241 AND wi.weight = 242 AND wi.weight = 243 AND wi.weight = 244 AND wi.weight = 245 AND wi.weight = 246 AND wi.weight = 247 AND wi.weight = 248 AND wi.weight = 249 AND wi.weight = 250 AND wi.weight = 251 AND wi.weight
+          = 252 AND wi.weight = 253 AND wi.weight = 254 AND wi.weight = 255 AND wi.weight = 256) RETURN wi.id",
+      }
     expect:
       compile_error: a query must not combine more than 256 conditions
       compile_error_not_contains: [wi.weight = 256]
@@ -181,8 +97,6 @@ cases:
   - name: not_group_path_rejected
     description: Shortest paths reject NOT over a list membership
     query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,102],"not":{"visibility_level":{"in":["internal"]}}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["*"]}}
       gql: |
         MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
         WHERE g.id IN [100, 102] AND NOT g.visibility_level IN ['internal']
@@ -212,21 +126,17 @@ cases:
   - name: not_list_only_needs_anchor
     description: A node whose only condition is NOT over a list is not anchored
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"id":{"in":[1]}}}],"limit":30}
       gql: |
         MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
     expect: { compile_error: add filters or node_ids to at least one node (NOT conditions do not count) }
 
   - name: not_literal_comparison_rejected
-    description: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable, and a JSON not key must be a property name.
+    description: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable.
     query:
       gql: |
         MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' = 'private-query-literal' RETURN wi.id
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"1":"private-query-literal"}}],"limit":10}
     expect:
-      compile_error: { gql: each comparison starts with a property such as n.name, json: does not match }
+      compile_error: { gql: each comparison starts with a property such as n.name }
       compile_error_not_contains: [private-query-literal]
 
   - name: not_literal_left_rejected
@@ -263,8 +173,6 @@ cases:
   - name: not_virtual_contains_rejected
     description: NOT cannot wrap a condition on a virtual column
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[13000],"not":{"content":{"contains":"secret"}},"columns":["name"]}],"limit":30}
       gql: |
         MATCH (f:File {id: 13000})
         WHERE NOT f.content CONTAINS 'secret'

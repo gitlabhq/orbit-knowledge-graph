@@ -1,38 +1,34 @@
 use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+use compiler::gql;
 use compiler::input::AggFunction;
 use compiler::passes::{codegen::codegen, cursor};
 use integration_testkit::TestContext;
 use integration_testkit::visitor::NodeExt;
-use serde_json::Value;
 
 use super::helpers::run_query;
 use crate::common::compile_and_execute;
 
 pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(ctx: &TestContext) {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-        "order_by": "-u.username",
-        "cursor": {"page_size": 2}
-    }"#;
+    let query = r#"MATCH (u:User)
+        WHERE u.id >= 1 AND u.id <= 10000
+        RETURN u{.username}
+        ORDER BY u.username DESC
+        PAGE 2"#;
 
-    let mut query: Value = serde_json::from_str(json).unwrap();
     let token = cursor::encode(
-        cursor::canonical_hash(&query),
+        gql::parse_with_hash(query).unwrap().query_hash,
         &[Some("'); DROP TABLE gl_user; --".into()), Some("0".into())],
     );
-    query["cursor"]["after"] = token.into();
 
-    let resp = run_query(ctx, &query.to_string()).await;
+    let resp = run_query(ctx, &format!("{query} AFTER '{token}'")).await;
     resp.assert_node_order("User", &[]);
     resp.assert_node_count(0);
 
     let intact = run_query(
         ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}]
-        }"#,
+        r#"MATCH (u:User)
+            WHERE u.id >= 1 AND u.id <= 10000
+            RETURN u{.username}"#,
     )
     .await;
     intact.assert_node_count(7);
@@ -42,13 +38,8 @@ pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestCon
     let full_text = format!("{}tail", "🙂".repeat(10_000));
     let query_with_limit = |limit: u32| {
         format!(
-            r#"{{
-            "query_type": "traversal",
-            "nodes": [{{"id": "n", "entity": "Note", "node_ids": [3002],
-                       "columns": ["note", "discussion_id"],
-                       "filters": {{"note": {{"ends_with": "tail"}}}}}}],
-            "limit": {limit}
-        }}"#
+            "MATCH (n:Note {{id: 3002}}) WHERE n.note ENDS WITH 'tail' \
+             RETURN n{{.note, .discussion_id}} LIMIT {limit}"
         )
     };
 
@@ -78,16 +69,10 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
 ) {
     let (_compiled, result) = compile_and_execute(
         ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["CALLS"]},
-            "limit": 10
-        }"#,
+        r#"MATCH p = ANY SHORTEST (start:Definition)-[:CALLS*1..3]->(`end`:Definition)
+            WHERE start.name = 'compile' AND `end`.name = 'run_query'
+            RETURN p
+            LIMIT 10"#,
     )
     .await;
 

@@ -10,22 +10,23 @@ Usage:
     remote_repo_map.py [--project-id ID] [--branch B] callers   NAME
 
 Defaults to gitlab-org/gitlab (project 278964, branch master).
-Requires glab >= v1.117.0 authenticated against gitlab.com.
+Requires glab >= v1.117.0 authenticated against gitlab.com and Orbit CLI
+>= 0.130.0 for inline GQL query text.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
-import tempfile
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULT_PROJECT_ID = 278964   # gitlab-org/gitlab
 DEFAULT_BRANCH     = "master"
 QUERY_TIMEOUT_SECONDS = 120
+MAX_IDS_PER_QUERY = 500
+MAX_DEPTH = 3
 
 TYPE_KINDS = [
     "Class", "Module", "Struct", "Enum", "Trait", "Interface",
@@ -40,13 +41,49 @@ MEMBER_KINDS = TYPE_KINDS + CALLABLE_KINDS + ["Field", "Attribute", "Property"]
 
 # ── Query helpers ─────────────────────────────────────────────────────────────
 
-def _query(body: dict) -> dict:
-    fd, tmp = tempfile.mkstemp(suffix=".json")
+def _lit(value: str | int) -> str:
+    """Render a GQL literal. Strings are single-quoted with `\\` and `'` escaped."""
+    if isinstance(value, bool):
+        raise TypeError("boolean literals are not used by this helper")
+    if isinstance(value, int):
+        return str(value)
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _list(values: list[str] | list[int]) -> str:
+    return "[" + ", ".join(_lit(v) for v in values) + "]"
+
+
+def _id_list(ids: list[str]) -> str:
+    """Render Definition IDs, which the raw response returns as strings, as integers."""
+    return "[" + ", ".join(str(int(i)) for i in ids) + "]"
+
+
+def _scope(var: str, project_id: int, branch: str) -> str:
+    return f"{var}.project_id = {_lit(project_id)} AND {var}.branch = {_lit(branch)}"
+
+
+def _hops(depth: int) -> str:
+    return "" if depth == 1 else f"*1..{depth}"
+
+
+def _returns(var: str, columns: list[str]) -> list[str]:
+    return [f"{var}.{column}" for column in columns]
+
+
+def _gql(match: str, where: list[str], returns: list[str], limit: int) -> str:
+    return (
+        f"MATCH {match}\n"
+        f"WHERE {' AND '.join(where)}\n"
+        f"RETURN {', '.join(returns)}\n"
+        f"LIMIT {limit}"
+    )
+
+
+def _query(gql: str) -> dict:
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(body, f)
         cp = subprocess.run(
-            ["glab", "orbit", "query", "--response-format", "raw", tmp],
+            ["glab", "orbit", "query", "--response-format", "raw", gql],
             capture_output=True, text=True,
             timeout=QUERY_TIMEOUT_SECONDS,
         )
@@ -54,8 +91,6 @@ def _query(body: dict) -> dict:
         sys.exit("glab not found on PATH - install glab >= 1.117.0 (https://gitlab.com/gitlab-org/cli)")
     except subprocess.TimeoutExpired:
         sys.exit(f"Orbit query timed out after {QUERY_TIMEOUT_SECONDS} seconds")
-    finally:
-        os.unlink(tmp)
     if cp.returncode != 0:
         sys.exit(f"Orbit query failed:\n{cp.stderr.strip()}")
     try:
@@ -72,21 +107,23 @@ def _nodes(result: dict, node_type: str | None = None) -> list[dict]:
 
 
 def _edges(result: dict) -> list[dict]:
-    """Return the instance-level edges from a graph/raw query response.
+    """Return the instance-level edges from a raw query response.
 
-    The raw formatter always emits an `edges` array (required field in
-    config/schemas/query_response.json), with `from_id`/`to_id` string IDs and,
-    for variable-length traversals, a `depth` hop count (absent on single-hop
-    edges).
+    The raw formatter always emits an `edges` array with `from_id`/`to_id`
+    string IDs.
     """
     return result.get("result", {}).get("edges", [])
 
 
-def _base_filters(project_id: int, branch: str) -> dict:
-    return {
-        "project_id": {"eq": project_id},
-        "branch":     {"eq": branch},
-    }
+def _merge_results(results: list[dict]) -> dict:
+    """Combine chunked responses into one response with deduplicated nodes."""
+    nodes: dict[tuple, dict] = {}
+    edges: list[dict] = []
+    for result in results:
+        for n in _nodes(result):
+            nodes.setdefault((n.get("type"), n.get("id")), n)
+        edges.extend(_edges(result))
+    return {"result": {"nodes": list(nodes.values()), "edges": edges}}
 
 
 # ── Pure helpers (no I/O — unit-testable against canned responses) ─────────────
@@ -142,7 +179,7 @@ def _resolve_name(name: str) -> tuple[str, str]:
     'Ci::Build' is given, filter by `fqn` for an unambiguous match instead of
     falling back to a bare `name` filter that could match unrelated classes.
 
-    Returns a tuple (property_name, value) ready for use in a filters dict.
+    Returns a tuple (property_name, value) ready for a property predicate.
     """
     if "::" not in name:
         return ("name", name)
@@ -167,51 +204,44 @@ def _parse_callers_fqn(raw: str) -> tuple[str, str | None]:
     return (raw, None)
 
 
+def _clamp_depth(raw_depth: int) -> int:
+    depth = max(1, min(raw_depth, MAX_DEPTH))
+    if raw_depth != depth:
+        print(f"(depth clamped to {depth}; server limit is {MAX_DEPTH})", file=sys.stderr)
+    return depth
+
+
+def _print_definitions(rows: list[dict]) -> None:
+    print(f"{'type':12}  {'fqn':<60}  location")
+    print("-" * 110)
+    for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
+        fqn  = n.get("fqn", n.get("name", "?"))
+        kind = n.get("definition_type", "?")
+        loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
+        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+
+
+def build_extends_query(project_id: int, branch: str, name: str, depth: int) -> str:
+    key, value = _resolve_name(name)
+    # Request the full row cap. Multi-hop fan-out on wide trees can exceed a few
+    # hundred nodes, and the server has no stable order before truncation, so a
+    # low limit truncates the result non-deterministically.
+    return _gql(
+        f"(child:Definition)-[:EXTENDS{_hops(depth)}]->(base:Definition)",
+        [_scope("base", project_id, branch), f"base.{key} = {_lit(value)}",
+         _scope("child", project_id, branch)],
+        _returns("base", ["fqn", "name"])
+        + _returns("child", ["fqn", "name", "definition_type", "file_path", "start_line"]),
+        1000,
+    )
+
+
 def cmd_extends(args: argparse.Namespace) -> None:
-    """Find all descendants of a class/module via EXTENDS — single server-side multi-hop traversal.
-
-    Uses a hops range on the RelationshipSelector to collapse the old
-    N×M frontier loop (one query per frontier node per hop) into a single
-    server-side traversal.  For a class with 16 direct subclasses at depth=2
-    the old approach required 16+256=272 sequential API calls (~2.5 min);
-    this version issues exactly one query regardless of depth.
-    """
-    pid    = args.project_id
-    branch = args.branch
-    depth  = max(1, min(args.depth, 3))  # server caps traversal at 3
-    if args.depth != depth:
-        print(f"(depth clamped to {depth}; server limit is 3)", file=sys.stderr)
-
-    filter_key, filter_val = _resolve_name(args.name)
-
-    body = {"query": {
-        "query_type": "traversal",
-        "nodes": [
-            {
-                "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), filter_key: {"eq": filter_val}},
-                "columns": ["fqn", "name"],
-            },
-            {
-                "id": "child", "entity": "Definition",
-                "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-            },
-        ],
-        "relationships": [
-            {"type": "EXTENDS", "from": "child", "to": "base", "hops": [1, depth]}
-        ],
-        # Max server-side cap. Multi-hop fan-out on wide trees can exceed a few
-        # hundred nodes; a low limit truncates the result non-deterministically
-        # (the server has no stable order before truncation), so we request the
-        # full cap to keep multi-hop results stable and complete.
-        "limit": 1000,
-    }}
-
-    result = _query(body)
-    all_nodes = _nodes(result, "Definition")
+    """Find all descendants of a class/module via EXTENDS in one multi-hop traversal."""
+    depth = _clamp_depth(args.depth)
+    result = _query(build_extends_query(args.project_id, args.branch, args.name, depth))
     rows = [
-        n for n in all_nodes
+        n for n in _nodes(result, "Definition")
         if n.get("name") != args.name and n.get("fqn") != args.name
     ]
 
@@ -220,60 +250,31 @@ def cmd_extends(args: argparse.Namespace) -> None:
     if not rows:
         print("(no descendants found — class may not be indexed on this branch)")
         return
-    print(f"{'type':12}  {'fqn':<60}  location")
-    print("-" * 110)
-    for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
-        fqn  = n.get("fqn", n.get("name", "?"))
-        kind = n.get("definition_type", "?")
-        loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
-        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+    _print_definitions(rows)
     print(f"\n{len(rows)} descendant(s) found")
 
 
+def build_ancestors_query(project_id: int, branch: str, fqn: str, depth: int) -> str:
+    # Match the child by fqn, not name: 'Issue' matches app/models/issue.rb and
+    # qa/resource/issue.rb.
+    return _gql(
+        f"(child:Definition)-[:EXTENDS{_hops(depth)}]->(ancestor:Definition)",
+        [_scope("child", project_id, branch), f"child.fqn = {_lit(fqn)}",
+         _scope("ancestor", project_id, branch)],
+        _returns("child", ["fqn", "name"])
+        + _returns("ancestor", ["fqn", "name", "definition_type", "file_path", "start_line"]),
+        1000,
+    )
+
+
 def cmd_ancestors(args: argparse.Namespace) -> None:
-    """Walk EXTENDS edges upward — single server-side multi-hop traversal.
+    """Walk EXTENDS edges upward in one multi-hop traversal.
 
-    Uses fqn filter instead of name to avoid ambiguous matches
-    (e.g. 'Issue' matches app/models/issue.rb AND qa/resource/issue.rb).
     Pass --filter-prefix app/models/concerns to list only included concerns.
-
-    Uses a hops range on the RelationshipSelector to issue a single
-    query instead of the old N×M frontier loop.
     """
-    pid    = args.project_id
-    branch = args.branch
-    depth  = max(1, min(args.depth, 3))
-    if args.depth != depth:
-        print(f"(depth clamped to {depth}; server limit is 3)", file=sys.stderr)
-
-    body = {"query": {
-        "query_type": "traversal",
-        "nodes": [
-            {
-                "id": "child", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), "fqn": {"eq": args.name}},
-                "columns": ["fqn", "name"],
-            },
-            {
-                "id": "ancestor", "entity": "Definition",
-                "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-            },
-        ],
-        "relationships": [
-            {"type": "EXTENDS", "from": "child", "to": "ancestor", "hops": [1, depth]}
-        ],
-        # See cmd_extends: request the full cap so multi-hop ancestor chains are
-        # not truncated non-deterministically.
-        "limit": 1000,
-    }}
-
-    result = _query(body)
-    all_nodes = _nodes(result, "Definition")
-    rows = [
-        n for n in all_nodes
-        if n.get("fqn") != args.name
-    ]
+    depth = _clamp_depth(args.depth)
+    result = _query(build_ancestors_query(args.project_id, args.branch, args.name, depth))
+    rows = [n for n in _nodes(result, "Definition") if n.get("fqn") != args.name]
 
     prefix = getattr(args, "filter_prefix", None) or ""
     rows = _filter_by_prefix(rows, prefix)
@@ -284,66 +285,58 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
     if not rows:
         print("(no ancestors found — class may not be indexed on this branch)")
         return
-    print(f"{'type':12}  {'fqn':<60}  location")
-    print("-" * 110)
-    for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
-        fqn  = n.get("fqn", n.get("name", "?"))
-        kind = n.get("definition_type", "?")
-        loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
-        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+    _print_definitions(rows)
     print(f"\n{len(rows)} ancestor(s) found")
 
 
-def cmd_includes(args: argparse.Namespace) -> None:
-    """For each descendant of BASE, list concerns they include from PREFIX — single query.
+def build_descendants_query(project_id: int, branch: str, base: str, depth: int) -> str:
+    key, value = _resolve_name(base)
+    return _gql(
+        f"(descendant:Definition)-[:EXTENDS{_hops(depth)}]->(base:Definition)",
+        [_scope("base", project_id, branch), f"base.{key} = {_lit(value)}",
+         _scope("descendant", project_id, branch)],
+        _returns("base", ["fqn", "name"])
+        + _returns("descendant", ["fqn", "name", "definition_type", "file_path", "start_line"]),
+        1000,
+    )
 
-    More efficient than code_extends + N × code_ancestors: single 3-hop traversal
-    (BASE ← EXTENDS ← descendants ← EXTENDS → concerns_in_prefix).
-    Returns a per-descendant breakdown grouped by model.
+
+def build_concerns_query(project_id: int, branch: str, descendant_ids: list[str], prefix: str) -> str:
+    # Direct includes only (single hop, intentional): the concerns each
+    # descendant mixes in itself, not transitively.
+    return _gql(
+        "(descendant:Definition)-[:EXTENDS]->(concern:Definition)",
+        [f"descendant.id IN {_id_list(descendant_ids)}",
+         _scope("descendant", project_id, branch),
+         _scope("concern", project_id, branch),
+         f"concern.file_path STARTS WITH {_lit(prefix)}"],
+        _returns("descendant", ["fqn", "name"])
+        + _returns("concern", ["fqn", "name", "definition_type", "file_path", "start_line"]),
+        1000,
+    )
+
+
+def cmd_includes(args: argparse.Namespace) -> None:
+    """For each descendant of BASE, list the concerns it includes from PREFIX.
 
     Example: includes Noteable app/models/concerns
       -> For each Noteable model (Issue, MergeRequest, etc.), the concerns it includes.
     """
     pid    = args.project_id
     branch = args.branch
-    raw_depth = getattr(args, "depth", 1)
-    depth  = max(1, min(raw_depth, 3))
-    if raw_depth != depth:
-        print(f"(depth clamped to {depth}; server limit is 3)", file=sys.stderr)
+    depth  = _clamp_depth(getattr(args, "depth", 1))
 
     norm_prefix = args.prefix.rstrip("/") + "/"
-    base_key, base_val = _resolve_name(args.base)
+    _, base_val = _resolve_name(args.base)
 
-    # Two 2-node traversals instead of one 3-node branching traversal: Orbit
-    # Remote does not currently return results for a single query with two
-    # relationships fanning out from a shared node (it returns an empty set), so
+    # Two traversals instead of one query with two relationships fanning out
+    # from a shared node: Orbit Remote returns an empty set for that shape, so
     # we (1) find the descendants of BASE, then (2) map those descendants to the
-    # concerns they extend. This is still far cheaper than the old
-    # "1 extends + N ancestors" pattern: exactly two queries regardless of fan-out.
+    # concerns they extend.
 
     # Query 1 — descendants of BASE.
-    desc_body = {"query": {
-        "query_type": "traversal",
-        "nodes": [
-            {
-                "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), base_key: {"eq": base_val}},
-                "columns": ["id", "fqn", "name"],
-            },
-            {
-                "id": "descendant", "entity": "Definition",
-                "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-            },
-        ],
-        "relationships": [
-            {"type": "EXTENDS", "from": "descendant", "to": "base",
-             "hops": [1, depth]}
-        ],
-        "limit": 1000,
-    }}
     desc_nodes = [
-        n for n in _nodes(_query(desc_body), "Definition")
+        n for n in _nodes(_query(build_descendants_query(pid, branch, args.base, depth)), "Definition")
         if n.get("fqn") != args.base and n.get("name") != args.base
     ]
     id_to_node = {n["id"]: n for n in desc_nodes if "id" in n}
@@ -357,31 +350,12 @@ def cmd_includes(args: argparse.Namespace) -> None:
         return
 
     # Query 2 — for those descendants, the concerns under PREFIX they extend.
-    concern_body = {"query": {
-        "query_type": "traversal",
-        "nodes": [
-            {
-                "id": "descendant", "entity": "Definition",
-                "filters": _base_filters(pid, branch),
-                "node_ids": list(desc_ids),
-                "columns": ["id", "fqn", "name"],
-            },
-            {
-                "id": "concern", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch),
-                            "file_path": {"starts_with": norm_prefix}},
-                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-            },
-        ],
-        # Direct includes only (single hop, intentional): the concerns each
-        # descendant mixes in itself, not transitively.
-        "relationships": [
-            {"type": "EXTENDS", "from": "descendant", "to": "concern",
-             "hops": [1, 1]}
-        ],
-        "limit": 1000,
-    }}
-    concern_result = _query(concern_body)
+    # The server accepts at most MAX_IDS_PER_QUERY IDs in one list.
+    ordered_ids = sorted(desc_ids)
+    concern_result = _merge_results([
+        _query(build_concerns_query(pid, branch, ordered_ids[i:i + MAX_IDS_PER_QUERY], norm_prefix))
+        for i in range(0, len(ordered_ids), MAX_IDS_PER_QUERY)
+    ])
     concern_nodes = _nodes(concern_result, "Definition")
     # Add concern nodes without clobbering the richer descendant rows from Q1
     # (the descendant nodes reappear here with fewer columns).
@@ -422,25 +396,40 @@ def cmd_includes(args: argparse.Namespace) -> None:
     print(f"\n{len(desc_ids)} descendant(s), {total} total concern inclusions")
 
 
+def build_class_lookup_query(project_id: int, branch: str, name: str) -> str:
+    key, value = _resolve_name(name)
+    return _gql(
+        "(d:Definition)",
+        [_scope("d", project_id, branch), f"d.{key} = {_lit(value)}",
+         f"d.definition_type IN {_list(TYPE_KINDS)}"],
+        _returns("d", ["fqn", "file_path", "start_line", "definition_type"]),
+        5,
+    )
+
+
+def build_members_query(project_id: int, branch: str, name: str) -> str:
+    key, value = _resolve_name(name)
+    # The content column is omitted: it triggers content_resolution_error on
+    # large classes.
+    return _gql(
+        "(parent:Definition)-[:DEFINES]->(member:Definition)",
+        [_scope("parent", project_id, branch), f"parent.{key} = {_lit(value)}",
+         _scope("member", project_id, branch),
+         f"member.definition_type IN {_list(MEMBER_KINDS)}"],
+        _returns("parent", ["fqn"])
+        + _returns("member", ["name", "fqn", "definition_type", "file_path", "start_line"]),
+        200,
+    )
+
+
 def cmd_class(args: argparse.Namespace) -> None:
     """List all members (methods, fields) defined inside a class."""
     pid    = args.project_id
     branch = args.branch
-    filter_key, filter_val = _resolve_name(args.name)
 
-    # Step 1: look up the class itself (traversal only returns member nodes, not the parent)
-    lookup = _query({"query": {
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "d", "entity": "Definition",
-            "filters": {**_base_filters(pid, branch),
-                        filter_key: {"eq": filter_val},
-                        "definition_type": {"in": TYPE_KINDS}},
-            "columns": ["id", "fqn", "file_path", "start_line", "definition_type"],
-        }],
-        "limit": 5,
-    }})
-    parents = _nodes(lookup, "Definition")
+    # Step 1: look up the class itself (the member traversal returns members,
+    # and the parent only with the columns it needs for filtering).
+    parents = _nodes(_query(build_class_lookup_query(pid, branch, args.name)), "Definition")
 
     print(f"CLASS — {args.name}")
     print("=" * 78)
@@ -451,29 +440,7 @@ def cmd_class(args: argparse.Namespace) -> None:
         print(f"  {p.get('definition_type','?')}  {p.get('fqn','?')}  @ {p.get('file_path','')}:{p.get('start_line','')}")
 
     # Step 2: fetch members via DEFINES traversal
-    body = {"query": {
-        "query_type": "traversal",
-        "nodes": [
-            {
-                "id": "parent", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch),
-                             filter_key: {"eq": filter_val}},
-                "columns": ["id", "fqn"],
-            },
-            {
-                "id": "member", "entity": "Definition",
-                # content column omitted — triggers content_resolution_error on large classes
-                "filters": {
-                    **_base_filters(pid, branch),
-                    "definition_type": {"in": MEMBER_KINDS},
-                },
-                "columns": ["id", "name", "fqn", "definition_type", "file_path", "start_line"],
-            },
-        ],
-        "relationships": [{"type": "DEFINES", "from": "parent", "to": "member"}],
-        "limit": 200,
-    }}
-    result  = _query(body)
+    result  = _query(build_members_query(pid, branch, args.name))
     parent_fqns = {p.get("fqn") for p in parents}
     members = [n for n in _nodes(result, "Definition") if n.get("fqn") not in parent_fqns]
     print()
@@ -490,27 +457,21 @@ def cmd_class(args: argparse.Namespace) -> None:
     print(f"\n{len(members)} member(s)")
 
 
+def build_api_query(project_id: int, branch: str, prefix: str) -> str:
+    return _gql(
+        "(d:Definition)",
+        [_scope("d", project_id, branch),
+         f"d.file_path STARTS WITH {_lit(prefix + '/')}",
+         f"d.definition_type IN {_list(TYPE_KINDS + CALLABLE_KINDS)}"],
+        _returns("d", ["fqn", "name", "definition_type", "file_path", "start_line"]),
+        100,
+    )
+
+
 def cmd_api(args: argparse.Namespace) -> None:
     """List types and callables under a file path prefix."""
-    pid    = args.project_id
-    branch = args.branch
     prefix = args.prefix.rstrip("/")
-
-    body = {"query": {
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "d", "entity": "Definition",
-            "filters": {
-                **_base_filters(pid, branch),
-                "file_path":       {"starts_with": prefix + "/"},
-                "definition_type": {"in": TYPE_KINDS + CALLABLE_KINDS},
-            },
-            "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
-        }],
-        "limit": 100,
-    }}
-    result = _query(body)
-    defs   = _nodes(result, "Definition")
+    defs   = _nodes(_query(build_api_query(args.project_id, args.branch, prefix)), "Definition")
 
     print(f"API MAP — under {prefix}/")
     print("=" * 78)
@@ -533,48 +494,31 @@ def cmd_api(args: argparse.Namespace) -> None:
     print(f"\n{len(defs)} definition(s) across {len(by_file)} file(s)")
 
 
+def build_callers_query(project_id: int, branch: str, method_name: str, orbit_fqn: str | None) -> str:
+    target = [_scope("target", project_id, branch), f"target.name = {_lit(method_name)}"]
+    if orbit_fqn:
+        # Exact FQN match: most precise — returns only the intended target
+        target.append(f"target.fqn = {_lit(orbit_fqn)}")
+    return _gql(
+        "(caller:Definition)-[:CALLS]->(target:Definition)",
+        target + [_scope("caller", project_id, branch)],
+        _returns("target", ["name", "fqn", "file_path", "start_line"])
+        + _returns("caller", ["fqn", "name", "definition_type", "file_path", "start_line"]),
+        100,
+    )
+
+
 def cmd_callers(args: argparse.Namespace) -> None:
     """Find definitions that call a given method/function.
 
     Accepts bare method name ('execute') or qualified 'ClassName#method' /
-    'ClassName::method' syntax to narrow the target when the method name is
-    common.  The class qualifier is matched via a substring filter on the
-    target node's FQN.
+    'Ns::ClassName::method' syntax to narrow the target when the method name is
+    common. A qualified name matches the target's FQN exactly.
     """
-    pid    = args.project_id
-    branch = args.branch
-
     raw = args.name
     method_name, orbit_fqn = _parse_callers_fqn(raw)
 
-    if orbit_fqn:
-        # Exact FQN match: most precise — returns only the intended target
-        target_filters: dict = {
-            **_base_filters(pid, branch),
-            "name": {"eq": method_name},
-            "fqn":  {"eq": orbit_fqn},
-        }
-    else:
-        target_filters = {**_base_filters(pid, branch), "name": {"eq": method_name}}
-
-    body = {"query": {
-        "query_type": "traversal",
-        "nodes": [
-            {
-                "id": "target", "entity": "Definition",
-                "filters": target_filters,
-                "columns": ["id", "name", "fqn", "file_path", "start_line"],
-            },
-            {
-                "id": "caller", "entity": "Definition",
-                "filters": _base_filters(pid, branch),
-                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-            },
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "target"}],
-        "limit": 100,
-    }}
-    result  = _query(body)
+    result  = _query(build_callers_query(args.project_id, args.branch, method_name, orbit_fqn))
     all_defs = _nodes(result, "Definition")
 
     if orbit_fqn:
@@ -635,7 +579,7 @@ def main() -> None:
                        help="Only show ancestors whose file_path starts with this prefix "
                             "(e.g. app/models/concerns to list included concerns only).")
 
-    p_inc = sub.add_parser("includes", help="per-descendant concern matrix via single 3-hop query")
+    p_inc = sub.add_parser("includes", help="per-descendant concern matrix via two traversals")
     p_inc.add_argument("base", help="Base class/module FQN, e.g. 'Noteable'")
     p_inc.add_argument("prefix", help="File-path prefix to filter concerns, e.g. 'app/models/concerns'")
     p_inc.add_argument("--depth", type=int, default=1,

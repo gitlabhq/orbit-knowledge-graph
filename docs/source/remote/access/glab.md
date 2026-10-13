@@ -37,7 +37,7 @@ query GitLab Orbit from the command line.
 binary, which `glab` downloads, verifies, and keeps up to date for you. Run
 `glab orbit <command> --help` for the binary's own command reference.
 
-Hosted commands such as `query`, `status`, `ontology`, `dsl`, `tools`, and
+Hosted commands such as `query`, `status`, `ontology`, `tools`, and
 `graph-status` call the GitLab Orbit Remote REST API. `glab` injects your GitLab
 credential automatically. `glab orbit setup` provides guided onboarding and
 configures supported AI agents.
@@ -78,8 +78,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 |------------|----------|---------|
 | `glab orbit status` | `GET orbit/status` | Cluster health. |
 | `glab orbit ontology [node...]` | `GET orbit/schema` | Graph ontology. Positional args expand specific nodes. |
-| `glab orbit dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
-| `glab orbit tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
+| `glab orbit tools` | `GET orbit/tools` | MCP tool manifest. |
 | `glab orbit query <query>` | `POST orbit/query` | Run query text, or a request envelope with `--file <file\|->`. |
 | `glab orbit graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
 
@@ -89,7 +88,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 glab orbit status
 glab orbit ontology
 glab orbit ontology MergeRequest Project
-glab orbit dsl
+glab orbit query 'CALL db.schema()'
 glab orbit tools
 ```
 
@@ -98,27 +97,21 @@ glab orbit tools
 Replace `your-group` with your own group path. This query returns the first
 five projects in that group:
 
-Put the request body in `query.json`:
-
-```json orbit-query
-{
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "p",
-      "entity": "Project",
-      "filters": {
-        "full_path": {"starts_with": "your-group/"}
-      }
-    }],
-    "limit": 5
-  }
-}
+```gql orbit-query
+MATCH (p:Project)
+WHERE p.full_path STARTS WITH 'your-group/'
+RETURN p
+LIMIT 5
 ```
+
+Pass the query text as the argument:
 
 ```shell
-glab orbit query --file query.json
+glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'your-group/' RETURN p LIMIT 5"
 ```
+
+To read a request envelope such as `{"query": "MATCH ..."}` from a file, use
+`--file query.json`, or `--file -` to read it from stdin.
 
 The `--response-format` flag maps to the body's `response_format`:
 

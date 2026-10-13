@@ -10,13 +10,6 @@ config:
       user: [1, 2, 3, 4, 5, 6, 7, 9011]
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
-                 "filters": {"state": "active"}}],
-      "limit": 100
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.state = 'active' RETURN u.username, u.state LIMIT 100
 

@@ -1,13 +1,6 @@
 description: Non-aggregation neighbors query on User is not blocked by the aggregation guard
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n LIMIT 10
 

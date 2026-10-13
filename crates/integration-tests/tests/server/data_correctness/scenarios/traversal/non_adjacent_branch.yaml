@@ -1,22 +1,6 @@
 description: A branch after a two-hop path joins back to the pinned user
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [1]},
-        {"id": "g", "entity": "Group"},
-        {"id": "p", "entity": "Project"},
-        {"id": "mr", "entity": "MergeRequest"}
-      ],
-      "relationships": [
-        {"type": "MEMBER_OF", "from": "u", "to": "g"},
-        {"type": "CONTAINS", "from": "g", "to": "p"},
-        {"type": "APPROVED", "from": "u", "to": "mr"}
-      ],
-      "limit": 20
-    }
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
           (u)-[:APPROVED]->(mr:MergeRequest)

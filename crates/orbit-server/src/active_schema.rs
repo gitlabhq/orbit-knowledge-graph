@@ -14,7 +14,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
-use query_engine::compiler::{validate_normalize, validate_normalize_gql};
+use query_engine::compiler::{Frontend, validate_normalize};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -223,14 +223,15 @@ impl SnapshotLoader {
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
-    let json = query
-        .render_example_language(Language::Json)
-        .map_err(|error| error.to_string())?;
-    validate_normalize(&json, ontology).map_err(|error| error.to_string())?;
-    let gql = query
-        .render_example_language(Language::Gql)
-        .map_err(|error| error.to_string())?;
-    validate_normalize_gql(&gql, ontology).map_err(|error| error.to_string())?;
+    for language in Language::ALL {
+        let frontend = match language {
+            Language::Gql => Frontend::Gql,
+        };
+        let rendered = query
+            .render_example(language)
+            .map_err(|error| error.to_string())?;
+        validate_normalize(&rendered, frontend, ontology).map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 

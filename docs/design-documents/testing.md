@@ -22,7 +22,7 @@ The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitla
 - Do not delete a Rust test until a YAML suite checks every one of its assertions.
 - Keep tests deterministic. In a test that gates CI, measure performance with deterministic numbers, such as rows or bytes read, not wall-clock time.
 - Do not add a test that depends on another test's state.
-- Mark every query example in the docs as `json orbit-query` or `gql orbit-query`, so CI runs it.
+- Mark every query example in the docs as `gql orbit-query`, so CI runs it.
 - Put a new test in a target that a CI job runs. A file under a crate's `tests/` directory does not run in CI unless a job selects it.
 
 ## Terms
@@ -77,7 +77,6 @@ Some checks run when Cargo compiles a crate. A failed check stops `cargo build` 
 Build scripts check the inputs that the code depends on but that Rust cannot type-check:
 
 - Vendored files, such as analytics schemas and Rails system-note actions, are valid and agree with their pins.
-- The public query JSON schema agrees with the limit constants in Rust.
 - Local prompts, skills, and docs that list workspace members are complete.
 
 To find a check, read the `build.rs` file of the crate that owns the input.
@@ -170,7 +169,7 @@ CI splits the container tests into lanes that run in parallel. One lane runs mos
 
 Query scenarios are the main test surface for query correctness. They live in [`data_correctness/scenarios`](../../crates/integration-tests/tests/server/data_correctness/scenarios), in one directory for each category, such as security, search, and traversal.
 
-Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
+Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios key each query by frontend, so every frontend a scenario spells must return the same result.
 
 The runner validates response schemas and cursor metadata. Repeated queries must
 preserve node order within each entity type, properties, edges, and aggregation rows. Pagination
@@ -210,8 +209,8 @@ Orbit sends analytics and usage billing events through [labkit-rs](https://gitla
 The `corpus-smoke-test` job runs a large set of queries through the production query stages against seeded ClickHouse. A stub replaces the authorization stage, and a mock serves Gitaly content. The queries come from three places:
 
 - The curated corpus in [`fixtures/queries/corpus`](../../fixtures/queries/corpus).
-- The named queries in `config/named_queries`, each in JSON and GQL.
-- Code blocks marked `json orbit-query` or `gql orbit-query` in the docs and the Orbit skill.
+- The named queries in `config/named_queries`, in every spelling.
+- Code blocks marked `gql orbit-query` in the docs and the Orbit skill.
 
 The test runs every marked query example in the root Markdown files, `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too.
 
@@ -297,7 +296,7 @@ Some failures only occur at production scale. Examples are evictions on the temp
 
 ## Fuzzing
 
-The [`orbit-fuzz`](../../crates/fuzz/README.md) crate has Bolero targets for the query frontends (JSON and GQL), the language parsers, and indexer message deserialization. Each target has a `mise fuzz:<target>` task and needs a nightly Rust toolchain. Fuzzing runs locally. CI compiles the targets but does not run them.
+The [`orbit-fuzz`](../../crates/fuzz/README.md) crate has Bolero targets for the GQL query frontend, the language parsers, and indexer message deserialization. Each target has a `mise fuzz:<target>` task and needs a nightly Rust toolchain. Fuzzing runs locally. CI compiles the targets but does not run them.
 
 ## Gates around the tests
 
@@ -310,7 +309,7 @@ Next to the tests, CI runs checks on each MR:
 - Conventional-commit MR titles, toolchain sync, and identical `AGENTS.md` and `CLAUDE.md` files.
 - JSON schema checks for the ontology, named queries, the migration ledger, indexer scenarios, and other configuration files.
 - Freshness checks for generated files, such as the config schema, DDL, Grafana dashboards, the metrics catalog, and the query-language reference.
-- Version bump checks for the query DSL, response formats, skills, and prompts.
+- Version bump checks for the query language, response formats, skills, and prompts.
 - The migration ledger check described in [Schema management](schema_management.md#ci-and-local-enforcement).
 
 ### Local hooks

@@ -1,12 +1,6 @@
 description: Hydrated integer properties stay integers, matching the inline path
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}],
-      "neighbors": {"direction": "incoming", "rel_types": ["IN_PROJECT"]}
-    }
   gql: |
     MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(n) RETURN p, n
 

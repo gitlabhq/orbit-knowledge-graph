@@ -1,21 +1,6 @@
 name: FK-chain traversal preserves node outputs and stored edge orientation
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "filters": {"username": "alice"}, "columns": ["id"]},
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id"]},
-        {"id": "pipe", "entity": "Pipeline", "columns": ["id"]},
-        {"id": "j", "entity": "Job", "filters": {"status": "failed"}, "columns": ["id"]}
-      ],
-      "relationships": [
-        {"type": "AUTHORED", "from": "u", "to": "mr"},
-        {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pipe"},
-        {"type": "HAS_JOB", "from": "pipe", "to": "j"}
-      ]
-    }
   gql: |
     MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
       -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})

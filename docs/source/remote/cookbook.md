@@ -92,78 +92,36 @@ values returned by the earlier steps.
 
 Rank the most frequent job failures across your organization:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "j",
-      "entity": "Job",
-      "filters": {
-        "status": "failed",
-        "created_at": {"gte": "2025-01-01T00:00:00Z"}
-      }
-    }
-  ],
-  "group_by": ["j.name"],
-  "aggregations": [{ "count": "j", "as": "failures" }],
-  "aggregation_sort": "-failures",
-  "limit": 40
-}
+```gql orbit-query
+MATCH (j:Job {status: 'failed'})
+WHERE j.created_at >= '2025-01-01T00:00:00Z'
+RETURN j.name, count(j) AS failures
+ORDER BY failures DESC
+LIMIT 40
 ```
 
 Find failing jobs that recur across multiple projects. GitLab Orbit has no
 distinct-count function, so group by job name and project together: a job name
 that appears under three or more projects is a shared-template hot spot.
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "j",
-      "entity": "Job",
-      "filters": {
-        "status": "failed",
-        "created_at": {"gte": "2025-01-01T00:00:00Z"}
-      }
-    },
-    {"id": "p", "entity": "Project"}
-  ],
-  "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
-  "group_by": [
-    "j.name",
-    "p.full_path"
-  ],
-  "aggregations": [{ "count": "j", "as": "failures" }],
-  "aggregation_sort": "-failures",
-  "limit": 200
-}
+```gql orbit-query
+MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+WHERE j.created_at >= '2025-01-01T00:00:00Z'
+RETURN j.name, p.full_path, count(j) AS failures
+ORDER BY failures DESC
+LIMIT 200
 ```
 
 Find the merge requests generating the most repeated failures. Filter `source`
 to `merge_request_event` so you do not also count the downstream child
 pipelines those pipelines triggered.
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "pl",
-      "entity": "Pipeline",
-      "filters": {
-        "status": "failed",
-        "source": "merge_request_event",
-        "created_at": {"gte": "2025-01-01T00:00:00Z"}
-      }
-    }
-  ],
-  "group_by": ["pl.merge_request_id"],
-  "aggregations": [{ "count": "pl", "as": "failed_pipelines" }],
-  "aggregation_sort": "-failed_pipelines",
-  "limit": 20
-}
+```gql orbit-query
+MATCH (pl:Pipeline {status: 'failed', source: 'merge_request_event'})
+WHERE pl.created_at >= '2025-01-01T00:00:00Z'
+RETURN pl.merge_request_id, count(pl) AS failed_pipelines
+ORDER BY failed_pipelines DESC
+LIMIT 20
 ```
 
 Trace one merge request to the files that keep changing. Bound this to a single
@@ -171,47 +129,23 @@ merge request; the same traversal across every failed pipeline at once times
 out. `HAS_FILE` edges are sparsely populated, so treat a short result as
 incomplete coverage rather than authoritative.
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"eq": 123456789}}},
-    {"id": "d", "entity": "MergeRequestDiff"},
-    {"id": "f", "entity": "MergeRequestDiffFile"}
-  ],
-  "relationships": [
-    {"type": "HAS_DIFF", "from": "mr", "to": "d"},
-    {"type": "HAS_FILE", "from": "d", "to": "f"}
-  ],
-  "group_by": ["f.old_path"],
-  "aggregations": [{ "count": "d", "as": "diff_snapshots" }],
-  "aggregation_sort": "-diff_snapshots",
-  "limit": 20
-}
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+WHERE mr.id = 123456789
+RETURN f.old_path, count(d) AS diff_snapshots
+ORDER BY diff_snapshots DESC
+LIMIT 20
 ```
 
 Drill into the code definitions inside a hot-spot file. `File` and `Definition`
 nodes exist only for indexed source files, so some paths, such as test-support
 helpers, might not be indexed.
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "f",
-      "entity": "File",
-      "filters": {"path": {"eq": "app/models/project.rb"}}
-    },
-    {
-      "id": "def",
-      "entity": "Definition",
-      "columns": ["name", "fqn", "definition_type", "start_line"]
-    }
-  ],
-  "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],
-  "limit": 30
-}
+```gql orbit-query
+MATCH (f:File)-[:DEFINES]->(def:Definition)
+WHERE f.path = 'app/models/project.rb'
+RETURN f, def{.name, .fqn, .definition_type, .start_line}
+LIMIT 30
 ```
 
 </details>
@@ -235,33 +169,11 @@ to read first to understand it.
 
 Find the most active contributors to a project:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "u", "entity": "User", "columns": ["username", "name"]},
-    {
-      "id": "mr",
-      "entity": "MergeRequest",
-      "filters": {"state": "merged"}
-    },
-    {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/my-project"}
-    }
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-  ],
-  "group_by": ["u"],
-  "aggregations": [
-    { "count": "mr", "as": "merged_mrs" }
-  ],
-  "aggregation_sort": "-merged_mrs",
-  "limit": 10
-}
+```gql orbit-query
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {full_path: 'my-org/my-project'})
+RETURN u{.username, .name}, count(mr) AS merged_mrs
+ORDER BY merged_mrs DESC
+LIMIT 10
 ```
 
 </details>
@@ -286,69 +198,30 @@ riskiest change I could make.
 Find all files that import a specific module. Replace `payments-service` with
 the module or library you want to trace:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "sym",
-    "entity": "ImportedSymbol",
-    "columns": ["file_path", "import_path", "identifier_name"],
-    "filters": {
-      "import_path": {"contains": "payments-service"}
-    }
-  }],
-  "limit": 100
-}
+```gql orbit-query
+MATCH (sym:ImportedSymbol)
+WHERE sym.import_path CONTAINS 'payments-service'
+RETURN sym{.file_path, .import_path, .identifier_name}
+LIMIT 100
 ```
 
 Find projects that depend on a shared library:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "f",
-      "entity": "File",
-      "filters": {"path": {"contains": "shared-auth-lib"}}
-    },
-    {"id": "b", "entity": "Branch", "columns": ["name", "is_default"]},
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-  ],
-  "relationships": [
-    {"type": "ON_BRANCH", "from": "f", "to": "b"},
-    {"type": "CONTAINS", "from": "p", "to": "b"}
-  ],
-  "limit": 100
-}
+```gql orbit-query
+MATCH (f:File)-[:ON_BRANCH]->(b:Branch)<-[:CONTAINS]-(p:Project)
+WHERE f.path CONTAINS 'shared-auth-lib'
+RETURN f, b{.name, .is_default}, p{.name, .full_path}
+LIMIT 100
 ```
 
 Rank the definitions that the most code imports:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "sym",
-      "entity": "ImportedSymbol",
-      "columns": ["import_path"],
-      "filters": {
-        "import_path": {"contains": "payments"}
-      }
-    },
-    {"id": "def", "entity": "Definition", "columns": ["name", "fqn", "file_path"]}
-  ],
-  "relationships": [
-    {"type": "IMPORTS", "from": "sym", "to": "def"}
-  ],
-  "group_by": ["def"],
-  "aggregations": [
-    { "count": "sym", "as": "import_count" }
-  ],
-  "aggregation_sort": "-import_count",
-  "limit": 20
-}
+```gql orbit-query
+MATCH (sym:ImportedSymbol)-[:IMPORTS]->(def:Definition)
+WHERE sym.import_path CONTAINS 'payments'
+RETURN def{.name, .fqn, .file_path}, count(sym) AS import_count
+ORDER BY import_count DESC
+LIMIT 20
 ```
 
 </details>
@@ -371,38 +244,19 @@ Group the results so I can see which failures are worth fixing first.
 
 Find projects with the most failed pipelines:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "pl", "to": "p"}
-  ],
-  "group_by": ["p"],
-  "aggregations": [
-    { "count": "pl", "as": "failed_count" }
-  ],
-  "aggregation_sort": "-failed_count",
-  "limit": 10
-}
+```gql orbit-query
+MATCH (pl:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+RETURN p{.name, .full_path}, count(pl) AS failed_count
+ORDER BY failed_count DESC
+LIMIT 10
 ```
 
 Find failed jobs and their failure reasons:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "j",
-    "entity": "Job",
-    "columns": ["name", "status", "failure_reason"],
-    "filters": {"status": "failed"}
-  }],
-  "limit": 10
-}
+```gql orbit-query
+MATCH (j:Job {status: 'failed'})
+RETURN j{.name, .status, .failure_reason}
+LIMIT 10
 ```
 
 </details>
@@ -426,73 +280,30 @@ Prioritize by severity and give me a short remediation shortlist.
 
 Find all critical and high vulnerabilities:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "v",
-      "entity": "Vulnerability",
-      "columns": ["title", "severity", "state", "report_type"],
-      "filters": {
-        "severity": {"in": ["critical", "high"]},
-        "state": "detected"
-      }
-    },
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "v", "to": "p"}
-  ],
-  "order_by": "-v.severity",
-  "limit": 50
-}
+```gql orbit-query
+MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(p:Project)
+WHERE v.severity IN ['critical', 'high']
+RETURN v{.title, .severity, .state, .report_type}, p{.name, .full_path}
+ORDER BY v.severity DESC
+LIMIT 50
 ```
 
 Count vulnerabilities by project:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "v",
-      "entity": "Vulnerability",
-      "filters": {"state": "detected"}
-    },
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "v", "to": "p"}
-  ],
-  "group_by": ["p"],
-  "aggregations": [
-    { "count": "v", "as": "vuln_count" }
-  ],
-  "aggregation_sort": "-vuln_count",
-  "limit": 20
-}
+```gql orbit-query
+MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(p:Project)
+RETURN p{.name, .full_path}, count(v) AS vuln_count
+ORDER BY vuln_count DESC
+LIMIT 20
 ```
 
 Count vulnerabilities by severity:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "v",
-      "entity": "Vulnerability",
-      "filters": {"state": "detected"}
-    }
-  ],
-  "group_by": ["v.severity"],
-  "aggregations": [
-    { "count": "v", "as": "vuln_count" }
-  ],
-  "aggregation_sort": "-vuln_count",
-  "limit": 10
-}
+```gql orbit-query
+MATCH (v:Vulnerability {state: 'detected'})
+RETURN v.severity, count(v) AS vuln_count
+ORDER BY vuln_count DESC
+LIMIT 10
 ```
 
 </details>
@@ -514,37 +325,21 @@ after the graph query, so these responses are slower than other queries.
 
 Fetch the source text of a file. Use `limit: 1` to avoid large responses:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "f",
-    "entity": "File",
-    "columns": ["path", "language", "content"],
-    "filters": {
-      "path": {"ends_with": "app/models/project.rb"}
-    }
-  }],
-  "limit": 1
-}
+```gql orbit-query
+MATCH (f:File)
+WHERE f.path ENDS WITH 'app/models/project.rb'
+RETURN f{.path, .language, .content}
+LIMIT 1
 ```
 
 Fetch the source text of a specific function or class definition. The `content`
 field returns the raw source text of just that definition, not the full file:
 
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "d",
-    "entity": "Definition",
-    "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
-    "filters": {
-      "fqn": {"eq": "Gitlab::Auth::authenticate"}
-    }
-  }],
-  "limit": 5
-}
+```gql orbit-query
+MATCH (d:Definition)
+WHERE d.fqn = 'Gitlab::Auth::authenticate'
+RETURN d{.name, .fqn, .file_path, .start_line, .end_line, .content}
+LIMIT 5
 ```
 
 </details>

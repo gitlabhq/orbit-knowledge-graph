@@ -6,7 +6,6 @@ cases:
         WHERE a.id IN [1, 2] AND a.id >= 1 AND a.id <= 10
           AND b.name = 'keep' AND NOT (b.id IN [3, 4] AND b.name = 'skip')
         RETURN b.id
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
         - (Filter a.id IN [1, 2], a.id >= 1, a.id <= 10 (NodeScan Definition AS a))
@@ -25,8 +24,6 @@ cases:
 
   - name: A node whose only condition is NOT gets edge-key narrowing, not candidate or filter keys
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition","not":{"name":{"in":["skip","other"]}},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
       gql: |
         MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
         WHERE NOT b.name IN ['skip', 'other']
@@ -57,7 +54,6 @@ cases:
         MATCH (mr:MergeRequest {project_id: 1000})-[:CLOSES]->(wi:WorkItem)
         WHERE NOT (mr.state = 'merged' AND wi.title = 'x')
         RETURN count(mr) AS n
-    missing_frontends: { json: JSON filters cannot express grouped negation. }
     logical:
       expect:
         - "(Filter NOT ((mr.state = 'merged') AND (wi.title = 'x')) (_))"

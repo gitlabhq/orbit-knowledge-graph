@@ -152,23 +152,6 @@ fn status_endpoint_is_get_orbit_status() {
 }
 
 #[test]
-fn dsl_endpoint_is_get_orbit_schema_dsl() {
-    let (base_url, handle) = serve_once(r#"{"$schema":"draft"}"#, "application/json");
-    let output = run_orbit(&base_url, &["dsl"]);
-    let request = handle.join().expect("join mock");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/schema/dsl HTTP/1.1"
-    );
-}
-
-#[test]
 fn graph_status_sends_full_path_query() {
     let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
     let output = run_orbit(
@@ -276,7 +259,7 @@ fn query_posts_envelope_with_resolved_response_format() {
             .stdin
             .take()
             .unwrap()
-            .write_all(br#"{"query":{"query_type":"traversal"}}"#)
+            .write_all(br#"{"query":"MATCH (u:User {id: 1}) RETURN u"}"#)
             .expect("write stdin");
         child.wait_with_output().expect("wait orbit query")
     };
@@ -291,7 +274,7 @@ fn query_posts_envelope_with_resolved_response_format() {
 
     let sent: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
     assert_eq!(sent["response_format"], "raw");
-    assert_eq!(sent["query"]["query_type"], "traversal");
+    assert_eq!(sent["query"], "MATCH (u:User {id: 1}) RETURN u");
 
     assert_eq!(output.stdout, b"@ok");
 }

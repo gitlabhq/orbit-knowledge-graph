@@ -46,8 +46,8 @@ pub fn decode(after: &str, query_hash: u64) -> Result<Vec<Option<String>>> {
     Ok(token.k)
 }
 
-/// FNV-1a over the canonicalized (key-sorted) query JSON minus `cursor`, so a
-/// token binds to the exact query it was issued for.
+/// FNV-1a over the canonicalized (key-sorted) value, so a token binds to the
+/// exact query it was issued for.
 pub fn canonical_hash(query: &serde_json::Value) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     let mut write = |bytes: &[u8]| {
@@ -56,19 +56,16 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
             hash = hash.wrapping_mul(0x100000001b3);
         }
     };
-    fn canonicalize(v: &serde_json::Value, skip_cursor: bool, out: &mut dyn FnMut(&[u8])) {
+    fn canonicalize(v: &serde_json::Value, out: &mut dyn FnMut(&[u8])) {
         match v {
             serde_json::Value::Object(map) => {
-                let mut keys: Vec<&String> = map
-                    .keys()
-                    .filter(|k| !(skip_cursor && *k == "cursor"))
-                    .collect();
+                let mut keys: Vec<&String> = map.keys().collect();
                 keys.sort();
                 out(b"{");
                 for k in keys {
                     out(k.as_bytes());
                     out(b":");
-                    canonicalize(&map[k], false, out);
+                    canonicalize(&map[k], out);
                     out(b",");
                 }
                 out(b"}");
@@ -76,7 +73,7 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
             serde_json::Value::Array(items) => {
                 out(b"[");
                 for item in items {
-                    canonicalize(item, false, out);
+                    canonicalize(item, out);
                     out(b",");
                 }
                 out(b"]");
@@ -84,7 +81,7 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
             other => out(other.to_string().as_bytes()),
         }
     }
-    canonicalize(query, true, &mut write);
+    canonicalize(query, &mut write);
     hash
 }
 
@@ -320,17 +317,16 @@ mod tests {
     }
 
     #[test]
-    fn canonical_hash_ignores_cursor_and_key_order() {
-        let a: serde_json::Value =
-            serde_json::from_str(r#"{"limit":5,"query_type":"traversal"}"#).unwrap();
-        let b: serde_json::Value = serde_json::from_str(
-            r#"{"query_type":"traversal","cursor":{"page_size":10},"limit":5}"#,
-        )
-        .unwrap();
-        let c: serde_json::Value =
-            serde_json::from_str(r#"{"limit":6,"query_type":"traversal"}"#).unwrap();
+    fn canonical_hash_ignores_key_order_and_keeps_token_order() {
+        let a = serde_json::json!({"limit": 5, "kind": "traversal"});
+        let b = serde_json::json!({"kind": "traversal", "limit": 5});
+        let c = serde_json::json!({"kind": "traversal", "limit": 6});
         assert_eq!(canonical_hash(&a), canonical_hash(&b));
         assert_ne!(canonical_hash(&a), canonical_hash(&c));
+        assert_ne!(
+            canonical_hash(&serde_json::json!(["MATCH", "(", "u"])),
+            canonical_hash(&serde_json::json!(["MATCH", "u", "("]))
+        );
     }
 
     #[test]

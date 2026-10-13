@@ -1,19 +1,6 @@
 name: Narrowed node reads recheck mutable fields outside latest-row resolution
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "p", "entity": "Project", "filters": {"star_count": 1}},
-        {"id": "mr", "entity": "MergeRequest", "node_ids": [9710]}
-      ],
-      "relationships": [
-        {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-      ],
-      "group_by": ["p.name"],
-      "aggregations": [{"count": "mr", "as": "c"}]
-    }
   gql: |
     MATCH (p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest {id: 9710})
     RETURN p.name, count(mr) AS c

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "NamedQuery",
-  "description": "A server-defined query in config/named_queries/ with one JSON DSL and one GQL spelling. The server renders the spelling the request selects and compiles it with the matching frontend. Each file name must match its name field.",
+  "description": "A server-defined query in config/named_queries/ with one spelling per supported query language. The server renders the spelling the request selects and compiles it with the matching frontend. Each file name must match its name field.",
   "type": "object",
   "required": ["name", "description", "query"],
   "additionalProperties": false,
@@ -27,7 +27,7 @@
       "items": {
         "enum": ["current_user_id"]
       },
-      "description": "Trusted server values, never client-supplied. JSON uses {$binding: name}; GQL uses binding(\"name\")."
+      "description": "Trusted server values, never client-supplied. The query uses binding(\"name\")."
     },
     "parameters": {
       "type": "object",
@@ -48,25 +48,20 @@
           }
         }
       },
-      "description": "Client values validated against JSON Schema. JSON uses {$param: name} for whole values and a \"$param:name\" object key for string parameters. GQL uses param(\"name\") for encoded literals, identifier(\"name\") for validated identifiers, and integer(\"name\") for decimal Int64 IDs."
+      "description": "Client values validated against JSON Schema. The query uses param(\"name\") for encoded literals, identifier(\"name\") for validated identifiers, and integer(\"name\") for decimal Int64 IDs."
     },
     "query": {
       "type": "object",
-      "required": ["json", "gql"],
+      "required": ["gql"],
       "additionalProperties": false,
       "properties": {
-        "json": {
-          "type": "object",
-          "required": ["query_type"],
-          "description": "Query DSL object with {$binding: name}, {$param: name}, and \"$param:name\" placeholders replaced at render time."
-        },
         "gql": {
           "type": "string",
           "minLength": 1,
           "description": "Trusted GQL text with MiniJinja lookup expressions. Authors must place each lookup at a complete literal or identifier position outside quotes, backticks, and comments, without removing its encoding."
         }
       },
-      "description": "Both spellings must select the same graph shape. The parity test in crates/integration-tests compiles them to identical SQL."
+      "description": "One spelling per supported query language, keyed by language. The server renders the spelling the request selects."
     }
   }
 }

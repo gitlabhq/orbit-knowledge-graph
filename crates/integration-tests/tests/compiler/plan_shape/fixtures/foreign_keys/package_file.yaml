@@ -1,8 +1,5 @@
 name: Package files use their stored package foreign key
 
-missing_frontends:
-  json: The JSON query form is being deprecated.
-
 query:
   gql: |
     MATCH (p:Package {id: 8001})-[:HAS_PACKAGE_FILE]->(f:PackageFile) RETURN p.id, f.file_name

@@ -11,14 +11,6 @@ config:
       - { id: 2104, iid: 10, title: Fix login crash, state: opened, source_branch: fix-d, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                 "columns": ["title"],
-                 "filters": {"title": [{"token_match": "FIX"}, {"all_tokens": "LOGIN Crash"}, {"any_tokens": "URGENT ios"}]}}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200
       AND token_match(mr.title, 'FIX') AND all_tokens(mr.title, 'LOGIN Crash') AND any_tokens(mr.title, 'URGENT ios')
