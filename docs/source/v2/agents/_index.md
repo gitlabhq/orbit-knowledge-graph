@@ -60,6 +60,7 @@ Options:
 - Name agents to set up only those, for example `glab orbit setup claude codex`.
   Setup adds a named agent even when it does not detect it. `--all` sets up every supported agent.
 - `--yes` skips the list. Use it in scripts and other places without a terminal.
+  Without it, setup stops with `stdin is not a terminal; pass --yes to proceed without a prompt`.
 - `--mcp` also registers the [local MCP server](mcp.md#local-mcp-server).
 - `--skip <component>` leaves out `instructions`, `hooks`, `skill`, or `mcp`. You can repeat it.
 - `--no-index` skips indexing.
