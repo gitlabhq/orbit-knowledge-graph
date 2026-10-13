@@ -1,8 +1,6 @@
 name: Denormalized singleton sets and boolean filters retain value tokens
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","node_ids":[1]},{"id":"p","entity":"Pipeline","filters":{"source":{"in":["push"]},"tag":true}}],"relationships":[{"type":"TRIGGERS_PIPELINE","from":"j","to":"p"}]}
   gql: |
     MATCH (j:Job {id: 1})-[:TRIGGERS_PIPELINE]->(p:Pipeline)
     WHERE p.source IN ['push'] AND p.tag = true

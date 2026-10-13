@@ -1,14 +1,6 @@
 description: IN filter returns rows matching any of the specified values
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["name", "visibility_level"],
-                 "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
-      "limit": 10
-    }
   gql: |
     MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 AND p.visibility_level IN ['public', 'internal'] RETURN p.name, p.visibility_level LIMIT 10
 

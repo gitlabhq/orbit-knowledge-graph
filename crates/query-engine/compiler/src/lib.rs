@@ -5,7 +5,7 @@
 //! # Pipeline
 //!
 //! ```text
-//! raw → {JSON | GQL} frontend → Input → shared compiler passes → SQL
+//! GQL text → Input → shared compiler passes → SQL
 //! ```
 //!
 //! # Example
@@ -24,13 +24,9 @@
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
-//! let json = r#"{
-//!     "query_type": "traversal",
-//!     "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-//!     "limit": 10
-//! }"#;
+//! let query = "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10";
 //!
-//! let result = compile(json, Frontend::JsonDsl, &ontology, &ctx).unwrap();
+//! let result = compile(query, Frontend::Gql, &ontology, &ctx).unwrap();
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
@@ -59,7 +55,6 @@ pub use constants::{
 pub use error::{QueryError, RejectionReason, Result};
 pub use input::{
     ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
-    parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
@@ -119,11 +114,6 @@ pub fn compile_model(
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
         Frontend::Gql => {
             let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
@@ -148,11 +138,6 @@ pub fn compile_local(
     let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     match fe {
-        Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_json_dsl)
-        }
         Frontend::Gql => {
             let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
             c.set_raw(raw.to_string());
@@ -161,32 +146,24 @@ pub fn compile_local(
     }
 }
 
-/// Run only `validate` + `normalize`, returning the normalized [`Input`].
-pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+/// Run only parsing, validation, and normalization, returning the normalized [`Input`].
+pub fn validate_normalize(raw: &str, fe: Frontend, ontology: &Arc<Ontology>) -> Result<Input> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ValidateNormalizeCtx::new(data_model);
-    ctx.set_raw(json_input.to_string());
-    config::run_validate_normalize(&mut ctx)
+    let (result, input) = match fe {
+        Frontend::Gql => {
+            let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
+            ctx.set_raw(raw.to_string());
+            (
+                config::run_validate_normalize_gql(&mut ctx),
+                ctx.take_input(),
+            )
+        }
+    };
+    result
         .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
+            input.ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
-            })
-        })
-        .count_err()
-}
-
-pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
-    let data_model = data_model::clickhouse(Arc::clone(ontology))
-        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
-    ctx.set_raw(raw.to_string());
-    config::run_validate_normalize_gql(&mut ctx)
-        .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant(
-                    "validate_normalize_gql produced no input".into(),
-                )
             })
         })
         .count_err()
@@ -260,33 +237,27 @@ mod tests {
     #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        for fe in [Frontend::JsonDsl, Frontend::Gql] {
-            let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-            let err =
-                compile("not a query", fe, &ONTOLOGY, &security_ctx()).expect_err("must reject");
-            let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-            assert!(
-                matches!(
-                    (fe, &err),
-                    (Frontend::JsonDsl, QueryError::Parse(_))
-                        | (Frontend::Gql, QueryError::Validation(_))
-                ),
-                "unexpected error: {err:?}"
-            );
-            assert!(
-                after > before,
-                "count_err must run on parse errors (before={before}, after={after})"
-            );
-        }
+        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        let err = compile("not a query", Frontend::Gql, &ONTOLOGY, &security_ctx())
+            .expect_err("must reject");
+        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        assert!(
+            matches!(err, QueryError::Validation(_)),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            after > before,
+            "count_err must run on parse errors (before={before}, after={after})"
+        );
     }
 
     #[test]
     fn allowlist_rejected_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
+        let query = r#"MATCH (x:NotARealEntity) RETURN x{.id} LIMIT 1"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err =
-            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
@@ -387,14 +358,8 @@ mod tests {
     fn note_excerpt_chars(limit: u32) -> u32 {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
-            &format!(
-                r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}}],
-                "limit": {limit}
-            }}"#
-            ),
-            Frontend::JsonDsl,
+            &format!("MATCH (n:Note {{id: 1}}) RETURN n.note LIMIT {limit}"),
+            Frontend::Gql,
             &ontology,
             &security_ctx(),
         )

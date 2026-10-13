@@ -1,7 +1,12 @@
 use super::*;
 use crate::tools::CommandRegistry;
-use query_engine::compiler::Frontend;
 use serde_json::Value;
+
+fn gql_tools_request() -> ListToolsRequest {
+    ListToolsRequest {
+        language: QueryLanguage::Gql as i32,
+    }
+}
 
 fn service_without_schema() -> OrbitServiceImpl {
     OrbitServiceImpl::new(
@@ -20,7 +25,7 @@ async fn command_response(
 ) -> Result<InvokeAgentCommandResponse, Status> {
     test_service()
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-            language: QueryLanguage::Json as i32,
+            language: QueryLanguage::Gql as i32,
             command_name: command_name.into(),
             parameters_json: parameters_json.into(),
         }))
@@ -159,22 +164,19 @@ async fn commands_reject_malformed_json() {
 async fn static_commands_succeed_without_an_active_schema() {
     let service = service_without_schema();
 
-    for command_name in ["get_query_dsl", "get_response_format"] {
-        let response = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                language: QueryLanguage::Json as i32,
-                command_name: command_name.into(),
-                parameters_json: "{}".into(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let Some(invoke_agent_command_response::Content::FormattedText(text)) = response.content
-        else {
-            panic!("expected formatted command response for {command_name}");
-        };
-        assert!(!text.is_empty());
-    }
+    let response = service
+        .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+            language: QueryLanguage::Gql as i32,
+            command_name: "get_response_format".into(),
+            parameters_json: "{}".into(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    let Some(invoke_agent_command_response::Content::FormattedText(text)) = response.content else {
+        panic!("expected formatted command response");
+    };
+    assert!(!text.is_empty());
 }
 
 #[tokio::test]
@@ -188,7 +190,7 @@ async fn graph_schema_commands_validate_before_requiring_an_active_schema() {
     ] {
         let error = service
             .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                language: QueryLanguage::Json as i32,
+                language: QueryLanguage::Gql as i32,
                 command_name: "get_graph_schema".into(),
                 parameters_json: parameters.into(),
             }))
@@ -202,12 +204,15 @@ async fn graph_schema_commands_validate_before_requiring_an_active_schema() {
 async fn advertised_tools_and_commands_have_valid_parameter_schemas() {
     let service = test_service();
     let tools = service
-        .list_tools(authed_request(ListToolsRequest::default()))
+        .list_tools(authed_request(gql_tools_request()))
         .await
         .unwrap()
         .into_inner();
     let commands = service
-        .list_agent_commands(authed_request(ListAgentCommandsRequest::default()))
+        .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Gql as i32,
+            ..Default::default()
+        }))
         .await
         .unwrap()
         .into_inner();
@@ -223,10 +228,59 @@ async fn advertised_tools_and_commands_have_valid_parameter_schemas() {
 }
 
 #[tokio::test]
-async fn query_language_command_returns_the_versioned_schema() {
-    let result = command_json("get_query_dsl", r#"{"format":"raw"}"#).await;
-    assert_eq!(result["title"], "GraphQueryAsJSON");
-    assert_eq!(result["version"], ToolService::build_query_dsl_version());
+async fn removed_query_dsl_command_is_not_found() {
+    let error = command_response("get_query_dsl", "{}").await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::NotFound);
+
+    let error = test_service()
+        .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Gql as i32,
+            command_names: vec!["get_query_dsl".into()],
+            format: ResponseFormat::Raw as i32,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::NotFound);
+}
+
+#[tokio::test]
+async fn discovery_rejects_the_removed_json_language() {
+    let service = test_service();
+    let json = QueryLanguage::Json as i32;
+    let errors = [
+        service
+            .list_tools(authed_request(ListToolsRequest { language: json }))
+            .await
+            .unwrap_err(),
+        service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest::default()))
+            .await
+            .unwrap_err(),
+        service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                language: json,
+                command_name: "get_response_format".into(),
+                parameters_json: "{}".into(),
+            }))
+            .await
+            .unwrap_err(),
+        service
+            .get_query_dsl(authed_request(GetQueryDslRequest::default()))
+            .await
+            .unwrap_err(),
+        service
+            .list_named_queries(authed_request(ListNamedQueriesRequest::default()))
+            .await
+            .unwrap_err(),
+    ];
+    for error in errors {
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert!(
+            error.message().contains("JSON Query DSL was removed"),
+            "{}",
+            error.message()
+        );
+    }
 }
 
 #[tokio::test]
@@ -398,7 +452,7 @@ async fn schema_rpc_and_command_use_the_supplied_ontology() {
     for format in ["raw", "llm"] {
         let response = service
             .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                language: QueryLanguage::Json as i32,
+                language: QueryLanguage::Gql as i32,
                 command_name: "get_graph_schema".into(),
                 parameters_json: serde_json::json!({"format": format}).to_string(),
             }))
@@ -430,8 +484,8 @@ async fn list_agent_commands_filters_known_command() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
-            language: QueryLanguage::Json as i32,
-            command_names: vec!["get_query_dsl".into()],
+            language: QueryLanguage::Gql as i32,
+            command_names: vec!["get_response_format".into()],
             format: ResponseFormat::Raw as i32,
         }))
         .await
@@ -439,7 +493,7 @@ async fn list_agent_commands_filters_known_command() {
         .into_inner();
 
     assert_eq!(response.commands.len(), 1);
-    assert_eq!(response.commands[0].name, "get_query_dsl");
+    assert_eq!(response.commands[0].name, "get_response_format");
     assert!(!response.commands[0].description.is_empty());
 }
 
@@ -448,7 +502,7 @@ async fn list_agent_commands_returns_short_command_descriptions() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
-            language: QueryLanguage::Json as i32,
+            language: QueryLanguage::Gql as i32,
             command_names: vec![],
             format: ResponseFormat::Raw as i32,
         }))
@@ -468,7 +522,7 @@ async fn list_agent_commands_returns_short_command_descriptions() {
 }
 
 #[tokio::test]
-async fn list_agent_commands_adds_routing_lead_to_gql_query_graph_only() {
+async fn list_agent_commands_adds_routing_lead_to_query_graph_only() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
@@ -485,7 +539,7 @@ async fn list_agent_commands_adds_routing_lead_to_gql_query_graph_only() {
         .iter()
         .find(|command| command.name == "query_graph")
         .expect("query_graph command should be listed");
-    let base = CommandRegistry::commands_for(Frontend::Gql)
+    let base = CommandRegistry::get_all_commands()
         .into_iter()
         .find(|command| command.name == "query_graph")
         .expect("query_graph command should be registered");
@@ -500,8 +554,8 @@ async fn list_agent_commands_returns_toon_for_llm_format() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
-            language: QueryLanguage::Json as i32,
-            command_names: vec!["get_query_dsl".into()],
+            language: QueryLanguage::Gql as i32,
+            command_names: vec!["get_response_format".into()],
             format: ResponseFormat::Llm as i32,
         }))
         .await
@@ -510,7 +564,11 @@ async fn list_agent_commands_returns_toon_for_llm_format() {
 
     assert_eq!(response.commands.len(), 1);
     assert!(response.formatted_text.contains("commands[1]"));
-    assert!(response.formatted_text.contains("name: get_query_dsl"));
+    assert!(
+        response
+            .formatted_text
+            .contains("name: get_response_format")
+    );
     assert!(response.formatted_text.contains("input_schema"));
 }
 
@@ -519,7 +577,7 @@ async fn list_agent_commands_rejects_unknown_command() {
     let service = test_service();
     let status = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
-            language: QueryLanguage::Json as i32,
+            language: QueryLanguage::Gql as i32,
             command_names: vec!["typo".into()],
             format: ResponseFormat::Raw as i32,
         }))
@@ -535,9 +593,9 @@ async fn invoke_agent_command_maps_intercepted_command_to_failed_precondition() 
     let service = test_service();
     let status = service
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-            language: QueryLanguage::Json as i32,
+            language: QueryLanguage::Gql as i32,
             command_name: "query_graph".into(),
-            parameters_json: r#"{"query":{}}"#.into(),
+            parameters_json: r#"{"query":"MATCH (u:User {id: 1}) RETURN u"}"#.into(),
         }))
         .await
         .unwrap_err();
@@ -550,8 +608,8 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
     let service = test_service();
     let raw = service
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-            language: QueryLanguage::Json as i32,
-            command_name: "get_query_dsl".into(),
+            language: QueryLanguage::Gql as i32,
+            command_name: "get_response_format".into(),
             parameters_json: r#"{"format":"raw"}"#.into(),
         }))
         .await
@@ -564,13 +622,13 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(
         parsed.get("version").and_then(serde_json::Value::as_str),
-        Some(ToolService::build_query_dsl_version().as_str())
+        Some(ToolService::build_response_format_version().as_str())
     );
 
     let llm = service
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-            language: QueryLanguage::Json as i32,
-            command_name: "get_query_dsl".into(),
+            language: QueryLanguage::Gql as i32,
+            command_name: "get_response_format".into(),
             parameters_json: "{}".into(),
         }))
         .await
@@ -580,7 +638,7 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
     let Some(invoke_agent_command_response::Content::FormattedText(text)) = llm.content else {
         panic!("expected LLM command result text");
     };
-    assert!(text.contains("QueryDSL v"));
+    assert!(text.contains("ResponseFormat v"));
 }
 
 #[tokio::test]
@@ -589,11 +647,7 @@ async fn list_tools_inlines_the_command_catalog_only_for_dws_callers() {
     let mut descriptions = Vec::new();
     for source_type in [SourceType::Dws, SourceType::Mcp] {
         let tools = service
-            .list_tools(authed_request_from(
-                ListToolsRequest::default(),
-                1,
-                source_type,
-            ))
+            .list_tools(authed_request_from(gql_tools_request(), 1, source_type))
             .await
             .unwrap()
             .into_inner();

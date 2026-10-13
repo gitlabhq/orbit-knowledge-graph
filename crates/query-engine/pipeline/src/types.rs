@@ -46,7 +46,7 @@ impl TypeMap {
 }
 
 pub struct QueryPipelineContext {
-    pub query_json: String,
+    pub query: String,
     pub frontend: compiler::Frontend,
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,

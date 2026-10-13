@@ -1,15 +1,6 @@
 cases:
   - name: Exact hop depth excludes shorter arms
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "a", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
-            {"id": "b", "entity": "Definition", "columns": ["id"]}
-          ],
-          "relationships": [{"type": "CALLS", "from": "a", "to": "b", "hops": [2, 2]}]
-        }
       gql: |
         MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition) RETURN a.id, b.id
     logical:
@@ -36,8 +27,6 @@ cases:
 
   - name: A one-to-one hop range plans a plain relationship without depth arms
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"n","entity":"Note","columns":["confidential"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","hops":[1,1]}],"limit":25}
       gql: |
         MATCH (u:User {id: 1})-[:AUTHORED*1..1]->(n:Note) RETURN u.username, n.confidential LIMIT 25
     logical:

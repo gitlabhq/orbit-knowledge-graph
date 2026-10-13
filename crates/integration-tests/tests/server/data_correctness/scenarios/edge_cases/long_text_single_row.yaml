@@ -1,14 +1,6 @@
 description: Single-row page returns full emoji text without truncation
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "n", "entity": "Note", "node_ids": [3002],
-                 "columns": ["note", "discussion_id"],
-                 "filters": {"note": {"ends_with": "tail"}}}],
-      "limit": 1
-    }
   gql: |
     MATCH (n:Note {id: 3002}) WHERE n.note ENDS WITH 'tail' RETURN n.note, n.discussion_id LIMIT 1
 

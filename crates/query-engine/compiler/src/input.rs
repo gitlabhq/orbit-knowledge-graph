@@ -1,36 +1,32 @@
-//! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
+//! The compiler's language-neutral query input. Frontends lower into it; the
+//! validate pass checks identifiers, ontology membership, and limits.
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
-use strum::VariantNames;
+use std::collections::HashMap;
 
 mod predicates;
 pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DynamicColumnMode {
-    #[serde(rename = "*")]
     All,
     #[default]
-    #[serde(rename = "default")]
     Default,
 }
 
 /// Optional presentation hints that control response shape without affecting query
 /// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct QueryOptions {
-    #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
     /// On SaaS: honored for GitLab team members. On self-managed/Dedicated:
     /// honored for instance admins only.
-    #[serde(default)]
     pub include_debug_sql: bool,
 }
 
@@ -72,27 +68,19 @@ pub struct RelationshipOrder {
     pub direction: OrderDirection,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Input {
     pub query_type: QueryType,
     pub nodes: Vec<InputNode>,
-    #[serde(default)]
     pub relationships: Vec<InputRelationship>,
-    #[serde(default)]
-    #[serde(flatten)]
     pub aggregation: InputAggregation,
     pub path: Option<InputPath>,
     pub neighbors: Option<InputNeighbors>,
-    #[serde(default = "default_limit")]
     pub limit: u32,
-    #[serde(skip)]
     pub skip: Option<u32>,
     pub order_by: Option<InputOrderBy>,
-    #[serde(default)]
     pub options: QueryOptions,
-    #[serde(skip)]
     pub predicates: Vec<BooleanExpression<Condition>>,
-    #[serde(skip)]
     pub relationship_return: RelationshipReturn,
 }
 
@@ -162,7 +150,6 @@ fn default_limit() -> u32 {
     Copy,
     PartialEq,
     Eq,
-    Deserialize,
     Serialize,
     strum::Display,
     strum::IntoStaticStr,
@@ -178,7 +165,6 @@ pub enum QueryType {
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
     /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip_deserializing)]
     Hydration,
 }
 
@@ -186,27 +172,19 @@ pub enum QueryType {
 // Nodes
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone)]
 pub struct InputNode {
     pub id: String,
-    #[serde(default)]
     pub entity: Option<String>,
     /// If not specified, only mandatory columns (id, type) are returned.
-    #[serde(default, deserialize_with = "deserialize_columns")]
     pub columns: Option<ColumnSelection>,
-    #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
-    #[serde(default, rename = "not", deserialize_with = "deserialize_filters")]
-    pub negated_filters: BTreeMap<String, Vec<InputFilter>>,
-    #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub id_property: String,
     /// Narrowed traversal paths extracted from base query results. Used by the
     /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
     /// queries, pruning granules through the primary key.
-    #[serde(skip)]
     pub traversal_paths: Vec<TraversalPath>,
 }
 
@@ -217,7 +195,6 @@ impl Default for InputNode {
             entity: None,
             columns: None,
             filters: HashMap::new(),
-            negated_filters: BTreeMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
@@ -232,69 +209,10 @@ pub enum ColumnSelection {
     List(Vec<String>),
 }
 
-fn deserialize_columns<'de, D>(deserializer: D) -> Result<Option<ColumnSelection>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value: Option<Value> = Option::deserialize(deserializer)?;
-    match value {
-        None => Ok(None),
-        Some(Value::String(s)) if s == "*" => Ok(Some(ColumnSelection::All)),
-        Some(Value::Array(arr)) => {
-            let cols: Result<Vec<String>, _> = arr
-                .into_iter()
-                .map(|v| {
-                    v.as_str()
-                        .map(String::from)
-                        .ok_or_else(|| serde::de::Error::custom("column names must be strings"))
-                })
-                .collect();
-            Ok(Some(ColumnSelection::List(cols?)))
-        }
-        Some(_) => Err(serde::de::Error::custom(
-            "columns must be '*' or an array of column names",
-        )),
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InputIdRange {
-    #[serde(deserialize_with = "deserialize_id")]
     pub start: i64,
-    #[serde(deserialize_with = "deserialize_id")]
     pub end: i64,
-}
-
-/// Accepts either a JSON integer or a JSON string of digits. Supports the
-/// server response convention (IDs serialized as strings to avoid JavaScript
-/// precision loss) so consumers can round-trip IDs without casting.
-fn deserialize_id<'de, D>(deserializer: D) -> Result<i64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    match Value::deserialize(deserializer)? {
-        Value::Number(n) => n
-            .as_i64()
-            .ok_or_else(|| serde::de::Error::custom("id out of i64 range")),
-        Value::String(s) => s.parse::<i64>().map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom("id must be an integer or string")),
-    }
-}
-
-fn deserialize_id_vec<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw: Vec<Value> = Vec::deserialize(deserializer)?;
-    raw.into_iter()
-        .map(|v| match v {
-            Value::Number(n) => n
-                .as_i64()
-                .ok_or_else(|| serde::de::Error::custom("id out of i64 range")),
-            Value::String(s) => s.parse::<i64>().map_err(serde::de::Error::custom),
-            _ => Err(serde::de::Error::custom("id must be an integer or string")),
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -313,8 +231,7 @@ impl InputFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
     Eq,
@@ -337,97 +254,13 @@ pub enum FilterOp {
     AnyTokens,
 }
 
-fn deserialize_filters<'de, D, C>(deserializer: D) -> Result<C, D::Error>
-where
-    D: Deserializer<'de>,
-    C: FromIterator<(String, Vec<InputFilter>)>,
-{
-    let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
-    raw.into_iter()
-        .map(|(k, v)| match parse_filter_entry(v) {
-            Ok(filters) => Ok((k, filters)),
-            Err(e) => Err(serde::de::Error::custom(format!("filter on \"{k}\": {e}"))),
-        })
-        .collect()
-}
-
-/// Parse a filter entry: a bare value is an equality match, an operator
-/// object AND-combines its operator keys, and an array of operator objects
-/// AND-combines its entries (the form needed to repeat an operator).
-fn parse_filter_entry(value: Value) -> Result<Vec<InputFilter>, String> {
-    match value {
-        Value::Object(obj) => parse_operator_object(obj),
-        Value::Array(arr) if arr.iter().any(Value::is_object) => {
-            let mut filters = Vec::new();
-            for elem in arr {
-                let Value::Object(obj) = elem else {
-                    return Err(
-                        "an array of operator objects must not mix in bare values".to_string()
-                    );
-                };
-                filters.extend(parse_operator_object(obj)?);
-            }
-            Ok(filters)
-        }
-        other => Ok(vec![InputFilter {
-            op: None,
-            value: Some(other),
-            ..Default::default()
-        }]),
-    }
-}
-
-fn parse_operator_object(obj: serde_json::Map<String, Value>) -> Result<Vec<InputFilter>, String> {
-    if obj.is_empty() {
-        return Err(format!(
-            "operator object needs at least one operator (one of: {})",
-            FilterOp::VARIANTS.join(", ")
-        ));
-    }
-    obj.into_iter()
-        .map(|(key, value)| {
-            let op: FilterOp =
-                serde_json::from_value(Value::String(key.clone())).map_err(|_| {
-                    format!(
-                        "unknown operator \"{key}\" (one of: {})",
-                        FilterOp::VARIANTS.join(", ")
-                    )
-                })?;
-            let (op, value) = match (op, value) {
-                (FilterOp::IsNull | FilterOp::IsNotNull, Value::Bool(apply)) => {
-                    let wants_null = (op == FilterOp::IsNull) == apply;
-                    let op = if wants_null {
-                        FilterOp::IsNull
-                    } else {
-                        FilterOp::IsNotNull
-                    };
-                    (op, None)
-                }
-                (FilterOp::IsNull | FilterOp::IsNotNull, _) => {
-                    return Err(format!("\"{key}\" takes a boolean value"));
-                }
-                (op, value) => (op, Some(value)),
-            };
-            Ok(InputFilter {
-                op: Some(op),
-                value,
-                ..Default::default()
-            })
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InputRelationship {
-    #[serde(rename = "type", deserialize_with = "deserialize_rel_types")]
     pub types: Vec<String>,
     pub from: String,
     pub to: String,
-    #[serde(default)]
     pub hops: HopRange,
-    #[serde(default)]
     pub direction: Direction,
-    #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
 }
 
@@ -443,66 +276,7 @@ impl Default for HopRange {
     }
 }
 
-impl<'de> Deserialize<'de> for HopRange {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        parse_hops(Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
-}
-
-fn parse_hops(value: Value) -> Result<HopRange, String> {
-    let as_hop_count = |v: &Value| -> Result<u32, String> {
-        let n = v
-            .as_u64()
-            .and_then(|n| u32::try_from(n).ok())
-            .ok_or_else(|| format!("hops bound must be a positive integer, got {v}"))?;
-        if n == 0 {
-            return Err("hops bounds must be at least 1".to_string());
-        }
-        Ok(n)
-    };
-    let Value::Array(arr) = &value else {
-        return Err(format!(
-            "hops must be a [min, max] pair (e.g. [1, 3]; [2, 2] for exactly 2), got {value}"
-        ));
-    };
-    let [min, max] = arr.as_slice() else {
-        return Err(format!(
-            "hops must be a [min, max] pair, got {} element(s)",
-            arr.len()
-        ));
-    };
-    let (min, max) = (as_hop_count(min)?, as_hop_count(max)?);
-    if min > max {
-        return Err(format!(
-            "hops range [{min}, {max}] is inverted: min must not exceed max"
-        ));
-    }
-    Ok(HopRange { min, max })
-}
-
-fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    match Value::deserialize(deserializer)? {
-        Value::String(s) => Ok(vec![s]),
-        Value::Array(arr) => arr
-            .into_iter()
-            .map(|v| {
-                v.as_str()
-                    .map(String::from)
-                    .ok_or_else(|| serde::de::Error::custom("expected string"))
-            })
-            .collect(),
-        _ => Err(serde::de::Error::custom("type must be string or array")),
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Direction {
     #[default]
     Outgoing,
@@ -527,24 +301,17 @@ impl Direction {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default)]
 pub struct InputAggregation {
-    #[serde(rename = "aggregations")]
     pub metrics: Vec<InputAggregationMetric>,
-    #[serde(rename = "group_by")]
     pub group_by: Vec<InputGroupByKey>,
-    #[serde(rename = "aggregation_sort")]
     pub sort: Option<InputAggSort>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InputAggregationMetric {
-    #[serde(flatten)]
     pub expr: AggExpr,
-    #[serde(rename = "as", default)]
     pub alias: Option<String>,
-    #[serde(default)]
     pub distinct: bool,
 }
 
@@ -561,8 +328,7 @@ impl InputAggregationMetric {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, strum::EnumDiscriminants)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq, Eq, strum::EnumDiscriminants)]
 #[strum_discriminants(
     name(AggFunction),
     vis(pub),
@@ -644,51 +410,10 @@ pub struct TargetRef {
     pub property: Option<String>,
 }
 
-impl<'de> Deserialize<'de> for TargetRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::node_ref_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "aggregation target {spec:?} must be \"node\" or \"node.property\""
-                ))
-            })?;
-        Ok(TargetRef {
-            node: caps["node"].to_owned(),
-            property: caps.name("property").map(|p| p.as_str().to_owned()),
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyRef {
     pub node: String,
     pub property: String,
-}
-
-impl<'de> Deserialize<'de> for PropertyRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::node_ref_regex()
-            .captures(&spec)
-            .filter(|caps| caps.name("property").is_some())
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "aggregation target {spec:?} must be \"node.property\""
-                ))
-            })?;
-        Ok(PropertyRef {
-            node: caps["node"].to_owned(),
-            property: caps["property"].to_owned(),
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -705,104 +430,7 @@ pub enum InputGroupByKey {
     },
 }
 
-impl<'de> Deserialize<'de> for InputGroupByKey {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        match Value::deserialize(deserializer)? {
-            Value::String(spec) => {
-                parse_group_by_spec(&spec, None, None).map_err(serde::de::Error::custom)
-            }
-            Value::Object(obj) => parse_group_by_object(obj).map_err(serde::de::Error::custom),
-            _ => Err(serde::de::Error::custom(
-                "group_by key must be a \"node\"/\"node.property\" string or a {\"key\": ..., \"truncate\"?: ..., \"as\"?: ...} object",
-            )),
-        }
-    }
-}
-
-fn parse_group_by_spec(
-    spec: &str,
-    truncate: Option<TruncateUnit>,
-    alias: Option<String>,
-) -> Result<InputGroupByKey, String> {
-    let caps = crate::passes::validate::node_ref_regex()
-        .captures(spec)
-        .ok_or_else(|| match truncate {
-            Some(unit) => format!(
-                "truncate \"{}\" target {spec:?} must be \"node.property\"",
-                unit.name()
-            ),
-            None => format!("group_by key {spec:?} must be \"node\" or \"node.property\""),
-        })?;
-    match caps.name("property") {
-        Some(property) => Ok(InputGroupByKey::Property {
-            node: caps["node"].to_owned(),
-            property: property.as_str().to_owned(),
-            truncate,
-            alias,
-        }),
-        None => match truncate {
-            Some(unit) => Err(format!(
-                "truncate \"{}\" target {spec:?} must be \"node.property\" — a node cannot be truncated",
-                unit.name()
-            )),
-            None => Ok(InputGroupByKey::Node {
-                node: caps["node"].to_owned(),
-                alias,
-            }),
-        },
-    }
-}
-
-fn parse_group_by_object(
-    mut obj: serde_json::Map<String, Value>,
-) -> Result<InputGroupByKey, String> {
-    if obj.contains_key("kind") {
-        return Err(
-            "the {\"kind\": ...} group_by form was removed; use \"node\", \"node.property\", or {\"key\": ..., \"truncate\"?: ..., \"as\"?: ...}"
-                .to_string(),
-        );
-    }
-    let Some(key) = obj.remove("key") else {
-        return Err("a group_by object requires \"key\"".to_string());
-    };
-    let Value::String(spec) = key else {
-        return Err("\"key\" takes a \"node\"/\"node.property\" string".to_string());
-    };
-    let truncate = match obj.remove("truncate") {
-        Some(unit) => Some(
-            serde_json::from_value::<TruncateUnit>(unit.clone()).map_err(|_| {
-                format!(
-                    "unknown truncation unit {unit} (one of: {})",
-                    TruncateUnit::VARIANTS.join(", ")
-                )
-            })?,
-        ),
-        None => None,
-    };
-    let alias = match obj.remove("as") {
-        Some(Value::String(name)) => Some(name),
-        Some(_) => return Err("\"as\" takes an output column name string".to_string()),
-        None => None,
-    };
-    if let Some(unknown) = obj.keys().next() {
-        return Err(format!(
-            "unknown group_by object field \"{unknown}\" (expected \"key\", \"truncate\", \"as\")"
-        ));
-    }
-    if truncate.is_none() && alias.is_none() {
-        return Err(format!(
-            "{{\"key\": {spec:?}}} without \"truncate\" or \"as\" is just {spec:?} — use the string form"
-        ));
-    }
-    parse_group_by_spec(&spec, truncate, alias)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TruncateUnit {
     Minute,
     Hour,
@@ -897,29 +525,23 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InputPath {
-    #[serde(rename = "type")]
     pub path_type: PathType,
     pub from: String,
     pub to: String,
     pub max_depth: u32,
-    #[serde(default)]
     pub rel_types: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathType {
     Shortest,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InputNeighbors {
-    #[serde(default)]
     pub direction: Direction,
-    #[serde(default)]
     pub rel_types: Vec<String>,
 }
 
@@ -934,34 +556,7 @@ pub struct InputOrderBy {
     pub direction: OrderDirection,
 }
 
-impl<'de> Deserialize<'de> for InputOrderBy {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::order_by_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
-                ))
-            })?;
-        let direction = if caps.name("descending").is_some() {
-            OrderDirection::Desc
-        } else {
-            OrderDirection::Asc
-        };
-        Ok(InputOrderBy {
-            node: caps["node"].to_owned(),
-            property: caps["property"].to_owned(),
-            direction,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OrderDirection {
     #[default]
     Asc,
@@ -974,272 +569,35 @@ pub struct InputAggSort {
     pub direction: OrderDirection,
 }
 
-impl<'de> Deserialize<'de> for InputAggSort {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::aggregation_sort_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                let hint = if spec.contains('.') {
-                    "; aggregation_sort takes a bare output column name (aggregation alias or group-key column) — \"node.property\" belongs in order_by"
-                } else {
-                    ""
-                };
-                serde::de::Error::custom(format!(
-                    "aggregation_sort {spec:?} must be \"[-]column\" (leading \"-\" = descending){hint}"
-                ))
-            })?;
-        let direction = if caps.name("descending").is_some() {
-            OrderDirection::Desc
-        } else {
-            OrderDirection::Asc
-        };
-        Ok(InputAggSort {
-            column: caps["column"].to_owned(),
-            direction,
-        })
-    }
-}
-
-#[must_use = "the parsed input should be used"]
-pub fn parse_input(json: &str) -> Result<Input, serde_json::Error> {
-    serde_json::from_str(json)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn order_by(spec: &str) -> InputOrderBy {
-        serde_json::from_str(&format!("\"{spec}\"")).expect("order_by parses")
-    }
-
-    fn hops(json: &str) -> Result<HopRange, String> {
-        serde_json::from_str::<HopRange>(json).map_err(|e| e.to_string())
-    }
-
     #[test]
-    fn hops_pair_means_inclusive_range() {
-        assert_eq!(hops("[1, 3]").unwrap(), HopRange { min: 1, max: 3 });
-        assert_eq!(hops("[2, 2]").unwrap(), HopRange { min: 2, max: 2 });
-    }
-
-    #[test]
-    fn hops_bare_integer_rejects_with_pair_example() {
-        let err = hops("2").unwrap_err();
-        assert!(err.contains("[min, max] pair"), "{err}");
-    }
-
-    #[test]
-    fn hops_omitted_defaults_to_single_hop() {
-        let rel: InputRelationship =
-            serde_json::from_str(r#"{"type": "CONTAINS", "from": "a", "to": "b"}"#).unwrap();
-        assert_eq!(rel.hops, HopRange { min: 1, max: 1 });
-    }
-
-    #[test]
-    fn hops_inverted_pair_rejects_with_ordering_error() {
-        let err = hops("[3, 1]").unwrap_err();
-        assert!(err.contains("inverted"), "{err}");
-    }
-
-    #[test]
-    fn hops_zero_bound_rejects() {
-        assert!(hops("[0, 2]").unwrap_err().contains("at least 1"));
-    }
-
-    #[test]
-    fn hops_wrong_arity_rejects() {
-        let err = hops("[1, 2, 3]").unwrap_err();
-        assert!(err.contains("[min, max] pair"), "{err}");
-    }
-
-    #[test]
-    fn order_by_descending_uses_leading_dash() {
+    fn group_by_output_names_derive_and_alias() {
+        let input = crate::gql::parse(
+            "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) \
+             RETURN u, mr.state, date_trunc('month', mr.created_at), mr.target_branch AS branch, count(mr) AS count",
+        )
+        .unwrap();
         assert_eq!(
-            order_by("-mr.merged_at"),
-            InputOrderBy {
-                node: "mr".into(),
-                property: "merged_at".into(),
-                direction: OrderDirection::Desc,
-            }
+            group_by_output_names(&input.aggregation.group_by),
+            vec!["u", "mr_state", "mr_created_at_month", "branch"]
         );
     }
 
     #[test]
-    fn order_by_without_dash_is_ascending() {
-        assert_eq!(order_by("u.username").direction, OrderDirection::Asc);
-    }
-
-    #[test]
-    fn order_by_requires_node_and_property() {
-        for malformed in [
-            "merged_at",
-            "-mr.",
-            ".merged_at",
-            "-",
-            "a.b.c",
-            "1mr.merged_at",
-            "mr.1merged_at",
-        ] {
-            assert!(
-                serde_json::from_str::<InputOrderBy>(&format!("\"{malformed}\"")).is_err(),
-                "{malformed:?} should not parse"
-            );
-        }
-
-        let over_length = "a".repeat(65);
-        assert!(
-            serde_json::from_str::<InputOrderBy>(&format!("\"{over_length}.prop\"")).is_err(),
-            "identifier longer than 64 chars should not parse"
-        );
-    }
-
-    fn agg_sort(spec: &str) -> InputAggSort {
-        serde_json::from_str(&format!("\"{spec}\"")).expect("aggregation_sort parses")
-    }
-
-    #[test]
-    fn aggregation_sort_descending_uses_leading_dash() {
-        assert_eq!(
-            agg_sort("-note_count"),
-            InputAggSort {
-                column: "note_count".into(),
-                direction: OrderDirection::Desc,
-            }
-        );
-    }
-
-    #[test]
-    fn aggregation_sort_without_dash_is_ascending() {
-        assert_eq!(agg_sort("note_count").direction, OrderDirection::Asc);
-    }
-
-    #[test]
-    fn aggregation_sort_requires_bare_identifier() {
-        for malformed in [
-            "",
-            "-",
-            "1count",
-            "note-count",
-            "mr.merged_at",
-            "-mr.merged_at",
-        ] {
-            assert!(
-                serde_json::from_str::<InputAggSort>(&format!("\"{malformed}\"")).is_err(),
-                "{malformed:?} should not parse"
-            );
-        }
-
-        let over_length = "a".repeat(65);
-        assert!(
-            serde_json::from_str::<InputAggSort>(&format!("\"{over_length}\"")).is_err(),
-            "identifier longer than 64 chars should not parse"
-        );
-    }
-
-    #[test]
-    fn aggregation_sort_dotted_value_error_points_to_order_by() {
-        let err = serde_json::from_str::<InputAggSort>("\"-mr.merged_at\"").unwrap_err();
-        assert!(err.to_string().contains("order_by"), "{err}");
-    }
-
-    fn group_by_key(json: &str) -> Result<InputGroupByKey, String> {
-        serde_json::from_str::<InputGroupByKey>(json).map_err(|e| e.to_string())
-    }
-
-    #[test]
-    fn group_by_string_forms() {
-        assert_eq!(
-            group_by_key(r#""u""#).unwrap(),
-            InputGroupByKey::Node {
-                node: "u".into(),
-                alias: None
-            }
-        );
-        assert_eq!(
-            group_by_key(r#""mr.state""#).unwrap(),
-            InputGroupByKey::Property {
-                node: "mr".into(),
-                property: "state".into(),
-                truncate: None,
-                alias: None
-            }
-        );
-        let err = group_by_key(r#""mr.state.x""#).unwrap_err();
-        assert!(
-            err.contains("must be \"node\" or \"node.property\""),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn group_by_truncate_object() {
-        assert_eq!(
-            group_by_key(r#"{"key": "mr.created_at", "truncate": "month"}"#).unwrap(),
-            InputGroupByKey::Property {
-                node: "mr".into(),
-                property: "created_at".into(),
-                truncate: Some(TruncateUnit::Month),
-                alias: None
-            }
-        );
-        let err = group_by_key(r#"{"key": "mr.created_at", "truncate": "fortnight"}"#).unwrap_err();
-        assert!(
-            err.contains("unknown truncation unit \"fortnight\""),
-            "{err}"
-        );
-        let err = group_by_key(r#"{"key": "mr", "truncate": "month"}"#).unwrap_err();
-        assert!(err.contains("a node cannot be truncated"), "{err}");
-    }
-
-    #[test]
-    fn group_by_alias_forms() {
-        assert_eq!(
-            group_by_key(r#"{"key": "u", "as": "author"}"#).unwrap(),
-            InputGroupByKey::Node {
-                node: "u".into(),
-                alias: Some("author".into())
-            }
-        );
-        assert_eq!(
-            group_by_key(r#"{"key": "mr.state", "as": "state"}"#).unwrap(),
-            InputGroupByKey::Property {
-                node: "mr".into(),
-                property: "state".into(),
-                truncate: None,
-                alias: Some("state".into())
-            }
-        );
-        assert_eq!(
-            group_by_key(r#"{"key": "mr.created_at", "truncate": "month", "as": "month"}"#)
-                .unwrap(),
-            InputGroupByKey::Property {
-                node: "mr".into(),
-                property: "created_at".into(),
-                truncate: Some(TruncateUnit::Month),
-                alias: Some("month".into())
-            }
-        );
-    }
-
-    #[test]
-    fn group_by_object_rejects_degenerate_forms() {
-        let err = group_by_key(r#"{"key": "mr.state"}"#).unwrap_err();
-        assert!(err.contains("use the string form"), "{err}");
-        let err = group_by_key(r#"{"as": "name"}"#).unwrap_err();
-        assert!(err.contains("requires \"key\""), "{err}");
-        let err = group_by_key(r#"{"key": "mr.state", "unit": "month"}"#).unwrap_err();
-        assert!(
-            err.contains("unknown group_by object field \"unit\""),
-            "{err}"
-        );
-        let err = group_by_key(r#"{"month": "mr.created_at"}"#).unwrap_err();
-        assert!(err.contains("requires \"key\""), "{err}");
-        let err = group_by_key(r#"{"kind": "node", "node": "u"}"#).unwrap_err();
-        assert!(err.contains("form was removed"), "{err}");
+    fn aggregation_derives_output_name_without_alias() {
+        let input = crate::gql::parse(
+            "MATCH (mr:MergeRequest) RETURN count(mr), avg(mr.merge_duration), max(mr.additions) AS biggest",
+        )
+        .unwrap();
+        let names: Vec<String> = input
+            .aggregation
+            .metrics
+            .iter()
+            .map(InputAggregationMetric::output_name)
+            .collect();
+        assert_eq!(names, ["count_mr", "avg_mr_merge_duration", "biggest"]);
     }
 }

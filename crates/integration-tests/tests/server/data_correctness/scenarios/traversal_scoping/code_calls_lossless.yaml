@@ -9,16 +9,6 @@ config:
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12000, target_kind: Definition, source_tags: [], target_tags: [] }
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "caller", "entity": "Definition"},
-            {"id": "def", "entity": "Definition", "node_ids": [12000]}
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
-        "limit": 50
-    }
   gql: |
     MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN caller, def LIMIT 50
 

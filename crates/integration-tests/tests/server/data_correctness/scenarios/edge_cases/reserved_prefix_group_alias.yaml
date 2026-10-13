@@ -1,14 +1,6 @@
 description: Group key names cannot use the internal column prefix
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]}],
-      "group_by": ["mr", {"key": "mr.iid", "as": "_orbit_mr_id"}],
-      "aggregations": [{"count": "mr", "as": "n"}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] RETURN mr, mr.iid AS _orbit_mr_id, count(mr) AS n LIMIT 10
 

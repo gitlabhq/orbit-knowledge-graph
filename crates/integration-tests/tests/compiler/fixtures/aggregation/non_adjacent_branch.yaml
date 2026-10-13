@@ -1,22 +1,6 @@
 name: Branch aggregation counts matches joined through the original shared node
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1]},
-        {"id": "b", "entity": "Definition"},
-        {"id": "c", "entity": "Definition"},
-        {"id": "d", "entity": "Definition"}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b"},
-        {"type": "CALLS", "from": "b", "to": "c"},
-        {"type": "CALLS", "from": "a", "to": "d"}
-      ],
-      "aggregations": [{"count": "d", "as": "matches"}]
-    }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
           (a)-[:CALLS]->(d:Definition)

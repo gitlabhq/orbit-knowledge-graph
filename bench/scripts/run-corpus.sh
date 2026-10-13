@@ -116,7 +116,7 @@ for yaml in "${CORPUS_DIR}"/*.yaml; do
     QUERY=$(yq eval ".${qname}.query" "${yaml}" | resolve_samples 2>/dev/null || yq eval ".${qname}.query" "${yaml}")
     OUTPUT="${RESULTS_DIR}/${suite}_${qname}.json"
 
-    PROF_ARGS=(-t "${TPATH}" --gql --explain)
+    PROF_ARGS=(-t "${TPATH}" --explain)
 
     if [[ "${EXPECT}" == "error" ]]; then
       if "${PROFILER}" "${PROF_ARGS[@]}" "${QUERY}" >/dev/null 2>&1; then

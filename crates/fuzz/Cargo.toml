@@ -6,23 +6,13 @@ publish = false
 
 [dependencies]
 compiler = { path = "../query-engine/compiler" }
-bolero = { workspace = true }
-serde_json.workspace = true
 pest_meta = { workspace = true }
 
 [dev-dependencies]
 code-graph = { path = "../code-graph" }
 indexer = { path = "../indexer" }
-
-[[test]]
-name = "fuzz_compile"
-path = "tests/fuzz_compile/fuzz_target.rs"
-harness = false
-
-[[test]]
-name = "fuzz_compile_structured"
-path = "tests/fuzz_compile_structured/fuzz_target.rs"
-harness = false
+bolero = { workspace = true }
+serde_json.workspace = true
 
 [[test]]
 name = "fuzz_gql"

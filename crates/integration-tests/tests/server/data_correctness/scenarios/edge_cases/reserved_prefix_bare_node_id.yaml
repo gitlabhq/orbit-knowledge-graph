@@ -1,16 +1,6 @@
 description: A node ID cannot form a column name with the internal column prefix
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "project", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
-        {"id": "_orbit", "entity": "MergeRequest", "columns": ["project_id"]}
-      ],
-      "relationships": [{"type": "IN_PROJECT", "from": "_orbit", "to": "project"}],
-      "limit": 10
-    }
   gql: |
     MATCH (_orbit:MergeRequest)-[:IN_PROJECT]->(project:Project) WHERE project.id = 1000 RETURN project{.name}, _orbit{.project_id} LIMIT 10
 

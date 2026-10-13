@@ -1,16 +1,6 @@
 description: Target entity MergeRequest excludes Note and WorkItem endpoints
 
 query:
-  json: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {"id": "start", "entity": "User", "node_ids": [1]},
-        {"id": "end", "entity": "MergeRequest", "node_ids": [2000, 2001]}
-      ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
-               "rel_types": ["AUTHORED"]}
-    }
   gql: |
     MATCH p = ANY SHORTEST (start:User {id: 1})-[:AUTHORED*1]->(`end`:MergeRequest) WHERE `end`.id IN [2000, 2001] RETURN p
 

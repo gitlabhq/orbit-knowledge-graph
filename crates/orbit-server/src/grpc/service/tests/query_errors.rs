@@ -9,20 +9,12 @@ async fn predicate_limit_returns_recovery_guidance_over_the_query_stream() {
     let gql = format!(
         "MATCH (a:Definition {{id: 1}})-[:CALLS]->(b:Definition) WHERE {comparisons} RETURN a.id"
     );
-    let json = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "a", "entity": "Definition", "node_ids": [1], "filters": {
-            "name": vec![serde_json::json!({"eq": "caller"}); 8],
-            "fqn": vec![serde_json::json!({"eq": "main.caller"}); 8]
-        }}]
-    })
-    .to_string();
-    for (query, language) in [(gql, QueryLanguage::Gql), (json, QueryLanguage::Json)] {
+    {
         let message = ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Request(
                 ExecuteQueryRequest {
-                    query,
-                    language: language as i32,
+                    query: gql,
+                    language: QueryLanguage::Gql as i32,
                     ..Default::default()
                 },
             )),

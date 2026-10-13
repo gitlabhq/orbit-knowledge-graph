@@ -73,7 +73,7 @@ fn ns_to_ms(ns: u64) -> f64 {
 }
 
 pub fn build_output(
-    query_json: &str,
+    query: &str,
     org_id: i64,
     traversal_paths: &[String],
     output: &PipelineOutput,
@@ -82,7 +82,7 @@ pub fn build_output(
     response: Option<serde_json::Value>,
 ) -> ProfilerOutput {
     let query: serde_json::Value =
-        serde_json::from_str(query_json).unwrap_or(serde_json::Value::String(query_json.into()));
+        serde_json::from_str(query).unwrap_or(serde_json::Value::String(query.into()));
 
     let hydration_plan = format!("{:?}", output.compiled.hydration);
 

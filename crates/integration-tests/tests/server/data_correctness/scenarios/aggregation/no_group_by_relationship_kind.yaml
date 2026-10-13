@@ -5,17 +5,6 @@ config:
     paths: ["1/"]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
-        {"id": "u", "entity": "User"}
-      ],
-      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-      "aggregations": [{"count": "mr", "as": "total_authored"}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN count(mr) AS total_authored LIMIT 10
 

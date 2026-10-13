@@ -1,14 +1,6 @@
 description: Equality filter with no matching value returns zero rows
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username"],
-                 "filters": {"username": "nonexistent_user"}}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username = 'nonexistent_user' RETURN u.username LIMIT 10
 

@@ -23,7 +23,7 @@ use std::sync::{Arc, LazyLock};
 use crate::common::{
     DummyClaims, GRAPH_SCHEMA_SQL, TestContext, derive_clickhouse_data_model, load_ontology,
 };
-use compiler::{Frontend, parse_input};
+use compiler::Frontend;
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
@@ -221,21 +221,11 @@ fn load_named_queries() -> Vec<SmokeCase> {
     integration_testkit::named_query_examples(&queries, 1)
         .unwrap_or_else(|e| panic!("render named query {e}"))
         .into_iter()
-        .flat_map(|example| {
-            [
-                (
-                    example.json,
-                    named_queries::Language::Json,
-                    Frontend::JsonDsl,
-                ),
-                (example.gql, named_queries::Language::Gql, Frontend::Gql),
-            ]
-            .map(|(query, language, frontend)| SmokeCase {
-                key: format!("named_query::{}::{language:?}", example.name),
-                query,
-                expects_error: false,
-                frontend,
-            })
+        .map(|example| SmokeCase {
+            key: format!("named_query::{}::Gql", example.name),
+            query: example.gql,
+            expects_error: false,
+            frontend: Frontend::Gql,
         })
         .collect()
 }
@@ -340,7 +330,7 @@ fn handle_doc_code_block(
     }
 
     if marked {
-        match normalize_marked_doc_query(first_token, &block.literal) {
+        match marked_doc_query(first_token, &block.literal) {
             Ok((query, frontend)) => {
                 cases.push(SmokeCase {
                     key: format!("{path_label}:{line}"),
@@ -360,42 +350,32 @@ fn handle_doc_code_block(
                 && orbit_query_value(&value).is_some()
             {
                 failures.push(format!(
-                    "{path_label}:{line}: Orbit query JSON fence must use `json {DOC_QUERY_MARKER}`"
+                    "{path_label}:{line}: the JSON Query DSL was removed; rewrite this query as a `gql {DOC_QUERY_MARKER}` fence"
                 ));
             }
         }
         Some("bash" | "sh" | "shell") if block.literal.contains("\"query_type\"") => {
             failures.push(format!(
-                "{path_label}:{line}: shell fence contains Orbit query JSON; move the query body to a `json {DOC_QUERY_MARKER}` fence"
+                "{path_label}:{line}: shell fence contains a JSON Query DSL query, which was removed; use GQL"
             ));
         }
         _ => {}
     }
 }
 
-fn normalize_marked_doc_query(
-    first_token: Option<&str>,
-    body: &str,
-) -> Result<(String, Frontend), String> {
-    match first_token {
-        Some("json") => Ok((normalize_doc_query(body)?, Frontend::JsonDsl)),
-        Some("gql") if !body.trim().is_empty() => Ok((body.trim().to_string(), Frontend::Gql)),
-        Some("gql") => Err("marked fence does not contain an Orbit query".to_string()),
-        _ => Err(format!(
-            "`{DOC_QUERY_MARKER}` fences must use `json` or `gql` as the first info token"
-        )),
+fn marked_doc_query(first_token: Option<&str>, body: &str) -> Result<(String, Frontend), String> {
+    let frontend = first_token
+        .and_then(|token| token.parse::<Frontend>().ok())
+        .ok_or_else(|| {
+            format!(
+                "`{DOC_QUERY_MARKER}` fences must name a query language ({}) as the first info token",
+                Frontend::names().join(", ")
+            )
+        })?;
+    if body.trim().is_empty() {
+        return Err("marked fence does not contain an Orbit query".to_string());
     }
-}
-
-fn normalize_doc_query(body: &str) -> Result<String, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
-    let query = orbit_query_value(&value)
-        .ok_or_else(|| "marked fence does not contain an Orbit query".to_string())?;
-    let json =
-        serde_json::to_string(query).map_err(|e| format!("serialize Orbit query JSON: {e}"))?;
-    parse_input(&json).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
-    Ok(json)
+    Ok((body.trim().to_string(), frontend))
 }
 
 fn orbit_query_value(value: &serde_json::Value) -> Option<&serde_json::Value> {
@@ -431,7 +411,7 @@ fn relative_path(path: &Path) -> String {
 
 async fn run_pipeline(
     db: &TestContext,
-    json: &str,
+    query: &str,
     frontend: Frontend,
     (data_model, ontology): (
         &Arc<query_data_model::ClickHouseDataModel>,
@@ -449,7 +429,7 @@ async fn run_pipeline(
 
     let mut ctx = QueryPipelineContext {
         frontend,
-        query_json: json.to_string(),
+        query: query.to_string(),
         compiled: None,
         ontology: Arc::clone(ontology),
         security_context: None,

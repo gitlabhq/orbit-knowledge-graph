@@ -1,4 +1,4 @@
-name: query_graph_gql_mcp_routing
+name: query_graph_mcp_routing
 version: 1.0.0
 description: >-
   Use for questions spanning many GitLab objects or following relationships:

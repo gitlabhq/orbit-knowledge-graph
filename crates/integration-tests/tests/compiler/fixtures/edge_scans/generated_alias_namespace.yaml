@@ -1,8 +1,5 @@
 name: Generated edge aliases cannot collide with user node aliases
 
-missing_frontends:
-  json: The JSON query form is already normalized and does not expose GQL node aliases.
-
 query:
   gql: |
     MATCH (e0:Definition {id: 12000})-[:CALLS]->(b:Definition)

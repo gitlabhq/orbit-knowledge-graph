@@ -1,16 +1,6 @@
 description: Non-default PK entity with starts_with filter on head_commit_sha
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "d",
-        "entity": "MergeRequestDiff",
-        "filters": {"head_commit_sha": {"starts_with": "aaaa"}}
-      }],
-      "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
-    }
   gql: |
     MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha STARTS WITH 'aaaa' RETURN d, n
 

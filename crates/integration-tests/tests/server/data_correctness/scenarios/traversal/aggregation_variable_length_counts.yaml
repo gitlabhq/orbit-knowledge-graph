@@ -1,24 +1,6 @@
 description: Variable-length aggregation counts paths at all depths
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [7]},
-        {"id": "wi", "entity": "WorkItem"},
-        {"id": "p", "entity": "Project"},
-        {"id": "g", "entity": "Group"}
-      ],
-      "relationships": [
-        {"type": "AUTHORED", "from": "u", "to": "wi"},
-        {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-        {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 2]}
-      ],
-      "group_by": ["u"],
-      "aggregations": [{"count": "g", "as": "n"}],
-      "limit": 5
-    }
   gql: |
     MATCH (u:User {id: 7})-[:AUTHORED]->(wi:WorkItem)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..2]-(g:Group) RETURN u, count(g) AS n LIMIT 5
 

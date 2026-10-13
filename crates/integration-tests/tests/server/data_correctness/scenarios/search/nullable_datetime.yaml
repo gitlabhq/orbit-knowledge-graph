@@ -1,14 +1,6 @@
 description: Nullable DateTime column returns null when the value is unset
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["created_at"],
-                 "node_ids": [3002]}],
-      "limit": 10
-    }
   gql: |
     MATCH (n:Note {id: 3002}) WHERE n.id >= 1 AND n.id <= 10000 RETURN n.created_at LIMIT 10
 

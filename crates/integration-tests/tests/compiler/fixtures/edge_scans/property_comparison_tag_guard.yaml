@@ -1,8 +1,5 @@
 name: Property comparisons do not lower into literal edge tags
 
-missing_frontends:
-  json: The JSON frontend does not expose property-to-property comparisons.
-
 query:
   gql: |
     MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)

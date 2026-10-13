@@ -1,18 +1,6 @@
 description: File content is_null filter matches binary files with no text content
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "f", "entity": "File",
-               "node_ids": [13000, 13001, 13002, 13003, 13004],
-               "columns": ["path", "project_id", "content"],
-               "filters": {
-                   "project_id": {"eq": 1000},
-                   "content": {"is_null": true}
-               }}],
-      "limit": 10
-    }
   gql: |
     MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content IS NULL RETURN f.path, f.project_id, f.content LIMIT 10
 

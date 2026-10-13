@@ -1,15 +1,12 @@
 //! Query validation.
 //!
-//! [`Validator`] checks in three layers:
-//! 1. **Schema validation** — JSON-only: the raw text against the base and
-//!    ontology-derived JSON Schemas, before deserialization.
-//! 2. **Shape validation** — every [`Input`] regardless of frontend: identifiers,
-//!    ontology membership, limits, and filter value shapes.
-//! 3. **Cross-reference validation** — node ID references, complexity caps, and
-//!    filter typing that neither layer above can express.
+//! [`Validator`] checks in two layers:
+//! 1. **Shape validation** — identifiers, ontology membership, limits, and
+//!    filter value shapes.
+//! 2. **Cross-reference validation** — node ID references, complexity caps, and
+//!    filter typing that shape checks cannot express.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
 
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
@@ -28,81 +25,8 @@ use ontology::{DataType, TRAVERSAL_PATH_COLUMN};
 use query_data_model::ClickHouseDataModel;
 use query_data_model::PropertyId;
 
-use super::errors::format_schema_error;
-
 mod conditions;
 use conditions::{check_condition_column, check_condition_counts};
-
-pub(crate) const BASE_SCHEMA_JSON: &str =
-    include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
-
-static BASE_SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
-static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-
-pub(crate) fn base_schema() -> &'static serde_json::Value {
-    BASE_SCHEMA.get_or_init(|| {
-        serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON")
-    })
-}
-
-pub(crate) fn base_validator() -> &'static jsonschema::Validator {
-    BASE_SCHEMA_VALIDATOR.get_or_init(|| {
-        jsonschema::validator_for(base_schema()).expect("schema.json must be a valid JSON Schema")
-    })
-}
-
-pub(crate) fn order_by_regex() -> &'static regex::Regex {
-    static ORDER_BY_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    ORDER_BY_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["properties"]["order_by"]["pattern"]
-            .as_str()
-            .expect("schema.json must define an order_by pattern");
-        regex::Regex::new(pattern).expect("order_by pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn aggregation_sort_regex() -> &'static regex::Regex {
-    static AGGREGATION_SORT_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    AGGREGATION_SORT_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["properties"]["aggregation_sort"]["pattern"]
-            .as_str()
-            .expect("schema.json must define an aggregation_sort pattern");
-        regex::Regex::new(pattern).expect("aggregation_sort pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn node_ref_regex() -> &'static regex::Regex {
-    static NODE_REF_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    NODE_REF_REGEX.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["$defs"]["NodeOrPropertyRef"]["pattern"]
-            .as_str()
-            .expect("schema.json must define a NodeOrPropertyRef pattern");
-        regex::Regex::new(pattern).expect("NodeOrPropertyRef pattern must be a valid regex")
-    })
-}
-
-pub(crate) fn collect_schema_errors(
-    validator: &jsonschema::Validator,
-    schema: &serde_json::Value,
-    value: &serde_json::Value,
-) -> Result<()> {
-    let errors: Vec<_> = validator
-        .iter_errors(value)
-        .map(|e| format_schema_error(&e, schema))
-        .collect();
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(QueryError::Validation(errors.join("; ")))
-    }
-}
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
 ///
@@ -421,12 +345,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             if self.model.get().entity(entity).is_none() {
                 return Err(QueryError::AllowlistRejected(format!(
                     "unknown entity '{entity}'"
-                )));
-            }
-            if !node.negated_filters.is_empty() {
-                return Err(QueryError::PipelineInvariant(format!(
-                    "node \"{}\" has not conditions the frontend did not lift",
-                    node.id
                 )));
             }
             self.check_field(entity, &node.id_property)?;
@@ -1741,16 +1659,25 @@ mod tests {
             skip: Skip::default(),
         }
     }
-    use crate::input::parse_input;
+    use crate::gql::parse;
 
-    fn assert_rejects(json: &str, expected: &str) {
-        let input = parse_input(json).unwrap();
+    fn assert_rejects(query: &str, expected: &str) {
+        assert_input_rejects(parse(query).unwrap(), expected);
+    }
+
+    fn assert_input_rejects(input: Input, expected: &str) {
         let ontology = Ontology::load_embedded().unwrap();
         let err = validator(&ontology).check_references(&input).unwrap_err();
         assert!(
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
         );
+    }
+
+    fn mutated(query: &str, mutate: impl FnOnce(&mut Input)) -> Input {
+        let mut input = parse(query).unwrap();
+        mutate(&mut input);
+        input
     }
 
     #[test]
@@ -1769,14 +1696,11 @@ mod tests {
         let validator = validator(&ontology);
 
         let eleven_conditions: String = (0..11)
-            .map(|_| r#"{"gte": "2020-01-01"}"#)
+            .map(|_| "u.created_at >= '2020-01-01'")
             .collect::<Vec<_>>()
-            .join(", ");
-        let over_cap = parse_input(&format!(
-            r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "u", "entity": "User", "filters": {{"created_at": [{eleven_conditions}]}}}}]
-            }}"#
+            .join(" AND ");
+        let over_cap = parse(&format!(
+            "MATCH (u:User) WHERE {eleven_conditions} RETURN u"
         ))
         .unwrap();
         let err = validator.check_depth(&over_cap).unwrap_err();
@@ -1788,66 +1712,56 @@ mod tests {
 
     #[test]
     fn rejects_group_by_on_traversal() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": ["p.visibility_level"]
-            }"#,
+        assert_input_rejects(
+            mutated("MATCH (p:Project {id: 1}) RETURN p", |input| {
+                input.aggregation.group_by.push(InputGroupByKey::Property {
+                    node: "p".into(),
+                    property: "visibility_level".into(),
+                    truncate: None,
+                    alias: None,
+                })
+            }),
             "only supported for aggregation",
         );
     }
 
     #[test]
     fn rejects_disconnected_multi_node_aggregation_without_group_by() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "mr", "entity": "MergeRequest"},
-                    {"id": "p", "entity": "Project", "node_ids": [278964]}
-                ],
-                "aggregations": [
-                    {"count": "mr", "as": "total"}
-                ]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN count(mr) AS total",
+                |input| input.relationships.clear(),
+            ),
             "without group_by requires relationships",
         );
     }
 
     #[test]
     fn rejects_aggregation_direction_both() {
-        assert_rejects(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "mr", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr", "direction": "both"}],
-                "group_by": ["u"],
-                "aggregations": [{"count": "mr", "as": "count"}]
-            }"#,
+        assert_input_rejects(
+            mutated(
+                "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u, count(mr) AS count",
+                |input| input.relationships[0].direction = crate::input::Direction::Both,
+            ),
             "does not support direction",
         );
     }
 
     #[test]
-    fn identifier_regex_rejects_non_ascii() {
-        let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).unwrap();
-        let pattern = schema["$defs"]["Identifier"]["pattern"]
-            .as_str()
-            .expect("Identifier pattern missing from schema");
-        let re = regex::Regex::new(pattern).unwrap();
-
-        assert!(re.is_match("user"));
-        assert!(re.is_match("_foo"));
-        assert!(re.is_match("User123"));
-
-        assert!(!re.is_match("usеr")); // Cyrillic е (U+0435)
-        assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
-        assert!(!re.is_match("üser")); // Latin u with diaeresis
-        assert!(!re.is_match("用户")); // CJK
+    fn identifiers_reject_non_ascii() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let v = validator(&ontology);
+        for name in ["usеr", "ᴜser", "üser", "用户"] {
+            assert!(
+                parse(&format!("MATCH ({name}:User {{id: 1}}) RETURN {name}")).is_err(),
+                "{name}"
+            );
+            let escaped = parse(&format!("MATCH (`{name}`:User {{id: 1}}) RETURN `{name}`"));
+            assert!(
+                escaped.is_err() || v.check_shape(&escaped.unwrap()).is_err(),
+                "{name}"
+            );
+        }
     }
 
     #[test]

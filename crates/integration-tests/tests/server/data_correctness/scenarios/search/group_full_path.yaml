@@ -1,14 +1,6 @@
 description: Group search returns correct full_path for nested groups
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["name", "full_path"]}],
-      "order_by": "g.id",
-      "limit": 10
-    }
   gql: |
     MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g.name, g.full_path ORDER BY g.id LIMIT 10
 

@@ -1,16 +1,6 @@
 description: WorkItem-Project IN_PROJECT traversal returns correct edges and project names
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
-        {"id": "p", "entity": "Project", "columns": ["name"]}
-      ],
-      "relationships": [{"type": "IN_PROJECT", "from": "w", "to": "p"}],
-      "limit": 20
-    }
   gql: |
     MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.title, p.name LIMIT 20
 

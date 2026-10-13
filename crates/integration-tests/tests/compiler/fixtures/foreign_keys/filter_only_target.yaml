@@ -1,16 +1,6 @@
 name: Filter-only endpoints use exact reusable keys
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
-        {"id": "u", "entity": "User", "filters": {"username": "alice"}}
-      ],
-      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-      "aggregations": [{"count": "mr", "as": "n"}]
-    }
   gql: |
     MATCH (mr:MergeRequest {id: 2000})<-[:AUTHORED]-(u:User {username: 'alice'})
     RETURN count(mr) AS n

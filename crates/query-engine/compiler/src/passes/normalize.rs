@@ -239,7 +239,7 @@ fn coerce_filter(filter: &mut InputFilter, property: Option<&query_data_model::P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::parse_input;
+    use crate::gql::parse;
     use serde_json::json;
 
     fn model() -> std::sync::Arc<ClickHouseDataModel> {
@@ -249,19 +249,14 @@ mod tests {
 
     #[test]
     fn leaves_unknown_fields_and_rejects_unknown_entities() {
-        let input = parse_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}]}"#,
-        )
-        .unwrap();
+        let input = parse("MATCH (mr:MergeRequest {nonexistent_field: 42}) RETURN mr").unwrap();
         let r = normalize(input, model().as_ref()).unwrap();
         assert_eq!(
             r.nodes[0].filters.get("nonexistent_field").unwrap()[0].value,
             Some(json!(42))
         );
 
-        let input = parse_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}]}"#,
-        ).unwrap();
+        let input = parse("MATCH (x:UnknownEntity {foo: 123}) RETURN x").unwrap();
         let err = normalize(input, model().as_ref()).unwrap_err();
         assert!(
             matches!(err, QueryError::AllowlistRejected(_)),

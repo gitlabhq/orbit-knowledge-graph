@@ -193,7 +193,6 @@ impl Drop for AssertionTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use query_engine::compiler::input::parse_input;
 
     use crate::visitor::tests::{
         make_edge, make_node, make_path_edge, sample_aggregation_response,
@@ -203,15 +202,17 @@ mod tests {
     use crate::visitor::{NodeExt, ResponseView};
     use query_engine::formatters::GraphResponse;
 
-    fn parse_test_input(json: &str) -> Input {
-        parse_input(json).expect("test query JSON should parse into Input")
+    fn parse_test_input(query: &str) -> Input {
+        query_engine::compiler::gql::parse(query).expect("test query should parse into Input")
     }
 
     #[test]
     fn requirements_from_search_with_order_by() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
-                "order_by": "u.id", "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN u
+                ORDER BY u.id
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::OrderBy));
@@ -221,9 +222,9 @@ mod tests {
     #[test]
     fn requirements_from_search_with_filter() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
-                "limit": 10}"#,
+            r#"MATCH (u:User {state: 'active'})
+                RETURN u
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Filter {
@@ -235,10 +236,9 @@ mod tests {
     #[test]
     fn requirements_from_search_with_multiple_filters() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "filters": {"state": "active", "user_type": "human"}}],
-                "limit": 10}"#,
+            r#"MATCH (u:User {state: 'active', user_type: 'human'})
+                RETURN u
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Filter {
@@ -253,12 +253,7 @@ mod tests {
     #[test]
     fn requirements_from_path_finding_excludes_node_ids() {
         let input = parse_test_input(
-            r#"{"query_type": "path_finding",
-                "nodes": [
-                    {"id": "s", "entity": "User", "node_ids": [1]},
-                    {"id": "e", "entity": "Project", "node_ids": [1000]}
-                ],
-                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+            "MATCH p = ANY SHORTEST (s:User {id: 1})-[*1..3]->(e:Project {id: 1000}) RETURN p",
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::PathFinding));
@@ -268,10 +263,9 @@ mod tests {
     #[test]
     fn requirements_from_aggregation() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"count": "u", "as": "c"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN count(u) AS c
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Aggregation));
@@ -281,13 +275,9 @@ mod tests {
     #[test]
     fn requirements_from_traversal_with_single_relationship() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Relationship {
@@ -299,17 +289,9 @@ mod tests {
     #[test]
     fn requirements_from_traversal_with_multiple_relationships() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [
-                    {"type": "MEMBER_OF", "from": "u", "to": "g"},
-                    {"type": "CONTAINS", "from": "g", "to": "p"}
-                ],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+                RETURN u, g, p
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Relationship {
@@ -324,15 +306,9 @@ mod tests {
     #[test]
     fn requirements_from_aggregation_excludes_relationships() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "mr", "entity": "MergeRequest"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-                "group_by": ["u"],
-                "aggregations": [{"count": "mr", "as": "c"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+                RETURN u, count(mr) AS c
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(
@@ -347,9 +323,8 @@ mod tests {
     #[test]
     fn requirements_from_neighbors() {
         let input = parse_test_input(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "outgoing"}}"#,
+            r#"MATCH (u:User {id: 1})-->(neighbor)
+                RETURN u, neighbor"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Neighbors));
@@ -359,11 +334,10 @@ mod tests {
     #[test]
     fn requirements_from_aggregation_sort() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"count": "u", "as": "c"}],
-                "aggregation_sort": "-c",
-                "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN count(u) AS c
+                ORDER BY c DESC
+                LIMIT 10"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::AggregationSort));
@@ -374,8 +348,10 @@ mod tests {
     #[test]
     fn for_query_order_satisfied_by_assert_node_order() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
-                "order_by": "u.id", "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN u
+                ORDER BY u.id
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -385,9 +361,9 @@ mod tests {
     #[test]
     fn for_query_filter_satisfied_by_assert_filter() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}}],
-                "limit": 10}"#,
+            r#"MATCH (u:User {username: 'alice'})
+                RETURN u
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -397,10 +373,9 @@ mod tests {
     #[test]
     fn for_query_multi_filter_requires_all_fields() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "filters": {"username": "alice", "state": "active"}}],
-                "limit": 10}"#,
+            r#"MATCH (u:User {username: 'alice', state: 'active'})
+                RETURN u
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -414,10 +389,9 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_multi_filter_panics_on_partial_satisfaction() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User",
-                         "filters": {"username": "alice", "state": "active"}}],
-                "limit": 10}"#,
+            r#"MATCH (u:User {username: 'alice', state: 'active'})
+                RETURN u
+                LIMIT 10"#,
         );
         let response = GraphResponse {
             nodes: vec![make_node(
@@ -438,10 +412,9 @@ mod tests {
     #[test]
     fn for_query_aggregation_satisfied_by_assert_aggregation_value() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"count": "u", "as": "c"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN count(u) AS c
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
         view.assert_aggregation_value_i64("c", 2);
@@ -450,10 +423,7 @@ mod tests {
     #[test]
     fn for_query_path_finding_satisfied_by_path_ids() {
         let input = parse_test_input(
-            r#"{"query_type": "path_finding",
-                "nodes": [{"id": "s", "entity": "User", "node_ids": [1]},
-                           {"id": "e", "entity": "Project", "node_ids": [1000]}],
-                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+            "MATCH p = ANY SHORTEST (s:User {id: 1})-[*1..3]->(e:Project {id: 1000}) RETURN p",
         );
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
@@ -472,13 +442,9 @@ mod tests {
     #[test]
     fn for_query_relationship_satisfied_by_edges_of_type() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_node_count(4);
@@ -488,13 +454,9 @@ mod tests {
     #[test]
     fn for_query_relationship_satisfied_by_assert_edge_exists() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_node_count(4);
@@ -505,13 +467,9 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_relationship_not_satisfied_by_assert_edge_absent() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_edge_absent("User", 1, "Group", 999, "MEMBER_OF");
@@ -520,17 +478,9 @@ mod tests {
     #[test]
     fn for_query_multi_relationship_requires_all_types() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [
-                    {"type": "MEMBER_OF", "from": "u", "to": "g"},
-                    {"type": "CONTAINS", "from": "g", "to": "p"}
-                ],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+                RETURN u, g, p
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_node_count(4);
@@ -542,17 +492,9 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_multi_relationship_panics_on_partial() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"},
-                    {"id": "p", "entity": "Project"}
-                ],
-                "relationships": [
-                    {"type": "MEMBER_OF", "from": "u", "to": "g"},
-                    {"type": "CONTAINS", "from": "g", "to": "p"}
-                ],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+                RETURN u, g, p
+                LIMIT 10"#,
         );
         let mut response = sample_response();
         response
@@ -566,9 +508,8 @@ mod tests {
     #[test]
     fn for_query_neighbors_satisfied_by_assert_edge_exists() {
         let input = parse_test_input(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "outgoing"}}"#,
+            r#"MATCH (u:User {id: 1})-->(neighbor)
+                RETURN u, neighbor"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -579,9 +520,8 @@ mod tests {
     #[test]
     fn for_query_neighbors_satisfied_by_edges_of_type() {
         let input = parse_test_input(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "outgoing"}}"#,
+            r#"MATCH (u:User {id: 1})-->(neighbor)
+                RETURN u, neighbor"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -592,12 +532,10 @@ mod tests {
     #[test]
     fn for_query_aggregation_sort_satisfied_by_group_node_order() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "group_by": ["u"],
-                "aggregations": [{"count": "u", "as": "c"}],
-                "aggregation_sort": "-c",
-                "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN u, count(u) AS c
+                ORDER BY c DESC
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_grouped_aggregation_response());
         view.assert_group_node_order("u", "User", &[1, 2]);
@@ -606,12 +544,7 @@ mod tests {
 
     #[test]
     fn requirements_from_skip() {
-        let mut input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "limit": 10}"#,
-        );
-        input.skip = Some(5);
+        let input = parse_test_input("MATCH (u:User) RETURN u SKIP 5 LIMIT 10");
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Skip));
         assert_eq!(reqs.len(), 1);
@@ -619,12 +552,7 @@ mod tests {
 
     #[test]
     fn for_query_skip_satisfied_by_assert_node_count() {
-        let mut input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "limit": 10}"#,
-        );
-        input.skip = Some(5);
+        let input = parse_test_input("MATCH (u:User) RETURN u SKIP 5 LIMIT 10");
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
     }
@@ -632,9 +560,8 @@ mod tests {
     #[test]
     fn for_query_neighbors_satisfied_by_assert_edge_set() {
         let input = parse_test_input(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "outgoing"}}"#,
+            r#"MATCH (u:User {id: 1})-->(neighbor)
+                RETURN u, neighbor"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -645,9 +572,8 @@ mod tests {
     #[test]
     fn for_query_neighbors_satisfied_by_assert_edge_count() {
         let input = parse_test_input(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "outgoing"}}"#,
+            r#"MATCH (u:User {id: 1})-->(neighbor)
+                RETURN u, neighbor"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -659,8 +585,10 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_order() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
-                "order_by": "u.id", "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN u
+                ORDER BY u.id
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         drop(view);
@@ -670,9 +598,9 @@ mod tests {
     #[should_panic(expected = "Filter on 'state'")]
     fn for_query_panics_on_unsatisfied_filter_shows_field() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
-                "limit": 10}"#,
+            r#"MATCH (u:User {state: 'active'})
+                RETURN u
+                LIMIT 10"#,
         );
         let response = GraphResponse {
             nodes: vec![make_node(
@@ -690,10 +618,9 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_aggregation() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"count": "u", "as": "c"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN count(u) AS c
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
         drop(view);
@@ -703,13 +630,9 @@ mod tests {
     #[should_panic(expected = "Relationship 'MEMBER_OF'")]
     fn for_query_panics_on_unsatisfied_relationship_shows_type() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
         drop(view);
@@ -719,9 +642,8 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_neighbors() {
         let input = parse_test_input(
-            r#"{"query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"direction": "outgoing"}}"#,
+            r#"MATCH (u:User {id: 1})-->(neighbor)
+                RETURN u, neighbor"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_ids("User", &[1]);
@@ -730,12 +652,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Skip")]
     fn for_query_panics_on_unsatisfied_skip() {
-        let mut input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "limit": 10}"#,
-        );
-        input.skip = Some(5);
+        let input = parse_test_input("MATCH (u:User) RETURN u SKIP 5 LIMIT 10");
         let view = ResponseView::for_query(&input, sample_search_response());
         drop(view);
     }
@@ -744,10 +661,7 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_path_finding() {
         let input = parse_test_input(
-            r#"{"query_type": "path_finding",
-                "nodes": [{"id": "s", "entity": "User", "node_ids": [1]},
-                           {"id": "e", "entity": "Project", "node_ids": [1000]}],
-                "path": {"type": "shortest", "from": "s", "to": "e", "max_depth": 3}}"#,
+            "MATCH p = ANY SHORTEST (s:User {id: 1})-[*1..3]->(e:Project {id: 1000}) RETURN p",
         );
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
@@ -767,11 +681,10 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_aggregation_sort() {
         let input = parse_test_input(
-            r#"{"query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"count": "u", "as": "c"}],
-                "aggregation_sort": "-c",
-                "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN count(u) AS c
+                ORDER BY c DESC
+                LIMIT 10"#,
         );
         let mut response = sample_aggregation_response();
         let rows = response.rows.as_mut().unwrap();
@@ -783,14 +696,10 @@ mod tests {
 
     #[test]
     fn for_query_combined_features_requires_all() {
-        let mut input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2],
-                         "filters": {"username": {"in": ["alice", "bob"]}}}],
-                "order_by": "u.id",
-                "limit": 10}"#,
+        let input = parse_test_input(
+            "MATCH (u:User) WHERE u.id IN [1, 2] AND u.username IN ['alice', 'bob'] \
+             RETURN u ORDER BY u.id SKIP 5 LIMIT 10",
         );
-        input.skip = Some(5);
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_order("User", &[1, 2]);
         view.assert_node_count(2);
@@ -802,8 +711,10 @@ mod tests {
     #[test]
     fn skip_requirement_prevents_panic() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
-                "order_by": "u.id", "limit": 10}"#,
+            r#"MATCH (u:User)
+                RETURN u
+                ORDER BY u.id
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -813,13 +724,9 @@ mod tests {
     #[test]
     fn skip_requirement_works_for_granular_variants() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User"},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "limit": 10}"#,
+            r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+                RETURN u, g
+                LIMIT 10"#,
         );
         let view = ResponseView::for_query(&input, sample_response());
         view.assert_node_count(4);

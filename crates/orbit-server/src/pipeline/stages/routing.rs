@@ -22,9 +22,8 @@ impl PipelineStage for RoutingStage {
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
         match ctx.frontend {
-            Frontend::JsonDsl => Ok(RoutingOutput::Query),
             Frontend::Gql => match query_engine::compiler::gql::route(
-                &ctx.query_json,
+                &ctx.query,
                 &ctx.ontology,
                 ontology::introspection::IntrospectionScope::All,
             )

@@ -1,12 +1,6 @@
 description: Outgoing neighbors from User 1
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-      "neighbors": {"direction": "outgoing"}
-    }
   gql: |
     MATCH (u:User {id: 1})-->(n) RETURN u, n
 

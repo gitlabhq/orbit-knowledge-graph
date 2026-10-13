@@ -28,13 +28,8 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// Query string or @filepath. Named JSON objects map names to JSON queries,
-    /// or to GQL strings when used with --gql.
+    /// GQL query text or @filepath (a single query, or a JSON object mapping names to query text)
     query: String,
-
-    /// Read the query as one GQL statement instead of Orbit query JSON
-    #[arg(long)]
-    gql: bool,
 
     /// ClickHouse HTTP URL
     #[arg(long, default_value = "http://127.0.0.1:8123", env = "CLICKHOUSE_URL")]
@@ -132,19 +127,18 @@ struct RunContext<'a> {
     org_id: i64,
     traversal_paths: &'a [String],
     emit_response: Option<ResponseFormat>,
-    frontend: compiler::Frontend,
 }
 
 async fn run_single(
     ctx: &RunContext<'_>,
-    query_json: &str,
+    query: &str,
     instance_health: Option<serde_json::Value>,
 ) -> Result<ProfilerOutput> {
     let correlation_id = labkit::correlation::generate_id();
     let span = labkit::context::span_with_id("profile", &correlation_id);
     let mut output = ctx
         .service
-        .run_query(ctx.security_ctx.clone(), query_json, ctx.frontend)
+        .run_query(ctx.security_ctx.clone(), query)
         .instrument(span)
         .await
         .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
@@ -157,7 +151,7 @@ async fn run_single(
     });
 
     Ok(build_output(
-        query_json,
+        query,
         ctx.org_id,
         ctx.traversal_paths,
         &output,
@@ -248,21 +242,12 @@ fn embedded_schema_version() -> u32 {
     orbit_versions::VERSIONS.schema
 }
 
-fn frontend(cli: &Cli) -> compiler::Frontend {
-    if cli.gql {
-        compiler::Frontend::Gql
-    } else {
-        compiler::Frontend::JsonDsl
-    }
-}
-
 fn compile_one(
-    query_json: &str,
-    frontend: compiler::Frontend,
+    query: &str,
     ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(query_json, frontend, ontology, security_ctx)
+    compiler::compile(query, compiler::Frontend::Gql, ontology, security_ctx)
         .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
@@ -289,18 +274,18 @@ fn format_hydration(plan: &compiler::HydrationPlan) -> String {
 }
 
 fn run_compile_only(
-    query_json: &str,
+    query: &str,
     ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
     show: &CompileShow,
     cli: &Cli,
 ) -> Result<()> {
-    let entries = query_entries(query_json, cli)?;
+    let entries = query_entries(query, cli)?;
 
     if entries.len() > 1 || cli.output.is_some() {
         let mut report = BTreeMap::new();
         for (name, query) in entries {
-            let value = match compile_one(&query, frontend(cli), ontology, security_ctx) {
+            let value = match compile_one(&query, ontology, security_ctx) {
                 Ok(compiled) => {
                     let mut value = serde_json::json!({ "query": query });
                     if matches!(show, CompileShow::Base | CompileShow::Both) {
@@ -320,7 +305,7 @@ fn run_compile_only(
     }
 
     for (name, query) in &entries {
-        let compiled = compile_one(query, frontend(cli), ontology, security_ctx)?;
+        let compiled = compile_one(query, ontology, security_ctx)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -347,38 +332,10 @@ fn run_compile_only(
 }
 
 fn query_entries(raw: &str, cli: &Cli) -> Result<Vec<(String, String)>> {
-    let parsed = serde_json::from_str::<serde_json::Value>(raw);
-    let single_json = parsed.as_ref().ok().is_some_and(|value| {
-        value
-            .get("query_type")
-            .is_some_and(serde_json::Value::is_string)
-    });
-    if (!cli.gql && single_json) || (cli.gql && parsed.is_err()) {
+    let Ok(queries) = serde_json::from_str::<BTreeMap<String, String>>(raw) else {
         return Ok(vec![("query".to_string(), raw.to_string())]);
-    }
-
-    let parsed = parsed.context(if cli.gql {
-        "GQL query files must contain one statement or a JSON object of named statements"
-    } else {
-        "failed to parse query JSON"
-    })?;
-    let queries = parsed
-        .as_object()
-        .context("multi-query file must be a JSON object")?;
-    let mut entries = queries
-        .iter()
-        .map(|(name, query)| {
-            let query = if cli.gql {
-                query
-                    .as_str()
-                    .map(str::to_string)
-                    .with_context(|| format!("named GQL query '{name}' must be a string"))?
-            } else {
-                serde_json::to_string(query).context("failed to serialize query value")?
-            };
-            Ok((name.clone(), query))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    };
+    let mut entries: Vec<_> = queries.into_iter().collect();
     if let Some(filter) = &cli.filter {
         let regex = regex::Regex::new(filter)?;
         entries.retain(|(name, _)| regex.is_match(name));
@@ -422,7 +379,7 @@ async fn main() -> Result<()> {
         .with(labkit::correlation::CorrelationCaptureLayer::new())
         .init();
 
-    let query_json = if cli.query.starts_with('@') {
+    let query = if cli.query.starts_with('@') {
         std::fs::read_to_string(&cli.query[1..])
             .context(format!("failed to read query file: {}", &cli.query[1..]))?
     } else {
@@ -455,7 +412,7 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
     if let Some(show) = &cli.compile_only {
-        return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);
+        return run_compile_only(&query, &ontology, &security_ctx, show, &cli);
     }
 
     let custom_settings: std::collections::HashMap<String, String> = cli
@@ -486,10 +443,10 @@ async fn main() -> Result<()> {
     };
 
     if cli.raw_sql {
-        return run_raw_sql(&client, &query_json, &cli, &profiling_config).await;
+        return run_raw_sql(&client, &query, &cli, &profiling_config).await;
     }
 
-    let entries = query_entries(&query_json, &cli)?;
+    let entries = query_entries(&query, &cli)?;
 
     let instance_health = if profiling_config.instance_health {
         match client.fetch_instance_health().await {
@@ -516,7 +473,6 @@ async fn main() -> Result<()> {
         org_id,
         traversal_paths: &cli.traversal_paths,
         emit_response: cli.emit_response.clone(),
-        frontend: frontend(&cli),
     };
 
     if entries.len() == 1 && cli.output.is_none() {

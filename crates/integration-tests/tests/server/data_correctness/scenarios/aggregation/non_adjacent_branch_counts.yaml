@@ -1,24 +1,6 @@
 description: Count the user's approval once per project in each membership branch
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [1]},
-        {"id": "g", "entity": "Group", "columns": ["name"]},
-        {"id": "p", "entity": "Project"},
-        {"id": "mr", "entity": "MergeRequest"}
-      ],
-      "relationships": [
-        {"type": "MEMBER_OF", "from": "u", "to": "g"},
-        {"type": "CONTAINS", "from": "g", "to": "p"},
-        {"type": "APPROVED", "from": "u", "to": "mr"}
-      ],
-      "group_by": ["g"],
-      "aggregations": [{"count": "mr", "as": "approval_count"}],
-      "limit": 20
-    }
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
           (u)-[:APPROVED]->(mr:MergeRequest)

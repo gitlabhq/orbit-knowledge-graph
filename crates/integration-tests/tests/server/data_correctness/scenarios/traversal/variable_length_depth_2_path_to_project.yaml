@@ -1,22 +1,6 @@
 description: Variable-length CONTAINS includes depth-2 path from group to project (MR !1069 cliff fix)
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [7], "columns": ["username"]},
-            {"id": "wi", "entity": "WorkItem", "columns": ["title"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]},
-            {"id": "g", "entity": "Group", "columns": ["name"]}
-        ],
-        "relationships": [
-            {"type": "AUTHORED", "from": "u", "to": "wi"},
-            {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-            {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 2]}
-        ],
-        "limit": 20
-    }
   gql: |
     MATCH (u:User {id: 7})-[:AUTHORED]->(wi:WorkItem)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..2]-(g:Group) RETURN u.username, wi.title, p.name, g.name LIMIT 20
 

@@ -10,12 +10,6 @@ config:
       user: [1]
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 5555}, "columns": ["title"]}],
-        "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest {project_id: 5555}) RETURN mr.title LIMIT 10
 

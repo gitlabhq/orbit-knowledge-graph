@@ -6,18 +6,6 @@ config:
     paths: ["1/100/"]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-        {"id": "u", "entity": "User"}
-      ],
-      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-      "group_by": ["g"],
-      "aggregations": [{"count": "u", "as": "member_count"}],
-      "limit": 10
-    }
   gql: |
     MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(u:User) RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
 

@@ -5,22 +5,6 @@ config:
     paths: ["1/"]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-        {"id": "mr", "entity": "MergeRequest"},
-        {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}}
-      ],
-      "relationships": [
-        {"type": "AUTHORED", "from": "u", "to": "mr"},
-        {"type": "HAS_NOTE", "from": "mr", "to": "n"}
-      ],
-      "group_by": ["u"],
-      "aggregations": [{"count": "n", "as": "note_count"}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN u{.id, .username}, count(n) AS note_count LIMIT 10
 

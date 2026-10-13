@@ -1,16 +1,6 @@
 description: User-only aggregation with email filter rejects at compile for non-admin
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [{
-        "id": "u", "entity": "User", "columns": ["username"],
-        "filters": {"email": "target@example.com"}
-      }],
-      "aggregations": [{"count": "u", "as": "hit"}],
-      "limit": 1
-    }
   gql: |
     MATCH (u:User {email: 'target@example.com'}) RETURN count(u) AS hit LIMIT 1
 

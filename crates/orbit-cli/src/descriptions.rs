@@ -10,8 +10,8 @@ static REMOTE_PROMPTS: LazyLock<orbit_prompts::Prompts> = LazyLock::new(|| {
 
 pub(crate) fn gql_syntax() -> &'static str {
     REMOTE_PROMPTS
-        .get("tools/query_graph_gql")
-        .expect("config/prompts/remote/tools/query_graph_gql.yml is embedded")
+        .get("tools/query_graph")
+        .expect("config/prompts/remote/tools/query_graph.yml is embedded")
         .description()
 }
 

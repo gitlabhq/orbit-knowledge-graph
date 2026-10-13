@@ -1,22 +1,6 @@
 description: A pinned author remains a bridge between approved merge requests and group memberships
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "v", "entity": "User"},
-        {"id": "mr", "entity": "MergeRequest"},
-        {"id": "u", "entity": "User", "node_ids": [1]},
-        {"id": "g", "entity": "Group"}
-      ],
-      "relationships": [
-        {"type": "APPROVED", "from": "v", "to": "mr"},
-        {"type": "AUTHORED", "from": "u", "to": "mr"},
-        {"type": "MEMBER_OF", "from": "u", "to": "g"}
-      ],
-      "limit": 20
-    }
   gql: |
     MATCH (v:User)-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1})-[:MEMBER_OF]->(g:Group)
     RETURN v, mr, u, g LIMIT 20

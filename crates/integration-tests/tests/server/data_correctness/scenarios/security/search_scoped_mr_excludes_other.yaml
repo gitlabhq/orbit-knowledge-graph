@@ -4,12 +4,6 @@ config:
   security: { org_id: 1, paths: ["1/101/"] }
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr.title LIMIT 10
 

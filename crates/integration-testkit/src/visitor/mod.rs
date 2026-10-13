@@ -168,14 +168,12 @@ impl ResponseView {
     /// - Search and aggregation responses have zero edges (the formatter never
     ///   produces edges for these query types)
     pub fn for_query(input: &Input, response: GraphResponse) -> Self {
-        let response_type: QueryType = serde_json::from_value(Value::String(
-            response.query_type.clone(),
-        ))
-        .unwrap_or_else(|_| panic!("unknown response query_type '{}'", response.query_type));
         assert_eq!(
-            response_type, input.query_type,
+            response.query_type,
+            input.query_type.to_string(),
             "response query_type '{}' does not match input '{}'",
-            response.query_type, input.query_type,
+            response.query_type,
+            input.query_type,
         );
 
         if input.is_search() || input.query_type == QueryType::Aggregation {
