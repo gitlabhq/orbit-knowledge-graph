@@ -915,13 +915,8 @@ async fn dispatch(
             Ok(())
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(
-                agents,
-                false,
-                false,
-                Default::default(),
-                Default::default(),
-            );
+            let options =
+                flags.to_options(agents, false, false, Default::default(), Default::default());
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {
