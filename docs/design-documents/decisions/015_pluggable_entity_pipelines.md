@@ -199,8 +199,8 @@ It hands each stage exactly its inputs so data flows top-down:
   `build → {extract, transform}`; neither stage imports the other or exchanges planning metadata.
 
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
-unvalidated template cannot reach the runtime. A build-time gate in `orbit-server`'s
-build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces two things.
+unvalidated template cannot reach the runtime. A unit-test gate in `ontology`
+(`ontology::etl_sql::validate_authored_etl_sql`) enforces two things.
 Every authored `.sql.j2` file projects `AS _version`/`AS _deleted`. It uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
 names. Projection completeness (order-by and lookup columns) is exercised end-to-end
@@ -311,8 +311,8 @@ unaffected.
 - Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
   `ExtractQuery`, `Transform`, `EdgeMapping`). YAML loading in
   `crates/ontology/src/loading/node.rs`. Authored `.sql.j2` marker/alias check in
-  `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from
-  `orbit-server`'s build script)
+  `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from an
+  `ontology` unit test)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
   `Transformation`, `Cursor`, filters). Plan building in `plan/build.rs`. Point
   lookups in `plan/extract/lookup.rs`. Extract stage in `plan/extract/` (`ExtractSpec`,

@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 static PROMPTS: LazyLock<orbit_prompts::Prompts> = LazyLock::new(|| {
-    orbit_prompts::Prompts::load_embedded("remote").expect("prompts are validated by build.rs")
+    orbit_prompts::Prompts::load_embedded("remote").expect("prompts are validated by tests")
 });
 
 fn prompt(key: &str) -> &'static orbit_prompts::Prompt {

@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [features]
 default = []
-regenerate-protos = []
+regenerate-protos = ["dep:tonic-prost-build"]
 testkit = ["orbit-analytics/testkit"]
 
 [dependencies]
@@ -69,16 +69,11 @@ uuid = { workspace = true, features = ["v4"] }
 toon-format = { workspace = true }
 
 [build-dependencies]
-compiler = { path = "../query-engine/compiler" }
-orbit-migrations = { path = "../orbit-migrations" }
-orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
-named-queries = { path = "../named-queries" }
-ontology = { path = "../ontology" }
 orbit-versions = { path = "../orbit-versions" }
-tower = { workspace = true }
-tonic-prost-build = { workspace = true }
+tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
+compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 orbit-billing = { path = "../orbit-billing", features = ["testkit"] }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
