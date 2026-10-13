@@ -1,16 +1,6 @@
 description: Filtering callee by project_id scopes CALLS edges to that project and drops the cross-project call
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
-            {"id": "callee", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "limit": 20
-    }
   gql: |
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition {project_id: 1000}) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, callee.name LIMIT 20
 

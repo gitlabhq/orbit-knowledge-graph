@@ -19,9 +19,6 @@ config:
       - { source_id: 9710, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 9720, target_kind: MergeRequestDiff, traversal_path: "1/970/9700/" }
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project","filters":{"name":"project"}},{"id":"mr","entity":"MergeRequest","id_range":{"start":9710,"end":9710},"filters":{"title":"a"}},{"id":"d","entity":"MergeRequestDiff"}],
-     "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}],"group_by":["d.state"],"aggregations":[{"count":"d","as":"c"}],"limit":10}
   gql: |
     MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project {name: 'project'})<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
     WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10

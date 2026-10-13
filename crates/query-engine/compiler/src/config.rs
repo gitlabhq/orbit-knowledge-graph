@@ -44,10 +44,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     phases {
-        json_dsl_parse {
-            reads_env: [data_model]
-            mutates: [raw, input]
-        }
         gql_parse {
             mutates: [raw, input]
         }
@@ -136,12 +132,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     pipelines {
-        clickhouse_json_dsl {
-            model: query_data_model::ClickHouseDataModel
-            env: [security_ctx]
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
-        }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
@@ -153,12 +143,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
-        }
-        duckdb_json_dsl {
-            model: query_data_model::DuckDbDataModel
-            env: []
-            state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, paginate, result_contract, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
@@ -172,20 +156,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [raw, input]
             phases: [gql_parse, validate, validate_relationships, normalize]
         }
-        validate_normalize {
-            model: query_data_model::ClickHouseDataModel
-            env: []
-            state: [raw, input]
-            phases: [json_dsl_parse, validate, normalize]
-        }
     }
-}
-
-fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let raw = require(ctx.take_raw(), "raw")?;
-    let input = frontend::json_dsl::parse(&raw, ctx.data_model())?;
-    ctx.set_input(input);
-    Ok(())
 }
 
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {

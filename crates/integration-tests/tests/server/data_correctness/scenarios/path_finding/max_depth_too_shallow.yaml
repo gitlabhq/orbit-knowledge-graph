@@ -1,16 +1,6 @@
 description: max_depth=1 cannot reach a 2-hop path, returns no paths
 
 query:
-  json: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {"id": "start", "entity": "User", "node_ids": [1]},
-        {"id": "end", "entity": "Project", "node_ids": [1000]}
-      ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
-               "rel_types": ["CONTAINS", "MEMBER_OF"]}
-    }
   gql: |
     MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1]->(`end`:Project {id: 1000}) RETURN p
 

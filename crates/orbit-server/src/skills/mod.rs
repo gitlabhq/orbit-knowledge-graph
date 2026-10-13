@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use query_engine::compiler::Frontend;
 use rust_embed::Embed;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -13,7 +12,6 @@ use thiserror::Error;
 const SKILL_NAME: &str = "orbit";
 const START_SKILL_NAME: &str = "orbit-start";
 const MANIFEST: &str = "SKILL.md";
-const GQL_MANIFEST: &str = "SKILL.gql.md";
 
 #[derive(Embed)]
 #[folder = "$SKILLS_DIR/orbit"]
@@ -29,26 +27,10 @@ struct MigrationAssets;
 #[folder = "$SKILLS_DIR/orbit-start"]
 struct StartAssets;
 
-static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
-    SkillCatalog::load_embedded(Frontend::JsonDsl)
+static CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
+    SkillCatalog::load_embedded()
         .expect("embedded skills passed full frontmatter and tree validation in tests")
 });
-
-static GQL_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
-    SkillCatalog::load_embedded(Frontend::Gql)
-        .expect("embedded skills have valid frontmatter in GQL mode")
-});
-
-fn served_in(path: &str) -> bool {
-    path != GQL_MANIFEST
-}
-
-fn catalog(frontend: Frontend) -> &'static SkillCatalog {
-    match frontend {
-        Frontend::JsonDsl => &JSON_CATALOG,
-        Frontend::Gql => &GQL_CATALOG,
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillMetadata {
@@ -92,25 +74,16 @@ struct SkillCatalog {
 }
 
 impl SkillCatalog {
-    fn load_embedded(frontend: Frontend) -> Result<Self, String> {
-        let orbit = load_skill::<SkillAssets>(SKILL_NAME, |path| {
-            served_in(path).then(|| {
-                if path == MANIFEST && frontend == Frontend::Gql {
-                    GQL_MANIFEST
-                } else {
-                    path
-                }
-            })
-        })?;
-        let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME, |path| Some(path))?;
-        let start = load_skill::<StartAssets>(START_SKILL_NAME, |path| Some(path))?;
+    fn load_embedded() -> Result<Self, String> {
+        let orbit = load_skill::<SkillAssets>(SKILL_NAME)?;
+        let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME)?;
+        let start = load_skill::<StartAssets>(START_SKILL_NAME)?;
         let skills = [orbit, migration, start]
             .into_iter()
             .map(|skill| (skill.metadata.name.clone(), skill))
             .collect();
         Ok(Self { skills })
     }
-
     fn list(&self) -> Vec<SkillMetadata> {
         self.skills
             .values()
@@ -130,17 +103,11 @@ impl SkillCatalog {
     }
 }
 
-fn load_skill<A: Embed>(
-    name: &str,
-    source_for: impl Fn(&str) -> Option<&str>,
-) -> Result<EmbeddedSkill, String> {
+fn load_skill<A: Embed>(name: &str) -> Result<EmbeddedSkill, String> {
     let mut files = Vec::new();
     for path in A::iter() {
-        let Some(source) = source_for(&path) else {
-            continue;
-        };
-        let asset = A::get(source)
-            .ok_or_else(|| format!("embedded skill file {source:?} is unreadable"))?;
+        let asset =
+            A::get(&path).ok_or_else(|| format!("embedded skill file {path:?} is unreadable"))?;
         let content = String::from_utf8(asset.data.into_owned())
             .map_err(|error| format!("embedded skill file {path:?} is not UTF-8: {error}"))?;
         files.push(SkillFile {
@@ -181,16 +148,12 @@ fn hex_digest(digest: impl AsRef<[u8]>) -> String {
     encoded
 }
 
-pub fn list_skills(frontend: Frontend) -> Vec<SkillMetadata> {
-    catalog(frontend).list()
+pub fn list_skills() -> Vec<SkillMetadata> {
+    CATALOG.list()
 }
 
-pub fn get_skill(
-    name: &str,
-    frontend: Frontend,
-    metadata_only: bool,
-) -> Result<SkillTree, SkillNotFound> {
-    catalog(frontend).get(name, metadata_only)
+pub fn get_skill(name: &str, metadata_only: bool) -> Result<SkillTree, SkillNotFound> {
+    CATALOG.get(name, metadata_only)
 }
 
 #[cfg(test)]
@@ -199,7 +162,7 @@ mod tests {
 
     #[test]
     fn list_exposes_manifest_metadata() {
-        let skills = list_skills(Frontend::JsonDsl);
+        let skills = list_skills();
         assert_eq!(
             skills
                 .iter()
@@ -225,7 +188,7 @@ mod tests {
         let wrapper_manifest = include_str!(concat!(env!("SKILLS_DIR"), "/orbit-wrapper/SKILL.md"));
         let wrapper = orbit_prompts::parse_skill_frontmatter(wrapper_manifest, "orbit-wrapper")
             .expect("skills/orbit-wrapper/SKILL.md frontmatter must parse");
-        let orbit = list_skills(Frontend::JsonDsl).remove(0);
+        let orbit = list_skills().remove(0);
         assert_eq!(
             wrapper.description, orbit.description,
             "skills/orbit-wrapper/SKILL.md description drifted from skills/orbit/SKILL.md: \
@@ -234,67 +197,16 @@ mod tests {
     }
 
     #[test]
-    fn gql_callers_get_the_gql_manifest() {
-        let json = list_skills(Frontend::JsonDsl).remove(0);
-        let tree = get_skill("orbit", Frontend::Gql, false).unwrap();
-        assert_eq!(
-            tree.metadata,
-            SkillMetadata {
-                version: format!("{}+gql", json.version),
-                ..json
-            }
-        );
-        let files = tree.files.unwrap();
-        assert_eq!(files[0].path, MANIFEST);
-        assert!(files[0].content.contains("CALL db.schema()"));
-        assert!(files.iter().any(|file| file.path == "references/gql.md"));
-    }
-
-    #[test]
-    fn gql_manifest_differs_from_json_manifest_only_by_version() {
-        let text = |path: &str| {
-            let asset = SkillAssets::get(path).unwrap();
-            std::str::from_utf8(&asset.data).unwrap().to_string()
-        };
-        let without_version = |content: String| {
-            content
-                .lines()
-                .filter(|line| !line.starts_with("version:"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        assert_eq!(
-            without_version(text(MANIFEST)),
-            without_version(text(GQL_MANIFEST)),
-            "SKILL.md and SKILL.gql.md drifted: keep them identical except for the version"
-        );
-    }
-
-    #[test]
     fn served_trees_have_expected_files_hashes_and_valid_links() {
-        for (frontend, paths) in [
-            (
-                Frontend::JsonDsl,
-                &[
-                    "SKILL.md",
-                    "references/gql.md",
-                    "references/maintaining.md",
-                    "references/reporting.md",
-                    "references/troubleshooting.md",
-                ][..],
-            ),
-            (
-                Frontend::Gql,
-                &[
-                    "SKILL.md",
-                    "references/gql.md",
-                    "references/maintaining.md",
-                    "references/reporting.md",
-                    "references/troubleshooting.md",
-                ][..],
-            ),
-        ] {
-            let files = get_skill("orbit", frontend, false).unwrap().files.unwrap();
+        let paths = [
+            "SKILL.md",
+            "references/gql.md",
+            "references/maintaining.md",
+            "references/reporting.md",
+            "references/troubleshooting.md",
+        ];
+        {
+            let files = get_skill("orbit", false).unwrap().files.unwrap();
             assert_eq!(
                 files
                     .iter()
@@ -319,17 +231,15 @@ mod tests {
                 std::path::Path::new(env!("SKILLS_DIR")).join("orbit-cli"),
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../orbit-cli/src/main.rs"),
             )
-            .unwrap_or_else(|error| panic!("{frontend:?}: {error}"));
+            .unwrap_or_else(|error| panic!("{error}"));
         }
     }
 
     #[test]
-    fn migration_skill_is_served_unchanged_in_both_modes() {
-        let json = get_skill(MIGRATION_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
-        let gql = get_skill(MIGRATION_SKILL_NAME, Frontend::Gql, false).unwrap();
-        assert_eq!(json, gql);
-        assert!(!json.metadata.version.contains("+gql"));
-        let files = json.files.unwrap();
+    fn migration_skill_is_served_unchanged() {
+        let tree = get_skill(MIGRATION_SKILL_NAME, false).unwrap();
+        assert!(!tree.metadata.version.contains("+gql"));
+        let files = tree.files.unwrap();
         assert_eq!(
             files
                 .iter()
@@ -341,8 +251,8 @@ mod tests {
 
     #[test]
     fn metadata_only_omits_files() {
-        let full = get_skill("orbit", Frontend::JsonDsl, false).unwrap();
-        let metadata = get_skill("orbit", Frontend::JsonDsl, true).unwrap();
+        let full = get_skill("orbit", false).unwrap();
+        let metadata = get_skill("orbit", true).unwrap();
         assert_eq!(metadata.metadata, full.metadata);
         assert!(metadata.files.is_none());
         let encoded = serde_json::to_value(metadata).unwrap();
@@ -351,7 +261,7 @@ mod tests {
 
     #[test]
     fn compact_whole_tree_envelope_stays_below_transport_budget() {
-        let tree = get_skill("orbit", Frontend::JsonDsl, false).unwrap();
+        let tree = get_skill("orbit", false).unwrap();
         let source_bytes: usize = tree
             .files
             .as_ref()
@@ -373,7 +283,7 @@ mod tests {
 
     #[test]
     fn unknown_skill_error_carries_sorted_known_names() {
-        let error = get_skill("unknown", Frontend::JsonDsl, false).unwrap_err();
+        let error = get_skill("unknown", false).unwrap_err();
         assert_eq!(error.name, "unknown");
         assert_eq!(
             error.known_names,
@@ -382,14 +292,12 @@ mod tests {
     }
 
     #[test]
-    fn start_skill_is_served_unchanged_in_both_modes() {
-        let json = get_skill(START_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
-        let gql = get_skill(START_SKILL_NAME, Frontend::Gql, false).unwrap();
-        assert_eq!(json, gql);
-        assert_eq!(json.metadata.name, START_SKILL_NAME);
-        assert!(json.metadata.description.starts_with("Walk a user through"));
+    fn start_skill_is_served_unchanged() {
+        let tree = get_skill(START_SKILL_NAME, false).unwrap();
+        assert_eq!(tree.metadata.name, START_SKILL_NAME);
+        assert!(tree.metadata.description.starts_with("Walk a user through"));
 
-        let files = json.files.unwrap();
+        let files = tree.files.unwrap();
         assert_eq!(
             files
                 .iter()

@@ -68,16 +68,6 @@ cases:
   - name: filter
     description: WHERE type(r) IN [...] on an untyped relationship returns the same edges as -[:AUTHORED|APPROVED]->
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-          ],
-          "relationships": [{"type": ["AUTHORED", "APPROVED"], "from": "u", "to": "mr"}],
-          "limit": 50
-        }
       gql: |
         MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
         WHERE type(r) IN ['AUTHORED', 'APPROVED']
@@ -174,12 +164,6 @@ cases:
   - name: neighbors_filter
     description: Neighbors with WHERE type(r) = 'MEMBER_OF' returns the same edges as <-[:MEMBER_OF]-
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-          "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
-        }
       gql: |
         MATCH (g:Group {id: 100})<-[r]-(n) WHERE type(r) = 'MEMBER_OF' RETURN g, n, type(r)
     expect:
@@ -198,12 +182,6 @@ cases:
   - name: neighbors_not_complement
     description: Neighbors with NOT type(r) = 'MEMBER_OF' keep the other incoming relationship types
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-          "neighbors": {"direction": "incoming", "rel_types": ["IN_GROUP"]}
-        }
       gql: |
         MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) = 'MEMBER_OF' RETURN g, n
     expect:
@@ -384,16 +362,6 @@ cases:
   - name: path_filter_single_hop
     description: WHERE type(r) on a one-hop shortest path restricts it like -[r:MEMBER_OF*1]->
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Group", "node_ids": [100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
-                   "rel_types": ["MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p
     expect:
@@ -405,16 +373,6 @@ cases:
   - name: path_returned
     description: RETURN p, type(r) on a one-hop shortest path is accepted; the path shows the edge type
     query:
-      json: |
-        {
-          "query_type": "path_finding",
-          "nodes": [
-            {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Group", "node_ids": [100]}
-          ],
-          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
-                   "rel_types": ["MEMBER_OF"]}
-        }
       gql: |
         MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(`end`:Group {id: 100}) RETURN p, type(r)
     expect:
@@ -487,16 +445,6 @@ cases:
     description: RETURN r in a traversal is accepted; the edges table lists its edges and the gql table
       adds an r column
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
-          ],
-          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-          "limit": 50
-        }
       gql: |
         MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50
     expect:

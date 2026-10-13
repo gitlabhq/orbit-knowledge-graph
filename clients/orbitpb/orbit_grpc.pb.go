@@ -69,9 +69,8 @@ type OrbitServiceClient interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(ctx context.Context, in *GetGraphSchemaRequest, opts ...grpc.CallOption) (*GetGraphSchemaResponse, error)
-	// Returns the query DSL grammar (JSON Schema for query_graph input).
-	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-	// command catalog and InvokeAgentCommand instead.
+	// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
+	// CALL db.schema(); kept so existing clients get a clear error.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
 	// Lists the standalone Orbit Remote skills embedded in this deployment.
 	// Used by Rails to build GET /api/v4/orbit/skills.
@@ -82,9 +81,8 @@ type OrbitServiceClient interface {
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
-	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-	// Direct API helper for REST consumers. MCP agents should use the command
-	// catalog and InvokeAgentCommand instead.
+	// output). Direct API helper for REST consumers. MCP agents should use the
+	// command catalog and InvokeAgentCommand instead.
 	GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
@@ -277,9 +275,8 @@ type OrbitServiceServer interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error)
-	// Returns the query DSL grammar (JSON Schema for query_graph input).
-	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-	// command catalog and InvokeAgentCommand instead.
+	// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
+	// CALL db.schema(); kept so existing clients get a clear error.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
 	// Lists the standalone Orbit Remote skills embedded in this deployment.
 	// Used by Rails to build GET /api/v4/orbit/skills.
@@ -290,9 +287,8 @@ type OrbitServiceServer interface {
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
-	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-	// Direct API helper for REST consumers. MCP agents should use the command
-	// catalog and InvokeAgentCommand instead.
+	// output). Direct API helper for REST consumers. MCP agents should use the
+	// command catalog and InvokeAgentCommand instead.
 	GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.

@@ -1,12 +1,6 @@
 description: Center node columns are hydrated on User 1
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name", "state"]}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}
-    }
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u.username, u.name, u.state, n
 

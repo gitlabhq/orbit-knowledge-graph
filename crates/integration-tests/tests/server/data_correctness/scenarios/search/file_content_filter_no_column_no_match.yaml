@@ -1,18 +1,6 @@
 description: File content filter without selecting column returns zero rows on no match
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "f", "entity": "File",
-               "node_ids": [13000, 13001, 13002, 13003, 13004],
-               "columns": ["path"],
-               "filters": {
-                   "project_id": {"eq": 1000},
-                   "content": {"contains": "zqxjnonexistenttoken9town_xyzzy"}
-               }}],
-      "limit": 10
-    }
   gql: |
     MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content CONTAINS 'zqxjnonexistenttoken9town_xyzzy' RETURN f.path LIMIT 10
 

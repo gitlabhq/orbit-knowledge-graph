@@ -19,16 +19,6 @@ cases:
     config:
       redaction: { allow: { project: [1000], ci_pipeline: [8100, 8101, 8102] } }
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"eq": "failed"}}, "columns": ["status"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
-          ],
-          "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
-          "limit": 10
-        }
       gql: |
         MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE pipe.status = 'failed' RETURN pipe.status, p LIMIT 10
     expect:
@@ -45,16 +35,6 @@ cases:
       security: { paths: ["1/"], access_level: 25 }
       redaction: { allow: { project: [1000], vulnerability: [8000, 8003] } }
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"eq": "critical"}}, "columns": ["severity"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
-          ],
-          "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-          "limit": 10
-        }
       gql: |
         MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE v.severity = 'critical' RETURN v.severity, p LIMIT 10
     expect:
@@ -71,16 +51,6 @@ cases:
       security: { paths: ["1/"], access_level: 25 }
       redaction: { allow: { project: [1000], vulnerability: [8000, 8003] } }
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {"state": {"eq": "detected"}, "severity": {"eq": "critical"}}, "columns": ["state", "severity"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
-          ],
-          "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-          "limit": 10
-        }
       gql: |
         MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE v.state = 'detected' AND v.severity = 'critical' RETURN v.state, v.severity, p LIMIT 10
     expect:
@@ -94,16 +64,6 @@ cases:
   - name: work_item_type
     description: Work item state and type filters through the group edge return only the matching work item
     query:
-      json: |
-        {
-          "query_type": "traversal",
-          "nodes": [
-            {"id": "wi", "entity": "WorkItem", "filters": {"state": {"eq": "opened"}, "work_item_type": {"eq": "issue"}}, "columns": ["state", "work_item_type"]},
-            {"id": "g", "entity": "Group", "node_ids": [100]}
-          ],
-          "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
-          "limit": 10
-        }
       gql: |
         MATCH (wi:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE wi.state = 'opened' AND wi.work_item_type = 'issue' RETURN wi.state, wi.work_item_type, g LIMIT 10
     expect:

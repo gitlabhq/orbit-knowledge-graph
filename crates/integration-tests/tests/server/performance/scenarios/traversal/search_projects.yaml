@@ -1,12 +1,8 @@
 description: Single-node Project lookup (search)
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "p", "entity": "Project", "node_ids": [5001]}],
-      "limit": 10
-    }
+  gql: |
+    MATCH (p:Project {id: 5001}) RETURN p LIMIT 10
 
 expect:
   compile_only: true

@@ -1,13 +1,6 @@
 name: Pinned search keeps an unprojected sort column available
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "f", "entity": "File", "node_ids": [1, 2], "columns": ["path"]}],
-      "order_by": "-f.id",
-      "limit": 5
-    }
   gql: |
     MATCH (f:File) WHERE f.id IN [1, 2]
     RETURN f.path ORDER BY f.id DESC LIMIT 5

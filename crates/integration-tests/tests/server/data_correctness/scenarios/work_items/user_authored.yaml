@@ -1,16 +1,6 @@
 description: User-WorkItem AUTHORED traversal returns correct edges and node properties
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-        {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
-      ],
-      "relationships": [{"type": "AUTHORED", "from": "u", "to": "w"}],
-      "limit": 20
-    }
   gql: |
     MATCH (u:User)-[:AUTHORED]->(w:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, w.title, w.state LIMIT 20
 

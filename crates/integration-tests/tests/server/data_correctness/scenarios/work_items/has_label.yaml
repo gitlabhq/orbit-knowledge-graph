@@ -1,16 +1,6 @@
 description: WorkItem-Label HAS_LABEL traversal returns correct edges and label properties
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
-        {"id": "l", "entity": "Label", "columns": ["title", "color"]}
-      ],
-      "relationships": [{"type": "HAS_LABEL", "from": "w", "to": "l"}],
-      "limit": 20
-    }
   gql: |
     MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.title, l.title, l.color LIMIT 20
 

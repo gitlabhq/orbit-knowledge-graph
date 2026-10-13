@@ -35,7 +35,7 @@ The shared glab instructions explain every API call you need.
 Use `docs/pages/engineering/development/agents-reference-index.md` as your index. Examples of drift to watch for:
 
 - MR adds a new crate → `docs/pages/engineering/development/agents-crate-map.md` and `README.md` architecture section need updating
-- MR changes the query DSL or proto definitions → `docs/pages/engineering/architecture/querying.md` may describe old behavior
+- MR changes the query language or proto definitions → `docs/pages/engineering/architecture/querying/` may describe old behavior
 - MR adds/changes public API surface or user-visible features → `skills/orbit/SKILL.md`, `skills/orbit/references/gql.md`, `skills/orbit/references/troubleshooting.md` may need new content. The hand-written skill prose (discovery workflow, gotchas, agent guidelines) won't flag itself as stale. Example: indexing progress added in !1015.
 - MR modifies auth or redaction logic → `docs/pages/engineering/architecture/security.md` may be stale
 - MR adds a CI job or changes enforcement → `AGENTS.md` "What CI enforces" list is incomplete
@@ -52,7 +52,7 @@ Only flag real drift. Skip cosmetic issues, formatting, and things markdownlint/
 - **SSOT desync**: `README.md` tables (repos, epics, infra, people, helm charts) don't reflect structural changes in the MR
 - **Agent docs desync**: crate map in `docs/pages/engineering/development/agents-crate-map.md`, reference index in `docs/pages/engineering/development/agents-reference-index.md`, CI enforcement list in `AGENTS.md`, or `AGENTS.md` stubs are outdated after the MR
 - **New undocumented surface**: new gRPC endpoint, server mode, config option, or ontology node/edge type with no doc coverage
-- **Stale agent skill**: hand-written parts of `skills/orbit/` (SKILL.md, gql.md, troubleshooting.md) don't reflect new API behavior.
+- **Stale agent skill**: hand-written parts of `skills/orbit/` (SKILL.md, references/gql.md, references/troubleshooting.md) don't reflect new API behavior.
 
 ## Commenting
 

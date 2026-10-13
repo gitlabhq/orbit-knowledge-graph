@@ -1,16 +1,6 @@
 description: User-MergeRequest APPROVED traversal returns correct edges and node properties
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
-        ],
-        "relationships": [{"type": "APPROVED", "from": "u", "to": "mr"}],
-        "limit": 20
-    }
   gql: |
     MATCH (u:User)-[:APPROVED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, mr.title, mr.state LIMIT 20
 

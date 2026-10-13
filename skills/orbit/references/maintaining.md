@@ -9,15 +9,6 @@ For inaccurate guidance, follow [Fix inaccurate guidance](../SKILL.md#fix-inaccu
 Keep `SKILL.md` and `references/` in sync, and use `opencode run`
 for meaningful behavior changes.
 
-## Query language
-
-Orbit serves `SKILL.gql.md` as `SKILL.md`. Keep the two files identical except
-for the version. Set the `SKILL.gql.md` version to the `SKILL.md` version plus
-`+gql` so caches never mix them. Keep both manifests' name, description, and
-compatibility equal. The server tests check those four fields, the file set,
-and relative links. Both manifests' front matter and local-section placeholders
-are validated at build time.
-
 ## Version bumps
 
 Bump the `version` field in `SKILL.md` frontmatter on every change under
