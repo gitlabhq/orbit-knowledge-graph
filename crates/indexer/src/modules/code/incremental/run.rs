@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::super::pipeline::IndexingReport;
 use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
-use code_graph_incremental::pipeline::FileTiming;
+use code_graph_incremental::pipeline::FileStats;
 use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
 
 use super::super::{
@@ -140,7 +140,7 @@ pub(in crate::modules::code) fn run(
             });
         }
     };
-    stats.slowest_files = file_timings(&report.files);
+    stats.slowest_files = file_timings(report.files);
     stats.language_timings = language_timings(&stats.slowest_files);
     stats.slowest_files.truncate(SLOWEST_FILES);
     stats.phase_timings.total_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -179,30 +179,24 @@ pub(in crate::modules::code) fn run(
 
 const SLOWEST_FILES: usize = 100;
 
-fn file_timings(timings: &[FileTiming]) -> Vec<FileTimingEntry> {
-    let mut by_path: HashMap<&str, FileTimingEntry> = HashMap::new();
-    for timing in timings {
-        let ms = timing.elapsed.as_secs_f64() * 1000.0;
-        let file = by_path
-            .entry(&timing.path)
-            .or_insert_with(|| FileTimingEntry {
-                path: timing.path.clone(),
-                size_bytes: 0,
-                parse_ms: 0.0,
-                resolve_ms: 0.0,
-                total_ms: 0.0,
-                language: <&str>::from(timing.language).to_owned(),
-            });
-        file.size_bytes += timing.bytes;
-        file.total_ms += ms;
-        match timing.phase.as_str() {
-            "resolve" => file.resolve_ms += ms,
-            _ => file.parse_ms += ms,
-        }
-    }
-    let mut files: Vec<_> = by_path.into_values().collect();
-    files.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
-    files
+fn file_timings(files: HashMap<String, FileStats>) -> Vec<FileTimingEntry> {
+    let mut entries: Vec<_> = files
+        .into_iter()
+        .map(|(path, stats)| {
+            let parse_ms = stats.parse.as_secs_f64() * 1000.0;
+            let resolve_ms = stats.resolve.as_secs_f64() * 1000.0;
+            FileTimingEntry {
+                path,
+                size_bytes: stats.bytes,
+                parse_ms,
+                resolve_ms,
+                total_ms: parse_ms + resolve_ms,
+                language: <&str>::from(stats.language).to_owned(),
+            }
+        })
+        .collect();
+    entries.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
+    entries
 }
 
 fn language_timings(files: &[FileTimingEntry]) -> Vec<LanguageTimings> {
