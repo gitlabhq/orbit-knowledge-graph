@@ -48,7 +48,8 @@ entities:
     id: { seed: dir, columns: [path] }
     columns:
       - { name: path, type: Utf8, from: tree_path("/")|default(".") }
-      - { name: name, type: Utf8, from: default(".") }
+      # id| makes this a pipeline; a bare default() is skipped on the root's empty text.
+      - { name: name, type: Utf8, from: id|default(".") }
 
   File:
     source: __source_file

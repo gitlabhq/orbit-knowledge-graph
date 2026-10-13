@@ -565,6 +565,10 @@ fn every_file_becomes_a_row_with_its_reason() {
         column(table(&exported, "gl_directory"), "path"),
         [".", "src"]
     );
+    assert_eq!(
+        column(table(&exported, "gl_directory"), "name"),
+        [".", "src"]
+    );
     let root_id = column(table(&exported, "gl_directory"), "id")[0].clone();
     let edges = rows(
         table(&exported, "gl_edge"),
