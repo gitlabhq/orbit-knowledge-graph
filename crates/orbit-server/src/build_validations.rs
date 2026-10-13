@@ -1,9 +1,3 @@
-//! Repository-consistency checks that used to run in `build.rs`.
-//!
-//! They run in the `unit-test` CI job on merge requests and on `main`. Keeping
-//! them out of the build script avoids compiling the compiler and ontology
-//! crates a second time as host build dependencies.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -61,7 +55,7 @@ fn named_queries_render_and_compile() {
 }
 
 /// Fails on ontology/DDL drift from the fingerprint snapshot or a malformed
-/// ledger. Mirrors `cargo xtask migration-ledger check`.
+/// ledger.
 #[test]
 fn migration_ledger_matches_fingerprint_snapshot() {
     let config_directory = config_directory();
@@ -69,13 +63,8 @@ fn migration_ledger_matches_fingerprint_snapshot() {
     let fingerprint_path = config_directory.join(ontology::migrations::FINGERPRINT_FILE);
     let ontology = embedded_ontology();
 
-    let current = ontology::migrations::Fingerprints {
-        sources: ontology::migrations::source_fingerprints(),
-        ddl: orbit_migrations::fingerprint::ddl_fingerprints(&ontology)
-            .expect("embedded DDL must be valid"),
-        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(&ontology)
-            .expect("embedded auxiliary schema must be valid"),
-    };
+    let current = orbit_migrations::fingerprint::current_fingerprints(&ontology)
+        .expect("embedded schema must be valid");
 
     let committed_text = std::fs::read_to_string(&fingerprint_path).unwrap_or_else(|error| {
         panic!(

@@ -86,7 +86,7 @@ To find a check, read the `build.rs` file of the crate that owns the input.
 
 Unit tests live in `#[cfg(test)]` modules next to the code they test. They need no Docker and no external services. Use them for pure logic, such as parsing and name mapping, and test behavior at a higher layer.
 
-`crates/orbit-server/src/build_validations.rs` holds repository-consistency checks that used to run in the build script. They cover named queries in JSON and GQL. They check the migration ledger against the fingerprint snapshot. They check that the current ontology archive is bundled and fresh. They validate the Orbit skill pair.
+Repository-consistency checks, such as named queries, the migration ledger, and bundled ontology archives, run as unit tests in the crate that owns them.
 
 `mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
 

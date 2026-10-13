@@ -253,7 +253,7 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-The migration ledger is the versioned-schema gate. The `unit-test` CI job runs an `orbit-server` test that fails on drift. It covers versioned
+The migration ledger is the versioned-schema gate. A unit test fails on drift. It covers versioned
 ontology sources, generated versioned DDL, and auxiliary schema, each compared with the committed
 fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`). It also fails if the ledger is malformed.
 Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`
@@ -266,8 +266,7 @@ changes automatically affect both ClickHouse and DuckDB schemas.
 
 Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
 edits do not require a bump. A genuinely non-invalidating change can bypass the CI base-diff
-guard with `[skip migration-ledger-check]` in the MR description; fingerprint drift still fails
-the `unit-test` CI job.
+guard with `[skip migration-ledger-check]` in the MR description; fingerprint drift still fails.
 
 ### Ledger scopes
 

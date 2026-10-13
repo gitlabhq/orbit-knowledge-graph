@@ -33,11 +33,9 @@ fn fingerprint_path() -> PathBuf {
 }
 
 fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints> {
-    Ok(Fingerprints {
-        sources: migrations::source_fingerprints(),
-        ddl: orbit_migrations::fingerprint::ddl_fingerprints(ontology)?,
-        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(ontology)?,
-    })
+    Ok(orbit_migrations::fingerprint::current_fingerprints(
+        ontology,
+    )?)
 }
 
 fn read_committed_fingerprints() -> Result<Option<Fingerprints>> {
