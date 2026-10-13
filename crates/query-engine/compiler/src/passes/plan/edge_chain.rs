@@ -18,6 +18,8 @@ pub struct Hop {
     pub rel_types: Vec<String>,
     pub relationships: Vec<query_data_model::RelationshipId>,
     pub edge_table: String,
+    pub edge_tables: Vec<String>,
+    pub alias: String,
     pub from_node: String,
     pub to_node: String,
     pub direction: Direction,
@@ -132,6 +134,10 @@ impl NodePlan {
         self.redaction_id_column == DEFAULT_PRIMARY_KEY
     }
 
+    pub fn is_id_pinned_only(&self) -> bool {
+        !self.node_ids.is_empty() && self.filters.is_empty() && self.id_range.is_none()
+    }
+
     /// Whether this node has point selectivity (node_ids, id_range) or at
     /// least one high-selectivity filter. Used to decide if a narrowing CTE
     /// is worth the cost of a pre-scan.
@@ -215,6 +221,7 @@ where
                 &hops,
                 &denormalized,
                 table_scans.contains(&node_plan.alias),
+                model,
             );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
@@ -290,7 +297,15 @@ where
         .iter()
         .enumerate()
         .map(|(input_index, rel)| {
-            let edge_table = model.relationship_table_for_query(&rel.types).to_string();
+            let edge_alias = format!(
+                "{}edge_{input_index}",
+                crate::constants::internal_column_prefix()
+            );
+            let edge_tables = model.relationship_tables(&rel.types);
+            let edge_table = edge_tables
+                .first()
+                .cloned()
+                .unwrap_or_else(|| model.default_edge_table().to_string());
             let from_entity = input
                 .nodes
                 .iter()
@@ -355,6 +370,8 @@ where
                     .filter_map(|kind| model.graph().relationship_id(kind))
                     .collect(),
                 edge_table,
+                edge_tables,
+                alias: edge_alias,
                 from_node: rel.from.clone(),
                 to_node: rel.to.clone(),
                 direction: rel.direction,
@@ -432,7 +449,12 @@ fn elide_hops(
                     .order_by
                     .as_ref()
                     .is_some_and(|order| order.node == fk.target_node);
-            if needs_role_scan || (np.node_ids.len() > 1 && needs_target_values) {
+            if needs_role_scan
+                || !np.filters.is_empty()
+                || np.id_range.is_some()
+                || hop.max_hops != 1
+                || (np.node_ids.len() > 1 && needs_target_values)
+            {
                 return None;
             }
             if np.selectivity == Selectivity::Pinned
@@ -504,6 +526,12 @@ fn elide_hops(
 }
 
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
+    if hops
+        .iter()
+        .any(|hop| hop.max_hops != 1 || !hop.filters.is_empty())
+    {
+        return None;
+    }
     let first_center = hops.first()?.fk.as_ref().map(|fk| &fk.fk_node)?;
     for hop in &hops[1..] {
         let center = hop.fk.as_ref().map(|fk| &fk.fk_node)?;
@@ -607,6 +635,7 @@ fn determine_hydration(
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     requires_table_scan: bool,
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -617,10 +646,15 @@ fn determine_hydration(
         .group_by
         .iter()
         .any(|group| matches!(group, crate::input::InputGroupByKey::Property { node, .. } if node == alias));
-    let is_agg_property_target = input.aggregation.metrics.iter().any(|a| {
-        a.expr.node() == alias.as_str()
-            && a.expr.property().is_some()
-            && !matches!(a.expr.function(), AggFunction::Count)
+    let is_agg_property_target = input.aggregation.metrics.iter().any(|metric| {
+        metric.expr.node() == alias.as_str()
+            && metric.expr.property().is_some_and(|property| {
+                !matches!(metric.expr.function(), AggFunction::Count)
+                    || node_plan
+                        .entity
+                        .as_deref()
+                        .is_some_and(|entity| model.property_is_nullable(entity, property))
+            })
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
     let is_join_predicate_target = input.join_predicates.iter().any(|predicate| {
@@ -643,10 +677,9 @@ fn determine_hydration(
 
     // Skip the node table only when every filter is carried by a hop's edge
     // tag; an uncovered filter stays on the node table so it isn't dropped.
-    let has_uncovered_filter = node_plan
-        .filters
-        .iter()
-        .any(|(_, filter)| !filter_covered_by_denorm(filter, alias, hops, denormalized));
+    let has_uncovered_filter = node_plan.filters.iter().any(|(_, filter)| {
+        !filter_covered_by_denorm(filter, alias, hops, denormalized, input, model)
+    });
 
     if has_uncovered_filter {
         HydrationStrategy::FilterOnly
@@ -664,12 +697,30 @@ fn filter_covered_by_denorm(
     alias: &str,
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+    input: &Input,
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> bool {
+    let entity = |alias: &str| {
+        input
+            .nodes
+            .iter()
+            .find(|node| node.id == alias)
+            .and_then(|node| node.entity.as_deref())
+            .and_then(|entity| model.graph().entity_id(entity))
+    };
     hops.iter().any(|hop| {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
             return false;
         }
         let (start_col, end_col) = hop.direction.edge_columns();
+        let endpoint_entities = match hop.direction {
+            Direction::Outgoing | Direction::Both => (entity(&hop.from_node), entity(&hop.to_node)),
+            Direction::Incoming => (entity(&hop.to_node), entity(&hop.from_node)),
+        };
+        let Some((source_entity, target_entity)) = endpoint_entities.0.zip(endpoint_entities.1)
+        else {
+            return false;
+        };
         [(&hop.from_node, start_col), (&hop.to_node, end_col)]
             .iter()
             .any(|(node, id_col)| {
@@ -683,9 +734,11 @@ fn filter_covered_by_denorm(
                 };
                 super::helpers::lowerable_denorm(filter, direction, denormalized).is_some_and(
                     |facts| {
-                        hop.relationships
-                            .iter()
-                            .any(|relationship| facts.relationships.contains(relationship))
+                        hop.relationships.iter().all(|relationship| {
+                            facts
+                                .variants
+                                .contains(&(*relationship, source_entity, target_entity))
+                        })
                     },
                 )
             })
@@ -825,6 +878,8 @@ mod tests {
             rel_types: vec!["REL".to_string()],
             relationships: Vec::new(),
             edge_table: "gl_edge".to_string(),
+            edge_tables: vec!["gl_edge".to_string()],
+            alias: "_orbit_edge_0".to_string(),
             from_node: from.to_string(),
             to_node: to.to_string(),
             direction: Direction::Outgoing,

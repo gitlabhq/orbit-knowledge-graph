@@ -101,7 +101,7 @@ pub struct Neighbors {
     pub edge: EdgeTableConfig,
     pub has_non_denorm: bool,
     pub fused_table: Option<String>,
-    pub center_tp_lookup: Option<(String, String)>,
+    pub incoming_scope_preserving: bool,
 }
 
 pub struct Hydration {

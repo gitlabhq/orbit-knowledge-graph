@@ -738,6 +738,10 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             }
         }
         for (field, expected) in &ne.filters {
+            if ne.ids.as_ref().is_some_and(Vec::is_empty) {
+                view.assert_filter_has_no_matches(entity, field);
+                continue;
+            }
             let expected = expected.clone();
             let field_name = field.clone();
             view.assert_filter(entity, field, move |n| {

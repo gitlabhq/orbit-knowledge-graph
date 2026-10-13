@@ -43,6 +43,10 @@ pub enum Predicate {
         column: Column,
         entity: String,
     },
+    ColumnEq {
+        left: Column,
+        right: Column,
+    },
     RelationshipKinds {
         alias: String,
         kinds: Vec<String>,

@@ -9,7 +9,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter e0.branch = 'main', e0.project_id = 9, e0.source_id = 1, e0.relationship_kind = 'CALLS', e0.source_kind = 'Definition', e0.target_kind = 'Definition', e0._deleted = false (Scan Table(gl_code_edge) AS e0))"]
-      reject: ["(Filter e0.id = 1, ... (_))"]
+      expect: ["(Filter _orbit_edge_0.branch = 'main', _orbit_edge_0.project_id = 9, _orbit_edge_0.source_id = 1, _orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_kind = 'Definition', _orbit_edge_0.target_kind = 'Definition', _orbit_edge_0._deleted = false (Scan Table(gl_code_edge) AS _orbit_edge_0))"]
+      reject: ["(Filter _orbit_edge_0.id = 1, ... (_))"]
     emitted:
-      expect: ["(Filter e0.branch = 'main', e0.project_id = 9, e0.source_id = 1, ... (_))"]
+      expect: ["(Filter _orbit_edge_0.branch = 'main', _orbit_edge_0.project_id = 9, _orbit_edge_0.source_id = 1, ... (_))"]

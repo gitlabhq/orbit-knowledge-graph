@@ -13,5 +13,5 @@ physical:
     emitted:
       ctes:
         exact_order: [forward, backward]
-      expect: ["(Join ON f.end_id = b.end_id (_) (_))"]
+      expect: ["(Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) (_) (_))"]
       reject: ["(CTE _path_scope_traversal_paths (_))"]

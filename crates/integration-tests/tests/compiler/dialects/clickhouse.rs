@@ -732,8 +732,8 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         "expected one gl_file scan per direction arm; got {gl_file_refs}\nSQL:\n{rendered}"
     );
     assert!(
-        rendered.contains("f.project_id AS project_id"),
-        "dedup subquery must surface redaction id column: {rendered}"
+        rendered.contains("f.project_id AS _orbit_f_id"),
+        "neighbors must project the redaction id without an alias clash: {rendered}"
     );
 }
 

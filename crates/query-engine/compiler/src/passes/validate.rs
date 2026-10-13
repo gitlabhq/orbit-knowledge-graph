@@ -768,6 +768,17 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                                     "property comparison cannot reference virtual column \"{rhs_prop}\" on {rhs_entity}"
                                 )));
                             }
+                            let rhs_type = self.field_type(rhs_entity, rhs_prop);
+                            if rhs_type.is_some_and(|rhs_type| rhs_type != data_type) {
+                                return Err(QueryError::Validation(format!(
+                                    "type mismatch in property comparison: {entity}.{prop} is {data_type:?} but {rhs_entity}.{rhs_prop} is {rhs_type:?}"
+                                )));
+                            }
+                        }
+                        if self.virtual_source(entity, prop).is_some() {
+                            return Err(QueryError::Validation(format!(
+                                "property comparison cannot reference virtual column \"{prop}\" on {entity}"
+                            )));
                         }
                         continue;
                     }
@@ -1010,6 +1021,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
         for (i, rel) in input.relationships.iter().enumerate() {
+            if rel.from == rel.to {
+                return Err(QueryError::Validation(
+                    "relationship endpoints must use different node aliases".into(),
+                ));
+            }
             if !node_ids.contains(&rel.from.as_str()) {
                 return Err(QueryError::ReferenceError(format!(
                     "relationship[{}] references undefined node \"{}\" in 'from'",
@@ -1103,6 +1119,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                         "invalid property in aggregation \"{alias}\": {e}"
                     ))
                 })?;
+
+                if self.virtual_source(entity, prop).is_some() {
+                    return Err(QueryError::Validation(format!(
+                        "aggregation \"{alias}\": virtual property {entity}.{prop} cannot be read in SQL"
+                    )));
+                }
 
                 if matches!(function, AggFunction::Sum | AggFunction::Avg) {
                     let data_type = self.field_type(entity, prop).ok_or_else(|| {
@@ -1237,6 +1259,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         self.check_field(entity, &order_by.property).map_err(|e| {
             QueryError::AllowlistRejected(format!("invalid order_by property: {}", e))
         })?;
+        if self.virtual_source(entity, &order_by.property).is_some() {
+            return Err(QueryError::Validation(format!(
+                "order_by property {}.{} is virtual and cannot be read in SQL",
+                order_by.node, order_by.property
+            )));
+        }
 
         Ok(())
     }

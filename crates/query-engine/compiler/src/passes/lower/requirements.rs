@@ -39,6 +39,7 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             column: value,
             entity,
         } => Expr::eq(column(value), Expr::string(entity)),
+        Predicate::ColumnEq { left, right } => Expr::eq(column(left), column(right)),
         Predicate::RelationshipKinds { alias, kinds } => {
             sql::rel_kind_filter(alias, kinds).unwrap_or_else(|| Expr::lit(true))
         }

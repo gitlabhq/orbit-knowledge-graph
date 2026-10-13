@@ -19,12 +19,12 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter e0.target_id = 2, ... (_))
+        - (Filter _orbit_edge_0.target_id = 2, ... (_))
     emitted:
       expect:
-        - (Filter e0.target_id = 2, ... (_))
+        - (Filter _orbit_edge_0.target_id = 2, ... (_))
   duckdb:
     planned:
       expect:
-        - (Join ON callee.id = e0.target_id (_) (Bind callee (_)))
-        - (Filter e0.target_id = 2, ... (_))
+        - (Join ON callee.id = _orbit_edge_0.target_id (_) (Bind callee (_)))
+        - (Filter _orbit_edge_0.target_id = 2, ... (_))

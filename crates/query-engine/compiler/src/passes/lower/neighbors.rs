@@ -22,12 +22,11 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         direction,
         edge,
         has_non_denorm,
-        center_tp_lookup,
         fused_table,
+        incoming_scope_preserving,
     } = &plan.operation;
     let direction = *direction;
     let has_non_denorm = *has_non_denorm;
-    let center_tp_lookup = center_tp_lookup.as_ref();
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -116,18 +115,18 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             {
                 wp.push(f);
             }
-            // Incoming edges to a namespace center sit at the center's own tp; pin to the resolved paths for a leading-PK point lookup.
             if dir == Direction::Incoming
+                && *incoming_scope_preserving
                 && !center_node_ids.is_empty()
-                && let Some((src, key_col)) = center_tp_lookup
+                && center_has_tp
             {
                 wp.push(Expr::InSelect {
                     expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
                     query: Box::new(Query {
                         select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-                        from: TableRef::scan(src.as_str(), "_tpd"),
+                        from: TableRef::scan(&center_table, "_tpd"),
                         where_clause: Expr::conjoin(vec![
-                            id_list_predicate("_tpd", key_col, &center_node_ids),
+                            id_list_predicate("_tpd", DEFAULT_PRIMARY_KEY, &center_node_ids),
                             deleted_false("_tpd"),
                         ]),
                         ..Default::default()

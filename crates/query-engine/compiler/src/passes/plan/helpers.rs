@@ -72,6 +72,9 @@ fn tag_value(value: &serde_json::Value) -> Option<String> {
 }
 
 pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>> {
+    if filter.rhs_column.is_some() {
+        return None;
+    }
     match filter.op {
         None | Some(FilterOp::Eq) => Some(vec![format!(
             "{key}:{}",
@@ -91,17 +94,6 @@ pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>>
         }
         _ => None,
     }
-}
-
-pub fn has_non_denorm_filters(
-    filters: &[(String, BoundFilter)],
-    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-) -> bool {
-    filters.iter().any(|(_, filter)| {
-        [DenormalizedDirection::Source, DenormalizedDirection::Target]
-            .into_iter()
-            .all(|direction| lowerable_denorm(filter, direction, denormalized).is_none())
-    })
 }
 
 pub fn lowerable_denorm<'a>(

@@ -18,7 +18,7 @@ struct FlatBuilder<'a, M: OrbitQueryModel + ?Sized> {
     facts: &'a PlanningContext<'a, M>,
     definitions: Vec<(String, PhysicalPlan)>,
     filtered: HashSet<String>,
-    tagged: HashSet<(String, String)>,
+    tagged: HashSet<(String, String, usize)>,
 }
 
 pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
@@ -54,8 +54,8 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     previous.inner_join(
                         edge,
                         (
-                            Column::new(format!("e{}", join.prev_index), &join.prev_col),
-                            Column::new(format!("e{index}"), &join.curr_col),
+                            Column::new(&self.facts.hops[join.prev_index].alias, &join.prev_col),
+                            Column::new(&hop.alias, &join.curr_col),
                         ),
                     )
                 }
@@ -71,11 +71,12 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         };
         if !self.facts.aggregate() {
             for (index, hop) in self.facts.hops.iter().enumerate() {
-                let edge = format!("e{index}");
+                let edge = hop.alias.clone();
+                let output = format!("e{index}");
                 let prefix = if hop.max_hops > 1 {
-                    format!("hop_{edge}")
+                    format!("hop_{output}")
                 } else {
-                    edge.clone()
+                    output
                 };
                 plan.outputs.extend(
                     [
@@ -113,7 +114,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 else {
                     continue;
                 };
-                let edge = &format!("e{index}");
+                let edge = &hop.alias;
                 let joined = node.hydration != HydrationStrategy::Skip
                     && !(node.hydration == HydrationStrategy::FilterOnly
                         && self.filtered.contains(alias));
@@ -126,7 +127,9 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 if !joined {
                     continue;
                 }
-                let membership = if node.hydration == HydrationStrategy::Join && node.use_narrowing
+                let membership = if node.hydration == HydrationStrategy::Join
+                    && node.use_narrowing
+                    && hop.max_hops == 1
                 {
                     let scan_alias = format!("{edge}n");
                     let mut predicates = self.facts.edge_predicates(&scan_alias, hop, false);
@@ -206,7 +209,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     self.definitions.push((name.clone(), keys));
                 }
                 if first || !filter_only {
-                    predicates.push(key_membership(&format!("e{index}"), column, name));
+                    predicates.push(key_membership(&hop.alias, column, name));
                 }
             }
         }
@@ -258,13 +261,8 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         cascade: Option<&PhysicalPlan>,
     ) -> Result<PhysicalSource> {
         let hop = &self.facts.hops[index];
-        let alias = format!("e{index}");
-        let scan = |final_| PhysicalSource::Scan {
-            table: hop.edge_table.clone(),
-            alias: alias.clone(),
-            final_,
-            relationship: Some(hop.input_index),
-        };
+        let alias = hop.alias.clone();
+        let scan = |final_| super::hops::edge_source(hop, &alias, final_);
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
         if !multi_hop && !dedup && self.facts.aggregate() {

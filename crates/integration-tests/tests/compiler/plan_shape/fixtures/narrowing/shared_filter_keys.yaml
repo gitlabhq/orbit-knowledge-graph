@@ -32,10 +32,10 @@ physical:
         - pattern: (CTE $shared (_))
           count: 1
       reject:
-        - (Filter e1.source_id IN $shared.id, ... (_))
+        - (Filter _orbit_edge_1.source_id IN $shared.id, ... (_))
   duckdb:
     planned:
       ctes:
         exact_order: [_filter_a, _filter_b]
       expect:
-        - (Filter e1.source_id IN _filter_b.id, ... (_))
+        - (Filter _orbit_edge_1.source_id IN _filter_b.id, ... (_))

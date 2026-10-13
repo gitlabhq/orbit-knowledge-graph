@@ -47,28 +47,34 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
         Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
-    let scan = |alias: &str| PhysicalSource::Scan {
-        relationship: None,
-        table: hop.edge_table.clone(),
-        alias: alias.into(),
-        final_: false,
-    };
+    let scan = |alias: &str| edge_source(hop, alias, true);
     let mut predicate = vec![];
     if let Some(kind) = relationship_kinds("e1", &hop.rel_types) {
         predicate.push(kind);
     }
-    predicate.push(live("e1"));
     let mut source = scan("e1");
     for index in 2..=depth {
         let previous = format!("e{}", index - 1);
         let current = format!("e{index}");
-        let mut predicates = vec![live(&current)];
+        let mut predicates = vec![];
         if let Some(kind) = relationship_kinds(&current, &hop.rel_types) {
             predicates.push(kind);
         }
         source = PhysicalSource::Join {
             endpoints: (Column::new(&previous, end), Column::new(&current, start)),
-            predicates,
+            predicates: {
+                predicates.push(Predicate::ColumnEq {
+                    left: Column::new(&previous, end_kind),
+                    right: Column::new(
+                        &current,
+                        match hop.direction {
+                            Direction::Outgoing | Direction::Both => SOURCE_KIND_COLUMN,
+                            Direction::Incoming => TARGET_KIND_COLUMN,
+                        },
+                    ),
+                });
+                predicates
+            },
             left: Box::new(source),
             right: Box::new(scan(&current)),
         };
@@ -106,5 +112,38 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
             Projection::col("e1", DELETED_COLUMN),
             Projection::col("e1", TRAVERSAL_PATH_COLUMN),
         ],
+    }
+}
+
+pub(super) fn edge_source(hop: &Hop, alias: &str, final_: bool) -> PhysicalSource {
+    if hop.edge_tables.len() <= 1 {
+        return PhysicalSource::Scan {
+            relationship: Some(hop.input_index),
+            table: hop.edge_table.clone(),
+            alias: alias.into(),
+            final_,
+        };
+    }
+    PhysicalSource::Union {
+        alias: alias.into(),
+        arms: hop
+            .edge_tables
+            .iter()
+            .map(|table| PhysicalPlan {
+                source: PhysicalSource::Scan {
+                    relationship: Some(hop.input_index),
+                    table: table.clone(),
+                    alias: format!("_{alias}"),
+                    final_,
+                },
+                outputs: EDGE_RESERVED_COLUMNS
+                    .iter()
+                    .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
+                    .chain([&DELETED_COLUMN])
+                    .map(|column| Projection::col(&format!("_{alias}"), column))
+                    .collect(),
+            })
+            .collect(),
+        relationship: hop.input_index,
     }
 }
