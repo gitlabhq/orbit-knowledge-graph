@@ -13,12 +13,6 @@ Accepted
 
 2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
 
-## Update: groups that the sweep missed (2026-10-13)
-
-`GetIndexingStatus` takes an optional `enabled_at` per path. A root with no checkpoint row
-is error when Orbit was turned on two hours or more before the last full dispatch sweep.
-The indexer will not start that root.
-
 ## Update: last completed time (2026-10-11)
 
 `GetIndexingStatus` returns `last_completed_at` per path, and `GetGraphStatus` sets it
