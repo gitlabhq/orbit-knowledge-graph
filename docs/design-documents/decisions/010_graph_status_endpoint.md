@@ -16,8 +16,8 @@ Accepted
 ## Update: groups that the sweep missed (2026-10-13)
 
 `GetIndexingStatus` takes an optional `enabled_at` per path. A root with no checkpoint row
-is error when Orbit was on two hours or more before the last full dispatch sweep. The
-indexer will not start that root.
+is error when Orbit was turned on two hours or more before the last full dispatch sweep.
+The indexer will not start that root.
 
 ## Update: last completed time (2026-10-11)
 
