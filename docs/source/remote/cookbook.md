@@ -35,7 +35,7 @@ This page is a library of prompts that work. Each one turns your agent into an
 expert on your own projects.
 
 For a step-by-step walkthrough of package registry queries, see
-[Tutorial: Answer package registry questions with GitLab Orbit](package-registry-tutorial.md).
+[Tutorial: Answer package registry questions with GitLab Orbit](tutorials/package-registry.md).
 
 ## How to use this page
 
