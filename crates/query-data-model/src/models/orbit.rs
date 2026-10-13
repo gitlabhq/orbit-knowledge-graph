@@ -211,6 +211,10 @@ pub trait OrbitQueryModel {
             .unwrap_or(ontology::RequiredRole::Reporter.as_access_level())
     }
 
+    fn table_path_columns(&self, table: &str) -> Option<&[crate::PathColumn]> {
+        self.query_backend().table_path_columns(table)
+    }
+
     fn relationship_table(&self, relationship: &str) -> Option<&str> {
         let relationship = self.graph().relationship_id(relationship)?;
         self.query_backend().relationship_table(relationship)
