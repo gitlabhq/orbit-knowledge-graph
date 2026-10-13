@@ -38,7 +38,8 @@ HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
   --kube-context "$KCTX"
   --set "namespaces.gitlab=$NS_GITLAB"
   --set "namespaces.gkg=$NS_GKG"
-  --set "indexingBudgetMultiplier=${E2E_INDEXING_BUDGET_MULTIPLIER:-1}")
+  --set "indexingBudgetMultiplier=${E2E_INDEXING_BUDGET_MULTIPLIER:-1}"
+  --set-string "codeGraphIncremental=${E2E_CODE_GRAPH_INCREMENTAL:-false}")
 if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
   HELM_ARGS+=(--set "image=$E2E_ROBOT_IMAGE")
 fi
