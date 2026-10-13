@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 
+#[path = "cli/revisions.rs"]
+mod revisions;
+
 use integration_testkit::cli::{
     create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
     orbit_index, orbit_sql, rows, rows_where, sorted_ids,
@@ -113,6 +116,48 @@ fn concurrent_readers() {
 }
 
 #[test]
+fn search_hook_recognizes_the_separate_manifest() {
+    use std::io::Write;
+
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let invoke = || {
+        let mut child = orbit_cmd()
+            .args(["hook-guard", "search"])
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .env("ORBIT_TELEMETRY_DISABLED", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        writeln!(
+            child.stdin.take().unwrap(),
+            "{}",
+            json!({
+                "cwd": repo.path,
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "hello"}
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        output.stdout
+    };
+    assert!(invoke().is_empty());
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    assert!(!data_dir.path().join("graph.duckdb").exists());
+    let output: Value = serde_json::from_slice(&invoke()).unwrap();
+    assert_eq!(output["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    assert!(
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("orbit")
+    );
+}
+
+#[test]
 fn reader_during_writer() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -154,7 +199,10 @@ fn concurrent_writers() {
             ok += 1;
         }
     }
-    assert!(ok > 0, "at least one writer should succeed");
+    assert_eq!(
+        ok, 2,
+        "both writers should complete under the revision lock"
+    );
 
     let result = orbit_sql(FILES_SIMPLE, data_dir.path());
     assert!(!rows(&result).is_empty());
@@ -179,16 +227,19 @@ fn index_db_flag_writes_to_custom_path() {
     let repo = create_test_repo();
 
     let workspace_dir = tempfile::TempDir::new().unwrap();
-    let out = orbit_cmd()
-        .args([
-            "index",
-            repo.path.to_str().unwrap(),
-            "--db",
-            db_path.to_str().unwrap(),
-        ])
-        .env("ORBIT_DATA_DIR", workspace_dir.path())
-        .output()
-        .unwrap();
+    let index = || {
+        orbit_cmd()
+            .args([
+                "index",
+                repo.path.to_str().unwrap(),
+                "--db",
+                db_path.to_str().unwrap(),
+            ])
+            .env("ORBIT_DATA_DIR", workspace_dir.path())
+            .output()
+            .unwrap()
+    };
+    let out = index();
     assert!(
         out.status.success(),
         "index --db failed: {}",
@@ -210,6 +261,35 @@ fn index_db_flag_writes_to_custom_path() {
     assert!(result.status.success());
     let json: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(rows(&json).len(), 2);
+
+    git(
+        &repo.path,
+        &["commit", "--allow-empty", "-m", "new revision"],
+    );
+    let output = index();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
+    );
+    let client = duckdb_client::DuckDbClient::open(&db_path).unwrap();
+    client
+        .execute(
+            "UPDATE _orbit_meta SET value = 'outdated' WHERE key = 'local_ddl'",
+            &[],
+        )
+        .unwrap();
+    drop(client);
+    let before = std::fs::read(&db_path).unwrap();
+    let output = index();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
+    );
+    assert_eq!(
+        std::fs::read(&db_path).unwrap(),
+        before,
+        "ownership rejection must preserve an outdated database"
+    );
 }
 
 #[test]
@@ -505,7 +585,9 @@ fn a_busy_graph_is_reported_in_one_line() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let _writer = duckdb_client::DuckDbClient::open(&data_dir.path().join("graph.duckdb")).unwrap();
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let graph = std::path::Path::new(manifest[0]["database_path"].as_str().unwrap());
+    let _writer = duckdb_client::DuckDbClient::open(graph).unwrap();
     let (_, stderr, ok) = run_cmd(&["sql", "--all", "SELECT 1"], data_dir.path());
 
     assert!(!ok);
@@ -1328,7 +1410,12 @@ fn repo_map_relative_orbit_data_dir() {
         "index with relative ORBIT_DATA_DIR failed: {}",
         String::from_utf8_lossy(&idx.stderr)
     );
-    assert!(caller_dir.path().join("orbit-data/graph.duckdb").exists());
+    assert!(
+        caller_dir
+            .path()
+            .join("orbit-data/local/manifest.duckdb")
+            .exists()
+    );
 
     let out = orbit_cmd()
         .args([
