@@ -690,6 +690,15 @@ mod tests {
         assert!(!dir.path().join("opencode.json").exists());
     }
 
+    /// What an earlier release left in `orbit-cli`: the embedded local skill, unedited.
+    fn write_legacy_skill(legacy: &Path) {
+        for (relative, contents) in crate::skill::embedded_files() {
+            let file = legacy.join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, contents).unwrap();
+        }
+    }
+
     fn skill_manifest_name(skill_dir: &Path) -> String {
         let manifest = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
         manifest
@@ -786,8 +795,7 @@ mod tests {
     fn a_legacy_orbit_cli_skill_and_its_link_are_migrated() {
         let dir = tempfile::tempdir().unwrap();
         let legacy = dir.path().join(".agents/skills/orbit-cli");
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(legacy.join("SKILL.md"), "---\nname: orbit-cli\n---\n").unwrap();
+        write_legacy_skill(&legacy);
         let mine = dir.path().join(".agents/skills/mine");
         std::fs::create_dir_all(&mine).unwrap();
         std::fs::create_dir_all(dir.path().join(".claude/skills")).unwrap();
@@ -806,8 +814,7 @@ mod tests {
     fn uninstall_removes_a_legacy_skill_and_keeps_one_the_user_owns() {
         let dir = tempfile::tempdir().unwrap();
         let legacy = dir.path().join(".agents/skills/orbit-cli");
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(legacy.join("SKILL.md"), "---\nname: orbit-cli\n---\n").unwrap();
+        write_legacy_skill(&legacy);
         uninstall_named(&["codex"], dir.path());
         assert!(!legacy.exists());
 
@@ -845,13 +852,12 @@ mod tests {
     }
 
     #[test]
-    fn migration_keeps_files_the_user_added_to_an_unmarked_legacy_skill() {
+    fn migration_keeps_files_the_user_added_or_edited_in_an_unmarked_legacy_skill() {
         let dir = tempfile::tempdir().unwrap();
         let legacy = dir.path().join(".agents/skills/orbit-cli");
-        std::fs::create_dir_all(legacy.join("references/local")).unwrap();
-        std::fs::write(legacy.join("SKILL.md"), "---\nname: orbit-cli\n---\n").unwrap();
-        std::fs::write(legacy.join("references/local/sql.md"), "shipped\n").unwrap();
+        write_legacy_skill(&legacy);
         std::fs::write(legacy.join("my-notes.md"), "mine\n").unwrap();
+        std::fs::write(legacy.join("references/local/sql.md"), "my edit\n").unwrap();
 
         install_with_mcp(&["codex"], dir.path());
 
@@ -859,8 +865,12 @@ mod tests {
             std::fs::read_to_string(legacy.join("my-notes.md")).unwrap(),
             "mine\n"
         );
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("references/local/sql.md")).unwrap(),
+            "my edit\n"
+        );
         assert!(!legacy.join("SKILL.md").exists());
-        assert!(!legacy.join("references").exists());
+        assert!(!legacy.join("references/local/cli.md").exists());
         assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
     }
 

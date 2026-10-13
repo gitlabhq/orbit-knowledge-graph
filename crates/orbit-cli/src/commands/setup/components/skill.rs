@@ -7,7 +7,7 @@ use super::json;
 use super::{Installer, Report, backup_once, file_mentions, remove_empty_parents, write_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
-use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_paths};
+use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_files};
 
 /// Written into every directory this component installs. Content cannot identify it, because the
 /// full skill depends on the instance.
@@ -344,8 +344,8 @@ fn remove_legacy_link(
 }
 
 /// Removes what an earlier release installed as `orbit-cli`. A marked directory goes whole. An
-/// unmarked one with the old manifest name loses only the files release shipped; anything the
-/// user added stays.
+/// unmarked one with the old manifest name loses only the files that still match what this
+/// release ships; anything the user added or edited stays.
 fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -357,9 +357,10 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
         remove_path(path)?;
     } else if has_legacy_manifest(path) {
         let mut directories = BTreeSet::new();
-        for relative in embedded_paths() {
+        for (relative, contents) in embedded_files() {
             let file = path.join(&relative);
-            if std::fs::remove_file(&file).is_ok() {
+            let unedited = std::fs::read(&file).is_ok_and(|current| current == contents);
+            if unedited && std::fs::remove_file(&file).is_ok() {
                 directories.extend(
                     file.ancestors()
                         .skip(1)
@@ -376,7 +377,7 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
         if path.exists() {
             report.note(
                 label,
-                "kept (has files that are not Orbit's; delete it by hand)",
+                "kept (has files that changed since install; delete it by hand)",
             );
             return Ok(());
         }
