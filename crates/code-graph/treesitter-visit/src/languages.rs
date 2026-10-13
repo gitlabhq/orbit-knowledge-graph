@@ -179,35 +179,60 @@ mod tests {
     #[test]
     #[cfg(feature = "tree-sitter-python")]
     fn test_python_parsing() {
-        let root = SupportLang::Python.ast_grep("def hello(): pass");
+        let root = crate::Root::try_new(
+            "def hello(): pass",
+            SupportLang::Python,
+            &crate::ParseGuard::default(),
+        )
+        .unwrap();
         assert!(!root.source().is_empty());
     }
 
     #[test]
     #[cfg(feature = "tree-sitter-typescript")]
     fn test_typescript_parsing() {
-        let root = SupportLang::TypeScript.ast_grep("function hello() {}");
+        let root = crate::Root::try_new(
+            "function hello() {}",
+            SupportLang::TypeScript,
+            &crate::ParseGuard::default(),
+        )
+        .unwrap();
         assert!(!root.source().is_empty());
     }
 
     #[test]
     #[cfg(feature = "tree-sitter-ruby")]
     fn test_ruby_parsing() {
-        let root = SupportLang::Ruby.ast_grep("def hello; end");
+        let root = crate::Root::try_new(
+            "def hello; end",
+            SupportLang::Ruby,
+            &crate::ParseGuard::default(),
+        )
+        .unwrap();
         assert!(!root.source().is_empty());
     }
 
     #[test]
     #[cfg(feature = "tree-sitter-php")]
     fn test_php_parsing() {
-        let root = SupportLang::Php.ast_grep("<?php function hello() {}");
+        let root = crate::Root::try_new(
+            "<?php function hello() {}",
+            SupportLang::Php,
+            &crate::ParseGuard::default(),
+        )
+        .unwrap();
         assert!(!root.source().is_empty());
     }
 
     #[test]
     #[cfg(feature = "tree-sitter-elixir")]
     fn test_elixir_parsing() {
-        let root = SupportLang::Elixir.ast_grep("defmodule Foo do\nend");
+        let root = crate::Root::try_new(
+            "defmodule Foo do\nend",
+            SupportLang::Elixir,
+            &crate::ParseGuard::default(),
+        )
+        .unwrap();
         assert!(!root.source().is_empty());
     }
 }

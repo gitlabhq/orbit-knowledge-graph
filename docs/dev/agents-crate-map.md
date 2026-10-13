@@ -31,8 +31,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `utils` | Shared SQL parameter types (`ScalarType`, `SqlType`), ClickHouse encoding helpers, Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait, strict-mode YAML parse/serialize helpers (`yaml`) |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `named-queries` | Named queries: parses/validates YAML under `config/named_queries/` with a JSON and a GQL spelling per query, embeds it via `rust-embed`, and renders the selected spelling with JSON-schema-validated client parameters and separate server-derived `BindingValues` (`$binding`/`$param` placeholders for JSON, MiniJinja `binding`/`param`/`identifier`/`integer` lookups for GQL); `orbit-server` executes `QUERY_TYPE_NAMED` with the spelling and frontend selected by the separate Rails-derived `QueryLanguage` value, and its unit tests compile both examples against the ontology |
-| `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), circuit-breaking decorator (`CircuitBreakingNatsClient`), testkit feature |
-| `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakerRegistry`, `CircuitBreakableError`) with observer hooks and per-service config |
+| `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), testkit feature |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
 | `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |

@@ -5,7 +5,6 @@ edition = "2024"
 license = "LicenseRef-EE"
 
 [dependencies]
-circuit-breaker = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
 rand = { workspace = true }

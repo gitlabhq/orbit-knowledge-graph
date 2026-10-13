@@ -14,7 +14,6 @@ pub mod billing;
 pub mod buckets;
 pub mod indexer;
 pub mod query;
-pub mod resilience;
 pub mod server;
 
 mod types;
@@ -46,7 +45,6 @@ pub fn catalog() -> Vec<&'static MetricSpec> {
     v.extend(query::engine::CATALOG);
     v.extend(server::content::CATALOG);
     v.extend(server::schema_watcher::CATALOG);
-    v.extend(resilience::CATALOG);
     v.extend(billing::events::CATALOG);
     v.extend(billing::quota::CATALOG);
     v

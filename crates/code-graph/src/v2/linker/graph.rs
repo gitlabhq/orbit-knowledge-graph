@@ -863,18 +863,6 @@ impl CodeGraph {
             .is_some_and(|id| self.indexes.by_name.contains(id))
     }
 
-    pub fn lookup_nested(&self, scope: &str, member: &str) -> &[NodeIndex] {
-        let scope_id = match self.strings.find(scope) {
-            Some(id) => id,
-            None => return &[],
-        };
-        let member_id = match self.strings.find(member) {
-            Some(id) => id,
-            None => return &[],
-        };
-        self.indexes.nested.lookup(scope_id, member_id)
-    }
-
     #[inline]
     pub fn ancestors(&self, idx: NodeIndex) -> Option<&[NodeIndex]> {
         self.indexes.ancestors.get(&idx).map(|v| v.as_slice())
@@ -1523,7 +1511,6 @@ mod tests {
         assert_eq!(cg.lookup_fqn("Foo.bar").len(), 1);
         assert_eq!(cg.lookup_name("Foo").len(), 1);
         assert_eq!(cg.lookup_name("bar").len(), 1);
-        assert_eq!(cg.lookup_nested("Foo", "bar").len(), 1);
     }
 
     fn make_def_at(

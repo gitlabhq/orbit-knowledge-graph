@@ -1183,14 +1183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "circuit-breaker"
-version = "0.1.0"
-dependencies = [
- "parking_lot",
- "tokio",
-]
-
-[[package]]
 name = "cityhash-rs"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1286,7 +1278,6 @@ dependencies = [
  "arrow-ipc",
  "bytes",
  "chrono",
- "circuit-breaker",
  "clickhouse",
  "futures",
  "orbit-server-config",
@@ -3337,7 +3328,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
- "circuit-breaker",
  "futures",
  "jsonwebtoken",
  "orbit-server-config",
@@ -5084,7 +5074,6 @@ dependencies = [
  "async-nats",
  "async-trait",
  "bytes",
- "circuit-breaker",
  "futures",
  "orbit-server-config",
  "parking_lot",
@@ -5646,10 +5635,8 @@ dependencies = [
 name = "orbit-observability"
 version = "0.1.0"
 dependencies = [
- "circuit-breaker",
  "opentelemetry",
  "serde",
- "tracing",
 ]
 
 [[package]]

@@ -146,7 +146,12 @@ mod tests {
         let ctx = ResultContext::new().with_query_type(QueryType::PathFinding);
         let mut result = QueryResult::from_batches(&[batch], &ctx);
 
-        for node in result.rows_mut()[0].dynamic_nodes_mut() {
+        for node in result
+            .authorized_rows_mut()
+            .next()
+            .unwrap()
+            .dynamic_nodes_mut()
+        {
             node.properties
                 .insert("name".to_string(), ColumnValue::String("test".to_string()));
             node.properties

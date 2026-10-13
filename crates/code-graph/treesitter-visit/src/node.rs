@@ -390,7 +390,6 @@ pub enum Match<'a> {
     Any,
     Named,
     KindEndsWith(&'a str),
-    KindStartsWith(&'a str),
     /// Match a node whose text content is exactly this string.
     Text(&'a str),
 }
@@ -406,7 +405,6 @@ impl Match<'_> {
             Match::Any => true,
             Match::Named => node.is_named(),
             Match::KindEndsWith(s) => node.kind().as_ref().ends_with(s),
-            Match::KindStartsWith(s) => node.kind().as_ref().starts_with(s),
             Match::Text(t) => node.text() == *t,
         }
     }

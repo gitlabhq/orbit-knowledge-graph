@@ -20,26 +20,6 @@ pub enum RedactionExchangeError {
     ClientError { code: String, message: String },
 }
 
-impl RedactionExchangeError {
-    pub fn into_status(self) -> Status {
-        match self {
-            Self::StreamClosed => {
-                Status::cancelled("Client closed stream without sending redaction response")
-            }
-            Self::ReceiveFailed(s) => s,
-            Self::InvalidMessage(msg) => Status::invalid_argument(msg),
-            Self::ResultIdMismatch { expected, received } => {
-                warn!(expected = %expected, received = %received, "result_id mismatch");
-                Status::invalid_argument("result_id mismatch in redaction response")
-            }
-            Self::ClientError { code, message } => {
-                warn!(code = %code, message = %message, "Client sent error");
-                Status::aborted(format!("{}: {}", code, message))
-            }
-        }
-    }
-}
-
 pub struct RedactionExchangeResult {
     pub authorizations: Vec<ResourceAuthorization>,
 }
@@ -150,35 +130,5 @@ impl RedactionService {
             .collect();
 
         Ok(RedactionExchangeResult { authorizations })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_redaction_exchange_error_into_status() {
-        let err = RedactionExchangeError::StreamClosed;
-        let status = err.into_status();
-        assert_eq!(status.code(), tonic::Code::Cancelled);
-
-        let err = RedactionExchangeError::InvalidMessage("test");
-        let status = err.into_status();
-        assert_eq!(status.code(), tonic::Code::InvalidArgument);
-
-        let err = RedactionExchangeError::ResultIdMismatch {
-            expected: "a".to_string(),
-            received: "b".to_string(),
-        };
-        let status = err.into_status();
-        assert_eq!(status.code(), tonic::Code::InvalidArgument);
-
-        let err = RedactionExchangeError::ClientError {
-            code: "test".to_string(),
-            message: "msg".to_string(),
-        };
-        let status = err.into_status();
-        assert_eq!(status.code(), tonic::Code::Aborted);
     }
 }

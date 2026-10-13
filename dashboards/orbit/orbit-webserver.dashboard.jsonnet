@@ -494,7 +494,6 @@ local reference =
   + o.sectionCollapsed('Schema watcher (reference)', o.metricsInDomain('server.schema_watcher'), DS, SEL)
   + o.sectionCollapsed('Billing events (reference)', o.metricsInDomain('billing.events'), DS, SEL)
   + o.sectionCollapsed('Billing quota (reference)', o.metricsInDomain('billing.quota'), DS, SEL)
-  + o.sectionCollapsed('Circuit breaker (reference)', o.metricsInDomain('resilience.circuit_breaker'), DS, o.GKG_ANY_SEL)
   + o.externalSection('Rails Orbit — request (reference)', ext.RAILS_KG_REQUEST, RDS, RAIL)
   + o.externalSection('Rails Orbit — traversal (reference)', ext.RAILS_KG_TRAVERSAL, RDS, RAIL);
 

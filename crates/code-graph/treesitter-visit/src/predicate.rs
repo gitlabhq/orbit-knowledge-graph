@@ -103,10 +103,6 @@ pub fn kind_ends_with(suffix: &'static str) -> Pred {
     check(Match::KindEndsWith(suffix))
 }
 
-pub fn kind_starts_with(prefix: &'static str) -> Pred {
-    check(Match::KindStartsWith(prefix))
-}
-
 pub fn parent_ends_with(suffix: &'static str) -> Pred {
     exists(Extract::one(Axis::Parent, Match::Any).where_(Match::KindEndsWith(suffix)))
 }
@@ -125,10 +121,10 @@ pub fn has_named_prev_sibling() -> Pred {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LanguageExt, SupportLang};
+    use crate::{ParseGuard, SupportLang};
 
     fn py(code: &str) -> crate::Root<crate::StrDoc<SupportLang>> {
-        SupportLang::Python.ast_grep(code)
+        crate::Root::try_new(code, SupportLang::Python, &ParseGuard::default()).unwrap()
     }
 
     #[test]
@@ -145,7 +141,6 @@ mod tests {
         let root = py("def foo(): pass");
         let func = root.root().children().next().unwrap();
         assert!(kind_ends_with("_definition").test(&func));
-        assert!(kind_starts_with("function").test(&func));
     }
 
     #[test]
