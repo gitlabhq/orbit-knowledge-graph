@@ -27,21 +27,17 @@ const CACHE_MANIFEST: &str = ".orbit-cache.json";
 const DEFAULT_SKILL: &str = "orbit";
 const LOCK_WAIT: Duration = Duration::from_secs(10);
 const STALE_CACHE_TEMP_AGE: Duration = Duration::from_secs(15 * 60);
-/// `orbit setup` always installs under this name: the content depends on whether the instance is
-/// reachable, so the name cannot.
+/// Fixed because the content, not the name, depends on whether the instance is reachable.
 pub(crate) const INSTALL_DIR_NAME: &str = "orbit";
-/// Earlier releases installed the embedded tree under this name.
 pub(crate) const LEGACY_INSTALL_DIR_NAME: &str = "orbit-cli";
 const GLAB_SKILLS_GET: &str = "glab orbit skills get orbit";
 
-/// The embedded local skill as files; earlier releases installed these as `orbit-cli`.
 pub(crate) fn embedded_files() -> Vec<(String, Vec<u8>)> {
     SkillAssets::iter()
         .filter_map(|path| Some((path.to_string(), SkillAssets::get(&path)?.data.into_owned())))
         .collect()
 }
 
-/// The thin skill that loads the real one when the agent reads it. No network is needed to install it.
 pub(crate) fn wrapper_tree() -> Result<BTreeMap<String, Vec<u8>>> {
     let launcher = crate::commands::setup::spec::launcher();
     let mut tree = BTreeMap::new();
@@ -62,8 +58,6 @@ pub(crate) fn wrapper_tree() -> Result<BTreeMap<String, Vec<u8>>> {
     Ok(tree)
 }
 
-/// The tree `orbit skills get orbit` prints, for agents that cannot run commands when they load a
-/// skill: the instance skill composed with the local one, or the embedded one when that fails.
 pub(crate) async fn full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
     let view = resolved_view(DEFAULT_SKILL).await.unwrap_or_else(|error| {
         eprintln!("warning: {error:#}; using the embedded local skill");

@@ -256,7 +256,6 @@ impl Component {
     }
 }
 
-/// What `orbit setup` writes into the skill directory.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum SkillKind {
     /// A thin skill that loads the real one when the agent reads it.
@@ -266,7 +265,6 @@ pub(crate) enum SkillKind {
     Full,
 }
 
-/// Nothing is fetched when the skill is not installed or nothing will be written.
 pub(crate) async fn skill_tree(
     kind: SkillKind,
     components: &BTreeSet<Component>,
@@ -289,7 +287,7 @@ pub(crate) struct Options {
     pub(crate) verbose: bool,
     pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
-    /// Files written for `Component::Skill`; resolved up front because that can need the network.
+    /// Resolved up front because `--skill full` can need the network.
     pub(crate) skill_tree: BTreeMap<String, Vec<u8>>,
 }
 
@@ -690,7 +688,6 @@ mod tests {
         assert!(!dir.path().join("opencode.json").exists());
     }
 
-    /// What an earlier release left in `orbit-cli`: the embedded local skill, unedited.
     fn write_legacy_skill(legacy: &Path) {
         for (relative, contents) in crate::skill::embedded_files() {
             let file = legacy.join(relative);

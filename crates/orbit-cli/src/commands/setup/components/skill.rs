@@ -20,7 +20,6 @@ const MARKER_CONTENTS: &str =
 
 static NO_FILES: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
-/// For plans, removal, and detection, which write no files.
 pub(super) static WITHOUT_FILES: Skill<'static> = Skill { tree: &NO_FILES };
 
 pub(super) struct Skill<'a> {
@@ -327,7 +326,6 @@ fn remove_skill_files(
     Ok(())
 }
 
-/// Removes the link an earlier release made to the `orbit-cli` skill. Other links are the user's.
 fn remove_legacy_link(
     link: &Path,
     label: &str,
@@ -346,9 +344,7 @@ fn remove_legacy_link(
     Ok(())
 }
 
-/// Removes what an earlier release installed as `orbit-cli`. A marked directory goes whole. An
-/// unmarked one with the old manifest name loses only the files that still match what this
-/// release ships; anything the user added or edited stays.
+/// An unmarked directory loses only files that still match this release; user edits stay.
 fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -393,8 +389,8 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
     Ok(())
 }
 
-/// A manifest that differs from this release's (edited, or from an older release) must stop being a skill, or the agent would list `orbit-cli` next to
-/// `orbit`. The unedited one is removed with the other shipped files.
+/// A differing manifest must stop being a skill, or the agent lists `orbit-cli` next to `orbit`.
+/// The caller removes an unedited one with the other shipped files.
 fn retire_legacy_manifest(dir: &Path, label: &str, report: &mut Report) -> Result<()> {
     let manifest = dir.join(MANIFEST);
     let shipped = embedded_files()
