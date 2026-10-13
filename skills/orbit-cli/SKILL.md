@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.23.2
+version: 0.24.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -50,10 +50,10 @@ orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crate
 ```
 
 Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
-with regex characters match as regex. Each file is one row: matching lines are
-grouped under their enclosing definition as `Kind name:start-end`, followed by
-`←callers` and `→callees`. Files that define a term come first, then code, tests,
-and config or docs. A definition the query names prints first with its source.
+with regex characters match as regex. Output follows rg's heading layout: each
+file's path once, then `line:text` per match. A `line-» Kind name:start-end
+←callers →callees` line precedes the matches inside each definition. Files that define
+a term come first, then code, tests, and config or docs. A definition the query names prints first with its source.
 The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
 `--kind` takes definition kinds such as `Class,Method`. `--kind File` and
 `--kind Directory` list where the matches are, with their definitions.
