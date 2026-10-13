@@ -10,7 +10,6 @@ use serde_json::Value;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
-use crate::input::*;
 
 use super::sql::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
@@ -18,7 +17,7 @@ use super::sql::{
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
+pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -> Result<Node> {
     let pf = &plan.operation;
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];
@@ -304,7 +303,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
             alias: alias.to_string(),
         },
         where_clause: Some(deleted_false(alias)),
-        limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
+        limit: Some(crate::query_limits::MAX_PATH_ANCHOR_LIMIT as u32),
         ..Default::default()
     };
     ctes.push(Cte::new(&cte_name, cte_query));

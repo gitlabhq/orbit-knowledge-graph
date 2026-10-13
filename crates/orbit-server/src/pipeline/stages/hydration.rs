@@ -99,7 +99,7 @@ impl HydrationStage {
         })?;
 
         let rendered_sql = compiled.base.render();
-        let debug = if ctx.compiled()?.input.options.include_debug_sql {
+        let debug = if ctx.compiled()?.input.include_debug_sql {
             vec![DebugQuery {
                 sql: compiled.base.sql.clone(),
                 rendered: rendered_sql.clone(),

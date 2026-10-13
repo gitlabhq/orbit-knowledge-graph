@@ -3,17 +3,39 @@ mod schema_contract;
 
 use crate::error::Result;
 use crate::input::Input;
-use crate::passes::{cursor, validate};
+use crate::passes::cursor;
 use query_data_model::OrbitQueryModel;
+
+const BASE_SCHEMA_JSON: &str =
+    include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
+
+fn collect_schema_errors(
+    validator: &jsonschema::Validator,
+    value: &serde_json::Value,
+) -> Result<()> {
+    let errors: Vec<_> = validator
+        .iter_errors(value)
+        .map(|error| crate::passes::errors::format_schema_error(&error))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(crate::error::QueryError::Validation(errors.join("; ")))
+    }
+}
 
 pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
     let value: serde_json::Value = serde_json::from_str(json)?;
-    validate::collect_schema_errors(validate::base_validator(), &value)?;
+    let base_schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON)?;
+    let base = jsonschema::validator_for(&base_schema).map_err(|error| {
+        crate::error::QueryError::Validation(format!("invalid base schema: {error}"))
+    })?;
+    collect_schema_errors(&base, &value)?;
     let schema = derive_json_schema(model)?;
     let validator = jsonschema::validator_for(&schema).map_err(|error| {
         crate::error::QueryError::Validation(format!("invalid derived schema: {error}"))
     })?;
-    validate::collect_schema_errors(&validator, &value).map_err(|error| match error {
+    collect_schema_errors(&validator, &value).map_err(|error| match error {
         crate::error::QueryError::Validation(message) => {
             crate::error::QueryError::AllowlistRejected(message)
         }
@@ -24,7 +46,7 @@ pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
 }
 
 fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value> {
-    let mut schema: serde_json::Value = serde_json::from_str(validate::BASE_SCHEMA_JSON)?;
+    let mut schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON)?;
     let definitions = &mut schema["$defs"];
     definitions["EntityType"]["enum"] = model
         .graph()

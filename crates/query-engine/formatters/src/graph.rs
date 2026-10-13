@@ -172,7 +172,7 @@ impl GraphFormatter {
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
         let aggregations = Some(&output.compiled.input.aggregation.metrics);
-        let group_by = &output.compiled.input.aggregation.group_by;
+        let group_by = &output.compiled.input.aggregation.groups;
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -192,7 +192,10 @@ impl GraphFormatter {
             }
             Some(QueryType::Aggregation) => {
                 if let Some(aggs) = aggregations {
-                    columns = Some(Self::build_column_descriptors(aggs));
+                    columns = Some(Self::build_column_descriptors(
+                        aggs,
+                        &output.compiled.input.nodes,
+                    ));
                     group_columns = Some(Self::build_group_column_descriptors(
                         group_by,
                         &output.compiled.input.nodes,
@@ -203,6 +206,7 @@ impl GraphFormatter {
                         &edge_prefixes,
                         aggs,
                         group_by,
+                        &output.compiled.input.nodes,
                     ));
                 }
             }
@@ -333,40 +337,44 @@ impl GraphFormatter {
         }
     }
 
-    fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
-        aggs.iter().map(|agg| agg.output_name()).collect()
+    fn agg_col_names(aggs: &[compiler::query::Metric]) -> Vec<String> {
+        aggs.iter().map(|agg| agg.alias.clone()).collect()
     }
 
     fn build_column_descriptors(
-        aggs: &[compiler::input::InputAggregationMetric],
+        aggs: &[compiler::query::Metric],
+        nodes: &[compiler::query::Node],
     ) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
-                name: agg.output_name(),
-                function: agg.expr.function().to_string(),
-                target: agg.expr.node().to_string(),
-                property: agg.expr.property().map(str::to_owned),
+                name: agg.alias.clone(),
+                function: agg.function.to_string(),
+                target: nodes[agg.target.index()].alias.clone(),
+                property: agg.property.as_ref().map(|property| property.name.clone()),
             })
             .collect()
     }
 
     fn build_group_column_descriptors(
-        groups: &[compiler::input::InputGroupByKey],
-        input_nodes: &[compiler::input::InputNode],
+        groups: &[compiler::query::Group],
+        input_nodes: &[compiler::query::Node],
     ) -> Vec<GroupColumnDescriptor> {
-        let names = compiler::input::group_by_output_names(groups);
         groups
             .iter()
-            .zip(names)
-            .map(|(group, name)| GroupColumnDescriptor {
-                name,
-                kind: compiler::input::group_by_kind(group).to_string(),
-                node: group.node().to_string(),
-                property: group.property().map(ToString::to_string),
-                entity: input_nodes
-                    .iter()
-                    .find(|node| node.id == group.node())
-                    .and_then(|node| node.entity.clone()),
+            .map(|group| {
+                let node = &input_nodes[group.node().index()];
+                GroupColumnDescriptor {
+                    name: group.output_name().to_string(),
+                    kind: if group.property().is_some() {
+                        "property"
+                    } else {
+                        "node"
+                    }
+                    .to_string(),
+                    node: node.alias.clone(),
+                    property: group.property().map(|property| property.name.clone()),
+                    entity: Some(node.entity_name.clone()),
+                }
             })
             .collect()
     }
@@ -375,10 +383,14 @@ impl GraphFormatter {
         result: &QueryResult,
         result_context: &ResultContext,
         edge_prefixes: &[&str],
-        aggs: &[compiler::input::InputAggregationMetric],
-        groups: &[compiler::input::InputGroupByKey],
+        aggs: &[compiler::query::Metric],
+        groups: &[compiler::query::Group],
+        input_nodes: &[compiler::query::Node],
     ) -> Vec<Map<String, Value>> {
-        let group_col_names = compiler::input::group_by_output_names(groups);
+        let group_col_names: Vec<_> = groups
+            .iter()
+            .map(|group| group.output_name().to_string())
+            .collect();
         let agg_col_names = Self::agg_col_names(aggs);
         let mut rows = Vec::new();
 
@@ -387,7 +399,7 @@ impl GraphFormatter {
 
             for (group, col_name) in groups.iter().zip(&group_col_names) {
                 match group {
-                    compiler::input::InputGroupByKey::Property { .. } => {
+                    compiler::query::Group::Property { .. } => {
                         obj.insert(
                             col_name.clone(),
                             row.get(col_name)
@@ -395,7 +407,8 @@ impl GraphFormatter {
                                 .unwrap_or(Value::Null),
                         );
                     }
-                    compiler::input::InputGroupByKey::Node { node, .. } => {
+                    compiler::query::Group::Node { node, .. } => {
+                        let node = &input_nodes[node.index()].alias;
                         obj.insert(
                             col_name.clone(),
                             Self::extract_group_node(row, result_context, node, edge_prefixes),
@@ -636,6 +649,15 @@ mod tests {
     use compiler::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
     use std::sync::Arc;
 
+    fn query(value: serde_json::Value) -> compiler::BoundQuery {
+        let input: compiler::Input = serde_json::from_value(value).unwrap();
+        let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
+            ontology::Ontology::load_embedded().unwrap(),
+        ))
+        .unwrap();
+        compiler::passes::bind::bind(input, &model, compiler::passes::bind::Mode::Local).unwrap()
+    }
+
     fn make_search_output() -> PipelineOutput {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_orbit_p_id", DataType::Int64, false),
@@ -673,12 +695,11 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
+                input: query(serde_json::json!({
                     "query_type": "traversal",
                     "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
-                }))
-                .unwrap(),
+                })),
                 pagination: Default::default(),
                 has_virtual_columns: false,
             }),
@@ -721,7 +742,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
+                input: query(serde_json::json!({
                     "query_type": "aggregation",
                     "nodes": [{"id": "v", "entity": "Vulnerability"}],
                     "group_by": ["v.severity"],
@@ -730,8 +751,7 @@ mod tests {
                         "as": "vulnerability_count"
                     }],
                     "limit": 10
-                }))
-                .unwrap(),
+                })),
                 pagination: Default::default(),
                 has_virtual_columns: false,
             }),
@@ -917,12 +937,11 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
+                input: query(serde_json::json!({
                     "query_type": "traversal",
                     "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
-                }))
-                .unwrap(),
+                })),
                 pagination: Default::default(),
                 has_virtual_columns: false,
             }),
@@ -1045,7 +1064,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
+                input: query(serde_json::json!({
                     "query_type": "path_finding",
                     "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
                     "nodes": [
@@ -1053,8 +1072,7 @@ mod tests {
                         {"id": "p", "entity": "Project"}
                     ],
                     "limit": 5
-                }))
-                .unwrap(),
+                })),
                 pagination: Default::default(),
                 has_virtual_columns: false,
             }),
@@ -1143,7 +1161,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
+                input: query(serde_json::json!({
                     "query_type": "path_finding",
                     "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
                     "nodes": [
@@ -1151,8 +1169,7 @@ mod tests {
                         {"id": "p", "entity": "Project"}
                     ],
                     "limit": 5
-                }))
-                .unwrap(),
+                })),
                 pagination: Default::default(),
                 has_virtual_columns: false,
             }),

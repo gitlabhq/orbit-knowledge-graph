@@ -3,12 +3,12 @@ use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::input::QueryType;
 use crate::passes::lower::sql::{
     deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
-use crate::passes::plan::helpers::{FilterOwner, ordered_filters};
+use crate::query::Query as BoundQuery;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
@@ -106,29 +106,33 @@ impl ResultContext {
 
 pub fn enforce_lowered_return(
     node: &mut Node,
-    input: &Input,
+    input: &BoundQuery,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
-        model
-            .redaction_id_column(entity)
-            .unwrap_or(DEFAULT_PRIMARY_KEY)
-            .to_string()
+    enforce_lowered_return_with(node, input, metadata, &mut ctx, |entity| {
+        input
+            .nodes
+            .iter()
+            .find(|node| node.entity == entity)
+            .map_or_else(
+                || DEFAULT_PRIMARY_KEY.to_string(),
+                |node| node.redaction_id_column.clone(),
+            )
     })?;
     Ok(ctx)
 }
 
 pub fn enforce_local_return(
     node: &mut Node,
-    input: &Input,
+    input: &BoundQuery,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    _model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
+    enforce_lowered_return_with(node, input, metadata, &mut ctx, |_| {
         DEFAULT_PRIMARY_KEY.to_string()
     })?;
     Ok(ctx)
@@ -136,18 +140,23 @@ pub fn enforce_local_return(
 
 fn enforce_lowered_return_with(
     node: &mut Node,
-    input: &Input,
+    input: &BoundQuery,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let selectable_nodes: HashSet<&str> = match input.query_type {
-        QueryType::Aggregation => {
-            crate::input::node_group_ids(&input.aggregation.group_by).collect()
-        }
+        QueryType::Aggregation => input
+            .aggregation
+            .groups
+            .iter()
+            .filter_map(|group| {
+                matches!(group, crate::query::Group::Node { .. })
+                    .then(|| input.node(group.node()).alias.as_str())
+            })
+            .collect(),
         QueryType::Traversal | QueryType::Neighbors => {
-            input.nodes.iter().map(|n| n.id.as_str()).collect()
+            input.nodes.iter().map(|node| node.alias.as_str()).collect()
         }
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
@@ -158,7 +167,6 @@ fn enforce_lowered_return_with(
             &selectable_nodes,
             ctx,
             &metadata.nodes,
-            model,
             redaction_column,
         )?,
         Node::Insert(_) => return Ok(()),
@@ -193,7 +201,7 @@ fn enforce_lowered_return_with(
 
 pub fn enforce_role_scans(
     node: &mut Node,
-    input: &Input,
+    input: &BoundQuery,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
@@ -201,10 +209,8 @@ pub fn enforce_role_scans(
         return Ok(());
     };
     for input_node in &input.nodes {
-        let Some(entity) = input_node.entity.as_deref() else {
-            continue;
-        };
-        let Some(binding) = metadata.nodes.get(&input_node.id) else {
+        let entity = input_node.entity_name.as_str();
+        let Some(binding) = metadata.nodes.get(&input_node.alias) else {
             continue;
         };
         if !model
@@ -216,10 +222,8 @@ pub fn enforce_role_scans(
         let Some(identity) = binding.role_identity()? else {
             continue;
         };
-        let table = model.entity_table(entity).ok_or_else(|| {
-            QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
-        })?;
-        let role_alias = format!("_role_{}", input_node.id);
+        let table = input_node.table.as_str();
+        let role_alias = format!("_role_{}", input_node.alias);
         query.from = TableRef::join(
             JoinType::Inner,
             std::mem::replace(&mut query.from, TableRef::scan("_placeholder", "_")),
@@ -246,34 +250,28 @@ fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
 
 fn enforce_return_columns(
     q: &mut Query,
-    input: &Input,
+    input: &BoundQuery,
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let select_len_before = q.select.len();
     for node in &input.nodes {
-        let Some(entity) = &node.entity else {
-            continue;
-        };
-        if !selectable_nodes.contains(node.id.as_str()) {
+        let entity = &node.entity_name;
+        if !selectable_nodes.contains(node.alias.as_str()) {
             continue;
         }
-        let entity_id = model
-            .entity(entity)
-            .map(|entity| entity.id)
-            .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?;
-        ctx.add_node(&node.id, entity);
-        let id_col = redaction_id_column(&node.id);
-        let binding = bindings.get(&node.id).ok_or_else(|| {
-            QueryError::Enforcement(format!("node '{}' has no lowered binding", node.id))
+        let entity_id = node.entity;
+        ctx.add_node(&node.alias, entity);
+        let id_col = redaction_id_column(&node.alias);
+        let binding = bindings.get(&node.alias).ok_or_else(|| {
+            QueryError::Enforcement(format!("node '{}' has no lowered binding", node.alias))
         })?;
         if matches!(binding, NodeBinding::Filtered) {
             return Err(QueryError::Enforcement(format!(
                 "node '{}' has no result identity",
-                node.id
+                node.alias
             )));
         }
         let NodeBinding::Values {
@@ -288,61 +286,69 @@ fn enforce_return_columns(
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {
             if table_alias.is_none() {
-                let table = model.entity_table(entity).ok_or_else(|| {
-                    QueryError::Enforcement(format!(
-                        "node '{}' has no authorization table",
-                        node.id
-                    ))
-                })?;
+                let table = node.table.as_str();
                 let scan = if node.filters.is_empty() {
-                    TableRef::scan_final(table, &node.id)
+                    TableRef::scan_final(table, &node.alias)
                 } else {
-                    let mut predicates: Vec<Expr> =
-                        ordered_filters(&node.filters, FilterOwner::Entity(entity_id), model)
-                            .iter()
-                            .map(|(property, bound)| filter_to_expr(&node.id, property, bound))
-                            .collect();
+                    let mut predicates: Vec<Expr> = node
+                        .filters
+                        .iter()
+                        .filter(|filter| filter.stored)
+                        .map(|filter| {
+                            filter_to_expr(
+                                &node.alias,
+                                &filter.name,
+                                &crate::passes::plan::BoundFilter::from(filter),
+                            )
+                        })
+                        .collect();
                     if !node.node_ids.is_empty() {
                         predicates.push(id_list_predicate(
-                            &node.id,
-                            DEFAULT_PRIMARY_KEY,
+                            &node.alias,
+                            &node.id_property.name,
                             &node.node_ids,
                         ));
                     }
                     if let Some(range) = &node.id_range {
-                        predicates.push(id_range_predicate(&node.id, range));
+                        predicates.push(id_range_predicate(&node.alias, range));
                     }
-                    predicates.push(deleted_false(&node.id));
+                    predicates.push(deleted_false(&node.alias));
                     TableRef::subquery(
                         Query {
                             select: vec![SelectExpr::star()],
-                            from: TableRef::scan_final(table, &node.id),
+                            from: TableRef::scan_final(table, &node.alias),
                             where_clause: Expr::conjoin(predicates),
                             ..Default::default()
                         },
-                        &node.id,
+                        &node.alias,
                     )
                 };
                 q.from = TableRef::join(
                     JoinType::Inner,
                     std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
                     scan,
-                    Expr::eq(identity.clone(), Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
+                    Expr::eq(
+                        identity.clone(),
+                        Expr::col(&node.alias, DEFAULT_PRIMARY_KEY),
+                    ),
                 );
                 if node.filters.is_empty() {
                     q.where_clause = Some(match q.where_clause.take() {
-                        Some(existing) => Expr::and(existing, deleted_false(&node.id)),
-                        None => deleted_false(&node.id),
+                        Some(existing) => Expr::and(existing, deleted_false(&node.alias)),
+                        None => deleted_false(&node.alias),
                     });
                 }
             }
-            Expr::col(table_alias.as_deref().unwrap_or(&node.id), redaction_column)
+            Expr::col(
+                table_alias.as_deref().unwrap_or(&node.alias),
+                redaction_column,
+            )
         } else {
             identity.clone()
         };
 
         if needs_separate_pk {
-            let name = primary_key_column(&node.id);
+            let name = primary_key_column(&node.alias);
             if !q.selects_alias(&name) {
                 q.select.push(SelectExpr::new(identity.clone(), name));
             }
@@ -353,7 +359,7 @@ fn enforce_return_columns(
                 .push(SelectExpr::new(authorization_id.clone(), &id_col));
         }
         ensure_in_group_by(q, input.query_type, authorization_id);
-        let type_col = redaction_type_column(&node.id);
+        let type_col = redaction_type_column(&node.alias);
         if !q.selects_alias(&type_col) {
             let position = q
                 .select
@@ -364,10 +370,10 @@ fn enforce_return_columns(
                 .insert(position, SelectExpr::new(Expr::string(entity), type_col));
         }
         if input.query_type != QueryType::Aggregation
-            && model.entity_has_traversal_path(entity)
+            && node.has_traversal_path
             && let Some(path) = traversal_path
         {
-            let name = traversal_path_column(&node.id);
+            let name = traversal_path_column(&node.alias);
             if !q.selects_alias(&name) {
                 q.select.push(SelectExpr::new(path.clone(), name));
             }

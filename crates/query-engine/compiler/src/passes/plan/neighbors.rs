@@ -24,16 +24,9 @@ where
             "neighbors query requires exactly one node".into(),
         ));
     };
-    let center_alias = center_node.id.clone();
-    let center_entity = center_node.entity.as_deref().ok_or_else(|| {
-        crate::error::QueryError::Lowering("neighbors center has no entity".into())
-    })?;
-    let center_entity_id = model
-        .entity(center_entity)
-        .map(|entity| entity.id)
-        .ok_or_else(|| {
-            crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
-        })?;
+    let center_alias = center_node.alias.clone();
+    let center_entity = center_node.entity_name.as_str();
+    let center_entity_id = center_node.entity;
 
     let center_np = context.resolve_node(center_node)?;
 
@@ -41,16 +34,20 @@ where
     let has_non_denorm = has_non_denorm_filters(&center_np.filters, &context.denormalized)
         || center_np.id_range.is_some();
 
-    let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
+    let mut edge = EdgeTableConfig::from_model(model, &config.relationship_names);
     {
-        let relationships: Vec<&str> = if config.rel_types.is_empty() {
+        let relationships: Vec<&str> = if config.relationship_names.is_empty() {
             model
                 .graph()
                 .relationships()
                 .map(|relationship| relationship.name.as_str())
                 .collect()
         } else {
-            config.rel_types.iter().map(String::as_str).collect()
+            config
+                .relationship_names
+                .iter()
+                .map(String::as_str)
+                .collect()
         };
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = relationships
@@ -96,10 +93,8 @@ where
         edge,
         has_non_denorm,
         fused_table,
-        center_tp_lookup: center_node
-            .entity
-            .as_deref()
-            .and_then(|entity| model.traversal_path_lookup(entity, ontology::TraversalPathKind::Id))
+        center_tp_lookup: model
+            .traversal_path_lookup(center_entity, ontology::TraversalPathKind::Id)
             .map(|(table, column)| (table.to_string(), column.to_string())),
     }))
 }

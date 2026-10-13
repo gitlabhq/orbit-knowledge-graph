@@ -3,15 +3,21 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::EmitOutput;
-pub fn emit_traversal(input: &Input, output: EmitOutput) -> Result<Node> {
+pub fn emit_traversal(input: &crate::query::Query, output: EmitOutput) -> Result<Node> {
     let order_by = input
-        .order_by
+        .order
         .as_ref()
         .map(|ob| {
             vec![if matches!(ob.direction, OrderDirection::Desc) {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
+                OrderExpr::desc(Expr::col(
+                    &input.node(ob.node).alias,
+                    ob.property.column.as_deref().unwrap_or(&ob.property.name),
+                ))
             } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
+                OrderExpr::asc(Expr::col(
+                    &input.node(ob.node).alias,
+                    ob.property.column.as_deref().unwrap_or(&ob.property.name),
+                ))
             }]
         })
         .unwrap_or_default();

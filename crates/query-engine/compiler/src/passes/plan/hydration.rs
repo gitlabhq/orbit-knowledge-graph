@@ -1,5 +1,4 @@
 use crate::error::{QueryError, Result};
-use crate::input::*;
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 use super::context::PlanningContext;
@@ -66,7 +65,6 @@ pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
     options: HydrationCompileOptions,
 ) -> Result<Plan<Hydration>> {
     let input = context.input;
-    let model = context.model;
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
@@ -76,24 +74,22 @@ pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
         .nodes
         .iter()
         .map(|node| {
-            let table = node
-                .entity
-                .as_deref()
-                .and_then(|entity| model.entity_table(entity))
-                .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
-            let entity = node
-                .entity
-                .as_ref()
-                .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
-            let columns = match &node.columns {
-                Some(ColumnSelection::List(cols)) => cols.clone(),
-                _ => vec![],
-            };
+            let table = node.table.as_str();
+            let entity = &node.entity_name;
+            let columns = node
+                .columns
+                .iter()
+                .filter_map(|property| property.column.clone())
+                .collect();
             Ok(HydrationNodePlan {
-                alias: node.id.clone(),
+                alias: node.alias.clone(),
                 table: table.to_string(),
                 entity: entity.clone(),
-                id_property: node.id_property.clone(),
+                id_property: node
+                    .id_property
+                    .column
+                    .clone()
+                    .unwrap_or_else(|| node.id_property.name.clone()),
                 node_ids: node.node_ids.clone(),
                 columns,
                 path_filter: path_filter(&node.traversal_paths, options),

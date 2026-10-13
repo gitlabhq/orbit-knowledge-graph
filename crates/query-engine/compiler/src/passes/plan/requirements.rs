@@ -107,11 +107,9 @@ pub fn live(alias: &str) -> Predicate {
 }
 
 pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
-    (!crate::passes::normalize::is_wildcard(kinds) && !kinds.is_empty()).then(|| {
-        Predicate::RelationshipKinds {
-            alias: alias.into(),
-            kinds: kinds.to_vec(),
-        }
+    (!crate::query::is_wildcard(kinds) && !kinds.is_empty()).then(|| Predicate::RelationshipKinds {
+        alias: alias.into(),
+        kinds: kinds.to_vec(),
     })
 }
 

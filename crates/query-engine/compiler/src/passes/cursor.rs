@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
-use crate::input::{AggFunction, Input, QueryType};
+use crate::input::{AggFunction, QueryType};
 use crate::passes::lower::LoweredMetadata;
+use crate::query::Query as BoundQuery;
 use orbit_utils::query_types::SqlType;
 
 pub fn cursor_column(i: usize) -> String {
@@ -90,7 +91,7 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
 
 pub fn apply(
     node: &mut Node,
-    input: &Input,
+    input: &BoundQuery,
     metadata: &LoweredMetadata,
     query_hash: u64,
 ) -> Result<usize> {
@@ -154,16 +155,16 @@ fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
 /// User sort properties and aggregation keys can be NULL (NULLs sort last in
 /// ClickHouse, both directions); compiler-generated tie-breakers are primary
 /// keys and never are.
-fn nullable_flags(input: &Input, key_count: usize) -> Vec<bool> {
+fn nullable_flags(input: &BoundQuery, key_count: usize) -> Vec<bool> {
     let mut flags = vec![false; key_count];
     match input.query_type {
         QueryType::Aggregation => {
             let mut idx = 0;
             if let Some(sort) = &input.aggregation.sort {
-                let sorts_on_count = input.aggregation.metrics.iter().any(|a| {
-                    a.output_name() == sort.column
-                        && matches!(a.expr.function(), AggFunction::Count)
-                });
+                let sorts_on_count =
+                    input.aggregation.metrics.iter().any(|a| {
+                        a.alias == sort.column && matches!(a.function, AggFunction::Count)
+                    });
                 if let Some(f) = flags.first_mut() {
                     *f = !sorts_on_count;
                 }
@@ -175,7 +176,7 @@ fn nullable_flags(input: &Input, key_count: usize) -> Vec<bool> {
         }
         QueryType::PathFinding => {}
         _ => {
-            if input.order_by.is_some()
+            if input.order.is_some()
                 && let Some(f) = flags.first_mut()
             {
                 *f = true;

@@ -10,32 +10,27 @@
 
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
+use crate::input::{FilterOp, QueryType};
+use crate::query::{Predicate, Query};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 
-fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
-    input
-        .nodes
-        .iter()
-        .find(|n| n.id == node_id)
-        .and_then(|n| n.entity.as_deref())
+fn entity_of(query: &Query, node: crate::query::NodeId) -> &str {
+    &query.node(node).entity_name
 }
 
 fn enforce_aggregation_scope(
-    input: &Input,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    input: &Query,
+    _model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let is_scoped = |entity: &str| model.entity_has_traversal_path(entity);
-
     let mut reachable: HashSet<&str> = input
         .nodes
         .iter()
-        .filter(|n| n.entity.as_deref().is_some_and(is_scoped))
-        .map(|n| n.id.as_str())
+        .filter(|node| node.has_traversal_path)
+        .map(|node| node.alias.as_str())
         .collect();
 
     if reachable.is_empty() {
@@ -50,8 +45,18 @@ fn enforce_aggregation_scope(
     let edges: Vec<(&str, &str)> = input
         .relationships
         .iter()
-        .map(|r| (r.from.as_str(), r.to.as_str()))
-        .chain(input.path.iter().map(|p| (p.from.as_str(), p.to.as_str())))
+        .map(|relationship| {
+            (
+                input.node(relationship.from).alias.as_str(),
+                input.node(relationship.to).alias.as_str(),
+            )
+        })
+        .chain(input.path.iter().map(|path| {
+            (
+                input.node(path.from).alias.as_str(),
+                input.node(path.to).alias.as_str(),
+            )
+        }))
         .collect();
 
     loop {
@@ -72,12 +77,12 @@ fn enforce_aggregation_scope(
     if let Some(orphan) = input
         .nodes
         .iter()
-        .find(|n| !reachable.contains(n.id.as_str()))
+        .find(|node| !reachable.contains(node.alias.as_str()))
     {
         return Err(QueryError::Restrict(format!(
             "aggregation node \"{}\" is globally-scoped and must be connected to a \
              traversal_path-scoped node via \"relationships\" or \"path\"",
-            orphan.id
+            orphan.alias
         )));
     }
 
@@ -85,44 +90,37 @@ fn enforce_aggregation_scope(
 }
 
 fn enforce_traversal_path_filters(
-    input: &Input,
+    input: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
-        let (Some(entity), Some(tp_filters)) = (
-            node.entity.as_deref(),
-            node.filters.get(TRAVERSAL_PATH_COLUMN),
-        ) else {
-            continue;
-        };
-        let Some(_) = model.entity(entity) else {
-            continue;
-        };
+        let entity = node.entity_name.as_str();
         // Entities without a redaction role use the normal traversal-path floor:
         // Rails only sends Reporter+ paths, and stricter entities override this.
         let min_role = model
             .entity_minimum_access_level(entity)
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
-        for tp_filter in tp_filters {
+        for tp_filter in node.filters(TRAVERSAL_PATH_COLUMN) {
             validate_traversal_path_filter_scope(
                 &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                tp_filter,
+                &tp_filter.predicate,
                 &eligible_paths,
             )?;
         }
     }
 
     for (i, rel) in input.relationships.iter().enumerate() {
-        let Some(tp_filters) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
-            continue;
-        };
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
-        for tp_filter in tp_filters {
+        for tp_filter in rel
+            .filters
+            .iter()
+            .filter(|filter| filter.name == TRAVERSAL_PATH_COLUMN)
+        {
             validate_traversal_path_filter_scope(
                 &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-                tp_filter,
+                &tp_filter.predicate,
                 &eligible_paths,
             )?;
         }
@@ -133,7 +131,7 @@ fn enforce_traversal_path_filters(
 
 fn validate_traversal_path_filter_scope(
     label: &str,
-    traversal_path_filter: &InputFilter,
+    traversal_path_filter: &Predicate,
     eligible_paths: &[&TraversalPath],
 ) -> Result<()> {
     for path in traversal_path_values(label, traversal_path_filter)? {
@@ -150,9 +148,9 @@ fn invalid_traversal_path_filter_invariant(label: &str) -> QueryError {
 
 fn traversal_path_values<'a>(
     label: &str,
-    traversal_path_filter: &'a InputFilter,
+    traversal_path_filter: &'a Predicate,
 ) -> Result<Vec<&'a str>> {
-    match traversal_path_filter.op.unwrap_or(FilterOp::Eq) {
+    match traversal_path_filter.op {
         FilterOp::Eq | FilterOp::StartsWith => traversal_path_filter
             .value_str()
             .map(|path| vec![path])
@@ -197,22 +195,14 @@ fn validate_traversal_path_within_scope(
 ///
 /// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
 fn stamp_edge_scope_proofs(
-    input: &Input,
+    input: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
-    crate::scope::derive_scope_proofs(input, model)
-}
-
-fn admin_only(
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    entity: &str,
-    property: &str,
-) -> bool {
-    model.admin_only(entity, property)
+    crate::scope::derive_bound_scope_proofs(input, model)
 }
 
 pub fn restrict(
-    input: &mut Input,
+    input: &mut Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
@@ -228,90 +218,63 @@ pub fn restrict(
     }
 
     for node in &mut input.nodes {
-        let Some(entity) = node.entity.as_deref() else {
-            continue;
-        };
-
-        for prop in node.filters.keys() {
-            if admin_only(model, entity, prop) {
+        let entity = node.entity_name.as_str();
+        for filter in &node.filters {
+            if filter
+                .property
+                .is_some_and(|property| model.property_is_admin_only(property))
+            {
                 return Err(QueryError::Restrict(format!(
-                    "filter on \"{prop}\" for {entity}: field requires administrator access"
+                    "filter on \"{}\" for {entity}: field requires administrator access",
+                    filter.name
                 )));
             }
         }
-
-        if let Some(ColumnSelection::All) = &node.columns {
-            return Err(QueryError::PipelineInvariant(
-                "RestrictPass requires expanded columns; normalization must run first".into(),
-            ));
-        }
-
-        if let Some(ColumnSelection::List(cols)) = &mut node.columns {
-            cols.retain(|col_name| !admin_only(model, entity, col_name));
-        }
+        node.columns.retain(|property| !property.admin_only);
     }
 
-    if let Some(ob) = &input.order_by
-        && let Some(entity) = entity_of(input, &ob.node)
-        && admin_only(model, entity, &ob.property)
+    if let Some(order) = &input.order
+        && order.property.admin_only
     {
+        let entity = entity_of(input, order.node);
         return Err(QueryError::Restrict(format!(
             "order_by on \"{}\" for {entity}: field requires administrator access",
-            ob.property
+            order.property.name
         )));
     }
 
     for agg in &input.aggregation.metrics {
-        let Some(prop) = agg.expr.property() else {
+        let Some(property) = &agg.property else {
             continue;
         };
-        let Some(entity) = entity_of(input, agg.expr.node()) else {
-            continue;
-        };
-        if admin_only(model, entity, prop) {
+        let entity = entity_of(input, agg.target);
+        if property.admin_only {
             return Err(QueryError::Restrict(format!(
-                "aggregation on \"{prop}\" for {entity}: field requires administrator access"
+                "aggregation on \"{}\" for {entity}: field requires administrator access",
+                property.name
             )));
         }
     }
 
-    for (node, property) in crate::input::property_groups(&input.aggregation.group_by) {
-        let Some(entity) = entity_of(input, node) else {
+    for group in &input.aggregation.groups {
+        let Some(property) = group.property() else {
             continue;
         };
-        if admin_only(model, entity, property) {
+        let entity = entity_of(input, group.node());
+        if property.admin_only {
             return Err(QueryError::Restrict(format!(
                 "group_by on \"{}\" for {entity}: field requires administrator access",
-                property
+                property.name
             )));
         }
     }
-
-    for node in &input.nodes {
-        if node.entity.is_none() {
-            continue;
-        }
-        for filters in node.filters.values() {
-            for filter in filters {
-                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
-                    && let Some(rhs_entity) = entity_of(input, rhs_node)
-                    && admin_only(model, rhs_entity, rhs_prop)
-                {
-                    return Err(QueryError::Restrict(format!(
-                        "filter on \"{rhs_prop}\" for {rhs_entity}: field requires administrator access"
-                    )));
-                }
-            }
-        }
-    }
-
-    for jp in &input.join_predicates {
-        for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
-            if let Some(entity) = entity_of(input, node_id)
-                && admin_only(model, entity, prop)
-            {
+    for comparison in &input.comparisons {
+        for operand in [&comparison.left, &comparison.right] {
+            if operand.property.admin_only {
+                let entity = entity_of(input, operand.node);
                 return Err(QueryError::Restrict(format!(
-                    "filter on \"{prop}\" for {entity}: field requires administrator access"
+                    "filter on \"{}\" for {entity}: field requires administrator access",
+                    operand.property.name
                 )));
             }
         }
@@ -324,8 +287,9 @@ pub fn restrict(
 mod tests {
     use super::*;
     use crate::input::{
-        AggExpr, AggFunction, FilterOp, InputAggregation, InputAggregationMetric, InputFilter,
-        InputGroupByKey, InputNode, InputOrderBy, OrderDirection, QueryType,
+        AggExpr, AggFunction, ColumnSelection, FilterOp, Input, InputAggregation,
+        InputAggregationMetric, InputFilter, InputGroupByKey, InputNode, InputOrderBy,
+        OrderDirection, QueryType,
     };
 
     use ontology::{DataType, RequiredRole};
@@ -334,7 +298,10 @@ mod tests {
 
     fn apply(input: &mut Input, ontology: &Ontology, context: &SecurityContext) -> Result<()> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        restrict(input, model.as_ref(), context).map(|_| ())
+        let input = std::mem::take(input);
+        let mut query =
+            crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Public)?;
+        restrict(&mut query, model.as_ref(), context).map(|_| ())
     }
 
     fn ontology() -> Ontology {
@@ -1168,7 +1135,7 @@ mod tests {
     fn prune_to_target_stamps_when_target_resolves() {
         let ont = reviewer_prune_to_target_ontology();
         let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
-        let mut input = Input {
+        let input = Input {
             query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
@@ -1187,7 +1154,10 @@ mod tests {
             ..Input::default()
         };
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        let proofs = restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
+        let mut query =
+            crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Public)
+                .unwrap();
+        let proofs = restrict(&mut query, model.as_ref(), &ctx).expect("restrict ok");
         let mr_prefix = proofs.get("mr").cloned();
         assert!(
             mr_prefix.is_some(),
@@ -1199,7 +1169,7 @@ mod tests {
     fn prune_to_target_does_not_propagate_across_hub() {
         let ont = reviewer_prune_to_target_ontology();
         let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
-        let mut input = Input {
+        let input = Input {
             query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
@@ -1226,7 +1196,10 @@ mod tests {
             ..Input::default()
         };
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        let proofs = restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
+        let mut query =
+            crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Public)
+                .unwrap();
+        let proofs = restrict(&mut query, model.as_ref(), &ctx).expect("restrict ok");
 
         assert!(
             proofs.contains_key("mr_a") && !proofs.contains_key("mr_b"),

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Expr, Function, Node, Op, SelectExpr};
-use crate::input::{ColumnSelection, Input};
+use crate::query::Query;
 use ontology::DataType;
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
@@ -10,7 +10,7 @@ const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 
 pub fn apply_text_excerpts(
     node: &mut Node,
-    input: &Input,
+    input: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) {
     let Node::Query(query) = node else { return };
@@ -20,12 +20,8 @@ pub fn apply_text_excerpts(
     let columns: HashMap<String, HashSet<String>> = input
         .nodes
         .iter()
-        .filter_map(|node| {
-            let entity = model.entity(node.entity.as_deref()?)?;
-            let requested = match &node.columns {
-                Some(ColumnSelection::List(columns)) => columns,
-                _ => return None,
-            };
+        .map(|node| {
+            let entity = model.graph().entity(node.entity);
             let mut excerpted: HashSet<String> = model
                 .graph()
                 .entity(entity.id)
@@ -46,8 +42,8 @@ pub fn apply_text_excerpts(
                     }
                 }
             }
-            excerpted.retain(|column| requested.contains(column));
-            Some((node.id.clone(), excerpted))
+            excerpted.retain(|column| node.columns.iter().any(|property| &property.name == column));
+            (node.alias.clone(), excerpted)
         })
         .collect();
 

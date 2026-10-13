@@ -5,7 +5,61 @@ use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use strum::VariantNames;
+
+const BASE_SCHEMA_JSON: &str =
+    include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
+
+fn schema_regex(path: &[&str]) -> &'static str {
+    let schema: serde_json::Value = serde_json::from_str(BASE_SCHEMA_JSON).expect("valid schema");
+    let value = path.iter().fold(&schema, |value, key| &value[*key]);
+    Box::leak(
+        value
+            .as_str()
+            .expect("schema pattern")
+            .to_string()
+            .into_boxed_str(),
+    )
+}
+
+fn node_ref_regex() -> &'static regex::Regex {
+    static REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex::Regex::new(schema_regex(&["$defs", "NodeOrPropertyRef", "pattern"]))
+            .expect("valid pattern")
+    })
+}
+
+fn order_by_regex() -> &'static regex::Regex {
+    static REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex::Regex::new(schema_regex(&["properties", "order_by", "pattern"]))
+            .expect("valid pattern")
+    })
+}
+
+fn aggregation_sort_regex() -> &'static regex::Regex {
+    static REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex::Regex::new(schema_regex(&["properties", "aggregation_sort", "pattern"]))
+            .expect("valid pattern")
+    })
+}
+
+pub(crate) fn validate_identifier(identifier: &str) -> Result<(), String> {
+    let mut chars = identifier.chars();
+    if identifier.len() <= crate::query_limits::MAX_IDENTIFIER_LEN
+        && chars
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        Ok(())
+    } else {
+        Err(format!("invalid identifier {identifier:?}"))
+    }
+}
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
@@ -583,13 +637,11 @@ impl<'de> Deserialize<'de> for TargetRef {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::node_ref_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "aggregation target {spec:?} must be \"node\" or \"node.property\""
-                ))
-            })?;
+        let caps = node_ref_regex().captures(&spec).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "aggregation target {spec:?} must be \"node\" or \"node.property\""
+            ))
+        })?;
         Ok(TargetRef {
             node: caps["node"].to_owned(),
             property: caps.name("property").map(|p| p.as_str().to_owned()),
@@ -609,7 +661,7 @@ impl<'de> Deserialize<'de> for PropertyRef {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::node_ref_regex()
+        let caps = node_ref_regex()
             .captures(&spec)
             .filter(|caps| caps.name("property").is_some())
             .ok_or_else(|| {
@@ -660,7 +712,7 @@ fn parse_group_by_spec(
     truncate: Option<TruncateUnit>,
     alias: Option<String>,
 ) -> Result<InputGroupByKey, String> {
-    let caps = crate::passes::validate::node_ref_regex()
+    let caps = node_ref_regex()
         .captures(spec)
         .ok_or_else(|| match truncate {
             Some(unit) => format!(
@@ -873,13 +925,11 @@ impl<'de> Deserialize<'de> for InputOrderBy {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::order_by_regex()
-            .captures(&spec)
-            .ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
-                ))
-            })?;
+        let caps = order_by_regex().captures(&spec).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
+            ))
+        })?;
         let direction = if caps.name("descending").is_some() {
             OrderDirection::Desc
         } else {
@@ -913,7 +963,7 @@ impl<'de> Deserialize<'de> for InputAggSort {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let caps = crate::passes::validate::aggregation_sort_regex()
+        let caps = aggregation_sort_regex()
             .captures(&spec)
             .ok_or_else(|| {
                 let hint = if spec.contains('.') {

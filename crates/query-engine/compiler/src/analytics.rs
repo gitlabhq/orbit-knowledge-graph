@@ -2,15 +2,15 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::input::Input;
 use crate::passes::hydrate::HydrationPlan;
+use crate::query::Query;
 
 /// `query_executed` accumulates across multiple ClickHouse round-trips; all
 /// other fields are written directly by observers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExecMetrics {
     #[serde(skip)]
-    pub input: Option<Input>,
+    pub input: Option<Query>,
     #[serde(skip)]
     pub hydration: Option<HydrationPlan>,
     #[serde(skip)]

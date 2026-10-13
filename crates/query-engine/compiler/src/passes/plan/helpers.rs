@@ -2,54 +2,6 @@ use std::collections::HashMap;
 
 use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::input::{ColumnSelection, FilterOp, InputFilter};
-use query_data_model::RelationalMapping;
-
-pub enum FilterOwner<'a> {
-    Entity(query_data_model::EntityId),
-    Table(&'a str),
-}
-
-pub fn ordered_filters(
-    filters: &HashMap<String, Vec<InputFilter>>,
-    owner: FilterOwner<'_>,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Vec<(String, BoundFilter)> {
-    let mut properties: Vec<_> = filters.iter().collect();
-    properties.sort_unstable_by_key(|(property, _)| *property);
-    properties
-        .into_iter()
-        .flat_map(|(property, filters)| {
-            let (metadata, table) = match owner {
-                FilterOwner::Entity(entity) => (
-                    model
-                        .property_for_entity_id(entity, property)
-                        .map(|property| (Some(property.id), Some(property.data_type))),
-                    model.query_backend().entity_table(entity),
-                ),
-                FilterOwner::Table(table) => (
-                    Some((None, model.table_column_type(table, property))),
-                    Some(table),
-                ),
-            };
-            let (property_id, data_type) = metadata.unwrap_or_default();
-            let in_sort_key = table.is_some_and(|table| model.in_sort_key(table, property));
-            filters.iter().map(move |filter| {
-                (
-                    property.clone(),
-                    BoundFilter {
-                        filter: filter.clone(),
-                        property: property_id,
-                        data_type,
-                        selectivity: property_id
-                            .map(|property| model.property_selectivity(property))
-                            .unwrap_or_default(),
-                        in_sort_key,
-                    },
-                )
-            })
-        })
-        .collect()
-}
 
 pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
     match columns {
@@ -60,7 +12,7 @@ pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
 }
 
 pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
-    (!crate::passes::normalize::is_wildcard(types)).then(|| types.to_vec())
+    (!crate::query::is_wildcard(types)).then(|| types.to_vec())
 }
 
 fn tag_value(value: &serde_json::Value) -> Option<String> {

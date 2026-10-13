@@ -41,6 +41,7 @@ pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
+pub mod query;
 pub(crate) mod query_limits;
 
 pub mod scope;
@@ -64,9 +65,11 @@ pub use input::{
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
+pub use query::Query as BoundQuery;
 pub use query_data_model::EntityAuthConfig;
 
 pub use analytics::ExecMetrics;
+pub use data_model::entity_auth as build_entity_auth;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query, codegen,
@@ -79,7 +82,6 @@ pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
-pub use passes::normalize::build_entity_auth;
 pub use passes::plan::HydrationCompileOptions;
 pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
@@ -163,31 +165,30 @@ pub fn compile_local(
     }
 }
 
-/// Run only `validate` + `normalize`, returning the normalized [`Input`].
-pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<BoundQuery> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeCtx::new(data_model);
     ctx.set_raw(json_input.to_string());
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
+            ctx.take_query().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("validate_normalize produced no query".into())
             })
         })
         .count_err()
 }
 
-pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<BoundQuery> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
     ctx.set_raw(raw.to_string());
     config::run_validate_normalize_gql(&mut ctx)
         .and_then(|()| {
-            ctx.take_input().ok_or_else(|| {
+            ctx.take_query().ok_or_else(|| {
                 error::QueryError::PipelineInvariant(
-                    "validate_normalize_gql produced no input".into(),
+                    "validate_normalize_gql produced no query".into(),
                 )
             })
         })

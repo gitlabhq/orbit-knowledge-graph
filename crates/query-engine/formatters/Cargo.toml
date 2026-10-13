@@ -23,6 +23,8 @@ toon-format = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
+ontology = { path = "../../ontology" }
+query-data-model = { path = "../../query-data-model" }
 
 [lints]
 workspace = true

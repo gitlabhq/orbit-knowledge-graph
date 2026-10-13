@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use compiler::input::{Direction, group_by_output_names};
+use compiler::input::Direction;
 use compiler::{QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column};
 use orbit_utils::arrow::ColumnValue;
 use orbit_utils::strings::quote_escaped;
@@ -32,7 +32,7 @@ fn node_table(output: &PipelineOutput) -> Table {
         .input
         .nodes
         .iter()
-        .map(|n| n.id.clone())
+        .map(|node| node.alias.clone())
         .collect();
     let rows = output
         .query_result
@@ -65,13 +65,15 @@ fn path_table(output: &PipelineOutput) -> Table {
 
 fn aggregation_table(output: &PipelineOutput) -> Table {
     let aggregation = &output.compiled.input.aggregation;
-    let columns: Vec<String> = group_by_output_names(&aggregation.group_by)
-        .into_iter()
+    let columns: Vec<String> = aggregation
+        .groups
+        .iter()
+        .map(|group| group.output_name().to_string())
         .chain(
             aggregation
                 .metrics
                 .iter()
-                .map(|metric| metric.output_name()),
+                .map(|metric| metric.alias.clone()),
         )
         .collect();
     let rows = GraphFormatter
@@ -119,7 +121,7 @@ fn neighbor_path(
     let center = input
         .nodes
         .first()
-        .and_then(|center| row_node(row, &output.result_context, prefixes, &center.id))
+        .and_then(|center| row_node(row, &output.result_context, prefixes, &center.alias))
         .unwrap_or_else(null);
     let neighbor = dynamic_node(row.neighbor_node()?);
     let relationship = row

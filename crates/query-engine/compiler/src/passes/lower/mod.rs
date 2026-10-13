@@ -116,18 +116,18 @@ impl EmitOutput {
     fn take_bindings<T>(
         &mut self,
         plan: &Plan<T>,
-        input: &Input,
+        input: &crate::query::Query,
     ) -> Result<HashMap<String, NodeBinding>> {
         for node in input
             .nodes
             .iter()
-            .filter(|node| plan.nodes.contains_key(&node.id))
+            .filter(|node| plan.nodes.contains_key(&node.alias))
         {
-            if self.nodes.contains_key(&node.id) {
+            if self.nodes.contains_key(&node.alias) {
                 continue;
             }
-            let source = plan.node_edge_mappings.get(&node.id).ok_or_else(|| {
-                QueryError::Lowering(format!("node '{}' has no emitted identity", node.id))
+            let source = plan.node_edge_mappings.get(&node.alias).ok_or_else(|| {
+                QueryError::Lowering(format!("node '{}' has no emitted identity", node.alias))
             })?;
             let binding = match (self.nodes.get(&source.0), node.node_ids.as_slice()) {
                 (
@@ -146,19 +146,22 @@ impl EmitOutput {
                     && plan.nodes.get(&source.0).is_some_and(|holder| {
                         holder.hydration == super::plan::HydrationStrategy::FilterOnly
                     })
-                    && !node_group_ids(&input.aggregation.group_by)
-                        .any(|alias| alias == node.id) =>
+                    && !input
+                        .aggregation
+                        .groups
+                        .iter()
+                        .any(|group| group.node() == node.id) =>
                 {
                     NodeBinding::Filtered
                 }
                 _ => {
                     return Err(QueryError::Lowering(format!(
                         "node '{}' has no emitted identity",
-                        node.id
+                        node.alias
                     )));
                 }
             };
-            self.nodes.insert(node.id.clone(), binding);
+            self.nodes.insert(node.alias.clone(), binding);
         }
         Ok(std::mem::take(&mut self.nodes))
     }
@@ -184,7 +187,7 @@ impl EmitOutput {
     }
 }
 
-pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
+pub fn emit(plan: &QueryPlan, input: &crate::query::Query) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let mut node = match plan {
         QueryPlan::Traversal(plan) => {
@@ -207,7 +210,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
     }?;
 
-    if !input.join_predicates.is_empty()
+    if !input.comparisons.is_empty()
         && let Node::Query(q) = &mut node
     {
         let column = |alias: &str, property: &str| -> Result<Expr> {
@@ -219,13 +222,29 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
                 .property(property)
         };
         let predicates = input
-            .join_predicates
+            .comparisons
             .iter()
-            .map(|jp| {
+            .map(|comparison| {
                 sql::comparison(
-                    column(&jp.lhs_node, &jp.lhs_prop)?,
-                    jp.op,
-                    column(&jp.rhs_node, &jp.rhs_prop)?,
+                    column(
+                        &input.node(comparison.left.node).alias,
+                        comparison
+                            .left
+                            .property
+                            .column
+                            .as_deref()
+                            .unwrap_or(&comparison.left.property.name),
+                    )?,
+                    comparison.op,
+                    column(
+                        &input.node(comparison.right.node).alias,
+                        comparison
+                            .right
+                            .property
+                            .column
+                            .as_deref()
+                            .unwrap_or(&comparison.right.property.name),
+                    )?,
                 )
             })
             .collect::<Result<Vec<_>>>()?;
@@ -286,7 +305,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Traversal(_) if input.relationships.is_empty() => input
             .nodes
             .iter()
-            .filter_map(|node| nodes.get(&node.id))
+            .filter_map(|node| nodes.get(&node.alias))
             .map(|binding| OrderExpr::asc(binding.identity().clone()))
             .collect(),
         QueryPlan::Traversal(plan) => plan

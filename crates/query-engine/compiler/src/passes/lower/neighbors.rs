@@ -16,7 +16,10 @@ use super::sql::{
 };
 use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 
-pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
+pub fn emit_neighbors(
+    plan: &Plan<Neighbors>,
+    input: &crate::query::Query,
+) -> Result<(Node, NodeBinding)> {
     let Neighbors {
         center: center_alias,
         direction,
@@ -68,11 +71,17 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         dedup_subquery(alias, table, select, scan_where)
     }
 
-    let order_by = match &input.order_by {
+    let order_by = match &input.order {
         Some(ob) => vec![if ob.direction == OrderDirection::Desc {
-            OrderExpr::desc(Expr::col(&ob.node, &ob.property))
+            OrderExpr::desc(Expr::col(
+                &input.node(ob.node).alias,
+                ob.property.column.as_deref().unwrap_or(&ob.property.name),
+            ))
         } else {
-            OrderExpr::asc(Expr::col(&ob.node, &ob.property))
+            OrderExpr::asc(Expr::col(
+                &input.node(ob.node).alias,
+                ob.property.column.as_deref().unwrap_or(&ob.property.name),
+            ))
         }],
         None => vec![],
     };

@@ -567,7 +567,6 @@ fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
 
 #[test]
 fn multi_table_single_type_routes_to_default() {
-    let orbit_query = "MATCH (u:User {id: 1})-[:AUTHORED]->(p:Project) RETURN u, p LIMIT 25";
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -577,7 +576,13 @@ fn multi_table_single_type_routes_to_default() {
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
+    let result = compiler::compile(
+        json,
+        compiler::Frontend::JsonDsl,
+        &multi_table_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -615,7 +620,6 @@ fn multi_table_code_edge_routes_to_code_table() {
 
 #[test]
 fn multi_table_wildcard_scans_all_tables() {
-    let orbit_query = "MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25";
     // v2 planner routes wildcard to the default edge table for a single hop.
     // It does not generate UNION ALL across edge tables per hop.
     let json = r#"{
@@ -627,7 +631,13 @@ fn multi_table_wildcard_scans_all_tables() {
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
+    let result = compiler::compile(
+        json,
+        compiler::Frontend::JsonDsl,
+        &multi_table_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("gl_edge"),
@@ -650,15 +660,10 @@ fn multi_table_mixed_types_scans_both_tables() {
         "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
+    let error = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap_err();
     assert!(
-        rendered.contains("gl_edge"),
-        "mixed types should route to first matched table (gl_edge): {rendered}"
-    );
-    assert!(
-        rendered.contains("AUTHORED") && rendered.contains("DEFINES"),
-        "both relationship types should appear in the SQL: {rendered}"
+        error.to_string().contains("span unsupported edge tables"),
+        "mixed-table alternatives must fail closed: {error}"
     );
 }
 
@@ -1275,7 +1280,8 @@ fn orbit_query_rejects_relationships_the_ontology_cannot_match() {
             .unwrap_or_else(|error| panic!("{query}: {error}"));
     }
     let reversed = r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"mr","to":"u"}]}"#;
-    compile(reversed, Frontend::JsonDsl, &ontology, &ctx).unwrap();
+    let error = compile(reversed, Frontend::JsonDsl, &ontology, &ctx).unwrap_err();
+    assert!(error.to_string().contains("reverse the arrow"));
 }
 
 #[test]
@@ -1893,7 +1899,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert!(compiled.input.options.include_debug_sql);
+    assert!(compiled.input.include_debug_sql);
 
     let json = r#"{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"both"},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
@@ -1903,10 +1909,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert_eq!(
-        compiled.input.options.dynamic_columns,
-        DynamicColumnMode::All
-    );
+    assert_eq!(compiled.input.dynamic_columns, DynamicColumnMode::All);
 
     let json = r#"{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
@@ -1916,10 +1919,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert_eq!(
-        compiled.input.options.dynamic_columns,
-        DynamicColumnMode::All
-    );
+    assert_eq!(compiled.input.dynamic_columns, DynamicColumnMode::All);
 }
 
 #[test]
@@ -1935,12 +1935,8 @@ fn orbit_query_optional_clauses_preserve_options() {
                 let compiled =
                     compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
                 let input = compiled.input;
-                assert_eq!(
-                    input.options.include_debug_sql,
-                    !debug.is_empty(),
-                    "{query}"
-                );
-                assert_eq!(input.order_by.is_some(), !order.is_empty(), "{query}");
+                assert_eq!(input.include_debug_sql, !debug.is_empty(), "{query}");
+                assert_eq!(input.order.is_some(), !order.is_empty(), "{query}");
                 assert_eq!(input.cursor.as_ref().map(|c| c.page_size), page, "{query}");
                 if let Some(rows) = rows {
                     assert_eq!(input.limit, rows, "{query}");
@@ -1964,7 +1960,7 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
         for comment in ["", " /* DEBUG */", " // DEBUG"] {
             let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
             let compiled = compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-            assert!(!compiled.input.options.include_debug_sql, "{query}");
+            assert!(!compiled.input.include_debug_sql, "{query}");
             assert!(
                 has_param_value(&compiled.base.params, &serde_json::json!(value)),
                 "{query}"

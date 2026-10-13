@@ -97,7 +97,7 @@ pub struct PaginationMeta {
 /// last scanned row to keep pagination progressing rather than stall.
 pub fn paginate(
     query_result: &mut QueryResult,
-    input: &compiler::Input,
+    input: &compiler::BoundQuery,
     pagination: &compiler::passes::codegen::PaginationContext,
 ) -> PaginationMeta {
     let window = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;

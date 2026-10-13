@@ -6,6 +6,7 @@ use ontology::constants::*;
 use super::context::PlanningContext;
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::query::Query;
 
 use super::{
     Aggregation, BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
@@ -77,55 +78,36 @@ pub struct NodePlan {
 }
 
 impl NodePlan {
-    pub(super) fn from_input<M>(node: &InputNode, model: &M, strip_virtuals: bool) -> Option<Self>
-    where
-        M: OrbitQueryModel + ?Sized,
-    {
-        let entity = node.entity.as_deref()?;
-        let entity_id = model.graph().entity_id(entity)?;
-        let stored_filters = strip_virtuals.then(|| {
-            node.filters
-                .iter()
-                .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
-                .map(|(property, filters)| (property.clone(), filters.clone()))
-                .collect()
-        });
-        let filters = stored_filters.as_ref().unwrap_or(&node.filters);
-        let columns = node.columns.as_ref().map(|selection| match selection {
-            ColumnSelection::All => ColumnSelection::All,
-            ColumnSelection::List(columns) if strip_virtuals => ColumnSelection::List(
-                columns
-                    .iter()
-                    .filter(|column| !model.property_is_virtual(entity_id, column))
-                    .cloned()
-                    .collect(),
-            ),
-            ColumnSelection::List(columns) => ColumnSelection::List(columns.clone()),
-        });
-        Some(Self {
-            alias: node.id.clone(),
-            entity: node.entity.clone(),
-            table: model.entity_table(entity).map(String::from),
-            selectivity: Selectivity::from_node(node),
+    pub(super) fn from_query(node: &crate::query::Node, strip_virtuals: bool) -> Self {
+        let columns = node
+            .columns
+            .iter()
+            .filter(|property| !strip_virtuals || property.is_stored())
+            .filter_map(|property| property.column.clone())
+            .collect();
+        let filters = node
+            .filters
+            .iter()
+            .filter(|filter| !strip_virtuals || filter.stored)
+            .map(|filter| (filter.name.clone(), super::BoundFilter::from(filter)))
+            .collect();
+        Self {
+            alias: node.alias.clone(),
+            entity: Some(node.entity_name.clone()),
+            table: Some(node.table.clone()),
+            selectivity: Selectivity::from_query_node(node),
             hydration: HydrationStrategy::Skip,
-            filters: super::helpers::ordered_filters(
-                filters,
-                super::helpers::FilterOwner::Entity(entity_id),
-                model,
-            ),
+            filters,
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
-            has_traversal_path: model.entity_has_traversal_path(entity),
-            is_global: model.entity_is_global(entity),
-            redaction_id_column: model
-                .redaction_id_column_named(entity)
-                .unwrap_or(DEFAULT_PRIMARY_KEY)
-                .to_string(),
-            columns,
+            has_traversal_path: node.has_traversal_path,
+            is_global: node.is_global,
+            redaction_id_column: node.redaction_id_column.clone(),
+            columns: Some(ColumnSelection::List(columns)),
             use_narrowing: false,
             fk_needs_join: false,
             emit_select: true,
-        })
+        }
     }
 
     pub fn uses_default_pk(&self) -> bool {
@@ -156,7 +138,7 @@ pub enum Selectivity {
 }
 
 impl Selectivity {
-    pub fn from_node(node: &InputNode) -> Self {
+    pub fn from_query_node(node: &crate::query::Node) -> Self {
         if !node.node_ids.is_empty() {
             Self::Pinned
         } else if node.id_range.is_some() {
@@ -194,7 +176,11 @@ where
     let input = context.input;
     let model = context.model;
     let hops = build_hops(input, model);
-    let mut nodes = build_node_plans(input, model);
+    let mut nodes: HashMap<_, _> = input
+        .nodes
+        .iter()
+        .map(|node| (node.alias.clone(), NodePlan::from_query(node, true)))
+        .collect();
 
     let (mut hops, elided_fks) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input, model)
@@ -227,8 +213,15 @@ where
     resolve_node_flags(&hops, &mut nodes, input);
 
     if input.query_type == QueryType::Aggregation {
-        let group_by_nodes: HashSet<&str> =
-            crate::input::node_group_ids(&input.aggregation.group_by).collect();
+        let group_by_nodes: HashSet<&str> = input
+            .aggregation
+            .groups
+            .iter()
+            .filter_map(|group| {
+                matches!(group, crate::query::Group::Node { .. })
+                    .then(|| input.node(group.node()).alias.as_str())
+            })
+            .collect();
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
@@ -276,87 +269,77 @@ where
     })
 }
 
-fn build_hops<M>(input: &Input, model: &M) -> Vec<Hop>
+fn build_hops<M>(input: &Query, model: &M) -> Vec<Hop>
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let entities: HashMap<&str, &str> = input
-        .nodes
-        .iter()
-        .filter_map(|node| Some((node.id.as_str(), node.entity.as_deref()?)))
-        .collect();
     input
         .relationships
         .iter()
         .enumerate()
         .map(|(input_index, rel)| {
-            let edge_table = model.relationship_table_for_query(&rel.types).to_string();
-            let from_entity = input
-                .nodes
-                .iter()
-                .find(|node| node.id == rel.from)
-                .and_then(|node| node.entity.as_deref());
-            let to_entity = input
-                .nodes
-                .iter()
-                .find(|node| node.id == rel.to)
-                .and_then(|node| node.entity.as_deref());
-            let fk = from_entity
-                .zip(to_entity)
-                .and_then(|(from, to)| match rel.direction {
-                    Direction::Outgoing => model.foreign_key(&rel.types, from, to),
-                    Direction::Incoming => model.foreign_key(&rel.types, to, from),
-                    Direction::Both => None,
+            let edge_table = if crate::query::is_wildcard(&rel.names) {
+                model.default_edge_table().to_string()
+            } else {
+                rel.tables
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| model.default_edge_table().to_string())
+            };
+            let from = input.node(rel.from);
+            let to = input.node(rel.to);
+            let fk = match rel.direction {
+                Direction::Outgoing => {
+                    model.foreign_key(&rel.names, &from.entity_name, &to.entity_name)
+                }
+                Direction::Incoming => {
+                    model.foreign_key(&rel.names, &to.entity_name, &from.entity_name)
+                }
+                Direction::Both => None,
+            }
+            .and_then(|foreign_key| {
+                let fk_column = model.property_column(foreign_key.property)?.to_string();
+                let referenced_column = model
+                    .property_column(foreign_key.referenced_key)?
+                    .to_string();
+                let holder_is_from = matches!(
+                    (rel.direction, foreign_key.holder),
+                    (Direction::Outgoing, query_data_model::Endpoint::Source)
+                        | (Direction::Incoming, query_data_model::Endpoint::Target)
+                );
+                let (fk_node, target_node) = if holder_is_from {
+                    (from.alias.clone(), to.alias.clone())
+                } else {
+                    (to.alias.clone(), from.alias.clone())
+                };
+                Some(HopFk {
+                    fk_node,
+                    fk_column,
+                    target_node,
+                    referenced_column,
                 })
-                .and_then(|foreign_key| {
-                    let fk_column = model.property_column(foreign_key.property)?.to_string();
-                    let referenced_column = model
-                        .property_column(foreign_key.referenced_key)?
-                        .to_string();
-                    let holder_is_from = matches!(
-                        (rel.direction, foreign_key.holder),
-                        (Direction::Outgoing, query_data_model::Endpoint::Source)
-                            | (Direction::Incoming, query_data_model::Endpoint::Target)
-                    );
-                    let (fk_node, target_node) = if holder_is_from {
-                        (rel.from.clone(), rel.to.clone())
-                    } else {
-                        (rel.to.clone(), rel.from.clone())
-                    };
-                    Some(HopFk {
-                        fk_node,
-                        fk_column,
-                        target_node,
-                        referenced_column,
-                    })
-                });
-            let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
-            let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
-            let scope_preserving = !rel.types.is_empty()
-                && rel.types.iter().all(|kind| {
+            });
+            let scope_preserving = !rel.names.is_empty()
+                && rel.names.iter().all(|kind| {
                     model
-                        .variant_scope(kind, from_entity, to_entity)
+                        .variant_scope(kind, &from.entity_name, &to.entity_name)
                         .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
                         || model
-                            .variant_scope(kind, to_entity, from_entity)
+                            .variant_scope(kind, &to.entity_name, &from.entity_name)
                             .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
                 });
-            let filters = super::helpers::ordered_filters(
-                &rel.filters,
-                super::helpers::FilterOwner::Table(&edge_table),
-                model,
-            );
+            let filters = rel
+                .filters
+                .iter()
+                .map(|filter| (filter.name.clone(), super::BoundFilter::from(filter)))
+                .collect();
             Hop {
                 input_index,
-                rel_types: rel.types.clone(),
-                relationships: rel
-                    .types
-                    .iter()
-                    .filter_map(|kind| model.graph().relationship_id(kind))
-                    .collect(),
+                rel_types: rel.names.clone(),
+                relationships: rel.ids.clone(),
                 edge_table,
-                from_node: rel.from.clone(),
-                to_node: rel.to.clone(),
+                from_node: from.alias.clone(),
+                to_node: to.alias.clone(),
                 direction: rel.direction,
                 min_hops: rel.hops.min,
                 max_hops: rel.hops.max,
@@ -370,22 +353,11 @@ where
         .collect()
 }
 
-fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    input
-        .nodes
-        .iter()
-        .filter_map(|node| Some((node.id.clone(), NodePlan::from_input(node, model, true)?)))
-        .collect()
-}
-
 #[allow(clippy::type_complexity)]
 fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
-    input: &Input,
+    input: &Query,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> (Vec<Hop>, Vec<(String, String, String)>) {
     let mut keep_hops = Vec::new();
@@ -401,14 +373,18 @@ fn elide_hops(
                     .relationships
                     .iter()
                     .filter(|relationship| {
-                        relationship.from == fk.target_node || relationship.to == fk.target_node
+                        input.node(relationship.from).alias == fk.target_node
+                            || input.node(relationship.to).alias == fk.target_node
                     })
                     .count()
                     > 1
-                || input.join_predicates.iter().any(|predicate| {
-                    [&predicate.lhs_node, &predicate.rhs_node]
-                        .into_iter()
-                        .any(|node| node == &hop.from_node || node == &hop.to_node)
+                || input.comparisons.iter().any(|predicate| {
+                    [
+                        &input.node(predicate.left.node).alias,
+                        &input.node(predicate.right.node).alias,
+                    ]
+                    .into_iter()
+                    .any(|node| node == &hop.from_node || node == &hop.to_node)
                 })
             {
                 return None;
@@ -422,16 +398,16 @@ fn elide_hops(
             let needs_target_values = input.query_type != QueryType::Aggregation
                 || input
                     .aggregation
-                    .group_by
+                    .groups
                     .iter()
-                    .any(|group| group.node() == fk.target_node)
+                    .any(|group| input.node(group.node()).alias == fk.target_node)
                 || input.aggregation.metrics.iter().any(|metric| {
-                    metric.expr.node() == fk.target_node && metric.expr.property().is_some()
+                    input.node(metric.target).alias == fk.target_node && metric.property.is_some()
                 })
                 || input
-                    .order_by
+                    .order
                     .as_ref()
-                    .is_some_and(|order| order.node == fk.target_node);
+                    .is_some_and(|order| input.node(order.node).alias == fk.target_node);
             if needs_role_scan || (np.node_ids.len() > 1 && needs_target_values) {
                 return None;
             }
@@ -603,30 +579,41 @@ fn reorder_by_selectivity(
 
 fn determine_hydration(
     node_plan: &NodePlan,
-    input: &Input,
+    input: &Query,
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     requires_table_scan: bool,
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
-    let is_group_by_node = crate::input::node_group_ids(&input.aggregation.group_by)
-        .any(|node| node == alias.as_str());
+    let is_group_by_node = input.aggregation.groups.iter().any(|group| {
+        matches!(group, crate::query::Group::Node { .. })
+            && input.node(group.node()).alias == *alias
+    });
     let is_group_by_property = input
         .aggregation
-        .group_by
+        .groups
         .iter()
-        .any(|group| matches!(group, crate::input::InputGroupByKey::Property { node, .. } if node == alias));
+        .any(|group| matches!(group, crate::query::Group::Property { node, .. } if input.node(*node).alias == *alias));
     let is_agg_property_target = input.aggregation.metrics.iter().any(|a| {
-        a.expr.node() == alias.as_str()
-            && a.expr.property().is_some()
-            && !matches!(a.expr.function(), AggFunction::Count)
+        input.node(a.target).alias == *alias
+            && a.property.is_some()
+            && !matches!(a.function, AggFunction::Count)
     });
-    let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
-    let is_join_predicate_target = input.join_predicates.iter().any(|predicate| {
+    let is_order_by_target = input
+        .order
+        .as_ref()
+        .is_some_and(|order| input.node(order.node).alias == *alias);
+    let is_join_predicate_target = input.comparisons.iter().any(|predicate| {
         [
-            (&predicate.lhs_node, &predicate.lhs_prop),
-            (&predicate.rhs_node, &predicate.rhs_prop),
+            (
+                &input.node(predicate.left.node).alias,
+                &predicate.left.property.name,
+            ),
+            (
+                &input.node(predicate.right.node).alias,
+                &predicate.right.property.name,
+            ),
         ]
         .into_iter()
         .any(|(node, property)| node == alias && property != DEFAULT_PRIMARY_KEY)
@@ -666,7 +653,7 @@ fn filter_covered_by_denorm(
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
     hops.iter().any(|hop| {
-        if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+        if crate::query::is_wildcard(&hop.rel_types) {
             return false;
         }
         let (start_col, end_col) = hop.direction.edge_columns();
@@ -751,7 +738,7 @@ fn resolve_join_columns(hops: &mut [Hop]) -> Result<()> {
     Ok(())
 }
 
-fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
+fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Query) {
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);

@@ -9,7 +9,8 @@ use ontology::{FieldSource, Ontology};
 use query_data_model::PropertyRealization;
 
 use crate::ast::Node;
-use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
+use crate::input::{DynamicColumnMode, QueryType};
+use crate::query::Query;
 use crate::types::SecurityContext;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -100,7 +101,7 @@ pub struct VirtualColumnRequest {
 /// plans rely on `RestrictPass` having already pruned them from
 /// `node.columns`.
 pub fn generate_hydration_plan(
-    input: &Input,
+    input: &Query,
     emitted: &Node,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
@@ -128,7 +129,7 @@ pub fn generate_hydration_plan(
 }
 
 fn build_static_templates(
-    input: &Input,
+    input: &Query,
     emitted: &Node,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<HydrationTemplate> {
@@ -137,16 +138,17 @@ fn build_static_templates(
         .nodes
         .iter()
         .filter_map(|node| {
-            let entity = node.entity.as_ref()?;
-            let entity_id = model.entity(entity)?.id;
-
-            let Some(ColumnSelection::List(requested)) = &node.columns else {
-                return None;
-            };
+            let entity = &node.entity_name;
+            let entity_id = node.entity;
+            let requested: Vec<_> = node
+                .columns
+                .iter()
+                .map(|property| property.name.clone())
+                .collect();
 
             let selected: Vec<String> = requested
                 .iter()
-                .filter(|column| !projected(&format!("{}_{column}", node.id)))
+                .filter(|column| !projected(&format!("{}_{column}", node.alias)))
                 .cloned()
                 .collect();
             let requested_virtuals: HashSet<String> = requested
@@ -157,14 +159,24 @@ fn build_static_templates(
             let (mut columns, mut virtual_columns) =
                 split_model_columns(&selected, model, entity_id);
             let mut virtual_filters = Vec::new();
-            for (property, filters) in &node.filters {
-                if !model.property_is_virtual(entity_id, property) {
+            for filter in &node.filters {
+                let property = &filter.name;
+                if !filter.property.is_some_and(|property| {
+                    matches!(
+                        model.property_realization(property),
+                        Some(PropertyRealization::Virtual(_))
+                    )
+                }) {
                     continue;
                 }
-                virtual_filters.extend(filters.iter().cloned().map(|mut filter| {
-                    filter.op.get_or_insert(crate::input::FilterOp::Eq);
-                    (property.clone(), filter)
-                }));
+                virtual_filters.push((
+                    property.clone(),
+                    crate::input::InputFilter {
+                        op: Some(filter.predicate.op),
+                        value: filter.predicate.value.clone(),
+                        rhs_column: None,
+                    },
+                ));
                 if !virtual_columns
                     .iter()
                     .any(|column| column.column_name == *property)
@@ -189,12 +201,12 @@ fn build_static_templates(
 
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
-                node_alias: node.id.clone(),
-                destination_table: model.entity_table(entity)?.to_string(),
+                node_alias: node.alias.clone(),
+                destination_table: node.table.clone(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.entity_has_traversal_path(entity),
+                has_traversal_path: node.has_traversal_path,
                 virtual_filters,
                 filter_injected_columns,
             })
@@ -212,7 +224,7 @@ fn build_static_templates(
 /// see admin-only fields since hydration is built from the ontology
 /// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
-    input: &Input,
+    input: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
@@ -234,7 +246,7 @@ fn build_dynamic_specs(
                     .collect()
             };
 
-            let requested: Vec<String> = match input.options.dynamic_columns {
+            let requested: Vec<String> = match input.dynamic_columns {
                 // Virtual columns are excluded from dynamic modes: they
                 // require an explicit user request because they incur
                 // external service calls (e.g. Gitaly round-trips).
@@ -423,12 +435,14 @@ fn split_columns(
 
 #[cfg(test)]
 fn build_dynamic_specs_from_ontology(
-    input: &Input,
+    input: crate::Input,
     ontology: &Ontology,
     security_context: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
     let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-    build_dynamic_specs(input, model.as_ref(), security_context)
+    let query =
+        crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Local).unwrap();
+    build_dynamic_specs(&query, model.as_ref(), security_context)
 }
 
 #[cfg(test)]
@@ -668,7 +682,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
+        let specs = build_dynamic_specs_from_ontology(input, &ont, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -694,7 +708,7 @@ mod tests {
         let ctx = admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
+        let specs = build_dynamic_specs_from_ontology(input, &ont, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -721,7 +735,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::Default);
 
-        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
+        let specs = build_dynamic_specs_from_ontology(input, &ont, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -738,7 +752,10 @@ mod tests {
 
         let emitted = Node::Query(Box::default());
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
-        let plan = generate_hydration_plan(&input, &emitted, model.as_ref(), &ctx);
+        let query =
+            crate::passes::bind::bind(input, model.as_ref(), crate::passes::bind::Mode::Local)
+                .unwrap();
+        let plan = generate_hydration_plan(&query, &emitted, model.as_ref(), &ctx);
 
         match plan {
             HydrationPlan::Dynamic(specs) => {

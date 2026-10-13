@@ -8,8 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use compiler::input::Input;
-use compiler::passes::{frontend, lower, normalize, plan};
+use compiler::passes::{bind, frontend, lower, plan};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
 
@@ -231,7 +230,10 @@ fn check<M: OrbitQueryModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    build: impl Fn(
+        &compiler::BoundQuery,
+        plan::HydrationCompileOptions,
+    ) -> compiler::Result<plan::QueryPlan>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -245,8 +247,7 @@ fn check<M: OrbitQueryModel>(
             _ => panic!("{label}: unknown frontend"),
         }
         .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let mut input =
-            normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let mut input = input;
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
             input.query_type = compiler::input::QueryType::Hydration;
@@ -272,8 +273,15 @@ fn check<M: OrbitQueryModel>(
             .logical
             .check(&explain::logical(&input), &format!("{label}.logical"))
             .unwrap_or_else(|error| panic!("{error}"));
-        let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let mode = if input.query_type == compiler::QueryType::Hydration {
+            bind::Mode::Hydration
+        } else {
+            bind::Mode::Local
+        };
+        let query =
+            bind::bind(input, model, mode).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let plan = build(&query, options).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let lowered = lower::emit(&plan, &query).unwrap_or_else(|error| panic!("{label}: {error}"));
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
         assert!(
@@ -644,6 +652,7 @@ reject:
 
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
+    use compiler::Input;
     use compiler::input::{InputNode, QueryType};
     use compiler::passes::plan::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
@@ -669,8 +678,9 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             }],
             ..Default::default()
         };
+        let query = bind::bind(input, &model, bind::Mode::Hydration).unwrap();
         let plan = plan::plan_clickhouse(
-            &input,
+            &query,
             &model,
             plan::HydrationCompileOptions {
                 dynamic,
@@ -687,7 +697,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input).unwrap();
+        let lowered = lower::emit(&plan, &query).unwrap();
         let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(

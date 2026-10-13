@@ -14,19 +14,19 @@ where
         .as_ref()
         .ok_or_else(|| crate::error::QueryError::Lowering("path config missing".into()))?;
 
-    let start_node = find_node(input, &path.from)?;
-    let end_node = find_node(input, &path.to)?;
-    let start_alias = start_node.id.clone();
-    let end_alias = end_node.id.clone();
+    let start_node = find_node(input, path.from);
+    let end_node = find_node(input, path.to);
+    let start_alias = start_node.alias.clone();
+    let end_alias = end_node.alias.clone();
 
     let start_np = context.resolve_node(start_node)?;
     let end_np = context.resolve_node(end_node)?;
 
     let scoped_by_tp = start_np.has_traversal_path && end_np.has_traversal_path;
-    let edge = EdgeTableConfig::from_model(model, &path.rel_types);
+    let edge = EdgeTableConfig::from_model(model, &path.relationship_names);
 
     let endpoint_kinds = |entity: &str, source: bool| {
-        if !crate::passes::normalize::is_wildcard(&path.rel_types) {
+        if !crate::query::is_wildcard(&path.relationship_names) {
             return None;
         }
         let relationships = if source {
@@ -36,14 +36,8 @@ where
         };
         super::helpers::rel_kind_filter_values(&relationships)
     };
-    let forward_first_hop_filter = start_node
-        .entity
-        .as_deref()
-        .and_then(|entity| endpoint_kinds(entity, true));
-    let backward_first_hop_filter = end_node
-        .entity
-        .as_deref()
-        .and_then(|entity| endpoint_kinds(entity, false));
+    let forward_first_hop_filter = endpoint_kinds(&start_node.entity_name, true);
+    let backward_first_hop_filter = endpoint_kinds(&end_node.entity_name, false);
 
     let max_depth = path.max_depth;
     let forward_depth = max_depth / 2 + max_depth % 2;

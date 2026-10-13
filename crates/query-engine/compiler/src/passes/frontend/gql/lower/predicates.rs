@@ -23,6 +23,14 @@ impl Lowering {
                     ..Default::default()
                 });
         }
+        for predicates in filters.values_mut() {
+            predicates.sort_by(|left, right| {
+                left.op
+                    .unwrap_or(FilterOp::Eq)
+                    .as_ref()
+                    .cmp(right.op.unwrap_or(FilterOp::Eq).as_ref())
+            });
+        }
     }
 
     pub(super) fn predicate(&mut self, comparison: Comparison<'_>) -> Result<()> {
@@ -99,7 +107,14 @@ impl Lowering {
         let node = property.node.value;
         let key = property.property.value;
         if let Some(node) = self.input.nodes.iter_mut().find(|n| n.id == node) {
-            node.filters.entry(key).or_default().push(filter);
+            let predicates = node.filters.entry(key).or_default();
+            predicates.push(filter);
+            predicates.sort_by(|left, right| {
+                left.op
+                    .unwrap_or(FilterOp::Eq)
+                    .as_ref()
+                    .cmp(right.op.unwrap_or(FilterOp::Eq).as_ref())
+            });
         } else if let Some(index) = self.edges.get(&node) {
             let edge = &mut self.input.relationships[*index];
             if edge.hops.max != 1 {
@@ -108,7 +123,14 @@ impl Lowering {
                     "a variable-length relationship binds a list; relationship-list predicates are unsupported",
                 ));
             }
-            edge.filters.entry(key).or_default().push(filter);
+            let predicates = edge.filters.entry(key).or_default();
+            predicates.push(filter);
+            predicates.sort_by(|left, right| {
+                left.op
+                    .unwrap_or(FilterOp::Eq)
+                    .as_ref()
+                    .cmp(right.op.unwrap_or(FilterOp::Eq).as_ref())
+            });
         } else {
             return Err(invalid(span, &format!("undefined variable {node}")));
         }
@@ -120,21 +142,18 @@ impl Lowering {
             let Some(filters) = node.filters.get_mut("id") else {
                 continue;
             };
-            if node.node_ids.is_empty()
-                && let Some((index, values)) =
-                    filters
-                        .iter()
-                        .enumerate()
-                        .find_map(|(index, f)| match (&f.op, &f.value) {
-                            (Some(FilterOp::In), Some(Value::Array(values)))
-                                if !values.is_empty() =>
-                            {
-                                Some((index, values))
-                            }
-                            _ => None,
-                        })
+            if let Some((index, values)) =
+                filters
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, f)| match (&f.op, &f.value) {
+                        (Some(FilterOp::In), Some(Value::Array(values))) if !values.is_empty() => {
+                            Some((index, values))
+                        }
+                        _ => None,
+                    })
             {
-                node.node_ids = values
+                let promoted: Vec<i64> = values
                     .iter()
                     .map(|v| {
                         v.as_i64()
@@ -146,6 +165,9 @@ impl Lowering {
                             })
                     })
                     .collect::<Result<_>>()?;
+                if node.node_ids.is_empty() {
+                    node.node_ids = promoted;
+                }
                 filters.remove(index);
             }
             if let [left, right] = filters.as_slice() {

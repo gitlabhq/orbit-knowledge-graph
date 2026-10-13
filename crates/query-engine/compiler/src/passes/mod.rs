@@ -1,19 +1,16 @@
-//! Each pass module exposes a pure function (e.g. `normalize::normalize`,
-//! `restrict::restrict`) consumed by the phase functions in `config.rs`.
+//! Each pass module exposes a compiler phase consumed by `config.rs`.
 
+pub mod bind;
 pub mod check;
 pub mod codegen;
 pub mod cursor;
 pub mod enforce;
-mod errors;
+pub(crate) mod errors;
 pub mod frontend;
 pub mod hydrate;
 pub mod lower;
-pub mod normalize;
 pub mod plan;
-pub mod relationships;
 pub mod response_policy;
 pub mod restrict;
 pub mod security;
 pub mod settings;
-pub mod validate;

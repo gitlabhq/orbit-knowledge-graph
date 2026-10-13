@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use query_data_model::OrbitQueryModel;
 
 use crate::error::{QueryError, Result};
-use crate::input::{Input, InputNode, QueryType};
+use crate::input::QueryType;
+use crate::query::{Node, Query};
 
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
 
 pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
-    pub input: &'a Input,
+    pub input: &'a Query,
     pub model: &'a M,
     pub hops: Vec<Hop>,
     pub nodes: HashMap<String, NodePlan>,
@@ -28,10 +29,8 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         }
     }
 
-    pub fn resolve_node(&self, node: &InputNode) -> Result<NodePlan> {
-        NodePlan::from_input(node, self.model, false).ok_or_else(|| {
-            QueryError::Lowering(format!("node '{}' has an unknown entity", node.id))
-        })
+    pub fn resolve_node(&self, node: &Node) -> Result<NodePlan> {
+        Ok(NodePlan::from_query(node, false))
     }
 
     pub fn single_node(&self) -> Result<ExecutionPlan> {

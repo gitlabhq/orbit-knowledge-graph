@@ -7,9 +7,10 @@ pub mod duckdb;
 
 use orbit_server_config::QueryConfig;
 
-use crate::input::{Input, QueryType};
+use crate::input::QueryType;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
+use crate::query::Query;
 pub use orbit_utils::query_types::ParamValue;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -52,7 +53,7 @@ pub struct CompiledQueryContext {
     pub query_type: QueryType,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
-    pub input: Input,
+    pub input: Query,
     pub pagination: PaginationContext,
     pub has_virtual_columns: bool,
 }

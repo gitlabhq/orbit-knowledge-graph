@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use query_engine::compiler::BoundQuery;
 use query_engine::compiler::input::{Input, QueryType};
 
 /// Some variants carry data from the AST (field name, edge type) so the
@@ -62,6 +63,8 @@ impl std::fmt::Display for Requirement {
 
 pub trait QueryRequirements {
     fn requirements(&self) -> HashSet<Requirement>;
+    fn query_type(&self) -> QueryType;
+    fn is_search(&self) -> bool;
 }
 
 impl QueryRequirements for Input {
@@ -125,6 +128,75 @@ impl QueryRequirements for Input {
         }
 
         reqs
+    }
+
+    fn query_type(&self) -> QueryType {
+        self.query_type
+    }
+
+    fn is_search(&self) -> bool {
+        self.is_search()
+    }
+}
+
+impl QueryRequirements for BoundQuery {
+    fn requirements(&self) -> HashSet<Requirement> {
+        let mut reqs = HashSet::new();
+        if self.order.is_some() {
+            reqs.insert(Requirement::OrderBy);
+        }
+        for node in &self.nodes {
+            for filter in &node.filters {
+                reqs.insert(Requirement::Filter {
+                    field: filter.name.clone(),
+                });
+            }
+        }
+        if self.query_type != QueryType::PathFinding
+            && self.nodes.iter().any(|node| !node.node_ids.is_empty())
+        {
+            reqs.insert(Requirement::NodeIds);
+        }
+        match self.query_type {
+            QueryType::PathFinding => {
+                reqs.insert(Requirement::PathFinding);
+            }
+            QueryType::Aggregation => {
+                reqs.insert(Requirement::Aggregation);
+            }
+            QueryType::Neighbors => {
+                reqs.insert(Requirement::Neighbors);
+                reqs.insert(Requirement::NodeCount);
+            }
+            QueryType::Traversal => {
+                reqs.insert(Requirement::NodeCount);
+            }
+            QueryType::Hydration => {}
+        }
+        if self.query_type == QueryType::Traversal {
+            for relationship in &self.relationships {
+                for name in &relationship.names {
+                    reqs.insert(Requirement::Relationship {
+                        edge_type: name.clone(),
+                    });
+                }
+            }
+        }
+        if self.aggregation.sort.is_some() {
+            reqs.insert(Requirement::AggregationSort);
+        }
+        if self.cursor.is_some() {
+            reqs.insert(Requirement::Cursor);
+        }
+        reqs
+    }
+
+    fn query_type(&self) -> QueryType {
+        self.query_type
+    }
+
+    fn is_search(&self) -> bool {
+        self.is_search()
     }
 }
 

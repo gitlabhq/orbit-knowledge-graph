@@ -82,7 +82,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         alias: &str,
         tagged: &mut HashSet<(String, String)>,
     ) {
-        if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+        if crate::query::is_wildcard(&hop.rel_types) {
             return;
         }
         let (start, end) = hop.direction.edge_columns();

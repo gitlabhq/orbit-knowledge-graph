@@ -208,13 +208,9 @@ mod tests {
                 dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
             },
             hydration: query_engine::compiler::HydrationPlan::None,
-            input: query_engine::compiler::Input {
-                nodes: vec![query_engine::compiler::InputNode {
-                    entity: Some("User".into()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
+            input: query_engine::compiler::BoundQuery::new(
+                query_engine::compiler::input::QueryType::Traversal,
+            ),
             pagination: Default::default(),
             has_virtual_columns: false,
         });

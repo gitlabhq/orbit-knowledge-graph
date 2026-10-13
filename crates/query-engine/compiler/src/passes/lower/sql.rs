@@ -163,7 +163,7 @@ pub fn deleted_false(alias: &str) -> Expr {
 }
 
 pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
-    if crate::passes::normalize::is_wildcard(types) {
+    if crate::query::is_wildcard(types) {
         return None;
     }
     if types.len() == 1 {

@@ -23,9 +23,10 @@ use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
-    response_policy, restrict, security, settings, validate,
+    bind, check, codegen, cursor, enforce, hydrate, lower, plan, response_policy, restrict,
+    security, settings,
 };
+use crate::query::Query;
 use crate::types::SecurityContext;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
@@ -40,6 +41,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     state {
         pub raw: String,
         pub input: Input,
+        pub query: Query,
         pub pagination: PaginationContext,
         pub scope_proofs: crate::scope::QueryScope,
         pub hydration_options: HydrationCompileOptions,
@@ -60,38 +62,34 @@ compiler_pipeline_macros::define_compiler_ctx! {
         gql_parse {
             mutates: [raw, input, pagination]
         }
-        validate_relationships {
+        bind {
             reads_env: [data_model]
-            reads_state: [input]
+            mutates: [input, query, pagination]
         }
-        validate {
+        bind_local {
             reads_env: [data_model]
-            mutates: [input, pagination]
+            mutates: [input, query]
         }
-        validate_local {
+        bind_hydration {
             reads_env: [data_model]
-            mutates: [input]
-        }
-        normalize {
-            reads_env: [data_model]
-            mutates: [input]
+            mutates: [input, query]
         }
         restrict {
             reads_env: [data_model, security_ctx]
-            mutates: [input, scope_proofs]
+            mutates: [query, scope_proofs]
         }
         plan_clickhouse {
             reads_env: [data_model]
             reads_state: [scope_proofs, hydration_options]
-            mutates: [input, query_plan]
+            mutates: [query, query_plan]
         }
         plan_duckdb {
             reads_env: [data_model]
             reads_state: [scope_proofs, hydration_options]
-            mutates: [input, query_plan]
+            mutates: [query, query_plan]
         }
         lower {
-            reads_state: [input]
+            reads_state: [query]
             mutates: [query_plan, node, lowered_metadata]
         }
         scope_requirements {
@@ -101,17 +99,17 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         response_policy {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [query]
             mutates: [node]
         }
         enforce {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [query]
             mutates: [node, lowered_metadata, result_ctx]
         }
         enforce_local {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [query]
             mutates: [node, lowered_metadata, result_ctx]
         }
         security {
@@ -120,7 +118,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         cursor {
             reads_state: [lowered_metadata]
-            mutates: [input, pagination, node]
+            mutates: [query, pagination, node]
         }
         check {
             reads_env: [security_ctx, data_model]
@@ -128,19 +126,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, node]
+            reads_state: [query, node]
             mutates: [hydration_plan]
         }
         settings {
-            reads_state: [input, node, pagination]
+            reads_state: [query, node, pagination]
             mutates: [query_plan, query_config]
         }
         codegen {
-            reads_state: [node, input, pagination]
+            reads_state: [node, query, pagination]
             mutates: [result_ctx, query_config, hydration_plan, pagination, output]
         }
         duckdb_codegen {
-            reads_state: [node, input, pagination]
+            reads_state: [node, query, pagination]
             mutates: [result_ctx, hydration_plan, pagination, output]
         }
     }
@@ -149,44 +147,44 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, query, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, bind, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, query, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, bind, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
+            state: [input, query, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [bind_hydration, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
+            state: [raw, input, query, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, bind_local, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
+            state: [raw, input, query, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [gql_parse, bind_local, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
             env: []
-            state: [raw, input, pagination]
-            phases: [gql_parse, validate, validate_relationships, normalize]
+            state: [raw, input, query, pagination]
+            phases: [gql_parse, bind]
         }
         validate_normalize {
             model: query_data_model::ClickHouseDataModel
             env: []
-            state: [raw, input, pagination]
-            phases: [json_dsl_parse, validate, normalize]
+            state: [raw, input, query, pagination]
+            phases: [json_dsl_parse, bind]
         }
     }
 }
@@ -209,15 +207,8 @@ fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().as_ref(), "input")?;
-    relationships::validate_relationships(input, ctx.data_model())
-}
-
-fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn bind(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
-    let v = validate::Validator::new(ctx.data_model());
-    v.check_shape(&input)?;
     if let Some(c) = &mut input.cursor
         && let Some(after) = &c.after
     {
@@ -233,25 +224,22 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
         let values = cursor::decode(after, query_hash)?;
         c.after = Some(cursor::encode(query_hash, &values));
     }
-    v.check_references(&input)?;
-    ctx.set_input(input);
+    let query = bind::bind(input, ctx.data_model(), bind::Mode::Public)?;
+    ctx.set_query(query);
     Ok(())
 }
 
-fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn bind_local(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.take_input(), "input")?;
-    let v =
-        validate::Validator::new(ctx.data_model()).with_skip(validate::Skip { selectivity: true });
-    v.check_shape(&input)?;
-    v.check_references(&input)?;
-    ctx.set_input(input);
+    let query = bind::bind(input, ctx.data_model(), bind::Mode::Local)?;
+    ctx.set_query(query);
     Ok(())
 }
 
-fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn bind_hydration(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.take_input(), "input")?;
-    let input = normalize::normalize(input, ctx.data_model())?;
-    ctx.set_input(input);
+    let query = bind::bind(input, ctx.data_model(), bind::Mode::Hydration)?;
+    ctx.set_query(query);
     Ok(())
 }
 
@@ -261,10 +249,10 @@ where
     C::Model: query_data_model::OrbitQueryModel,
 {
     let security_ctx = ctx.security_ctx().clone();
-    let mut input = require(ctx.take_input(), "input")?;
-    let scope_proofs = restrict::restrict(&mut input, ctx.data_model(), &security_ctx)?;
-    let scope_proofs = crate::scope::prepare(&mut input, scope_proofs, ctx.data_model());
-    ctx.set_input(input);
+    let mut query = require(ctx.take_query(), "query")?;
+    let scope_proofs = restrict::restrict(&mut query, ctx.data_model(), &security_ctx)?;
+    let scope_proofs = crate::scope::prepare_bound(&mut query, scope_proofs, ctx.data_model());
+    ctx.set_query(query);
     ctx.set_scope_proofs(scope_proofs);
     Ok(())
 }
@@ -284,7 +272,7 @@ fn plan_duckdb(
 fn plan_with<C>(
     ctx: &mut C,
     build: impl FnOnce(
-        &Input,
+        &Query,
         &C::Model,
         HydrationCompileOptions,
         &std::collections::HashSet<String>,
@@ -293,7 +281,7 @@ fn plan_with<C>(
 where
     C: CompilerCtx,
 {
-    let input = require(ctx.take_input(), "input")?;
+    let query = require(ctx.take_query(), "query")?;
     let hydration_options = ctx
         .hydration_options()
         .as_ref()
@@ -304,16 +292,16 @@ where
         .scope_proofs()
         .as_ref()
         .map_or(&no_table_scans, crate::scope::QueryScope::table_scans);
-    let query_plan = build(&input, ctx.data_model(), hydration_options, table_scans)?;
-    ctx.set_input(input);
+    let query_plan = build(&query, ctx.data_model(), hydration_options, table_scans)?;
+    ctx.set_query(query);
     ctx.set_query_plan(query_plan);
     Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let input = require(ctx.input().clone(), "input")?;
-    let lowered = lower::emit(&query_plan, &input)?;
+    let query = require(ctx.query().clone(), "query")?;
+    let lowered = lower::emit(&query_plan, &query)?;
     ctx.set_query_plan(query_plan);
     ctx.set_node(lowered.ast);
     ctx.set_lowered_metadata(lowered.metadata);
@@ -330,9 +318,9 @@ fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
+    let query = require(ctx.query().clone(), "query")?;
     let mut node = require(ctx.take_node(), "node")?;
-    response_policy::apply_text_excerpts(&mut node, &input, ctx.data_model());
+    response_policy::apply_text_excerpts(&mut node, &query, ctx.data_model());
     ctx.set_node(node);
     Ok(())
 }
@@ -344,10 +332,10 @@ where
 {
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
-    enforce::enforce_role_scans(&mut node, &input, &metadata, ctx.data_model())?;
+    let query = require(ctx.query().clone(), "query")?;
+    enforce::enforce_role_scans(&mut node, &query, &metadata, ctx.data_model())?;
     let result_context =
-        enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model())?;
+        enforce::enforce_lowered_return(&mut node, &query, &metadata, ctx.data_model())?;
     ctx.set_node(node);
     ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
@@ -361,9 +349,9 @@ where
 {
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
+    let query = require(ctx.query().clone(), "query")?;
     let result_context =
-        enforce::enforce_local_return(&mut node, &input, &metadata, ctx.data_model())?;
+        enforce::enforce_local_return(&mut node, &query, &metadata, ctx.data_model())?;
     ctx.set_node(node);
     ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
@@ -383,12 +371,12 @@ where
 }
 
 fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.take_input(), "input")?;
+    let query = require(ctx.take_query(), "query")?;
     let mut node = require(ctx.take_node(), "node")?;
     let metadata = require(ctx.lowered_metadata().clone(), "lowered_metadata")?;
     let mut pagination = ctx.take_pagination().unwrap_or_default();
-    pagination.key_count = cursor::apply(&mut node, &input, &metadata, pagination.query_hash)?;
-    ctx.set_input(input);
+    pagination.key_count = cursor::apply(&mut node, &query, &metadata, pagination.query_hash)?;
+    ctx.set_query(query);
     ctx.set_pagination(pagination);
     ctx.set_node(node);
     Ok(())
@@ -408,17 +396,17 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
-    let input = require(ctx.input().as_ref(), "input")?;
+    let query = require(ctx.query().as_ref(), "query")?;
     let emitted = require(ctx.node().as_ref(), "node")?;
     let plan =
-        hydrate::generate_hydration_plan(input, emitted, ctx.data_model(), ctx.security_ctx());
+        hydrate::generate_hydration_plan(query, emitted, ctx.data_model(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }
 
 fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
-    let query_type: &str = input.query_type.into();
+    let query = require(ctx.query().clone(), "query")?;
+    let query_type: &str = query.query_type.into();
     let mut config = settings::resolve(query_type);
 
     let node = require(ctx.node().clone(), "node")?;
@@ -445,7 +433,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.
-    if input.query_type == QueryType::PathFinding {
+    if query.query_type == QueryType::PathFinding {
         if config.max_execution_time.is_none()
             || config.max_execution_time > Some(PATHFINDING_MAX_EXECUTION_TIME)
         {
@@ -467,16 +455,16 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = require(ctx.node().clone(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
+    let query = require(ctx.query().clone(), "query")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::codegen(&node, result_context, query_config)?;
-    let query_type = input.query_type;
+    let query_type = query.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
         base,
         hydration,
-        input,
+        input: query,
         pagination,
         has_virtual_columns,
     });
@@ -487,16 +475,16 @@ fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = require(ctx.node().clone(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
+    let query = require(ctx.query().clone(), "query")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::duckdb::codegen(&node, result_context)?;
-    let query_type = input.query_type;
+    let query_type = query.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
         base,
         hydration,
-        input,
+        input: query,
         pagination,
         has_virtual_columns,
     });

@@ -1,9 +1,7 @@
 use query_data_model::OrbitQueryModel;
 
 use super::helpers::requested_columns;
-use crate::input::{
-    AggExpr, AggFunction, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
-};
+use crate::input::{AggFunction, InputAggSort, TruncateUnit};
 
 use super::HydrationStrategy;
 use super::context::PlanningContext;
@@ -52,30 +50,34 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             group_outputs: vec![],
             measures: vec![],
             condition,
-            order: aggregation.sort.clone(),
+            order: aggregation.sort.as_ref().map(|sort| InputAggSort {
+                column: sort.column.clone(),
+                direction: sort.direction,
+            }),
         };
-        for (group, alias) in aggregation
-            .group_by
-            .iter()
-            .zip(group_by_output_names(&aggregation.group_by))
-        {
+        for group in &aggregation.groups {
             match group {
-                InputGroupByKey::Property {
+                crate::query::Group::Property {
                     node,
                     property,
                     truncate,
-                    ..
+                    alias,
                 } => {
+                    let node = &self.input.node(*node).alias;
                     let group = Group {
-                        column: Column::new(node, property),
+                        column: Column::new(
+                            node,
+                            property.column.as_deref().unwrap_or(&property.name),
+                        ),
                         truncate: *truncate,
                     };
-                    plan.group_outputs.push((group.clone(), alias));
+                    plan.group_outputs.push((group.clone(), alias.clone()));
                     if !plan.groups.contains(&group) {
                         plan.groups.push(group);
                     }
                 }
-                InputGroupByKey::Node { node, .. } => {
+                crate::query::Group::Node { node, .. } => {
+                    let node = &self.input.node(*node).alias;
                     if let Some(metadata) = self.nodes.get(node.as_str()) {
                         for column in requested_columns(&metadata.columns) {
                             let group = Group {
@@ -91,29 +93,19 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             }
         }
         for metric in &aggregation.metrics {
-            let argument = match &metric.expr {
-                AggExpr::Count(target) => target
-                    .property
-                    .as_ref()
-                    .filter(|_| {
-                        !self
-                            .nodes
-                            .get(&target.node)
-                            .is_some_and(|node| node.hydration == HydrationStrategy::Skip)
-                    })
-                    .map(|property| Column::new(&target.node, property)),
-                AggExpr::Sum(property)
-                | AggExpr::Avg(property)
-                | AggExpr::Min(property)
-                | AggExpr::Max(property)
-                | AggExpr::Collect(property) => {
-                    Some(Column::new(&property.node, &property.property))
-                }
-            };
+            let node = &self.input.node(metric.target).alias;
+            let argument = metric.property.as_ref().and_then(|property| {
+                (!(metric.function == AggFunction::Count
+                    && self
+                        .nodes
+                        .get(node)
+                        .is_some_and(|node| node.hydration == HydrationStrategy::Skip)))
+                .then(|| Column::new(node, property.column.as_deref().unwrap_or(&property.name)))
+            });
             plan.measures.push(Measure {
-                function: metric.expr.function(),
+                function: metric.function,
                 argument,
-                name: metric.output_name(),
+                name: metric.alias.clone(),
             });
         }
         plan

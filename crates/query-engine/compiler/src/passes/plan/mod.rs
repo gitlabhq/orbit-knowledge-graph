@@ -14,8 +14,9 @@ pub mod requirements;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::error::{QueryError, Result};
-use crate::input::*;
+use crate::error::Result;
+use crate::input::{Direction, InputFilter, QueryType};
+use crate::query::Query;
 
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
@@ -29,6 +30,22 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
+}
+
+impl From<&crate::query::Filter> for BoundFilter {
+    fn from(filter: &crate::query::Filter) -> Self {
+        Self {
+            filter: InputFilter {
+                op: Some(filter.predicate.op),
+                value: filter.predicate.value.clone(),
+                rhs_column: None,
+            },
+            property: filter.property,
+            data_type: Some(filter.data_type),
+            selectivity: filter.selectivity,
+            in_sort_key: filter.in_sort_key,
+        }
+    }
 }
 
 pub struct Plan<T> {
@@ -58,19 +75,18 @@ impl QueryPlan {
 }
 
 pub fn denormalized_facts(
-    input: &Input,
+    input: &Query,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
     input
         .nodes
         .iter()
-        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
-        .flat_map(|(entity, node)| {
+        .flat_map(|node| {
             [DenormalizedDirection::Source, DenormalizedDirection::Target]
                 .into_iter()
                 .flat_map(move |direction| {
-                    node.filters.keys().filter_map(move |property| {
-                        let property = model.graph().property_id(entity, property)?;
+                    node.filters.iter().filter_map(move |filter| {
+                        let property = filter.property?;
                         let key = DenormalizedKey {
                             property,
                             direction,
@@ -170,16 +186,12 @@ impl EdgeTableConfig {
     }
 }
 
-pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
-    input
-        .nodes
-        .iter()
-        .find(|n| n.id == alias)
-        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
+pub fn find_node(input: &Query, node: crate::query::NodeId) -> &crate::query::Node {
+    input.node(node)
 }
 
 pub fn plan_clickhouse(
-    input: &Input,
+    input: &Query,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
@@ -188,7 +200,7 @@ pub fn plan_clickhouse(
 }
 
 pub fn plan_duckdb(
-    input: &Input,
+    input: &Query,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
@@ -197,7 +209,7 @@ pub fn plan_duckdb(
 }
 
 fn plan<M>(
-    input: &Input,
+    input: &Query,
     model: &M,
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,

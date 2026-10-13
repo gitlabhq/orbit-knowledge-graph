@@ -136,10 +136,10 @@ fn apply_metrics(
         q.relationship_count = Some(input.relationships.len() as i64);
         q.is_search = Some(input.is_search());
         q.has_cursor = Some(input.cursor.is_some());
-        q.has_order_by = Some(input.order_by.is_some());
+        q.has_order_by = Some(input.order.is_some());
         q.limit = Some(input.limit as i64);
-        q.group_by_count = Some(input.aggregation.group_by.len() as i64);
-        q.dynamic_columns = <&str>::from(input.options.dynamic_columns).parse().ok();
+        q.group_by_count = Some(input.aggregation.groups.len() as i64);
+        q.dynamic_columns = <&str>::from(input.dynamic_columns).parse().ok();
         q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as i64);
 
         let mut entities = BTreeSet::new();
@@ -151,41 +151,25 @@ fn apply_metrics(
         let mut variable_hops = false;
 
         let mut columns = BTreeSet::new();
-        let mut has_star = false;
+        let has_star = false;
 
         for node in &input.nodes {
-            if let Some(e) = &node.entity {
-                entities.insert(e.clone());
-            }
-            match &node.columns {
-                Some(query_engine::compiler::ColumnSelection::All) => has_star = true,
-                Some(query_engine::compiler::ColumnSelection::List(cols)) => {
-                    columns.extend(cols.iter().cloned());
-                }
-                None => {}
-            }
-            for (f, entries) in &node.filters {
-                fields.insert(f.clone());
-                for ef in entries {
-                    filter_count += 1;
-                    if let Some(op) = &ef.op {
-                        ops.insert(op.as_ref().to_owned());
-                    }
-                }
+            entities.insert(node.entity_name.clone());
+            columns.extend(node.columns.iter().map(|property| property.name.clone()));
+            for filter in &node.filters {
+                fields.insert(filter.name.clone());
+                filter_count += 1;
+                ops.insert(filter.predicate.op.as_ref().to_owned());
             }
         }
         for rel in &input.relationships {
-            rel_types.extend(rel.types.iter().cloned());
+            rel_types.extend(rel.names.iter().cloned());
             max_hops = max_hops.max(rel.hops.max as i64);
             variable_hops |= rel.hops.min != rel.hops.max;
-            for (f, entries) in &rel.filters {
-                fields.insert(f.clone());
-                for ef in entries {
-                    filter_count += 1;
-                    if let Some(op) = &ef.op {
-                        ops.insert(op.as_ref().to_owned());
-                    }
-                }
+            for filter in &rel.filters {
+                fields.insert(filter.name.clone());
+                filter_count += 1;
+                ops.insert(filter.predicate.op.as_ref().to_owned());
             }
         }
 
@@ -201,7 +185,7 @@ fn apply_metrics(
                 .aggregation
                 .metrics
                 .iter()
-                .map(|m| m.expr.function().to_string())
+                .map(|metric| metric.function.to_string())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .filter_map(|s| s.parse().ok())
@@ -249,26 +233,18 @@ fn apply_metrics(
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
 /// Returns `None` for search queries (no relationships).
-fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
+fn traversal_shape(input: &query_engine::compiler::BoundQuery) -> Option<String> {
     if input.relationships.is_empty() {
         return None;
     }
-    let entity_of = |id: &str| -> &str {
-        input
-            .nodes
-            .iter()
-            .find(|n| n.id == id)
-            .and_then(|n| n.entity.as_deref())
-            .unwrap_or("?")
-    };
     let mut parts = Vec::new();
     for rel in &input.relationships {
-        let types = rel.types.join("|");
+        let types = rel.names.join("|");
         parts.push(format!(
             "{}-[{}]->{}",
-            entity_of(&rel.from),
+            input.node(rel.from).entity_name,
             types,
-            entity_of(&rel.to),
+            input.node(rel.to).entity_name,
         ));
     }
     Some(parts.join(", "))
@@ -639,41 +615,20 @@ mod tests {
     #[test]
     fn input_fields_mapped_to_context() {
         use query_engine::compiler::HydrationPlan;
-        use query_engine::compiler::input::{
-            Direction, FilterOp, HopRange, InputFilter, InputNode, InputRelationship,
-        };
-
         let claims = claims_with_paths(vec!["1/22/"]);
+        let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let security =
+            query_engine::compiler::SecurityContext::new(1, vec!["1/22/".into()]).unwrap();
+        let input = query_engine::compiler::compile(
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}]}"#,
+            query_engine::compiler::Frontend::JsonDsl,
+            &ontology,
+            &security,
+        )
+        .unwrap()
+        .input;
         let metrics = ExecMetrics {
-            input: Some(query_engine::compiler::Input {
-                nodes: vec![
-                    InputNode {
-                        entity: Some("User".into()),
-                        ..Default::default()
-                    },
-                    InputNode {
-                        entity: Some("MergeRequest".into()),
-                        filters: [(
-                            "state".into(),
-                            vec![InputFilter {
-                                op: Some(FilterOp::Eq),
-                                ..Default::default()
-                            }],
-                        )]
-                        .into(),
-                        ..Default::default()
-                    },
-                ],
-                relationships: vec![InputRelationship {
-                    types: vec!["AUTHORED".into()],
-                    from: "u".into(),
-                    to: "mr".into(),
-                    hops: HopRange::default(),
-                    direction: Direction::Outgoing,
-                    filters: Default::default(),
-                }],
-                ..Default::default()
-            }),
+            input: Some(input),
             hydration: Some(HydrationPlan::Static(vec![])),
             ..Default::default()
         };

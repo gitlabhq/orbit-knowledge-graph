@@ -209,8 +209,10 @@ mod tests {
             limit,
             ..Default::default()
         };
+        let query =
+            crate::passes::bind::bind(input, &model, crate::passes::bind::Mode::Hydration).unwrap();
         let plan = plan_clickhouse(
-            &input,
+            &query,
             &model,
             HydrationCompileOptions {
                 dynamic,
@@ -219,7 +221,7 @@ mod tests {
             &Default::default(),
         )
         .unwrap();
-        super::super::emit(&plan, &input).unwrap().ast
+        super::super::emit(&plan, &query).unwrap().ast
     }
 
     #[test]

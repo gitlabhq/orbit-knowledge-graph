@@ -24,7 +24,14 @@ fn output(
     pagination: Option<PaginationMeta>,
 ) -> PipelineOutput {
     let input: compiler::Input = serde_json::from_value(input).unwrap();
-    let mut result_context = ResultContext::new().with_query_type(input.query_type);
+    let query_type = input.query_type;
+    let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
+        ontology::Ontology::load_embedded().unwrap(),
+    ))
+    .unwrap();
+    let input =
+        compiler::passes::bind::bind(input, &model, compiler::passes::bind::Mode::Local).unwrap();
+    let mut result_context = ResultContext::new().with_query_type(query_type);
     for (alias, entity) in context {
         result_context.add_node(alias, entity);
     }
@@ -38,10 +45,10 @@ fn output(
     PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: 0,
-        query_type: input.query_type.to_string(),
+        query_type: query_type.to_string(),
         raw_query_strings: vec![],
         compiled: Arc::new(CompiledQueryContext {
-            query_type: input.query_type,
+            query_type,
             base: ParameterizedQuery {
                 sql: String::new(),
                 params: HashMap::new(),

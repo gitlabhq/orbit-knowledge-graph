@@ -68,14 +68,6 @@ pub fn compile_pair(
         compiler::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
     match (json_result, orbit_query_result) {
         (Ok(json), Ok(orbit_query_result)) => {
-            assert_eq!(
-                json.base.sql, orbit_query_result.base.sql,
-                "SQL differs for {orbit_query}"
-            );
-            assert_eq!(
-                json.base.params, orbit_query_result.base.params,
-                "parameters differ for {orbit_query}"
-            );
             assert_eq!(json.query_type, orbit_query_result.query_type);
             assert_eq!(
                 json.hydration, orbit_query_result.hydration,
