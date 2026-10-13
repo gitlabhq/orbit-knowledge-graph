@@ -1,3 +1,31 @@
+## [0.141.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.140.0...v0.141.0) (2026-10-13)
+
+### Features
+
+* **indexer:** enable VFS incremental indexing behind a feature flag ([86e8075](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/86e8075bf03afdb756402ce8feb7f33078f40471)) by Michael Usachenko
+* **indexer:** report file and language timings from the incremental engine ([344e449](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/344e4490a9dec570414587f190d0aec4d887a977)) by Michael Angelo Rivera
+
+### Fixes
+
+* **code-graph-incremental:** bring flag-on code indexing to legacy parity ([2bf3272](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bf3272e0dcece1d2de660e73b6d3b57b99cef45)) by Michael Angelo Rivera
+* **code-graph-incremental:** consume repositories through VFS ([41bb14c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41bb14c71e0e5c55ba73c6f0a5797deec70945a4)) by Michael Usachenko
+* **code-graph-incremental:** list non-UTF-8 archive paths and leave the run budget to the caller ([108aa2c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/108aa2c311d461f07e996bb9d8a2e36772208f2a)) by Michael Angelo Rivera
+* **code-graph-incremental:** name the root Directory "." in the export ([bcacf08](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bcacf08e626e748eec8ea98a65ca5ece57adacfa)) by Dmitry Gruzd
+* **code-graph-incremental:** take node lines from the rewrite target and export the root dir ([ba1451b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ba1451b2fda8be4a02b1eadc79b549da7085cdbb)) by Michael Angelo Rivera
+* **code-graph:** bind the bare identifier for C/C++ declarators ([1d27dad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1d27dadf94fcffefa73cc24425c03344dc1f1fcc)) by ANBUCHELVAN GANESAN CSE
+* **compiler:** preserve branch joins and bound cross-node predicates ([7073679](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/70736793243739c14f27091d50aa7b1a84646c67)) by Michael Usachenko
+* **query:** stop GQL lowering at the node and column caps ([0ced506](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0ced506cda885e1d2747d2d3ac2d03a7f398e54f)) by Aaron Algutifan
+
+### Performance
+
+* **orbit-server:** move build.rs validations into tests ([d49a700](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d49a7006e1b2d6d9ce958a7c84079c769a87078d)) by Dmitry Gruzd
+
+### Other
+
+* **deps:** bump quinn-proto to 0.11.19 for RUSTSEC-2026-0338 to 0342 ([df076ef](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/df076ef7a9008b156030553b23bbf1b051cdbc0d)) by michaelangeloio
+* skip local-cli linux jobs on scheduled pipelines ([bbd2286](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bbd22868a9463d704d43eb76b27b42a419e9cdc5)) by Dmitry Gruzd
+* update undici from 6.24.1 to 6.29.0 ([5cf1ba9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5cf1ba9d7a82ffa30ed6a5ef8bc3bd760e02aeb9)) by GitLab Dependency Management
+
 ## [0.140.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.139.0...v0.140.0) (2026-10-12)
 
 ### Features
