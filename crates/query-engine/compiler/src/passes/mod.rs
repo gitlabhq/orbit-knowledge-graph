@@ -2,7 +2,6 @@
 //! `restrict::restrict`) consumed by the phase functions in `config.rs`.
 
 pub mod codegen;
-mod errors;
 pub mod frontend;
 pub mod hydrate;
 pub mod lower;

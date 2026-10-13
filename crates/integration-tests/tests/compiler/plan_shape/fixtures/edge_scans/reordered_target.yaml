@@ -2,8 +2,6 @@ name: A target selector uses the target-oriented edge layout
 ontology_overlay: reordered_edges
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","columns":["id"]},{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["id"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}]}
   gql: |
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 12001}) RETURN caller.id, callee.id
 

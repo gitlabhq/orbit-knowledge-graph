@@ -4,13 +4,6 @@ config:
   redaction: none
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username"]}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username LIMIT 10
 

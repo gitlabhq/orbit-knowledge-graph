@@ -1,14 +1,6 @@
 description: Unicode and emoji values survive the query pipeline round-trip
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username", "name"],
-                 "node_ids": [6]}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 6}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name LIMIT 10
 

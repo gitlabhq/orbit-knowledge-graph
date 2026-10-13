@@ -295,9 +295,12 @@ async fn run_case(
         }
         let name = &step_label(name, index, steps.len());
         for (frontend_key, query_str) in &step.query {
-            let frontend = frontend_key
-                .parse::<Frontend>()
-                .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
+            let frontend = frontend_key.parse::<Frontend>().unwrap_or_else(|_| {
+                panic!(
+                    "{name}: unknown query language '{frontend_key}'; expected one of {:?}",
+                    Frontend::names()
+                )
+            });
             run_frontend(
                 (&ctx, &data_model, &ontology),
                 (frontend, frontend_key),
@@ -579,7 +582,7 @@ async fn compile_like_server(
     server_extensions.insert(Arc::clone(data_model));
     let mut pipeline_ctx = QueryPipelineContext {
         frontend,
-        query_json: query.to_owned(),
+        query: query.to_owned(),
         compiled: None,
         ontology: Arc::clone(ontology),
         security_context: Some(security.clone()),
@@ -628,7 +631,7 @@ async fn execute_output(
 
     let mut pipeline_ctx = QueryPipelineContext {
         frontend,
-        query_json: String::new(),
+        query: String::new(),
         compiled: Some(Arc::clone(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security.clone()),
@@ -1230,29 +1233,9 @@ mod tests {
     use query_engine::compiler::compile;
 
     #[test]
-    fn json_and_gql_keys_map_to_their_frontends() {
-        assert_eq!("json".parse(), Ok(Frontend::JsonDsl));
+    fn query_keys_map_to_their_frontends() {
         assert_eq!("gql".parse(), Ok(Frontend::Gql));
-        assert!("sql".parse::<Frontend>().is_err());
-    }
-
-    #[test]
-    fn both_frontends_compile_the_same_query_identically() {
-        let ontology = load_ontology();
-        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let json = compile(r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":5}"#, Frontend::JsonDsl, &ontology, &security)
-        .unwrap();
-        let gql = compile(
-            "MATCH (u:User {id: 1}) RETURN u.username LIMIT 5",
-            Frontend::Gql,
-            &ontology,
-            &security,
-        )
-        .unwrap();
-        assert_eq!(json.base.sql, gql.base.sql);
-        assert_eq!(json.base.params, gql.base.params);
-        assert_eq!(json.query_type, gql.query_type);
-        assert_eq!(json.hydration, gql.hydration);
+        assert!("json".parse::<Frontend>().is_err());
     }
 
     #[test]

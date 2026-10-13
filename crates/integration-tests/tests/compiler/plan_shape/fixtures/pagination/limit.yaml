@@ -1,8 +1,6 @@
 name: LIMIT alone fetches one probe row without tie-breakers or an OFFSET
 
 query:
-  json: |
-    {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "columns": ["path"]}], "limit": 2}
   gql: |
     MATCH (f:File) RETURN f.path LIMIT 2
 

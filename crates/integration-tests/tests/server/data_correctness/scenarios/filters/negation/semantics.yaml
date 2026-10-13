@@ -255,10 +255,8 @@ cases:
           has_more: false
 
   - name: not_denormalized_state
-    description: NOT = on a denormalized property matches the same rows as the JSON ne filter
+    description: NOT = on a denormalized property removes the matching work items
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","filters":{"state":{"ne":"closed"}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
       gql: |
         MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
         WHERE u.id IN [1, 2] AND NOT wi.state = 'closed'
@@ -300,8 +298,6 @@ cases:
   - name: not_id_list_stays_filter
     description: NOT over an ID list stays a filter and does not become an ID selector
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"id":{"lt":4003}},"not":{"id":{"in":[4000,4001]}},"columns":["state"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.id < 4003 AND NOT wi.id IN [4000, 4001]
@@ -316,8 +312,6 @@ cases:
   - name: not_in_denormalized_state
     description: NOT IN on a non-nullable denormalized property reads the edge tags and removes the closed work item
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
       gql: |
         MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
         WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed']
@@ -338,8 +332,6 @@ cases:
   - name: not_plus_filters_same_property
     description: A filter and a not entry on the same property both apply
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"gte":3}},"not":{"weight":{"in":[8,13]}},"columns":["weight"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight >= 3 AND NOT wi.weight IN [8, 13]
@@ -357,8 +349,6 @@ cases:
   - name: not_token_match
     description: NOT token_match removes the work item whose title has the token
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"title":{"token_match":"login"}},"columns":["title"]}],"limit":10}
       gql: |
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT token_match(wi.title, 'login')
@@ -391,8 +381,6 @@ cases:
   - name: pushdown_neighbors_center
     description: A complemented NOT on a neighbors center is an ordinary filter and keeps the open work item
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"state":"closed"},"columns":["state"]}],"neighbors":{"direction":"outgoing","rel_types":["IN_GROUP"]}}
       gql: |
         MATCH (wi:WorkItem {id: 4000})-[:IN_GROUP]->(n)
         WHERE NOT wi.state = 'closed'

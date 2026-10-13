@@ -20,16 +20,6 @@ config:
       label: [7000, 7001, 7002]
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [9600], "columns": ["username", "name"]},
-        {"id": "g", "entity": "Group"}
-      ],
-      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 9600})-[:MEMBER_OF]->(g:Group) RETURN u.username, u.name, g LIMIT 10
 

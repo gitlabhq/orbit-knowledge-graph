@@ -1,13 +1,6 @@
 description: Bidirectional MEMBER_OF+CONTAINS neighbors of Group 100 with limit
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
-      "neighbors": {"direction": "both", "rel_types": ["MEMBER_OF", "CONTAINS"]},
-      "limit": 50
-    }
   gql: |
     MATCH (g:Group {id: 100})-[:MEMBER_OF|`CONTAINS`]-(n) RETURN g, n LIMIT 50
 

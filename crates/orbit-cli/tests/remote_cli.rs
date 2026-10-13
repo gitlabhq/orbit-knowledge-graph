@@ -785,7 +785,7 @@ fn query_posts_envelope_with_resolved_response_format() {
             .stdin
             .take()
             .unwrap()
-            .write_all(br#"{"query":{"query_type":"traversal"}}"#)
+            .write_all(br#"{"query":"MATCH (u:User {id: 1}) RETURN u"}"#)
             .expect("write stdin");
         child.wait_with_output().expect("wait orbit query")
     };
@@ -800,7 +800,7 @@ fn query_posts_envelope_with_resolved_response_format() {
 
     let sent: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
     assert_eq!(sent["response_format"], "raw");
-    assert_eq!(sent["query"]["query_type"], "traversal");
+    assert_eq!(sent["query"], "MATCH (u:User {id: 1}) RETURN u");
 
     assert_eq!(output.stdout, b"@ok");
 }

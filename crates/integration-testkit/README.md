@@ -141,7 +141,7 @@ and the formatted `GraphResponse`:
 use integration_testkit::visitor::{ResponseView, NodeExt};
 use compiler::{compile, Frontend};
 
-let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+let compiled = compile(query, Frontend::Gql, &ontology, &security_ctx).unwrap();
 // ... run pipeline, get response ...
 let resp = ResponseView::for_query(&compiled.input, response);
 ```
@@ -200,13 +200,12 @@ resp.skip_requirement(Requirement::OrderBy);
 
 ```rust
 async fn search_filter_eq(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User",
-                 "filters": {"state": "blocked"}}],
-        "order_by": "u.id",
-        "limit": 10
-    }"#, &allow_all()).await;
+    let resp = run_query(
+        ctx,
+        "MATCH (u:User {state: 'blocked'}) RETURN u ORDER BY u.id LIMIT 10",
+        &allow_all(),
+    )
+    .await;
 
     // Satisfies Filter{field:"state"}
     resp.assert_filter("User", "state", |n| {
@@ -222,15 +221,12 @@ async fn search_filter_eq(ctx: &TestContext) {
 
 ```rust
 async fn traversal_edges(ctx: &TestContext) {
-    let resp = run_query(ctx, r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group"}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 10
-    }"#, &allow_all()).await;
+    let resp = run_query(
+        ctx,
+        "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, g LIMIT 10",
+        &allow_all(),
+    )
+    .await;
 
     // Satisfies Relationship{edge_type:"MEMBER_OF"}
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
@@ -319,7 +315,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 |---|---|---|---|
 | `description` | string | no | Human-readable summary |
 | `config` | `ScenarioConfig` | no | Security, redaction, and seed overrides |
-| `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
+| `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`gql`); unknown keys fail the scenario |
 | `expect` | `QueryExpect` | with `query` | Assertions on the result |
 | `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
 
@@ -500,14 +496,6 @@ parses every file with no Docker.
 description: User search returns correct properties
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username", "state"]}],
-      "order_by": "u.id",
-      "limit": 10
-    }
   gql: |
     MATCH (u:User)
     WHERE u.id >= 1 AND u.id <= 10000
@@ -525,5 +513,6 @@ expect:
 ```
 
 This scenario queries users by ID range, asserts 7 nodes returned in order, and
-spot-checks properties on two of them. Both JSON and GQL frontends are tested.
+spot-checks properties on two of them. Every frontend key under `query` is tested
+against the same expectations.
 The default security and redaction presets apply since `config` is omitted.

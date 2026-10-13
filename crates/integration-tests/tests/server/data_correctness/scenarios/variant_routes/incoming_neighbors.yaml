@@ -9,8 +9,6 @@ config:
       - { source_id: 11000, source_kind: File, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _deleted: false }
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"callee","entity":"Definition","node_ids":[12001]}],"neighbors":{"direction":"incoming","rel_types":["CALLS"]},"limit":10}
   gql: |
     MATCH (callee:Definition {id: 12001})<-[:CALLS]-(caller) RETURN callee, caller LIMIT 10
 

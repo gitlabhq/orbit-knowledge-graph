@@ -33,7 +33,7 @@ use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::{
     ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, GetClusterHealthRequest,
-    RedactionExchange, RedactionResponse, ResourceAuthorization, redaction_exchange,
+    QueryLanguage, RedactionExchange, RedactionResponse, ResourceAuthorization, redaction_exchange,
 };
 use rand::SeedableRng;
 use rand::rngs::Xoshiro256PlusPlus;
@@ -160,7 +160,7 @@ pub async fn run(opts: Options) -> Result<()> {
         queries.retain(|q| q.label.contains(filter));
     }
     if queries.is_empty() {
-        bail!("no runnable scenarios found (need a `query.json` body)");
+        bail!("no runnable scenarios found (need a `query.gql` body)");
     }
 
     let spec = |phase, rounds| PassSpec {
@@ -391,6 +391,7 @@ async fn execute(
         .send(ExecuteQueryMessage {
             content: Some(Content::Request(ExecuteQueryRequest {
                 query: body.to_string(),
+                language: QueryLanguage::Gql as i32,
                 ..Default::default()
             })),
         })
@@ -864,8 +865,8 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
         let text = std::fs::read_to_string(&path)?;
         let scenario: ScenarioFile = orbit_utils::yaml::from_str(&text)
             .with_context(|| format!("parsing {}", path.display()))?;
-        let Some(body) = scenario.query.get("json") else {
-            continue; // gql-only or non-executable scenario
+        let Some(body) = scenario.query.get("gql") else {
+            continue;
         };
         let label = path
             .strip_prefix(root)
@@ -881,27 +882,14 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
     Ok(())
 }
 
-/// Minimal view of a query body: the entity and pinned ids of each node.
-#[derive(Deserialize)]
-struct QueryNodes {
-    #[serde(default)]
-    nodes: Vec<QueryNode>,
-}
-
-#[derive(Deserialize)]
-struct QueryNode {
-    entity: String,
-    #[serde(default)]
-    node_ids: Vec<i64>,
-}
-
 /// `(entity, id)` for every pinned node id in a query body, deduplicated.
 fn node_refs(body: &str) -> Result<Vec<(String, i64)>> {
-    let parsed: QueryNodes = serde_json::from_str(body).context("parsing query.json")?;
+    let parsed = query_engine::compiler::gql::parse(body).context("parsing query")?;
     let mut refs: Vec<(String, i64)> = parsed
         .nodes
         .into_iter()
-        .flat_map(|n| n.node_ids.into_iter().map(move |id| (n.entity.clone(), id)))
+        .filter_map(|n| Some((n.entity?, n.node_ids)))
+        .flat_map(|(entity, ids)| ids.into_iter().map(move |id| (entity.clone(), id)))
         .collect();
     refs.sort();
     refs.dedup();
@@ -1114,20 +1102,14 @@ mod tests {
 
     #[test]
     fn node_refs_lists_pinned_ids_per_entity() {
-        let body = r#"{"query_type":"path_finding","nodes":[
-            {"id":"u1","entity":"User","node_ids":[2,1]},
-            {"id":"u2","entity":"User","node_ids":[2]},
-            {"id":"p","entity":"Project"}]}"#;
+        let body = "MATCH (u1:User)-[:MEMBER_OF]->(g:Group)<-[:MEMBER_OF]-(u2:User {id: 2}) \
+                    WHERE u1.id IN [2, 1] RETURN u1, g, u2";
         assert_eq!(
             node_refs(body).unwrap(),
             [("User".to_string(), 1), ("User".to_string(), 2)]
         );
-        assert!(
-            node_refs(r#"{"query_type":"traversal"}"#)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(node_refs("not json").is_err());
+        assert!(node_refs("MATCH (u:User) RETURN u").unwrap().is_empty());
+        assert!(node_refs("not a query").is_err());
     }
 
     #[test]
@@ -1302,20 +1284,22 @@ mod tests {
     }
 
     #[test]
-    fn scenarios_missing_json_body_are_skipped() {
+    fn scenarios_load_queries_labelled_by_path() {
         let dir = std::env::temp_dir().join(format!("xtask-loadtest-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join("traversal")).unwrap();
         std::fs::write(
-            dir.join("with_json.yaml"),
-            "query:\n  json: '{\"query_type\":\"traversal\"}'\n",
+            dir.join("traversal/search.yaml"),
+            "query:\n  gql: |\n    MATCH (u:User {id: 1}) RETURN u\n",
         )
         .unwrap();
-        std::fs::write(dir.join("gql_only.yaml"), "query:\n  gql: 'MATCH (n)'\n").unwrap();
+        std::fs::write(dir.join("other.yaml"), "query:\n  sql: 'SELECT 1'\n").unwrap();
+        std::fs::write(dir.join("notes.txt"), "ignored").unwrap();
 
         let queries = load_scenarios(&dir).unwrap();
         std::fs::remove_dir_all(&dir).ok();
 
         assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].label, "with_json");
+        assert_eq!(queries[0].label, "traversal/search");
+        assert_eq!(queries[0].body, "MATCH (u:User {id: 1}) RETURN u\n");
     }
 }

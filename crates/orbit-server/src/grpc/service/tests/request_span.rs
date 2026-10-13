@@ -8,6 +8,12 @@ use tracing_subscriber::layer::SubscriberExt;
 use super::*;
 use crate::grpc::GrpcServer;
 
+fn gql_list_tools() -> ListToolsRequest {
+    ListToolsRequest {
+        language: QueryLanguage::Gql as i32,
+    }
+}
+
 #[derive(Clone, Default)]
 struct Buffer(Arc<Mutex<Vec<u8>>>);
 
@@ -42,7 +48,7 @@ async fn serve_with_layers() -> OrbitServiceClient<tonic::transport::Channel> {
 }
 
 async fn handler_log_line(feature_flags: Option<&'static str>) -> String {
-    let mut request = authed_request(ListToolsRequest::default());
+    let mut request = authed_request(gql_list_tools());
     if let Some(flags) = feature_flags {
         let value = MetadataValue::from_static(flags);
         request
@@ -85,7 +91,7 @@ fn request_with_paths(admin: bool, paths: &[&str]) -> Request<ListToolsRequest> 
         group_traversal_ids,
         ..test_claims()
     };
-    signed_request(ListToolsRequest::default(), claims)
+    signed_request(gql_list_tools(), claims)
 }
 
 #[tokio::test]

@@ -1,8 +1,6 @@
 cases:
   - name: A selective filter on a changing column reads once with FINAL and checks after the merge
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"source_branch":"feature-x"},"columns":["id","title"]}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {source_branch: 'feature-x'}) RETURN mr.id, mr.title LIMIT 10
     logical:
@@ -20,8 +18,6 @@ cases:
 
   - name: High-selectivity filters on an unchanging column apply before the latest-row pick
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"name":"build"},"columns":["id","name"]}],"limit":10}
       gql: |
         MATCH (j:Job {name: 'build'}) RETURN j.id, j.name LIMIT 10
     logical:
@@ -37,8 +33,6 @@ cases:
 
   - name: Low-selectivity node filters keep FINAL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id","status"]}],"limit":10}
       gql: |
         MATCH (j:Job {status: 'failed'}) RETURN j.id, j.status LIMIT 10
     logical:
@@ -51,8 +45,6 @@ cases:
 
   - name: An unpinned range on a high fan out child reads once with FINAL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
       gql: |
         MATCH (j:Job) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
     logical:
@@ -154,8 +146,6 @@ cases:
 
   - name: High-selectivity ranges on an unchanging column apply before the latest-row pick
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"created_at":{"gte":"2026-10-10"}},"columns":["id","created_at"]}],"limit":10}
       gql: |
         MATCH (j:Job) WHERE j.created_at >= '2026-10-10' RETURN j.id, j.created_at LIMIT 10
     logical:
@@ -171,8 +161,6 @@ cases:
 
   - name: Namespace anchors keep FINAL by themselves
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"j","entity":"Job","filters":{"project_id":1000}}],"aggregations":[{"count":"j","as":"n"}]}
       gql: |
         MATCH (j:Job {project_id: 1000}) RETURN count(j) AS n
     logical:
@@ -185,8 +173,6 @@ cases:
 
   - name: A text match on a changing column keeps FINAL instead of a keyed re-read
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"project_id":1000,"title":{"contains":"migration"}},"columns":["title"]}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {project_id: 1000})
         WHERE mr.title CONTAINS 'migration'
@@ -202,8 +188,6 @@ cases:
 
   - name: A text match beside a key range still finds then checks
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"filters":{"username":{"starts_with":"ALI"}},"columns":["username"]}],"limit":10}
       gql: |
         MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
     logical:
@@ -218,8 +202,6 @@ cases:
 
   - name: Text indexes on an unchanging column apply before the latest-row pick
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"MergeRequestDiffFile","filters":{"project_id":1000,"new_path":{"contains":"app/services"}},"columns":["new_path"]}],"limit":10}
       gql: |
         MATCH (f:MergeRequestDiffFile {project_id: 1000})
         WHERE f.new_path CONTAINS 'app/services'
@@ -237,8 +219,6 @@ cases:
 
   - name: Negated high-selectivity node filters keep FINAL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","not":{"name":"build"},"columns":["id","name"]}],"limit":10}
       gql: |
         MATCH (j:Job) WHERE NOT j.name = 'build' RETURN j.id, j.name LIMIT 10
     logical:
@@ -251,8 +231,6 @@ cases:
 
   - name: Wide ID ranges keep FINAL
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","id_range":{"start":1,"end":100002},"columns":["id"]}],"limit":10}
       gql: |
         MATCH (j:Job) WHERE j.id >= 1 AND j.id <= 100002 RETURN j.id LIMIT 10
     logical:

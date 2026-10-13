@@ -42,7 +42,7 @@ Batch schema reads: make every schema read a question needs in one shell command
 glab orbit query 'CALL db.schema()'; echo; glab orbit query "CALL db.schema('Vulnerability')"; echo; glab orbit query "CALL db.schema('Pipeline')"
 ```
 
-The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in your mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered for the caller. Do not reuse discovery results across users. Entries contain only `name`, `description`, and `raw_query`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 

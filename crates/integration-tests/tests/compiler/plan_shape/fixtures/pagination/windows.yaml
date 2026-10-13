@@ -1,6 +1,3 @@
-missing_frontends:
-  json: The JSON DSL has no skip field.
-
 cases:
   - name: SKIP lowers to an OFFSET past the probe row over identity tie-breakers
     query:
