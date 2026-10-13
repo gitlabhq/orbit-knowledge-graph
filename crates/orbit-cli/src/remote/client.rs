@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use anyhow::bail;
 use serde::Deserialize;
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
@@ -252,8 +251,8 @@ fn resolve_endpoint(
     if let Some(token) = non_empty("GITLAB_TOKEN") {
         let base_url =
             non_empty("GITLAB_URL").unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
-        validate_base_url("GITLAB_URL", &base_url)?;
-        if !base_url.starts_with("https://") {
+        let url = validate_base_url("GITLAB_URL", &base_url)?;
+        if url.scheme() == "http" {
             eprintln!(
                 "warning: GITLAB_URL is not https ({base_url}); the token will be sent in plaintext"
             );
@@ -266,19 +265,21 @@ fn resolve_endpoint(
     }
 
     if let Some(endpoint) = credential_helper() {
+        validate_base_url(
+            "glab auth credential-helper instance_url",
+            &endpoint.base_url,
+        )?;
         return Ok(endpoint);
     }
 
     Err(MissingCredential.into())
 }
 
-fn validate_base_url(variable: &str, base_url: &str) -> anyhow::Result<()> {
-    let is_absolute_http = reqwest::Url::parse(base_url)
-        .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some());
-    if !is_absolute_http {
-        bail!("{variable} must be an absolute https URL (got `{base_url}`)");
-    }
-    Ok(())
+fn validate_base_url(source: &str, base_url: &str) -> anyhow::Result<reqwest::Url> {
+    reqwest::Url::parse(base_url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        .ok_or_else(|| anyhow::anyhow!("{source} must be an absolute https URL (got `{base_url}`)"))
 }
 
 #[derive(Debug)]
@@ -483,6 +484,22 @@ mod tests {
                 format!("GITLAB_URL must be an absolute https URL (got `{url}`)")
             );
         }
+    }
+
+    #[test]
+    fn scheme_less_helper_instance_url_is_rejected() {
+        let error = resolve_endpoint(env_from(&[]), || {
+            Some(ResolvedEndpoint {
+                base_url: "gitlab.com".to_string(),
+                ..helper_endpoint()
+            })
+        })
+        .err()
+        .unwrap();
+        assert_eq!(
+            error.to_string(),
+            "glab auth credential-helper instance_url must be an absolute https URL (got `gitlab.com`)"
+        );
     }
 
     #[test]

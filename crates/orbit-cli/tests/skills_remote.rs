@@ -421,6 +421,35 @@ fn invalid_gitlab_url_warns_and_serves_the_embedded_skill() {
 }
 
 #[test]
+fn invalid_gitlab_url_warns_and_lists_the_embedded_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = hermetic_orbit(&cache, &["skills"])
+        .env("GITLAB_TOKEN", "glpat-env")
+        .env("GITLAB_URL", "gitlab.example.com")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("GITLAB_URL must be an absolute https URL"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("orbit"));
+}
+
+#[test]
+fn https_gitlab_url_with_uppercase_scheme_emits_no_plaintext_warning() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = hermetic_orbit(&cache, &["skills", "get", "orbit"])
+        .env("GITLAB_TOKEN", "glpat-env")
+        .env("GITLAB_URL", "HTTPS://127.0.0.1:1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        !stderr(&output).contains("plaintext"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn endpoint_404_warns_and_falls_back_to_local() {
     let cache = tempfile::tempdir().unwrap();
     let (url, server) = mock_server(vec![Reply {
