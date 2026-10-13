@@ -1,3 +1,4 @@
+use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -175,10 +176,10 @@ pub fn stale_edge_task(
 ) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
-        Arc::new(ctx.config.build_client()),
+        Arc::new(ctx.config.build_client(&CircuitBreakers::default().graph)),
     ));
     indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
-        ctx.config.build_client(),
+        ctx.config.build_client(&CircuitBreakers::default().graph),
         &ontology,
         checkpoint_store,
         indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),

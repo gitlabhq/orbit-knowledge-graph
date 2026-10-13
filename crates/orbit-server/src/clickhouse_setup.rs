@@ -3,17 +3,14 @@
 
 use anyhow::{Context, anyhow};
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
+use orbit_observability::resilience::CircuitBreakers;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use orbit_utils::clickhouse::quote_sql_literal;
 use tracing::info;
 
 const CONTRACT: &str = include_str!(concat!(env!("CONFIG_DIR"), "/clickhouse-setup.sql"));
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a one-shot setup job has no later calls to protect"
-)]
-pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
+pub async fn run(config: &AppConfig, breakers: &CircuitBreakers) -> anyhow::Result<()> {
     let setup = &config.clickhouse_setup;
     let admin_password = required(&setup.admin_password, "admin_password")?;
     let writer_password = required(&setup.writer_password, "writer_password")?;
@@ -27,7 +24,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
         password: Some(admin_password.to_string()),
         ..config.graph.clone()
     }
-    .build_client();
+    .build_client(&breakers.graph);
 
     if config.graph.replicated {
         check_replicated_prerequisites(&admin, &config.graph.database).await?;
@@ -138,7 +135,7 @@ mod tests {
         config.clickhouse_setup.writer_password = Some("writer".to_string());
         config.clickhouse_setup.siphon_reader_password = Some("siphon".to_string());
 
-        let error = run(&config).await.unwrap_err();
+        let error = run(&config, &CircuitBreakers::default()).await.unwrap_err();
 
         assert!(
             error

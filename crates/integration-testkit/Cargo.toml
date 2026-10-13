@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
+circuit-breaker = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 gitalisk-core = { workspace = true }
 orbit-utils = { path = "../utils" }

@@ -14,15 +14,11 @@ const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
 ];
 
 pub trait ClickHouseConfigurationExt {
-    fn build_client(&self) -> ArrowClickHouseClient;
-
-    fn build_client_with_circuit_breaker(&self, breaker: &CircuitBreaker) -> ArrowClickHouseClient {
-        self.build_client().with_circuit_breaker(breaker.clone())
-    }
+    fn build_client(&self, circuit_breaker: &CircuitBreaker) -> ArrowClickHouseClient;
 }
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
-    fn build_client(&self) -> ArrowClickHouseClient {
+    fn build_client(&self, circuit_breaker: &CircuitBreaker) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
@@ -30,6 +26,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             self.password.as_deref(),
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
+            circuit_breaker,
         )
         .with_replicated(self.replicated)
     }
@@ -245,7 +242,7 @@ mod tests {
         };
         let breaker = crate::testing::circuit_breaker(1);
 
-        let client = config.build_client_with_circuit_breaker(&breaker);
+        let client = config.build_client(&breaker);
         let _ = client.execute("SELECT 1").await;
 
         assert!(!breaker.is_available());
@@ -258,7 +255,7 @@ mod tests {
             ..AppConfig::embedded_defaults().graph
         };
 
-        let client = config.build_client();
+        let client = config.build_client(&crate::testing::circuit_breaker(5));
         assert!(client.has_quorum_writes());
         assert!(client.is_replicated());
     }
@@ -286,7 +283,7 @@ mod tests {
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
-        let client = config.build_client();
+        let client = config.build_client(&crate::testing::circuit_breaker(5));
         let err = client.execute("SELECT 1").await.unwrap_err();
         let msg = err.to_string();
 

@@ -996,10 +996,6 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "tests talk to a local or absent ClickHouse and need no breaker"
-)]
 mod tests {
     mod billing;
     mod commands;
@@ -1013,6 +1009,7 @@ mod tests {
     use crate::proto::orbit_service_server::{OrbitService, OrbitServiceServer};
     use clickhouse_client::ClickHouseConfigurationExt;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use orbit_observability::resilience::CircuitBreakers;
     use orbit_server_config::ClickHouseConfiguration;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::metadata::MetadataValue;
@@ -1029,6 +1026,10 @@ mod tests {
         orbit_server_config::AppConfig::embedded_defaults().graph
     }
 
+    fn test_client() -> ArrowClickHouseClient {
+        test_config().build_client(&CircuitBreakers::default().graph)
+    }
+
     fn test_service() -> OrbitServiceImpl {
         test_service_on(&test_config())
     }
@@ -1037,7 +1038,7 @@ mod tests {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
-            clickhouse.build_client(),
+            clickhouse.build_client(&CircuitBreakers::default().graph),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1168,7 +1169,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1201,7 +1202,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1240,7 +1241,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1267,7 +1268,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1288,7 +1289,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1320,7 +1321,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1358,7 +1359,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1389,7 +1390,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1528,7 +1529,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(Arc::clone(&ontology)),
-            test_config().build_client(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),

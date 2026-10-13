@@ -68,28 +68,21 @@ pub struct GitlabClient {
     http: reqwest::Client,
     base_url: String,
     signing_key: Vec<u8>,
-    circuit_breaker: Option<CircuitBreaker>,
+    circuit_breaker: CircuitBreaker,
 }
 
 impl GitlabClient {
-    pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
+    pub fn new(
+        config: GitlabClientConfiguration,
+        circuit_breaker: &CircuitBreaker,
+    ) -> Result<Self, GitlabClientError> {
         let signing_key = BASE64.decode(&config.signing_key)?;
         let http = Self::build_http_client(&config)?;
         Ok(Self {
             http,
             base_url: config.base_url,
             signing_key,
-            circuit_breaker: None,
-        })
-    }
-
-    pub fn new_with_circuit_breaker(
-        config: GitlabClientConfiguration,
-        breaker: &CircuitBreaker,
-    ) -> Result<Self, GitlabClientError> {
-        Ok(Self {
-            circuit_breaker: Some(breaker.clone()),
-            ..Self::new(config)?
+            circuit_breaker: circuit_breaker.clone(),
         })
     }
 
@@ -359,10 +352,9 @@ impl GitlabClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, GitlabClientError> {
-        circuit_breaker::call_transient(self.circuit_breaker.as_ref(), || async {
-            Ok(request.send().await?)
-        })
-        .await
+        self.circuit_breaker
+            .call_transient(|| async { Ok(request.send().await?) })
+            .await
     }
 
     fn check_response_status(
@@ -442,6 +434,7 @@ pub(crate) fn decode_token_exp(token: &str) -> Result<i64, GitlabClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{UNREACHABLE_URL, circuit_breaker};
     use futures::future::BoxFuture;
 
     #[test]
@@ -578,8 +571,11 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let client =
-            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+        let client = GitlabClient::new(
+            config_with_resolve(&format!("http://{addr}"), None),
+            &circuit_breaker(5),
+        )
+        .unwrap();
         let _stream = client.download_archive(7, "abc123").await.unwrap();
 
         assert_eq!(*seen.lock().unwrap(), "ref=abc123&include_lfs_blobs=false");
@@ -619,8 +615,11 @@ mod tests {
             let addr = listener.local_addr().unwrap();
             tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-            let client =
-                GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+            let client = GitlabClient::new(
+                config_with_resolve(&format!("http://{addr}"), None),
+                &circuit_breaker(5),
+            )
+            .unwrap();
             let result = client.cloud_connector_token().await.unwrap();
 
             assert_eq!(result.token, expected_token);
@@ -628,33 +627,8 @@ mod tests {
         }
     }
 
-    const UNREACHABLE_URL: &str = "http://127.0.0.1:1";
-
-    fn circuit_breaker(failure_threshold: u32) -> CircuitBreaker {
-        use circuit_breaker::{CircuitBreakerRegistry, CircuitConfig, ServiceName};
-
-        struct TestService;
-
-        impl ServiceName for TestService {
-            fn as_str(&self) -> &'static str {
-                "gitlab-test"
-            }
-        }
-
-        let configs = std::collections::HashMap::from([(
-            TestService.as_str(),
-            CircuitConfig {
-                failure_threshold,
-                window: Duration::from_secs(10),
-                cooldown: Duration::from_secs(60),
-            },
-        )]);
-        CircuitBreakerRegistry::without_observer(configs).circuit_breaker(TestService)
-    }
-
     fn client_with_breaker(base_url: &str, breaker: &CircuitBreaker) -> GitlabClient {
-        GitlabClient::new_with_circuit_breaker(config_with_resolve(base_url, None), breaker)
-            .unwrap()
+        GitlabClient::new(config_with_resolve(base_url, None), breaker).unwrap()
     }
 
     type RequestCall = for<'a> fn(&'a GitlabClient) -> BoxFuture<'a, Result<(), GitlabClientError>>;

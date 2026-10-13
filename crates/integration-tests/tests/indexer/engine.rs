@@ -1,5 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
+use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -203,6 +204,7 @@ impl TestContext {
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
+                &CircuitBreakers::default().graph,
             );
 
             match client.execute("SELECT 1").await {
@@ -274,6 +276,7 @@ impl TestContext {
             Some(PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &CircuitBreakers::default().graph,
         );
 
         let batches = client

@@ -36,16 +36,8 @@ pub fn register_handlers(
     breakers: &CircuitBreakers,
     ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
-    let graph_client = Arc::new(
-        config
-            .graph
-            .build_client_with_circuit_breaker(&breakers.graph),
-    );
-    let datalake_client = Arc::new(
-        config
-            .datalake
-            .build_client_with_circuit_breaker(&breakers.datalake),
-    );
+    let graph_client = Arc::new(config.graph.build_client(&breakers.graph));
+    let datalake_client = Arc::new(config.datalake.build_client(&breakers.datalake));
 
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake_client,

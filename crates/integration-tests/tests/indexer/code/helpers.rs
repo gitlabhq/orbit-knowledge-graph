@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use orbit_observability::resilience::CircuitBreakers;
 use std::io::Write;
 use std::sync::Arc;
 
@@ -68,7 +69,11 @@ impl CodeIndexingDeps {
         ontology: ontology::Ontology,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
-        let graph_client = Arc::new(clickhouse.config.build_client());
+        let graph_client = Arc::new(
+            clickhouse
+                .config
+                .build_client(&CircuitBreakers::default().graph),
+        );
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
@@ -138,7 +143,10 @@ impl CodeIndexingDeps {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
-        let graph_client = Arc::new(self.clickhouse_config.build_client());
+        let graph_client = Arc::new(
+            self.clickhouse_config
+                .build_client(&CircuitBreakers::default().graph),
+        );
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
@@ -250,7 +258,8 @@ impl MockGitlabServer {
             signing_key: base64::engine::general_purpose::STANDARD.encode(SIGNING_KEY),
             resolve_host: None,
         };
-        GitlabClient::new(config).expect("failed to create GitlabClient")
+        GitlabClient::new(config, &CircuitBreakers::default().gitlab)
+            .expect("failed to create GitlabClient")
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {

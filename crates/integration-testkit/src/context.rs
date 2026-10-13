@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
+use circuit_breaker::{CircuitBreaker, CircuitBreakerRegistry, CircuitConfig, ServiceName};
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
+use orbit_observability::resilience::CircuitBreakers;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::bollard::Docker;
@@ -39,6 +41,27 @@ fn session_id() -> &'static str {
 
 const MAX_CONNECTION_ATTEMPTS: u32 = 200;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
+
+// ClickHouse refuses connections while the container starts, so the readiness
+// probe needs a breaker that stays closed for every attempt.
+fn readiness_probe_breaker() -> CircuitBreaker {
+    struct ReadinessProbe;
+
+    impl ServiceName for ReadinessProbe {
+        fn as_str(&self) -> &'static str {
+            "clickhouse-readiness-probe"
+        }
+    }
+
+    let configs = HashMap::from([(
+        ReadinessProbe.as_str(),
+        CircuitConfig {
+            failure_threshold: MAX_CONNECTION_ATTEMPTS,
+            ..CircuitConfig::default()
+        },
+    )]);
+    CircuitBreakerRegistry::without_observer(configs).circuit_breaker(ReadinessProbe)
+}
 
 #[derive(Clone)]
 pub struct TestContext {
@@ -179,7 +202,7 @@ impl TestContext {
     }
 
     pub fn create_client(&self) -> ArrowClickHouseClient {
-        self.config.build_client()
+        self.config.build_client(&CircuitBreakers::default().graph)
     }
 
     pub async fn fork(&self, name: &str) -> Self {
@@ -190,6 +213,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &CircuitBreakers::default().graph,
         );
         admin
             .execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))
@@ -339,6 +363,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &readiness_probe_breaker(),
         );
 
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
@@ -362,6 +387,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &CircuitBreakers::default().graph,
         );
 
         for schema_sql in schema_sqls {

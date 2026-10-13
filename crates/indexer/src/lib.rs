@@ -95,9 +95,7 @@ pub async fn run(
 
     info!(modules = ?config.engine.modules, "indexer module selection");
 
-    let graph_client = config
-        .graph
-        .build_client_with_circuit_breaker(&breakers.graph);
+    let graph_client = config.graph.build_client(&breakers.graph);
     info!(url = %config.graph.url, "initializing schema version table");
     schema::version::init(&graph_client).await?;
 
@@ -250,16 +248,8 @@ pub async fn run_dispatcher(
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let graph_client = || {
-        config
-            .graph
-            .build_client_with_circuit_breaker(&breakers.graph)
-    };
-    let datalake_client = || {
-        config
-            .datalake
-            .build_client_with_circuit_breaker(&breakers.datalake)
-    };
+    let graph_client = || config.graph.build_client(&breakers.graph);
+    let datalake_client = || config.datalake.build_client(&breakers.datalake);
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 

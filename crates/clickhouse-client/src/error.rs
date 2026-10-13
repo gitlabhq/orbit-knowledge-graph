@@ -36,18 +36,19 @@ fn is_memory_limit_exceeded(message: &str) -> bool {
     message.contains("MEMORY_LIMIT_EXCEEDED")
 }
 
-// A per-query or per-user memory limit is the caller's problem. Only the
-// server-wide `(total)` limit means the server itself is overloaded.
-const SERVER_OVERLOAD_MARKERS: [&str; 3] = [
-    "TOO_MANY_PARTS",
-    "TOO_MANY_SIMULTANEOUS_QUERIES",
-    "Memory limit (total) exceeded",
-];
+const SERVER_OVERLOAD_CODES: [&str; 2] = ["TOO_MANY_PARTS", "TOO_MANY_SIMULTANEOUS_QUERIES"];
+
+// Only the server-wide memory tracker adds `current RSS` to MEMORY_LIMIT_EXCEEDED.
+// A query or user limit ("Query memory limit exceeded") is the caller's problem.
+fn is_server_memory_limit(message: &str) -> bool {
+    is_memory_limit_exceeded(message) && message.contains("current RSS")
+}
 
 fn is_server_overload_message(message: &str) -> bool {
-    SERVER_OVERLOAD_MARKERS
-        .iter()
-        .any(|marker| message.contains(marker))
+    is_server_memory_limit(message)
+        || SERVER_OVERLOAD_CODES
+            .iter()
+            .any(|code| message.contains(code))
 }
 
 fn is_server_unavailable(error: &clickhouse::error::Error) -> bool {

@@ -5,6 +5,7 @@
 //! code indexing tasks for **all** enabled namespaces, not only for
 //! newly-enabled ones arriving via CDC events.
 
+use orbit_observability::resilience::CircuitBreakers;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -371,7 +372,10 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     let backfill = CodeBackfill::new(
         context.scheduler_services.nats.clone(),
         context.clickhouse.create_client(),
-        context.clickhouse.config.build_client(),
+        context
+            .clickhouse
+            .config
+            .build_client(&CircuitBreakers::default().graph),
         ScheduledTaskMetrics::new(),
         campaign,
         orbit_server_config::AppConfig::embedded_defaults()
@@ -447,7 +451,10 @@ async fn backfill_dispatches_only_projects_that_are_due() {
     let backfill = CodeBackfill::new(
         context.scheduler_services.nats.clone(),
         context.clickhouse.create_client(),
-        context.clickhouse.config.build_client(),
+        context
+            .clickhouse
+            .config
+            .build_client(&CircuitBreakers::default().graph),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         orbit_server_config::AppConfig::embedded_defaults()

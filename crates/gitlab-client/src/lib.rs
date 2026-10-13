@@ -1,6 +1,8 @@
 mod cc_token;
 mod client;
 mod error;
+#[cfg(test)]
+mod testing;
 mod types;
 
 pub use cc_token::{CloudConnectorTokenCache, CloudConnectorTokenFetcher};

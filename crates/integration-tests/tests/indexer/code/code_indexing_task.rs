@@ -1,3 +1,4 @@
+use orbit_observability::resilience::CircuitBreakers;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -703,7 +704,11 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
     )
     .await;
 
-    let graph_client = Arc::new(clickhouse.config.build_client());
+    let graph_client = Arc::new(
+        clickhouse
+            .config
+            .build_client(&CircuitBreakers::default().graph),
+    );
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
     let cleaner = ClickHouseStaleDataCleaner::new(graph_client, &table_names);

@@ -1,5 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
+use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -59,6 +60,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &CircuitBreakers::default().graph,
         )
     }
 
@@ -117,6 +119,7 @@ async fn setup_database(host: &str, port: u16) {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &CircuitBreakers::default().graph,
         );
 
         match client.execute("SELECT 1").await {

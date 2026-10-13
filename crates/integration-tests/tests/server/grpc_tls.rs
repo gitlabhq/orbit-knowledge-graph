@@ -1,3 +1,4 @@
+use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -21,7 +22,7 @@ fn build_grpc_server(tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     GrpcServer::new(
         validator,
         ActiveSchema::pinned(ontology),
-        clickhouse_config.build_client(),
+        clickhouse_config.build_client(&CircuitBreakers::default().graph),
         cluster_health,
         tls_config,
         orbit_server_config::AppConfig::embedded_defaults().grpc,

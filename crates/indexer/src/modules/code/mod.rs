@@ -68,14 +68,10 @@ pub async fn register_handlers(
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
 
     let gitlab_client = Arc::new(
-        GitlabClient::new_with_circuit_breaker(gitlab_config.clone(), &breakers.gitlab)
+        GitlabClient::new(gitlab_config.clone(), &breakers.gitlab)
             .map_err(HandlerInitError::new)?,
     );
-    let client = Arc::new(
-        config
-            .graph
-            .build_client_with_circuit_breaker(&breakers.graph),
-    );
+    let client = Arc::new(config.graph.build_client(&breakers.graph));
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));

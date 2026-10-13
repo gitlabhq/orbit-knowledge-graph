@@ -179,18 +179,6 @@ impl CircuitBreaker {
     }
 }
 
-pub async fn call_transient<F, Fut, T, E>(breaker: Option<&CircuitBreaker>, f: F) -> Result<T, E>
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-    E: CircuitBreakableError,
-{
-    match breaker {
-        Some(breaker) => breaker.call_transient(f).await,
-        None => f().await,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,6 @@
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
+use orbit_observability::resilience::CircuitBreakers;
 use orbit_server::clickhouse_setup;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration, ClickHouseSetupConfig};
 
@@ -47,7 +48,7 @@ fn client_as(
         password: Some(password.to_string()),
         ..ctx.config.clone()
     }
-    .build_client()
+    .build_client(&CircuitBreakers::default().graph)
 }
 
 async fn assert_fails_with(client: &ArrowClickHouseClient, sql: &str, code: &str) {
@@ -71,7 +72,7 @@ async fn clickhouse_setup_creates_identities_with_the_contract_privileges() {
     let ctx = new_context().await;
     let passwords = SPECIAL_CHARACTER_PASSWORDS;
 
-    clickhouse_setup::run(&setup_config(&ctx, &passwords))
+    clickhouse_setup::run(&setup_config(&ctx, &passwords), &CircuitBreakers::default())
         .await
         .expect("setup should apply the contract");
 
@@ -119,10 +120,13 @@ async fn clickhouse_setup_reruns_and_rotates_passwords() {
         siphon_reader: "siphon-rotated",
     };
 
-    clickhouse_setup::run(&setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS))
-        .await
-        .expect("first run");
-    clickhouse_setup::run(&setup_config(&ctx, &rotated))
+    clickhouse_setup::run(
+        &setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS),
+        &CircuitBreakers::default(),
+    )
+    .await
+    .expect("first run");
+    clickhouse_setup::run(&setup_config(&ctx, &rotated), &CircuitBreakers::default())
         .await
         .expect("second run");
 
@@ -146,7 +150,7 @@ async fn clickhouse_setup_on_a_replicated_graph_requires_replicated_user_storage
     let mut config = setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS);
     config.graph.replicated = true;
 
-    let error = clickhouse_setup::run(&config)
+    let error = clickhouse_setup::run(&config, &CircuitBreakers::default())
         .await
         .expect_err("a single node keeps users in local storage")
         .to_string();

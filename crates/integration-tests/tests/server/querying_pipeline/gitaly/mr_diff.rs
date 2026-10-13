@@ -1,3 +1,4 @@
+use orbit_observability::resilience::CircuitBreakers;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -95,11 +96,14 @@ async fn mock_mr_diff_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
-        base_url: format!("http://{addr}"),
-        signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-        resolve_host: None,
-    })
+    let client = GitlabClient::new(
+        orbit_server_config::GitlabClientConfiguration {
+            base_url: format!("http://{addr}"),
+            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: None,
+        },
+        &CircuitBreakers::default().gitlab,
+    )
     .unwrap();
 
     MockServer {

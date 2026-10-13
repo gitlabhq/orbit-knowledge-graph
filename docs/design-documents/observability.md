@@ -163,10 +163,10 @@ The query engine fires a single counter during compilation, with a closed-enum `
 
 The circuit breaker guards calls to the graph ClickHouse, the datalake ClickHouse, and the GitLab API. Each process builds one `CircuitBreakers` set at startup, so every client of a service shares one circuit. The `service` label is `graph`, `datalake`, or `gitlab`. Only failures that show the service itself is in trouble count toward opening a circuit:
 
-- ClickHouse: network errors, `TOO_MANY_PARTS`, `TOO_MANY_SIMULTANEOUS_QUERIES`, and the server-wide `Memory limit (total) exceeded`. A timeout or a per-query memory limit comes from one query, so it does not count.
+- ClickHouse: network errors, `TOO_MANY_PARTS`, `TOO_MANY_SIMULTANEOUS_QUERIES`, and `MEMORY_LIMIT_EXCEEDED` from the server-wide memory tracker (the only one that reports `current RSS`). A timeout or a query or user memory limit comes from one query, so it does not count.
 - GitLab: network errors. An HTTP error response is a reply about one project (for example, a 5xx for a missing repository), so it does not count.
 
-Health checks use clients without a breaker so that they always see the real state of the service. The `clippy.toml` files of the `indexer` and `orbit-server` crates forbid the constructors without a breaker, so each such client carries an `#[expect(clippy::disallowed_methods)]` with its reason. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
+Every client constructor takes a breaker, so no client can skip it. Health checks use the same breakers, so an open circuit reports the service as down until a half-open probe succeeds. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|

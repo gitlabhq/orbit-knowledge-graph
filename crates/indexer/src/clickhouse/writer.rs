@@ -62,7 +62,7 @@ impl ClickHouseWriter {
         configuration
             .validate()
             .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client_with_circuit_breaker(breaker);
+        let client = configuration.build_client(breaker);
         Ok(Self {
             client,
             metrics,
@@ -72,15 +72,11 @@ impl ClickHouseWriter {
 
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "a no-op writer never calls ClickHouse"
-    )]
     pub fn noop() -> Self {
         Self {
             client: orbit_server_config::AppConfig::embedded_defaults()
                 .graph
-                .build_client(),
+                .build_client(&orbit_observability::resilience::CircuitBreakers::default().graph),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }

@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
     let result = match args.mode {
-        Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
+        Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config, &breakers).await,
         Mode::DispatchIndexing => {
             config.schema.validate()?;
             let archive = ontology::archive::OntologyArchive::from_bytes(
@@ -99,9 +99,7 @@ async fn main() -> anyhow::Result<()> {
                 include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
             )?;
 
-            let graph = config
-                .graph
-                .build_client_with_circuit_breaker(&breakers.graph);
+            let graph = config.graph.build_client(&breakers.graph);
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
@@ -110,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
+        Mode::HealthCheck => health_check_mode::run(&config, &breakers, internal_tls)
             .await
             .map_err(Into::into),
         Mode::Indexer => {
@@ -155,26 +153,17 @@ async fn run_webserver(
              the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
         )
     })?;
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "cluster health must see the real state of ClickHouse and GitLab"
-    )]
+    let gitlab_client = Arc::new(
+        gitlab_client::GitlabClient::new(gitlab_client_config, &breakers.gitlab)
+            .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+    );
+
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
-        Some(config.graph.build_client()),
-        Some(Arc::new(
-            gitlab_client::GitlabClient::new(gitlab_client_config.clone())
-                .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
-        )),
+        Some(config.graph.build_client(&breakers.graph)),
+        Some(gitlab_client.clone()),
     )
     .into_arc();
-    let gitlab_client = Arc::new(
-        gitlab_client::GitlabClient::new_with_circuit_breaker(
-            gitlab_client_config,
-            &breakers.gitlab,
-        )
-        .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
-    );
 
     let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
     resolver_registry.register(
@@ -196,11 +185,7 @@ async fn run_webserver(
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
     ActiveSchema::spawn(
         &active_schema,
-        Arc::new(
-            config
-                .graph
-                .build_client_with_circuit_breaker(&breakers.graph),
-        ),
+        Arc::new(config.graph.build_client(&breakers.graph)),
         archive,
         catalog,
         config,
@@ -217,9 +202,7 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         validator,
         active_schema,
-        config
-            .graph
-            .build_client_with_circuit_breaker(&breakers.graph),
+        config.graph.build_client(&breakers.graph),
         cluster_health,
         tls_config,
         config.grpc.clone(),
