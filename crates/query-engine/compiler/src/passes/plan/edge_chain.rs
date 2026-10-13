@@ -5,7 +5,7 @@ use ontology::constants::*;
 
 use super::conditions::place_conditions;
 use super::context::PlanningContext;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use super::{

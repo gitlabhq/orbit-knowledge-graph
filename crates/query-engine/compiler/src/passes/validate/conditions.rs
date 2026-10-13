@@ -1,5 +1,5 @@
 use super::*;
-use crate::schema_limits::{MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL};
+use crate::query_limits::{MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL};
 
 impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
     pub(super) fn check_predicate_shape(&self, input: &Input) -> Result<()> {
@@ -149,7 +149,7 @@ pub(super) fn check_condition_counts(input: &Input) -> Result<()> {
             .collect();
         for predicate in input
             .conditions()
-            .filter(|predicate| predicate.target == target)
+            .filter(|predicate| predicate.target == target && !predicate.compares_aliases())
         {
             *counts.entry(&predicate.property).or_default() += 1;
         }
