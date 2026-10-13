@@ -23,15 +23,14 @@ impl GraphReader {
         let Some(db_path) = db else {
             return Self::open_workspace();
         };
-        let lock = read_lock_database(&db_path)?;
-        if !db_path.exists() {
+        let Some(lock) = read_lock_database(&db_path)? else {
             anyhow::bail!(
                 "no local graph found at {}. Index a repository first \
              (`{} index` inside it, or the `index` MCP tool).",
                 db_path.display(),
                 spec::launcher()
             );
-        }
+        };
         let client = DuckDbClient::open_read_only(&db_path)
             .with_context(|| format!("failed to open {}", db_path.display()))?;
         if schema::stored_meta(&client, "revision")?.is_some() {
@@ -79,12 +78,11 @@ impl GraphReader {
         };
         let mut tables = std::collections::BTreeMap::<String, Vec<String>>::new();
         for (index, path) in paths.iter().enumerate() {
-            reader._locks.push(read_lock_database(Path::new(path))?);
-            if !Path::new(path).try_exists()? {
+            let Some(lock) = read_lock_database(Path::new(path))? else {
                 eprintln!("orbit: skipping missing revision {path}; reindex its checkout");
-                reader._locks.pop();
                 continue;
-            }
+            };
+            reader._locks.push(lock);
             let catalog = format!("revision_{index}");
             client.execute(
                 &format!("ATTACH {} AS {catalog} (READ_ONLY)", sql_lit(path)),

@@ -11,10 +11,9 @@ const CODE_INDEX_META_KEY: &str = "code_index_revision";
 const CODE_INDEX_REVISION: &str = "4";
 
 pub fn graph_lacks_commit(db: &Path, commit_sha: &str) -> Result<bool> {
-    let _lock = read_lock_database(db)?;
-    if !db.exists() {
+    let Some(_lock) = read_lock_database(db)? else {
         return Ok(true);
-    }
+    };
     let client = DuckDbClient::open_read_only(db)?;
     if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
         return Ok(true);

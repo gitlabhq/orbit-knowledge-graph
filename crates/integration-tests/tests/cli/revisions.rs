@@ -88,7 +88,10 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
                 let graph = duckdb_client::DuckDbClient::open(&broken).unwrap();
                 graph.execute(sql, &[]).unwrap();
             }
-            None => std::fs::remove_file(&broken).unwrap(),
+            None => {
+                std::fs::remove_file(&broken).unwrap();
+                std::fs::remove_file(broken.with_extension("duckdb.lock")).unwrap();
+            }
         }
         let (output, error, ok) = run_cmd(
             &["sql", "-F", "json", "SELECT * FROM gl_probe"],
@@ -118,6 +121,27 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
         data.path(),
     );
     assert!(!ok, "explicit missing file must fail: {error}");
+    assert!(!broken.with_extension("duckdb.lock").exists());
+    let missing = data.path().join("missing/revision.duckdb");
+    let manifest =
+        duckdb_client::DuckDbClient::open(&data.path().join("local/manifest.duckdb")).unwrap();
+    manifest
+        .execute(
+            "UPDATE _orbit_manifest SET database_path = ?1 WHERE repo_path = 'a'",
+            &[missing.to_string_lossy().to_string().into()],
+        )
+        .unwrap();
+    drop(manifest);
+    assert_eq!(
+        orbit_sql("SELECT * FROM gl_probe", data.path()),
+        json!([{"id":42}])
+    );
+    let (_, error, ok) = run_cmd(
+        &["sql", "--db", missing.to_str().unwrap(), "SELECT 1"],
+        data.path(),
+    );
+    assert!(!ok, "explicit missing file must fail: {error}");
+    assert!(!missing.parent().unwrap().exists());
 }
 
 fn wait_for_reader(lock: &std::fs::File) {

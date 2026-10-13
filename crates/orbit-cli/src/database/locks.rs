@@ -8,8 +8,12 @@ pub fn lock_database(path: &Path) -> Result<File> {
     acquire_database_lock(path, false)
 }
 
-pub fn read_lock_database(path: &Path) -> Result<File> {
-    acquire_database_lock(path, true)
+pub fn read_lock_database(path: &Path) -> Result<Option<File>> {
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    let lock = acquire_database_lock(path, true)?;
+    Ok(path.try_exists()?.then_some(lock))
 }
 
 fn acquire_database_lock(path: &Path, shared: bool) -> Result<File> {
