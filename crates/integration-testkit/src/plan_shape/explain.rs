@@ -3,7 +3,7 @@ use compiler::input::{ColumnSelection, Input, InputFilter};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
-use compiler::query::Predicate as BoundPredicate;
+use compiler::query::Predicate as QueryPredicate;
 use compiler::{FilterOp, OrderDirection};
 use query_engine::compiler;
 use std::collections::HashMap;
@@ -197,7 +197,7 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
     format!("{alias}.{property} {operator} {value}")
 }
 
-fn bound_property_filter(alias: &str, property: &str, filter: &BoundPredicate) -> String {
+fn bound_property_filter(alias: &str, property: &str, filter: &QueryPredicate) -> String {
     let value = literal(filter.value.as_ref().unwrap_or(&serde_json::Value::Null));
     let operator = match filter.op {
         FilterOp::Eq => "=",

@@ -90,15 +90,15 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
 
 pub fn apply<S>(
     ast: &mut Ast<S>,
-    input: &Query,
+    query: &Query,
     metadata: &LoweredMetadata,
     query_hash: u64,
 ) -> Result<usize> {
     let Some(q) = ast.select_mut() else {
         return Ok(0);
     };
-    q.limit = Some(input.fetch_limit());
-    let Some(cursor) = &input.cursor else {
+    q.limit = Some(query.fetch_limit());
+    let Some(cursor) = &query.cursor else {
         return Ok(0);
     };
     let additional: Vec<_> = metadata
@@ -124,7 +124,7 @@ pub fn apply<S>(
             "cursor.after was issued for a different query; restart pagination".into(),
         ));
     }
-    let nullable = nullable_flags(input, order_by.len());
+    let nullable = nullable_flags(query, order_by.len());
     let alias_scoped = order_by
         .iter()
         .any(|o| matches!(o.expr, Expr::Identifier(_)));
@@ -154,14 +154,14 @@ fn append_readback_columns(q: &mut Select, order_by: &[OrderExpr]) {
 /// User sort properties and aggregation keys can be NULL (NULLs sort last in
 /// ClickHouse, both directions); compiler-generated tie-breakers are primary
 /// keys and never are.
-fn nullable_flags(input: &Query, key_count: usize) -> Vec<bool> {
+fn nullable_flags(query: &Query, key_count: usize) -> Vec<bool> {
     let mut flags = vec![false; key_count];
-    match input.query_type {
+    match query.query_type {
         QueryType::Aggregation => {
             let mut idx = 0;
-            if let Some(sort) = &input.aggregation.sort {
+            if let Some(sort) = &query.aggregation.sort {
                 let sorts_on_count =
-                    input.aggregation.metrics.iter().any(|a| {
+                    query.aggregation.metrics.iter().any(|a| {
                         a.alias == sort.column && matches!(a.function, AggFunction::Count)
                     });
                 if let Some(f) = flags.first_mut() {
@@ -175,7 +175,7 @@ fn nullable_flags(input: &Query, key_count: usize) -> Vec<bool> {
         }
         QueryType::PathFinding => {}
         _ => {
-            if input.order.is_some()
+            if query.order.is_some()
                 && let Some(f) = flags.first_mut()
             {
                 *f = true;

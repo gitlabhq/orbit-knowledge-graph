@@ -105,14 +105,14 @@ impl ResultContext {
 
 pub fn enforce_lowered_return<S>(
     ast: &mut Ast<S>,
-    input: &Query,
+    query: &Query,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
-    let mut ctx = ResultContext::new().with_query_type(input.query_type);
+    let mut ctx = ResultContext::new().with_query_type(query.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
-    enforce_lowered_return_with(ast, input, metadata, &mut ctx, |entity| {
-        input
+    enforce_lowered_return_with(ast, query, metadata, &mut ctx, |entity| {
+        query
             .nodes
             .iter()
             .find(|node| node.entity == entity)
@@ -126,12 +126,12 @@ pub fn enforce_lowered_return<S>(
 
 pub fn enforce_local_return<S>(
     ast: &mut Ast<S>,
-    input: &Query,
+    query: &Query,
     metadata: &LoweredMetadata,
     _model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
-    let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    enforce_lowered_return_with(ast, input, metadata, &mut ctx, |_| {
+    let mut ctx = ResultContext::new().with_query_type(query.query_type);
+    enforce_lowered_return_with(ast, query, metadata, &mut ctx, |_| {
         DEFAULT_PRIMARY_KEY.to_string()
     })?;
     Ok(ctx)
@@ -139,21 +139,21 @@ pub fn enforce_local_return<S>(
 
 fn enforce_lowered_return_with<S>(
     ast: &mut Ast<S>,
-    input: &Query,
+    query: &Query,
     metadata: &LoweredMetadata,
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
-    let selectable_nodes: HashSet<&str> = match input.query_type {
-        QueryType::Aggregation => input
+    let selectable_nodes: HashSet<&str> = match query.query_type {
+        QueryType::Aggregation => query
             .aggregation
             .groups
             .iter()
             .filter(|&group| matches!(group, crate::query::Group::Node { .. }))
-            .map(|group| input.node(group.node()).alias.as_str())
+            .map(|group| query.node(group.node()).alias.as_str())
             .collect(),
         QueryType::Traversal | QueryType::Neighbors => {
-            input.nodes.iter().map(|node| node.alias.as_str()).collect()
+            query.nodes.iter().map(|node| node.alias.as_str()).collect()
         }
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
@@ -162,7 +162,7 @@ fn enforce_lowered_return_with<S>(
     };
     enforce_return_columns(
         select,
-        input,
+        query,
         &selectable_nodes,
         ctx,
         &metadata.nodes,
@@ -170,7 +170,7 @@ fn enforce_lowered_return_with<S>(
     )?;
 
     if matches!(
-        input.query_type,
+        query.query_type,
         QueryType::Traversal | QueryType::Aggregation
     ) {
         use crate::constants::{
@@ -198,14 +198,14 @@ fn enforce_lowered_return_with<S>(
 
 pub fn enforce_role_scans<S>(
     ast: &mut Ast<S>,
-    input: &Query,
+    query: &Query,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let Some(query) = ast.select_mut() else {
+    let Some(select) = ast.select_mut() else {
         return Ok(());
     };
-    for input_node in &input.nodes {
+    for input_node in &query.nodes {
         let entity = input_node.entity_name.as_str();
         let Some(binding) = metadata.nodes.get(&input_node.alias) else {
             continue;
@@ -221,16 +221,16 @@ pub fn enforce_role_scans<S>(
         };
         let table = input_node.table.as_str();
         let role_alias = format!("_role_{}", input_node.alias);
-        query.from = TableRef::join(
+        select.from = TableRef::join(
             JoinType::Inner,
-            std::mem::replace(&mut query.from, TableRef::scan("_placeholder", "_")),
+            std::mem::replace(&mut select.from, TableRef::scan("_placeholder", "_")),
             TableRef::scan_final(table, &role_alias),
             Expr::eq(
                 identity.clone(),
                 Expr::col(&role_alias, DEFAULT_PRIMARY_KEY),
             ),
         );
-        query.where_clause = Some(match query.where_clause.take() {
+        select.where_clause = Some(match select.where_clause.take() {
             Some(existing) => Expr::and(existing, deleted_false(&role_alias)),
             None => deleted_false(&role_alias),
         });
@@ -247,14 +247,14 @@ fn ensure_in_group_by(q: &mut Select, query_type: QueryType, expr: Expr) {
 
 fn enforce_return_columns(
     q: &mut Select,
-    input: &Query,
+    query: &Query,
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let select_len_before = q.select.len();
-    for node in &input.nodes {
+    for node in &query.nodes {
         let entity = &node.entity_name;
         if !selectable_nodes.contains(node.alias.as_str()) {
             continue;
@@ -295,7 +295,7 @@ fn enforce_return_columns(
                             filter_to_expr(
                                 &node.alias,
                                 &filter.name,
-                                &crate::passes::plan::BoundFilter::from(filter),
+                                &crate::passes::plan::PlannedFilter::from(filter),
                             )
                         })
                         .collect();
@@ -349,13 +349,13 @@ fn enforce_return_columns(
             if !q.selects_alias(&name) {
                 q.select.push(SelectExpr::new(identity.clone(), name));
             }
-            ensure_in_group_by(q, input.query_type, identity.clone());
+            ensure_in_group_by(q, query.query_type, identity.clone());
         }
         if !q.selects_alias(&id_col) {
             q.select
                 .push(SelectExpr::new(authorization_id.clone(), &id_col));
         }
-        ensure_in_group_by(q, input.query_type, authorization_id);
+        ensure_in_group_by(q, query.query_type, authorization_id);
         let type_col = redaction_type_column(&node.alias);
         if !q.selects_alias(&type_col) {
             let position = q
@@ -366,7 +366,7 @@ fn enforce_return_columns(
             q.select
                 .insert(position, SelectExpr::new(Expr::string(entity), type_col));
         }
-        if input.query_type != QueryType::Aggregation
+        if query.query_type != QueryType::Aggregation
             && node.has_traversal_path
             && let Some(path) = traversal_path
         {

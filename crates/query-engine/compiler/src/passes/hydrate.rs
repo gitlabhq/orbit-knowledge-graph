@@ -15,7 +15,7 @@ use crate::types::SecurityContext;
 #[derive(Debug, Clone, PartialEq)]
 pub enum HydrationPlan {
     None,
-    /// One template per input node, with IDs to be filled at runtime.
+    /// One template per query node, with IDs to be filled at runtime.
     Static(Vec<HydrationTemplate>),
     /// Column specs are pre-resolved for every ontology entity type so
     /// the server just looks up the matching spec — no ontology queries.
@@ -89,7 +89,7 @@ pub struct VirtualColumnRequest {
 
 /// Build the hydration plan for a compiled query.
 ///
-/// - Aggregation/Traversal: one static template per input node, minus the
+/// - Aggregation/Traversal: one static template per query node, minus the
 ///   columns `emitted` already projects as `{alias}_{col}`. Nodes the base
 ///   query joins inline therefore need no second query; single-node search
 ///   keeps only its virtual columns.
@@ -100,21 +100,21 @@ pub struct VirtualColumnRequest {
 /// plans rely on `RestrictPass` having already pruned them from
 /// `node.columns`.
 pub fn generate_hydration_plan<S>(
-    input: &Query,
+    query: &Query,
     emitted: &Ast<S>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
-    match input.query_type {
+    match query.query_type {
         QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
-            HydrationPlan::Dynamic(build_dynamic_specs(input, model, security_ctx))
+            HydrationPlan::Dynamic(build_dynamic_specs(query, model, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, emitted, model);
+            let mut templates = build_static_templates(query, emitted, model);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
-            if input.query_type == QueryType::Aggregation {
+            if query.query_type == QueryType::Aggregation {
                 templates.retain(|t| !t.virtual_columns.is_empty());
             }
 
@@ -128,7 +128,7 @@ pub fn generate_hydration_plan<S>(
 }
 
 fn build_static_templates<S>(
-    input: &Query,
+    query: &Query,
     emitted: &Ast<S>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<HydrationTemplate> {
@@ -137,7 +137,7 @@ fn build_static_templates<S>(
             .select_ref()
             .is_some_and(|select| select.selects_alias(alias))
     };
-    input
+    query
         .nodes
         .iter()
         .filter_map(|node| {
@@ -226,7 +226,7 @@ fn build_static_templates<S>(
 /// see admin-only fields since hydration is built from the ontology
 /// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
-    input: &Query,
+    query: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
@@ -248,7 +248,7 @@ fn build_dynamic_specs(
                     .collect()
             };
 
-            let requested: Vec<String> = match input.dynamic_columns {
+            let requested: Vec<String> = match query.dynamic_columns {
                 // Virtual columns are excluded from dynamic modes: they
                 // require an explicit user request because they incur
                 // external service calls (e.g. Gitaly round-trips).

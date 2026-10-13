@@ -1,8 +1,8 @@
 use ontology::constants::*;
 
 use super::helpers::denorm_tag_values;
-use super::{BoundFilter, NodePlan};
-use crate::query::Predicate as BoundPredicate;
+use super::{NodePlan, PlannedFilter};
+use crate::query::Predicate as QueryPredicate;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {
@@ -23,7 +23,7 @@ impl Column {
 pub enum Predicate {
     Property {
         column: Column,
-        filter: BoundPredicate,
+        filter: QueryPredicate,
         data_type: Option<ontology::DataType>,
         in_sort_key: bool,
     },
@@ -84,7 +84,7 @@ impl Projection {
     }
 }
 
-pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
+pub fn property_filter(alias: &str, property: &str, bound: &PlannedFilter) -> Predicate {
     Predicate::Property {
         column: Column::new(alias, property),
         filter: bound.predicate.clone(),
@@ -117,7 +117,7 @@ pub fn tag_filter(
     alias: &str,
     column: &str,
     key: &str,
-    filter: &BoundPredicate,
+    filter: &QueryPredicate,
 ) -> Option<Predicate> {
     denorm_tag_values(key, filter).map(|values| Predicate::Tags {
         column: Column::new(alias, column),

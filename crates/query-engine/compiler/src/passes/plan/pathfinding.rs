@@ -7,15 +7,15 @@ pub(super) fn plan_pathfinding<M>(mut context: PlanningContext<'_, M>) -> Result
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let input = context.query;
+    let query = context.query;
     let model = context.model;
-    let path = input
+    let path = query
         .path
         .as_ref()
         .ok_or_else(|| crate::error::QueryError::Lowering("path config missing".into()))?;
 
-    let start_node = find_node(input, path.from);
-    let end_node = find_node(input, path.to);
+    let start_node = find_node(query, path.from);
+    let end_node = find_node(query, path.to);
     let start_alias = start_node.alias.clone();
     let end_alias = end_node.alias.clone();
 

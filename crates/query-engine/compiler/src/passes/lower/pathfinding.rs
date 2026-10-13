@@ -17,7 +17,7 @@ use super::sql::{
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -> Result<Select> {
+pub fn emit_pathfinding(plan: &Plan<PathFinding>, query: &crate::query::Query) -> Result<Select> {
     let pf = &plan.operation;
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];
@@ -231,7 +231,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -
         ],
         from: paths_union,
         order_by,
-        limit: Some(input.limit),
+        limit: Some(query.limit),
         ..Default::default()
     })
 }
@@ -531,7 +531,7 @@ fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr>
 fn build_denorm_tags(
     direction: query_data_model::DenormalizedDirection,
     edge_alias: &str,
-    filters: &[(String, crate::passes::plan::BoundFilter)],
+    filters: &[(String, crate::passes::plan::PlannedFilter)],
     denormalized: &HashMap<
         query_data_model::DenormalizedKey,
         query_data_model::DenormalizedProperty,

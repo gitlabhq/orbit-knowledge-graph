@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
+use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty, PlannedFilter};
 use crate::query::{FilterOp, Predicate};
 
 pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
@@ -38,7 +38,7 @@ pub fn denorm_tag_values(key: &str, filter: &Predicate) -> Option<Vec<String>> {
 }
 
 pub fn has_non_denorm_filters(
-    filters: &[(String, BoundFilter)],
+    filters: &[(String, PlannedFilter)],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
     filters.iter().any(|(_, filter)| {
@@ -49,7 +49,7 @@ pub fn has_non_denorm_filters(
 }
 
 pub fn lowerable_denorm<'a>(
-    filter: &BoundFilter,
+    filter: &PlannedFilter,
     direction: DenormalizedDirection,
     denormalized: &'a HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> Option<&'a DenormalizedProperty> {

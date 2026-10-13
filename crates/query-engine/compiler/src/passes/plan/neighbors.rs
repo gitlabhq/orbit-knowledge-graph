@@ -12,14 +12,14 @@ pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<P
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let input = context.query;
+    let query = context.query;
     let model = context.model;
-    let config = input
+    let config = query
         .neighbors
         .as_ref()
         .ok_or_else(|| crate::error::QueryError::Lowering("neighbors config missing".into()))?;
 
-    let [center_node] = input.nodes.as_slice() else {
+    let [center_node] = query.nodes.as_slice() else {
         return Err(crate::error::QueryError::Lowering(
             "neighbors query requires exactly one node".into(),
         ));
@@ -30,7 +30,7 @@ where
 
     let center_np = context.resolve_node(center_node)?;
 
-    context.denormalized = super::denormalized_facts(input, model);
+    context.denormalized = super::denormalized_facts(query, model);
     let has_non_denorm = has_non_denorm_filters(&center_np.filters, &context.denormalized)
         || center_np.id_range.is_some();
 

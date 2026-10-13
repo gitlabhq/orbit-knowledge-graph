@@ -2,7 +2,7 @@ use ontology::constants::*;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::BoundFilter;
+use crate::passes::plan::PlannedFilter;
 use crate::passes::plan::helpers::denorm_tag_values;
 use crate::query::{FilterOp, IdRange, Predicate};
 
@@ -19,7 +19,7 @@ pub(crate) fn latest_row_dedup(
     (order, Some((1, keys)))
 }
 
-pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
+pub fn filter_to_expr(alias: &str, prop: &str, bound: &PlannedFilter) -> Expr {
     filter_expression(
         alias,
         prop,

@@ -18,7 +18,7 @@ use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 
 pub fn emit_neighbors(
     plan: &Plan<Neighbors>,
-    input: &crate::query::Query,
+    query: &crate::query::Query,
 ) -> Result<(Select, NodeBinding)> {
     let Neighbors {
         center: center_alias,
@@ -46,7 +46,7 @@ pub fn emit_neighbors(
     fn build_center_dedup(
         alias: &str,
         table: &str,
-        filters: &[(String, crate::passes::plan::BoundFilter)],
+        filters: &[(String, crate::passes::plan::PlannedFilter)],
         node_ids: &[i64],
         id_range: Option<&IdRange>,
         extra_select: &[&str],
@@ -71,15 +71,15 @@ pub fn emit_neighbors(
         dedup_subquery(alias, table, select, scan_where)
     }
 
-    let order_by = match &input.order {
+    let order_by = match &query.order {
         Some(ob) => vec![if ob.direction == OrderDirection::Desc {
             OrderExpr::desc(Expr::col(
-                &input.node(ob.node).alias,
+                &query.node(ob.node).alias,
                 ob.property.column.as_deref().unwrap_or(&ob.property.name),
             ))
         } else {
             OrderExpr::asc(Expr::col(
-                &input.node(ob.node).alias,
+                &query.node(ob.node).alias,
                 ob.property.column.as_deref().unwrap_or(&ob.property.name),
             ))
         }],
@@ -275,18 +275,18 @@ pub fn emit_neighbors(
             edge_alias,
         );
         q.order_by = order_by;
-        q.limit = Some(input.limit);
+        q.limit = Some(query.limit);
         q
     } else if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
-        outgoing.limit = Some(input.limit);
+        outgoing.limit = Some(query.limit);
         outgoing
     } else {
         let mut arm = build_arm(direction);
         arm.order_by = order_by;
-        arm.limit = Some(input.limit);
+        arm.limit = Some(query.limit);
         arm
     };
     let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
@@ -316,7 +316,7 @@ fn build_fused_both_arm(
     center_entity: &str,
     center_has_tp: bool,
     center_node_ids: &[i64],
-    center_filters: &[(String, crate::passes::plan::BoundFilter)],
+    center_filters: &[(String, crate::passes::plan::PlannedFilter)],
     plan: &Plan<Neighbors>,
     edge: &EdgeTableConfig,
     edge_table: &str,

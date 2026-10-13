@@ -116,9 +116,9 @@ impl EmitOutput {
     fn take_bindings<T>(
         &mut self,
         plan: &Plan<T>,
-        input: &crate::query::Query,
+        query: &crate::query::Query,
     ) -> Result<HashMap<String, NodeBinding>> {
-        for node in input
+        for node in query
             .nodes
             .iter()
             .filter(|node| plan.nodes.contains_key(&node.alias))
@@ -142,11 +142,11 @@ impl EmitOutput {
                     table_alias: None,
                     traversal_path: None,
                 },
-                _ if input.query_type == QueryType::Aggregation
+                _ if query.query_type == QueryType::Aggregation
                     && plan.nodes.get(&source.0).is_some_and(|holder| {
                         holder.hydration == super::plan::HydrationStrategy::FilterOnly
                     })
-                    && !input
+                    && !query
                         .aggregation
                         .groups
                         .iter()
@@ -189,7 +189,7 @@ impl EmitOutput {
 
 pub fn emit<M>(
     plan: &QueryPlan,
-    input: &crate::query::Query,
+    query: &crate::query::Query,
     _model: &M,
 ) -> Result<LoweredQuery<M::Schema>>
 where
@@ -199,25 +199,25 @@ where
     let mut select = match plan {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
-            nodes = output.take_bindings(plan, input)?;
-            traversal::emit_traversal(input, output)
+            nodes = output.take_bindings(plan, query)?;
+            traversal::emit_traversal(query, output)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
             let mut output = physical::execute(&plan.operation.execution);
-            nodes = output.take_bindings(plan, input)?;
-            Ok(requirements::aggregation(result, output, input.limit))
+            nodes = output.take_bindings(plan, query)?;
+            Ok(requirements::aggregation(result, output, query.limit))
         }
         QueryPlan::Neighbors(plan) => {
-            let (query, binding) = neighbors::emit_neighbors(plan, input)?;
+            let (query, binding) = neighbors::emit_neighbors(plan, query)?;
             nodes.insert(plan.operation.center.clone(), binding);
             Ok(query)
         }
-        QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
-        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
+        QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, query),
+        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, query.limit),
     }?;
 
-    if !input.comparisons.is_empty() {
+    if !query.comparisons.is_empty() {
         let column = |alias: &str, property: &str| -> Result<Expr> {
             nodes
                 .get(alias)
@@ -226,13 +226,13 @@ where
                 })?
                 .property(property)
         };
-        let predicates = input
+        let predicates = query
             .comparisons
             .iter()
             .map(|comparison| {
                 sql::comparison(
                     column(
-                        &input.node(comparison.left.node).alias,
+                        &query.node(comparison.left.node).alias,
                         comparison
                             .left
                             .property
@@ -242,7 +242,7 @@ where
                     )?,
                     comparison.op,
                     column(
-                        &input.node(comparison.right.node).alias,
+                        &query.node(comparison.right.node).alias,
                         comparison
                             .right
                             .property
@@ -310,7 +310,7 @@ where
                 )),
             ],
         },
-        QueryPlan::Traversal(_) if input.relationships.is_empty() => input
+        QueryPlan::Traversal(_) if query.relationships.is_empty() => query
             .nodes
             .iter()
             .filter_map(|node| nodes.get(&node.alias))

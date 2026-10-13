@@ -5,7 +5,7 @@ use query_data_model::OrbitQueryModel;
 use super::{QueryScope, ScopeProof};
 use crate::query::{Direction, Query, QueryType};
 
-pub fn prepare_bound(
+pub fn prepare(
     query: &mut Query,
     proofs: HashMap<String, ScopeProof>,
     model: &(impl OrbitQueryModel + ?Sized),
@@ -14,7 +14,7 @@ pub fn prepare_bound(
         relationships: query
             .relationships
             .iter()
-            .map(|relationship| bound_relationship_proof(query, relationship, &proofs, model))
+            .map(|relationship| relationship_proof(query, relationship, &proofs, model))
             .collect(),
         nodes: proofs,
         requirements: Vec::new(),
@@ -57,9 +57,9 @@ pub fn prepare_bound(
     }
     let candidate = [relationship.from, relationship.to]
         .into_iter()
-        .filter(|node| bound_scope_only_container(query, *node))
+        .filter(|node| scope_only_container(query, *node))
         .find_map(|anchor| {
-            bound_container_target_scope(query, relationship, anchor, &scope.nodes, model)
+            container_target_scope(query, relationship, anchor, &scope.nodes, model)
                 .map(|(target, proof)| (anchor, target, proof))
         });
     let Some((anchor, target, target_proof)) = candidate else {
@@ -76,7 +76,7 @@ pub fn prepare_bound(
     scope
 }
 
-fn bound_relationship_proof(
+fn relationship_proof(
     query: &Query,
     relationship: &crate::query::Relationship,
     proofs: &HashMap<String, ScopeProof>,
@@ -99,10 +99,10 @@ fn bound_relationship_proof(
     })
 }
 
-fn bound_scope_only_container(query: &Query, node: crate::query::NodeId) -> bool {
+fn scope_only_container(query: &Query, node: crate::query::NodeId) -> bool {
     let node_ref = query.node(node);
     node_ref.has_traversal_path
-        && super::bound_scope_keys(node_ref, &[]).len() == 1
+        && super::scope_keys(node_ref, &[]).len() == 1
         && node_ref.id_range.is_none()
         && node_ref.node_ids.len() <= 1
         && query
@@ -128,7 +128,7 @@ fn bound_scope_only_container(query: &Query, node: crate::query::NodeId) -> bool
             .any(|comparison| comparison.left.node == node || comparison.right.node == node)
 }
 
-fn bound_container_target_scope(
+fn container_target_scope(
     query: &Query,
     relationship: &crate::query::Relationship,
     anchor: crate::query::NodeId,

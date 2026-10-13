@@ -22,10 +22,10 @@ fn entity_of(query: &Query, node: crate::query::NodeId) -> &str {
 }
 
 fn enforce_aggregation_scope(
-    input: &Query,
+    query: &Query,
     _model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let mut reachable: HashSet<&str> = input
+    let mut reachable: HashSet<&str> = query
         .nodes
         .iter()
         .filter(|node| node.has_traversal_path)
@@ -41,19 +41,19 @@ fn enforce_aggregation_scope(
         ));
     }
 
-    let edges: Vec<(&str, &str)> = input
+    let edges: Vec<(&str, &str)> = query
         .relationships
         .iter()
         .map(|relationship| {
             (
-                input.node(relationship.from).alias.as_str(),
-                input.node(relationship.to).alias.as_str(),
+                query.node(relationship.from).alias.as_str(),
+                query.node(relationship.to).alias.as_str(),
             )
         })
-        .chain(input.path.iter().map(|path| {
+        .chain(query.path.iter().map(|path| {
             (
-                input.node(path.from).alias.as_str(),
-                input.node(path.to).alias.as_str(),
+                query.node(path.from).alias.as_str(),
+                query.node(path.to).alias.as_str(),
             )
         }))
         .collect();
@@ -73,7 +73,7 @@ fn enforce_aggregation_scope(
         }
     }
 
-    if let Some(orphan) = input
+    if let Some(orphan) = query
         .nodes
         .iter()
         .find(|node| !reachable.contains(node.alias.as_str()))
@@ -89,11 +89,11 @@ fn enforce_aggregation_scope(
 }
 
 fn enforce_traversal_path_filters(
-    input: &Query,
+    query: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<()> {
-    for node in &input.nodes {
+    for node in &query.nodes {
         let entity = node.entity_name.as_str();
         // Entities without a redaction role use the normal traversal-path floor:
         // Rails only sends Reporter+ paths, and stricter entities override this.
@@ -110,7 +110,7 @@ fn enforce_traversal_path_filters(
         }
     }
 
-    for (i, rel) in input.relationships.iter().enumerate() {
+    for (i, rel) in query.relationships.iter().enumerate() {
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
         for tp_filter in rel
             .filters
@@ -192,31 +192,31 @@ fn validate_traversal_path_within_scope(
 /// only hold rows under that scope; scoping it is lossless and restores the
 /// edge PK prefix that the broad org-wide authorization filter erases (#601941).
 ///
-/// The per-alias proofs come from [`crate::scope::derive_bound_scope_proofs`].
+/// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
 fn stamp_edge_scope_proofs(
-    input: &Query,
+    query: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
-    crate::scope::derive_bound_scope_proofs(input, model)
+    crate::scope::derive_scope_proofs(query, model)
 }
 
 pub fn restrict(
-    input: &mut Query,
+    query: &mut Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
-    enforce_traversal_path_filters(input, model, security_ctx)?;
-    let scope_proofs = stamp_edge_scope_proofs(input, model);
+    enforce_traversal_path_filters(query, model, security_ctx)?;
+    let scope_proofs = stamp_edge_scope_proofs(query, model);
 
     if security_ctx.admin {
         return Ok(scope_proofs);
     }
 
-    if matches!(input.query_type, QueryType::Aggregation) {
-        enforce_aggregation_scope(input, model)?;
+    if matches!(query.query_type, QueryType::Aggregation) {
+        enforce_aggregation_scope(query, model)?;
     }
 
-    for node in &mut input.nodes {
+    for node in &mut query.nodes {
         let entity = node.entity_name.as_str();
         for filter in &node.filters {
             if filter
@@ -232,21 +232,21 @@ pub fn restrict(
         node.columns.retain(|property| !property.admin_only);
     }
 
-    if let Some(order) = &input.order
+    if let Some(order) = &query.order
         && order.property.admin_only
     {
-        let entity = entity_of(input, order.node);
+        let entity = entity_of(query, order.node);
         return Err(QueryError::Restrict(format!(
             "order_by on \"{}\" for {entity}: field requires administrator access",
             order.property.name
         )));
     }
 
-    for agg in &input.aggregation.metrics {
+    for agg in &query.aggregation.metrics {
         let Some(property) = &agg.property else {
             continue;
         };
-        let entity = entity_of(input, agg.target);
+        let entity = entity_of(query, agg.target);
         if property.admin_only {
             return Err(QueryError::Restrict(format!(
                 "aggregation on \"{}\" for {entity}: field requires administrator access",
@@ -255,11 +255,11 @@ pub fn restrict(
         }
     }
 
-    for group in &input.aggregation.groups {
+    for group in &query.aggregation.groups {
         let Some(property) = group.property() else {
             continue;
         };
-        let entity = entity_of(input, group.node());
+        let entity = entity_of(query, group.node());
         if property.admin_only {
             return Err(QueryError::Restrict(format!(
                 "group_by on \"{}\" for {entity}: field requires administrator access",
@@ -267,10 +267,10 @@ pub fn restrict(
             )));
         }
     }
-    for comparison in &input.comparisons {
+    for comparison in &query.comparisons {
         for operand in [&comparison.left, &comparison.right] {
             if operand.property.admin_only {
-                let entity = entity_of(input, operand.node);
+                let entity = entity_of(query, operand.node);
                 return Err(QueryError::Restrict(format!(
                     "filter on \"{}\" for {entity}: field requires administrator access",
                     operand.property.name

@@ -64,13 +64,13 @@ pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
     context: PlanningContext<'_, M>,
     options: HydrationCompileOptions,
 ) -> Result<Plan<Hydration>> {
-    let input = context.query;
-    if input.nodes.is_empty() {
+    let query = context.query;
+    if query.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
         ));
     }
-    let hydration_nodes = input
+    let hydration_nodes = query
         .nodes
         .iter()
         .map(|node| {

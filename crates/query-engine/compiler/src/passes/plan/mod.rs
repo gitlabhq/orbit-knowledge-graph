@@ -23,7 +23,7 @@ use query_data_model::OrbitQueryModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
 #[derive(Clone)]
-pub struct BoundFilter {
+pub struct PlannedFilter {
     pub predicate: Predicate,
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
@@ -31,7 +31,7 @@ pub struct BoundFilter {
     pub in_sort_key: bool,
 }
 
-impl From<&crate::query::Filter> for BoundFilter {
+impl From<&crate::query::Filter> for PlannedFilter {
     fn from(filter: &crate::query::Filter) -> Self {
         Self {
             predicate: filter.predicate.clone(),
@@ -70,10 +70,10 @@ impl QueryPlan {
 }
 
 pub fn denormalized_facts(
-    input: &Query,
+    query: &Query,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
-    input
+    query
         .nodes
         .iter()
         .flat_map(|node| {
@@ -181,30 +181,30 @@ impl EdgeTableConfig {
     }
 }
 
-pub fn find_node(input: &Query, node: crate::query::NodeId) -> &crate::query::Node {
-    input.node(node)
+pub fn find_node(query: &Query, node: crate::query::NodeId) -> &crate::query::Node {
+    query.node(node)
 }
 
 pub fn plan_clickhouse(
-    input: &Query,
+    query: &Query,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, true, table_scans)
+    plan(query, model, hydration_options, true, table_scans)
 }
 
 pub fn plan_duckdb(
-    input: &Query,
+    query: &Query,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false, table_scans)
+    plan(query, model, hydration_options, false, table_scans)
 }
 
 fn plan<M>(
-    input: &Query,
+    query: &Query,
     model: &M,
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,
@@ -214,14 +214,14 @@ where
     M: OrbitQueryModel + ?Sized,
 {
     let context = context::PlanningContext {
-        query: input,
+        query,
         model,
         nodes: HashMap::new(),
         hops: Vec::new(),
         denormalized: HashMap::new(),
         node_edge_mappings: HashMap::new(),
     };
-    match input.query_type {
+    match query.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
             edge_chain::plan(context, use_fk_elision, table_scans)
         }

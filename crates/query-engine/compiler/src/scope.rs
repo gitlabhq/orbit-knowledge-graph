@@ -4,7 +4,7 @@ mod application;
 mod preparation;
 
 pub use application::apply;
-pub use preparation::prepare_bound;
+pub use preparation::prepare;
 
 #[derive(Clone, Default)]
 pub struct QueryScope {
@@ -122,7 +122,7 @@ fn scope_value_expr(source: &ScopeSource) -> Expr {
     }
 }
 
-pub fn derive_bound_scope_proofs(
+pub fn derive_scope_proofs(
     query: &crate::query::Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> HashMap<String, ScopeProof> {
@@ -141,7 +141,7 @@ pub fn derive_bound_scope_proofs(
         .nodes
         .iter()
         .filter_map(|node| {
-            let lookups: Vec<_> = bound_scope_keys(node, &anchor_fks)
+            let lookups: Vec<_> = scope_keys(node, &anchor_fks)
                 .into_iter()
                 .filter_map(|key| {
                     model.traversal_path_lookup(&key.entity, key.kind).map(
@@ -158,10 +158,10 @@ pub fn derive_bound_scope_proofs(
                 .then(|| (node.alias.clone(), ScopeProof::from_sources(lookups)))
         })
         .collect();
-    propagate_bound_scope_proofs(query, model, &seed)
+    propagate_scope_proofs(query, model, &seed)
 }
 
-fn propagate_bound_scope_proofs(
+fn propagate_scope_proofs(
     query: &crate::query::Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     seed: &HashMap<String, ScopeProof>,
@@ -240,7 +240,7 @@ fn propagate_bound_scope_proofs(
     result
 }
 
-pub(super) fn bound_scope_keys(
+pub(super) fn scope_keys(
     node: &crate::query::Node,
     anchor_fks: &[(&str, &str)],
 ) -> Vec<PathResolutionKey> {
@@ -251,21 +251,21 @@ pub(super) fn bound_scope_keys(
                 .iter()
                 .map(|id| PathResolutionKey::id(&node.entity_name, *id)),
         );
-    } else if let Some(id) = bound_eq_value(node, "id").and_then(serde_json::Value::as_i64) {
+    } else if let Some(id) = eq_value(node, "id").and_then(serde_json::Value::as_i64) {
         keys.push(PathResolutionKey::id(&node.entity_name, id));
     }
-    if let Some(path) = bound_eq_value(node, "full_path").and_then(serde_json::Value::as_str) {
+    if let Some(path) = eq_value(node, "full_path").and_then(serde_json::Value::as_str) {
         keys.push(PathResolutionKey::full_path(&node.entity_name, path));
     }
     for (column, entity) in anchor_fks {
-        if let Some(id) = bound_eq_value(node, column).and_then(serde_json::Value::as_i64) {
+        if let Some(id) = eq_value(node, column).and_then(serde_json::Value::as_i64) {
             keys.push(PathResolutionKey::id(*entity, id));
         }
     }
     keys
 }
 
-fn bound_eq_value<'a>(node: &'a crate::query::Node, name: &str) -> Option<&'a serde_json::Value> {
+fn eq_value<'a>(node: &'a crate::query::Node, name: &str) -> Option<&'a serde_json::Value> {
     let mut filters = node.filters(name);
     let filter = filters.next()?;
     if filters.next().is_some() || filter.predicate.op != FilterOp::Eq {

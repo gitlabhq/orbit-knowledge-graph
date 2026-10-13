@@ -251,7 +251,7 @@ where
     let security_ctx = ctx.security_ctx().clone();
     let mut query = require(ctx.take_query(), "query")?;
     let scope_proofs = restrict::restrict(&mut query, ctx.data_model(), &security_ctx)?;
-    let scope_proofs = crate::scope::prepare_bound(&mut query, scope_proofs, ctx.data_model());
+    let scope_proofs = crate::scope::prepare(&mut query, scope_proofs, ctx.data_model());
     ctx.set_query(query);
     ctx.set_scope_proofs(scope_proofs);
     Ok(())

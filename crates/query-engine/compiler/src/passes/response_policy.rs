@@ -10,16 +10,16 @@ const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 
 pub fn apply_text_excerpts<S>(
     ast: &mut Ast<S>,
-    input: &Query,
+    query: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) {
-    let Some(query) = ast.select_mut() else {
+    let Some(select) = ast.select_mut() else {
         return;
     };
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
-        / u64::from(input.fetch_limit().max(1))) as u32;
-    let columns: HashMap<String, HashSet<String>> = input
+        / u64::from(query.fetch_limit().max(1))) as u32;
+    let columns: HashMap<String, HashSet<String>> = query
         .nodes
         .iter()
         .map(|node| {
@@ -49,8 +49,8 @@ pub fn apply_text_excerpts<S>(
         })
         .collect();
 
-    for select in &mut query.select {
-        rewrite_select(select, &columns, max_chars);
+    for expression in &mut select.select {
+        rewrite_select(expression, &columns, max_chars);
     }
 }
 
