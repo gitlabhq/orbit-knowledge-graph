@@ -15,8 +15,6 @@
 
 .local-cli-linux-rules:
   rules:
-    # `changes:` evaluates true in pipelines without a push event, so every
-    # scheduled pipeline on main matched the rule below. Drop them explicitly.
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - !reference [.local-cli-release-rules, rules]
