@@ -54,37 +54,13 @@ fn named_queries_render_and_compile() {
     }
 }
 
-/// Fails on ontology/DDL drift from the fingerprint snapshot or a malformed
-/// ledger.
+/// Fails on ontology/DDL drift from the fingerprint snapshot, a malformed
+/// ledger or a stale current archive.
 #[test]
 fn migration_ledger_matches_fingerprint_snapshot() {
-    let config_directory = config_directory();
-    let ledger_path = config_directory.join(ontology::migrations::LEDGER_FILE);
-    let fingerprint_path = config_directory.join(ontology::migrations::FINGERPRINT_FILE);
-    let ontology = embedded_ontology();
-
-    let current = orbit_migrations::fingerprint::current_fingerprints(&ontology)
-        .expect("embedded schema must be valid");
-
-    let committed_text = std::fs::read_to_string(&fingerprint_path).unwrap_or_else(|error| {
-        panic!(
-            "reading {}: {error}. Run `mise schema:bump` to create the fingerprint snapshot.",
-            fingerprint_path.display()
-        )
-    });
-    let committed = ontology::migrations::Fingerprints::parse(&committed_text)
-        .unwrap_or_else(|error| panic!("{error}"));
-
-    let ledger_text = std::fs::read_to_string(&ledger_path)
-        .unwrap_or_else(|error| panic!("reading {}: {error}", ledger_path.display()));
-    let ledger = ontology::migrations::MigrationLedger::parse(&ledger_text)
-        .unwrap_or_else(|error| panic!("{error}"));
-
-    ontology::migrations::verify_snapshot(
-        &ontology,
-        &current,
-        &committed,
-        &ledger,
+    orbit_migrations::snapshot_check::verify_committed_snapshot(
+        &embedded_ontology(),
+        config_directory(),
         orbit_versions::VERSIONS.schema,
     )
     .unwrap_or_else(|error| panic!("{error}"));
@@ -98,19 +74,5 @@ fn current_ontology_archive_is_bundled() {
         versions.contains(&current_version),
         "{} is missing; run `mise schema:snapshot` to seed the current archive.",
         OntologyArchive::path(config_directory(), current_version).display()
-    );
-}
-
-#[test]
-fn current_ontology_archive_is_not_stale() {
-    let current_version = orbit_versions::VERSIONS.schema;
-    let archive = OntologyArchive::bundled(current_version)
-        .unwrap_or_else(|error| panic!("{error}"))
-        .unwrap_or_else(|| {
-            panic!("current archive v{current_version} is missing; run `mise schema:snapshot`")
-        });
-    assert!(
-        archive.matches_sources(&ontology::migrations::embedded_sources()),
-        "ontology archive is stale; run `mise schema:bump`"
     );
 }
