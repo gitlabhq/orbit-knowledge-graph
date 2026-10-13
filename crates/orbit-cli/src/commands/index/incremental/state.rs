@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Instant;
 
 use anyhow::{Context as _, Result};
+use code_graph_incremental::pipeline::{Context, Display, Report};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Env, State};
+use code_graph_incremental::{Env, State, templates};
 use serde::{Deserialize, Serialize};
 
 use super::input;
-use super::output::{ChangeCounts, Exporter, FamilyOutput, IncrementalOutput, Run};
+use super::output::{Exporter, FamilyOutput};
 use crate::database::GraphWriter;
 use crate::workspace::{self, GitInfo};
 
@@ -31,7 +31,7 @@ pub(super) struct Project<'a> {
     pub stats: bool,
 }
 
-pub(super) enum FamilyWork {
+enum Work {
     Index(Vec<String>),
     Reindex {
         paths: Vec<String>,
@@ -41,25 +41,17 @@ pub(super) enum FamilyWork {
 }
 
 impl Project<'_> {
-    pub(super) fn index_all(&self) -> Result<IncrementalOutput> {
-        let started = Instant::now();
+    pub(super) fn index_all(&self) -> Result<Vec<FamilyOutput>> {
         let repository = input::directory(&self.git.repo_path)?;
-        tracing::info!(
-            "walk {:.2}s, {} files",
-            started.elapsed().as_secs_f64(),
-            repository.usage().files
-        );
         let families = input::split(&repository, None);
         let owner = families.values().next().map(|(family, _)| *family);
         let work = families
             .into_values()
-            .map(|(family, paths)| (family, FamilyWork::Index(paths)));
-        let families = self.run_families(work, owner)?;
-        Ok(self.output("index", started, families, None))
+            .map(|(family, paths)| (family, Work::Index(paths)));
+        self.run(work, owner)
     }
 
-    pub(super) fn index_changed(&self) -> Result<IncrementalOutput> {
-        let started = Instant::now();
+    pub(super) fn index_changed(&self) -> Result<Vec<FamilyOutput>> {
         let saved = self.load_state()?;
         let mut changes = workspace::git_changes(&self.git.repo_path, &saved.commit_sha)?;
         for path in &saved.dirty {
@@ -69,102 +61,90 @@ impl Project<'_> {
             }
         }
         let changes = changes.settled();
-        let counts = ChangeCounts {
-            changed: changes.changed.len(),
-            removed: changes.removed.len(),
-        };
-        tracing::info!(
-            "{} changed, {} removed since {}",
-            counts.changed,
-            counts.removed,
-            &saved.commit_sha[..8.min(saved.commit_sha.len())]
-        );
         let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
         let changed = input::paths(&self.git.repo_path, changes.changed)?;
-        let mut changed_families = input::split(&changed, owner);
+        let mut changed = input::split(&changed, owner);
         let mut removed = input::split_removed(changes.removed, owner);
         let mut work = BTreeMap::new();
         for name in &saved.families {
             let family = SupportLang::from_family(name).with_context(|| {
                 format!("{STATE_FILE} names a language family this build does not know: {name}")
             })?;
-            let paths = changed_families
+            let paths = changed
                 .remove(family.family())
                 .map_or_else(Vec::new, |(_, paths)| paths);
             let removed = removed.remove(family.family()).unwrap_or_default();
-            let job = match paths.is_empty() && removed.is_empty() {
-                true => FamilyWork::Keep,
-                false => FamilyWork::Reindex { paths, removed },
+            let next = match paths.is_empty() && removed.is_empty() {
+                true => Work::Keep,
+                false => Work::Reindex { paths, removed },
             };
-            work.insert(family.family(), (family, job));
+            work.insert(family.family(), (family, next));
         }
-        for (family, paths) in changed_families.into_values() {
-            work.insert(family.family(), (family, FamilyWork::Index(paths)));
+        for (family, paths) in changed.into_values() {
+            work.insert(family.family(), (family, Work::Index(paths)));
         }
-        let families = self.run_families(work.into_values(), owner)?;
-        Ok(self.output("reindex", started, families, Some(counts)))
+        self.run(work.into_values(), owner)
     }
 
-    fn run_families(
+    fn run(
         &self,
-        work: impl IntoIterator<Item = (SupportLang, FamilyWork)>,
+        work: impl IntoIterator<Item = (SupportLang, Work)>,
         owner: Option<SupportLang>,
     ) -> Result<Vec<FamilyOutput>> {
         self.writer.clear(self.ontology)?;
-        let mut exporter = Exporter::new(self.git, self.writer, self.ontology, self.stats);
+        let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
         std::fs::create_dir_all(&self.state_dir)?;
         let mut families = Vec::new();
         let mut outputs = Vec::new();
-        for (family, job) in work {
+        for (family, work) in work {
             families.push(family.family().to_string());
             let snapshot = self.snapshot_path(family);
             let mut env;
-            let run = match job {
-                FamilyWork::Index(paths) => {
+            let (report, state) = match work {
+                Work::Index(paths) => {
                     env = Env::for_lang(family)?;
                     env.limits.total_ms = self.budget_ms;
-                    Run::Index(input::paths(&self.git.repo_path, paths)?)
+                    let (context, displayed) = templates::index(Context::new(
+                        &env,
+                        input::paths(&self.git.repo_path, paths)?,
+                    ))?
+                    .then(Display)?
+                    .finish();
+                    (context.report, displayed.state)
                 }
-                FamilyWork::Reindex { paths, removed } => {
+                Work::Reindex { paths, removed } => {
                     let (loaded, state) = State::load(&snapshot, family)
                         .with_context(|| format!("failed to load {}", snapshot.display()))?;
                     env = loaded;
                     env.limits.total_ms = self.budget_ms;
-                    Run::Reindex {
-                        repository: input::paths(&self.git.repo_path, paths)?,
+                    let (context, displayed) = templates::reindex(
+                        Context::new(&env, input::paths(&self.git.repo_path, paths)?),
                         state,
                         removed,
-                    }
+                    )?
+                    .then(Display)?
+                    .finish();
+                    (context.report, displayed.state)
                 }
-                FamilyWork::Keep => {
+                Work::Keep => {
                     let (loaded, state) = State::load(&snapshot, family)
                         .with_context(|| format!("failed to load {}", snapshot.display()))?;
                     env = loaded;
-                    Run::Keep(state)
+                    outputs.push(exporter.write(
+                        family,
+                        &env,
+                        &state,
+                        &Report::default(),
+                        self.stats,
+                    )?);
+                    continue;
                 }
             };
-            outputs.push(exporter.family(family, &env, run, &snapshot)?);
+            state.save(&env, &snapshot)?;
+            outputs.push(exporter.write(family, &env, &state, &report, self.stats)?);
         }
         self.save_state(&families, owner)?;
         Ok(outputs)
-    }
-
-    fn output(
-        &self,
-        mode: &'static str,
-        started: Instant,
-        families: Vec<FamilyOutput>,
-        changes: Option<ChangeCounts>,
-    ) -> IncrementalOutput {
-        IncrementalOutput {
-            repository: super::super::repository_name(self.git),
-            path: self.git.repo_path.to_string_lossy().to_string(),
-            mode,
-            time_seconds: started.elapsed().as_secs_f64(),
-            families,
-            changes,
-            state_dir: self.state_dir.to_string_lossy().to_string(),
-        }
     }
 
     fn snapshot_path(&self, family: SupportLang) -> PathBuf {

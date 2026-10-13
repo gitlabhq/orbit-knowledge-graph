@@ -64,7 +64,7 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
             budget_ms: options.budget_seconds * 1000,
             stats: options.stats,
         };
-        let result = match mode {
+        let output = match mode {
             Mode::Full => project.index_all()?,
             Mode::Changed => project.index_changed()?,
         };
@@ -76,7 +76,6 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
             None,
             &db_path,
         )?;
-        let output = result;
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())

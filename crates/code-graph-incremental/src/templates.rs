@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::pipeline::{
-    Canonicalize, Context, Display, Each, Insert, ItemPhase, Link, Observer, Parse, Pipeline,
-    Prepare, ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, State,
+    Canonicalize, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
+    ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, State,
 };
 use crate::sentinel::Sentinel;
 use crate::treesitter::SupportLang;
@@ -20,22 +20,6 @@ pub struct Options {
     pub batch_bytes: usize,
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
-}
-
-pub enum FamilyRun {
-    Index(Arc<orbit_utils::vfs::Vfs<()>>),
-    Reindex {
-        repository: Arc<orbit_utils::vfs::Vfs<()>>,
-        state: State,
-        removed: Vec<String>,
-    },
-    Keep(State),
-}
-
-pub struct FamilyResult {
-    pub report: Report,
-    pub state: State,
-    pub batches: Vec<(String, RecordBatch)>,
 }
 
 pub fn index<'e>(context: Context<'e>) -> Result<Pipeline<'e, Resolved>, Error> {
@@ -56,53 +40,6 @@ pub fn reindex<'e>(
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
         .then(Resolve)
-}
-
-pub fn family(
-    env: &Env,
-    run: FamilyRun,
-    observer: impl Observer + 'static,
-    envelope: &Envelope<'_>,
-    ontology: &ontology::Ontology,
-    include_directories: bool,
-) -> Result<FamilyResult, Error> {
-    let (report, state) = match run {
-        FamilyRun::Index(repository) => {
-            let (context, graph) = index(Context::new(env, repository).observe(observer))?
-                .then(Display)?
-                .finish();
-            (context.report, graph.state)
-        }
-        FamilyRun::Reindex {
-            repository,
-            state,
-            removed,
-        } => {
-            let (context, graph) = reindex(
-                Context::new(env, repository).observe(observer),
-                state,
-                removed,
-            )?
-            .then(Display)?
-            .finish();
-            (context.report, graph.state)
-        }
-        FamilyRun::Keep(state) => (Report::default(), state),
-    };
-    let batches = crate::export::export(
-        &state.trees,
-        &state.edges,
-        &env.lang,
-        &crate::export::ExportPlan::from_config(&env.export_config, ontology, &env.lang)?,
-        envelope,
-        include_directories,
-        &|_| true,
-    )?;
-    Ok(FamilyResult {
-        report,
-        state,
-        batches,
-    })
 }
 
 pub fn repository<E: std::fmt::Display>(

@@ -43,11 +43,7 @@ pub(super) fn split(
     let mut families: BTreeMap<&'static str, (SupportLang, Vec<String>)> = BTreeMap::new();
     let mut unparsed = Vec::new();
     for file in repository.files() {
-        let language = file
-            .keeps()
-            .then(|| SupportLang::from_path(&file.path))
-            .flatten()
-            .filter(|language| language.has_rules());
+        let language = file.keeps().then(|| parsed_language(&file.path)).flatten();
         match language {
             Some(language) => families
                 .entry(language.family())
@@ -74,12 +70,13 @@ pub(super) fn split_removed(
 ) -> BTreeMap<&'static str, Vec<String>> {
     let mut families: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     for path in paths {
-        if let Some(language) = SupportLang::from_path(&path)
-            .filter(|language| language.has_rules())
-            .or(owner)
-        {
+        if let Some(language) = parsed_language(&path).or(owner) {
             families.entry(language.family()).or_default().push(path);
         }
     }
     families
+}
+
+fn parsed_language(path: &str) -> Option<SupportLang> {
+    SupportLang::from_path(path).filter(|language| language.has_rules())
 }

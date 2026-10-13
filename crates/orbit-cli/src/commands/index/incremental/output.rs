@@ -1,62 +1,37 @@
-use std::collections::BTreeMap;
-use std::path::Path;
-
-use anyhow::{Context as _, Result};
-use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
+use anyhow::Result;
+use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use code_graph_incremental::pipeline::{FileStats, Observer, Report};
+use code_graph_incremental::export::ExportPlan;
+use code_graph_incremental::pipeline::{FileStats, Report};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Env, Envelope, Scalar, templates};
+use code_graph_incremental::{Env, Envelope, Scalar, State};
+use orbit_utils::arrow::ArrowUtils;
 use rustc_hash::FxHashSet;
 
 use crate::database::GraphWriter;
 use crate::workspace::GitInfo;
 
-pub(super) type Run = templates::FamilyRun;
-
-#[derive(serde::Serialize)]
-pub(super) struct IncrementalOutput {
-    pub(super) repository: String,
-    pub(super) path: String,
-    pub(super) mode: &'static str,
-    pub(super) time_seconds: f64,
-    pub(super) families: Vec<FamilyOutput>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) changes: Option<ChangeCounts>,
-    pub(super) state_dir: String,
-}
-
 #[derive(serde::Serialize)]
 pub(super) struct FamilyOutput {
-    pub(super) family: String,
-    pub(super) files: usize,
-    pub(super) rows: BTreeMap<String, usize>,
-    pub(super) skipped_files: usize,
-    pub(super) phases: Vec<(String, f64)>,
+    family: String,
+    files: usize,
+    skipped_files: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(super) slowest_files: Vec<SlowFile>,
+    slowest_files: Vec<SlowFile>,
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct SlowFile {
-    pub(super) path: String,
-    pub(super) language: String,
-    pub(super) parse_ms: f64,
-    pub(super) resolve_ms: f64,
-    pub(super) ms: f64,
-}
-
-#[derive(serde::Serialize)]
-pub(super) struct ChangeCounts {
-    pub(super) changed: usize,
-    pub(super) removed: usize,
+struct SlowFile {
+    path: String,
+    language: String,
+    parse_ms: f64,
+    resolve_ms: f64,
 }
 
 pub(super) struct Exporter<'a> {
     git: &'a GitInfo,
     writer: &'a GraphWriter,
     ontology: &'a ontology::Ontology,
-    stats: bool,
     directories: FxHashSet<i64>,
     containment: FxHashSet<(i64, i64)>,
 }
@@ -66,61 +41,48 @@ impl<'a> Exporter<'a> {
         git: &'a GitInfo,
         writer: &'a GraphWriter,
         ontology: &'a ontology::Ontology,
-        stats: bool,
     ) -> Self {
         Self {
             git,
             writer,
             ontology,
-            stats,
             directories: FxHashSet::default(),
             containment: FxHashSet::default(),
         }
     }
 
-    pub(super) fn family(
+    pub(super) fn write(
         &mut self,
         family: SupportLang,
         env: &Env,
-        run: Run,
-        snapshot: &Path,
+        state: &State,
+        report: &Report,
+        stats: bool,
     ) -> Result<FamilyOutput> {
         let envelope = Envelope::new([
             ("project_id", Scalar::Int(self.git.project_id)),
             ("branch", Scalar::Str(&self.git.branch)),
             ("commit_sha", Scalar::Str(&self.git.commit_sha)),
         ]);
-        let result = templates::family(
-            env,
-            run,
-            PhaseLog(family.family()),
+        let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
+        for (table, batch) in code_graph_incremental::export::export(
+            &state.trees,
+            &state.edges,
+            &env.lang,
+            &plan,
             &envelope,
-            self.ontology,
             true,
-        )?;
-        let mut rows = BTreeMap::new();
-        for (table, batch) in result.batches {
+            &|_| true,
+        )? {
             let batch = self.unseen(&table, &batch)?;
-            *rows.entry(table.clone()).or_default() += batch.num_rows();
             self.writer.insert_batch(&table, &batch)?;
         }
-        result
-            .state
-            .save(env, snapshot)
-            .context("failed to save snapshot")?;
         Ok(FamilyOutput {
             family: family.family().to_string(),
-            files: result.state.trees.len(),
-            rows,
-            skipped_files: result.report.skipped.len(),
-            phases: result
-                .report
-                .phases
-                .iter()
-                .map(|phase| (phase.name.clone(), phase.elapsed.as_secs_f64()))
-                .collect(),
-            slowest_files: if self.stats {
-                slowest_files(&result.report, 20)
+            files: state.trees.len(),
+            skipped_files: report.skipped.len(),
+            slowest_files: if stats {
+                slowest_files(report, 20)
             } else {
                 Vec::new()
             },
@@ -160,24 +122,10 @@ impl<'a> Exporter<'a> {
     }
 }
 
-fn int_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int64Array> {
-    batch
-        .column_by_name(name)
-        .and_then(|column| column.as_any().downcast_ref())
-        .with_context(|| format!("export batch has no Int64 column {name}"))
-}
-
-fn string_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a StringArray> {
-    batch
-        .column_by_name(name)
-        .and_then(|column| column.as_any().downcast_ref())
-        .with_context(|| format!("export batch has no Utf8 column {name}"))
-}
-
 fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
-    let mut timings: Vec<(&String, &FileStats)> = report.files.iter().collect();
-    timings.sort_by_key(|(_, timing)| std::cmp::Reverse(timing.parse + timing.resolve));
-    timings
+    let mut files: Vec<(&String, &FileStats)> = report.files.iter().collect();
+    files.sort_by_key(|(_, timing)| std::cmp::Reverse(timing.parse + timing.resolve));
+    files
         .into_iter()
         .take(count)
         .map(|(path, timing)| SlowFile {
@@ -185,23 +133,16 @@ fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
             language: <&str>::from(timing.language).to_owned(),
             parse_ms: timing.parse.as_secs_f64() * 1000.0,
             resolve_ms: timing.resolve.as_secs_f64() * 1000.0,
-            ms: (timing.parse + timing.resolve).as_secs_f64() * 1000.0,
         })
         .collect()
 }
 
-struct PhaseLog(&'static str);
+fn int_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int64Array> {
+    ArrowUtils::get_column_by_name(batch, name)
+        .ok_or_else(|| anyhow::anyhow!("export batch has no Int64 column {name}"))
+}
 
-impl Observer for PhaseLog {
-    fn finished(&mut self, phase: &str, elapsed: std::time::Duration) {
-        tracing::info!("{:<10} {phase} {:.2}s", self.0, elapsed.as_secs_f64());
-    }
-
-    fn skipped(&mut self, killed: &code_graph_incremental::sentinel::Killed) {
-        tracing::warn!("{:<10} skipped {killed}", self.0);
-    }
-
-    fn failed(&mut self, phase: &str, error: &code_graph_incremental::error::Error) {
-        tracing::error!("{:<10} {phase} failed: {error}", self.0);
-    }
+fn string_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a StringArray> {
+    ArrowUtils::get_column_by_name(batch, name)
+        .ok_or_else(|| anyhow::anyhow!("export batch has no Utf8 column {name}"))
 }
