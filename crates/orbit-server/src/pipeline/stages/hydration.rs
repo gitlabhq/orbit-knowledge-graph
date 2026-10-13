@@ -74,7 +74,7 @@ impl HydrationStage {
 
         let options = HydrationCompileOptions {
             dynamic: matches!(
-                ctx.compiled()?.query.query_type,
+                ctx.compiled()?.query.query_type(),
                 QueryType::Neighbors | QueryType::PathFinding
             ),
             path_segment_budget: Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS),

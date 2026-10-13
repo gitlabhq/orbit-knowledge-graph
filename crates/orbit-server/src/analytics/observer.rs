@@ -208,7 +208,9 @@ mod tests {
                 dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
             },
             hydration: query_engine::compiler::HydrationPlan::None,
-            query: query_engine::compiler::Query::new(query_engine::compiler::QueryType::Traversal),
+            query: query_engine::compiler::Query::empty(
+                query_engine::compiler::QueryType::Traversal,
+            ),
             pagination: Default::default(),
             has_virtual_columns: false,
         });

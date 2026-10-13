@@ -189,7 +189,7 @@ pub fn hydration(query: &Query) -> Tree {
             }
         })
         .collect();
-    Tree::node(Operator::Query, query.query_type.to_string(), children)
+    Tree::node(Operator::Query, query.query_type().to_string(), children)
 }
 
 fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<String> {

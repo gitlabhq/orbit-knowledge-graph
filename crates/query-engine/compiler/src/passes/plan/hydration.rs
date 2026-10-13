@@ -79,17 +79,13 @@ pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
             let columns = node
                 .columns
                 .iter()
-                .filter_map(|property| property.column.clone())
+                .filter_map(|property| property.column().map(str::to_string))
                 .collect();
             Ok(HydrationNodePlan {
                 alias: node.alias.clone(),
                 table: table.to_string(),
                 entity: entity.clone(),
-                id_property: node
-                    .id_property
-                    .column
-                    .clone()
-                    .unwrap_or_else(|| node.id_property.name.clone()),
+                id_property: node.id_property.column().to_string(),
                 node_ids: node.node_ids.clone(),
                 columns,
                 path_filter: path_filter(&node.traversal_paths, options),

@@ -130,17 +130,17 @@ fn apply_metrics(
     total_elapsed: Duration,
 ) {
     if let Some(query) = &metrics.query {
-        let query_type: &str = query.query_type.into();
+        let query_type: &str = query.query_type().into();
         q.query_type = query_type.parse().ok();
         q.node_count = Some(query.nodes.len() as i64);
-        q.relationship_count = Some(query.relationships.len() as i64);
+        q.relationship_count = Some(query.relationships().len() as i64);
         q.is_search = Some(query.is_search());
         q.has_cursor = Some(query.cursor.is_some());
-        q.has_order_by = Some(query.order.is_some());
+        q.has_order_by = Some(query.order().is_some());
         q.limit = Some(query.limit as i64);
-        q.group_by_count = Some(query.aggregation.groups.len() as i64);
+        q.group_by_count = Some(query.aggregation().map_or(0, |a| a.groups.len()) as i64);
         q.dynamic_columns = <&str>::from(query.dynamic_columns).parse().ok();
-        q.path_max_depth = query.path.as_ref().map(|p| p.max_depth as i64);
+        q.path_max_depth = query.path().map(|p| p.max_depth as i64);
 
         let mut entities = BTreeSet::new();
         let mut rel_types = BTreeSet::new();
@@ -162,8 +162,8 @@ fn apply_metrics(
                 ops.insert(filter.predicate.op.as_ref().to_owned());
             }
         }
-        for rel in &query.relationships {
-            rel_types.extend(rel.names.iter().cloned());
+        for rel in query.relationships() {
+            rel_types.extend(rel.names().map(str::to_string));
             max_hops = max_hops.max(rel.hops.max as i64);
             variable_hops |= rel.hops.min != rel.hops.max;
             for filter in &rel.filters {
@@ -182,9 +182,9 @@ fn apply_metrics(
         q.filter_ops = Some(to_vec(ops));
         q.agg_functions = Some(
             query
-                .aggregation
-                .metrics
-                .iter()
+                .aggregation()
+                .into_iter()
+                .flat_map(|aggregation| &aggregation.metrics)
                 .map(|metric| metric.function.to_string())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
@@ -234,12 +234,12 @@ fn apply_metrics(
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
 /// Returns `None` for search queries (no relationships).
 fn traversal_shape(query: &query_engine::compiler::Query) -> Option<String> {
-    if query.relationships.is_empty() {
+    if query.relationships().is_empty() {
         return None;
     }
     let mut parts = Vec::new();
-    for rel in &query.relationships {
-        let types = rel.names.join("|");
+    for rel in query.relationships() {
+        let types = rel.names().collect::<Vec<_>>().join("|");
         parts.push(format!(
             "{}-[{}]->{}",
             query.node(rel.from).entity_name,

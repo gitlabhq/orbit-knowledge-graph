@@ -127,7 +127,7 @@ pub fn derive_scope_proofs(
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> HashMap<String, ScopeProof> {
     if !matches!(
-        query.query_type,
+        query.query_type(),
         QueryType::Traversal | QueryType::Aggregation
     ) {
         return HashMap::new();
@@ -170,7 +170,7 @@ fn propagate_scope_proofs(
         return HashMap::new();
     }
     let edges: Vec<_> = query
-        .relationships
+        .relationships()
         .iter()
         .map(|relationship| {
             let (from, to) = match relationship.direction {
@@ -179,12 +179,12 @@ fn propagate_scope_proofs(
             };
             let source = query.node(from);
             let target = query.node(to);
-            let scope_preserving = relationship.names.iter().all(|kind| {
+            let scope_preserving = relationship.names().all(|kind| {
                 model
                     .variant_scope(kind, &source.entity_name, &target.entity_name)
                     .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
             });
-            let propagates_to_source = relationship.names.iter().all(|kind| {
+            let propagates_to_source = relationship.names().all(|kind| {
                 model
                     .variant_scope(kind, &source.entity_name, &target.entity_name)
                     .is_some_and(|scope| scope.propagates_to_source(kind, &source.entity_name))

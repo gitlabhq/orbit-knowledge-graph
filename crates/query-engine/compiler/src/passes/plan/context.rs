@@ -48,7 +48,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     }
 
     pub fn aggregate(&self) -> bool {
-        self.query.query_type == QueryType::Aggregation
+        self.query.query_type() == QueryType::Aggregation
     }
 
     pub fn node(&self, alias: &str) -> Result<&NodePlan> {

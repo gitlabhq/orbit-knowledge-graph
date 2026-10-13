@@ -105,7 +105,7 @@ pub fn generate_hydration_plan<S>(
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
-    match query.query_type {
+    match query.query_type() {
         QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
             HydrationPlan::Dynamic(build_dynamic_specs(query, model, security_ctx))
@@ -114,7 +114,7 @@ pub fn generate_hydration_plan<S>(
             let mut templates = build_static_templates(query, emitted, model);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
-            if query.query_type == QueryType::Aggregation {
+            if query.query_type() == QueryType::Aggregation {
                 templates.retain(|t| !t.virtual_columns.is_empty());
             }
 
@@ -651,7 +651,7 @@ mod tests {
     use crate::testkit::{admin_ctx, non_admin_ctx};
 
     fn neighbors_query(mode: DynamicColumnMode) -> Query {
-        let mut query = Query::new(QueryType::Neighbors);
+        let mut query = Query::empty(QueryType::Neighbors);
         query.dynamic_columns = mode;
         query
     }

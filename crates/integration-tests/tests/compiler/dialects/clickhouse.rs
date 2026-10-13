@@ -1666,27 +1666,15 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
     };
 
     let rel_types = |count: usize| {
-        let kinds = &[
-            "MEMBER_OF",
-            "AUTHORED",
-            "CONTAINS",
-            "IN_PROJECT",
-            "REVIEWER",
-            "ASSIGNED",
-            "HAS_HEAD_PIPELINE",
-            "ON_BRANCH",
-            "DEFINES",
-            "CALLS",
-            "EXTENDS",
-        ][..count];
+        let kinds = vec!["AUTHORED"; count];
         let quoted: Vec<String> = kinds.iter().map(|k| format!("\"{k}\"")).collect();
         (
             format!(
-                r#"{{"query_type":"traversal","nodes":[{{"id":"a","entity":"User","node_ids":[1]}},{{"id":"b","entity":"Project"}}],"relationships":[{{"type":[{}],"from":"a","to":"b"}}]}}"#,
+                r#"{{"query_type":"traversal","nodes":[{{"id":"a","entity":"User","node_ids":[1]}},{{"id":"b","entity":"MergeRequest"}}],"relationships":[{{"type":[{}],"from":"a","to":"b"}}]}}"#,
                 quoted.join(",")
             ),
             format!(
-                "MATCH (a:User {{id: 1}})-[:{}]->(b:Project) RETURN a, b",
+                "MATCH (a:User {{id: 1}})-[:{}]->(b:MergeRequest) RETURN a, b",
                 kinds.join("|")
             ),
         )
@@ -1935,7 +1923,7 @@ fn orbit_query_optional_clauses_preserve_options() {
                     compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
                 let bound = compiled.query;
                 assert_eq!(bound.include_debug_sql, !debug.is_empty(), "{query}");
-                assert_eq!(bound.order.is_some(), !order.is_empty(), "{query}");
+                assert_eq!(bound.order().is_some(), !order.is_empty(), "{query}");
                 assert_eq!(bound.cursor.as_ref().map(|c| c.page_size), page, "{query}");
                 if let Some(rows) = rows {
                     assert_eq!(bound.limit, rows, "{query}");

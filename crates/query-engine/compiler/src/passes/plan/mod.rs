@@ -221,7 +221,7 @@ where
         denormalized: HashMap::new(),
         node_edge_mappings: HashMap::new(),
     };
-    match query.query_type {
+    match query.query_type() {
         QueryType::Traversal | QueryType::Aggregation => {
             edge_chain::plan(context, use_fk_elision, table_scans)
         }

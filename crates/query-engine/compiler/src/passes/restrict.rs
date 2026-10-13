@@ -42,7 +42,7 @@ fn enforce_aggregation_scope(
     }
 
     let edges: Vec<(&str, &str)> = query
-        .relationships
+        .relationships()
         .iter()
         .map(|relationship| {
             (
@@ -50,7 +50,7 @@ fn enforce_aggregation_scope(
                 query.node(relationship.to).alias.as_str(),
             )
         })
-        .chain(query.path.iter().map(|path| {
+        .chain(query.path().into_iter().map(|path| {
             (
                 query.node(path.from).alias.as_str(),
                 query.node(path.to).alias.as_str(),
@@ -110,7 +110,7 @@ fn enforce_traversal_path_filters(
         }
     }
 
-    for (i, rel) in query.relationships.iter().enumerate() {
+    for (i, rel) in query.relationships().iter().enumerate() {
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
         for tp_filter in rel
             .filters
@@ -212,7 +212,7 @@ pub fn restrict(
         return Ok(scope_proofs);
     }
 
-    if matches!(query.query_type, QueryType::Aggregation) {
+    if matches!(query.query_type(), QueryType::Aggregation) {
         enforce_aggregation_scope(query, model)?;
     }
 
@@ -232,7 +232,7 @@ pub fn restrict(
         node.columns.retain(|property| !property.admin_only);
     }
 
-    if let Some(order) = &query.order
+    if let Some(order) = query.order()
         && order.property.admin_only
     {
         let entity = entity_of(query, order.node);
@@ -242,7 +242,11 @@ pub fn restrict(
         )));
     }
 
-    for agg in &query.aggregation.metrics {
+    for agg in query
+        .aggregation()
+        .into_iter()
+        .flat_map(|aggregation| &aggregation.metrics)
+    {
         let Some(property) = &agg.property else {
             continue;
         };
@@ -255,7 +259,11 @@ pub fn restrict(
         }
     }
 
-    for group in &query.aggregation.groups {
+    for group in query
+        .aggregation()
+        .into_iter()
+        .flat_map(|aggregation| &aggregation.groups)
+    {
         let Some(property) = group.property() else {
             continue;
         };
@@ -267,7 +275,7 @@ pub fn restrict(
             )));
         }
     }
-    for comparison in &query.comparisons {
+    for comparison in query.comparisons() {
         for operand in [&comparison.left, &comparison.right] {
             if operand.property.admin_only {
                 let entity = entity_of(query, operand.node);

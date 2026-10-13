@@ -15,8 +15,7 @@ where
     let query = context.query;
     let model = context.model;
     let config = query
-        .neighbors
-        .as_ref()
+        .neighbors()
         .ok_or_else(|| crate::error::QueryError::Lowering("neighbors config missing".into()))?;
 
     let [center_node] = query.nodes.as_slice() else {
@@ -34,20 +33,21 @@ where
     let has_non_denorm = has_non_denorm_filters(&center_np.filters, &context.denormalized)
         || center_np.id_range.is_some();
 
-    let mut edge = EdgeTableConfig::from_model(model, &config.relationship_names);
+    let relationship_names: Vec<_> = config
+        .routes
+        .iter()
+        .map(|route| route.name.clone())
+        .collect();
+    let mut edge = EdgeTableConfig::from_model(model, &relationship_names);
     {
-        let relationships: Vec<&str> = if config.relationship_names.is_empty() {
+        let relationships: Vec<&str> = if relationship_names.is_empty() {
             model
                 .graph()
                 .relationships()
                 .map(|relationship| relationship.name.as_str())
                 .collect()
         } else {
-            config
-                .relationship_names
-                .iter()
-                .map(String::as_str)
-                .collect()
+            relationship_names.iter().map(String::as_str).collect()
         };
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = relationships

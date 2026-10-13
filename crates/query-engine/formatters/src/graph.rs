@@ -171,8 +171,13 @@ impl GraphFormatter {
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
-        let aggregations = Some(&output.compiled.query.aggregation.metrics);
-        let group_by = &output.compiled.query.aggregation.groups;
+        let aggregation = output
+            .compiled
+            .query
+            .aggregation()
+            .expect("aggregation query");
+        let aggregations = Some(&aggregation.metrics);
+        let group_by = &aggregation.groups;
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -533,12 +538,7 @@ impl GraphFormatter {
         edges: &mut Vec<GraphEdge>,
         edge_set: &mut HashSet<EdgeKey>,
     ) {
-        let direction = output
-            .compiled
-            .query
-            .neighbors
-            .as_ref()
-            .map(|n| n.direction);
+        let direction = output.compiled.query.neighbors().map(|n| n.direction);
 
         for row in result.authorized_rows() {
             let mut center: Option<(String, i64)> = None;

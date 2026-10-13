@@ -1519,6 +1519,7 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "compiler-pipeline-macros",
  "jsonschema",
  "ontology",
@@ -1536,6 +1537,7 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

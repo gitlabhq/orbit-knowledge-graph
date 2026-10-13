@@ -156,14 +156,15 @@ fn append_readback_columns(q: &mut Select, order_by: &[OrderExpr]) {
 /// keys and never are.
 fn nullable_flags(query: &Query, key_count: usize) -> Vec<bool> {
     let mut flags = vec![false; key_count];
-    match query.query_type {
+    match query.query_type() {
         QueryType::Aggregation => {
             let mut idx = 0;
-            if let Some(sort) = &query.aggregation.sort {
-                let sorts_on_count =
-                    query.aggregation.metrics.iter().any(|a| {
-                        a.alias == sort.column && matches!(a.function, AggFunction::Count)
-                    });
+            let aggregation = query.aggregation().expect("aggregation query");
+            if let Some(sort) = &aggregation.sort {
+                let sorts_on_count = aggregation
+                    .metrics
+                    .iter()
+                    .any(|a| a.alias == sort.column && matches!(a.function, AggFunction::Count));
                 if let Some(f) = flags.first_mut() {
                     *f = !sorts_on_count;
                 }
@@ -175,7 +176,7 @@ fn nullable_flags(query: &Query, key_count: usize) -> Vec<bool> {
         }
         QueryType::PathFinding => {}
         _ => {
-            if query.order.is_some()
+            if query.order().is_some()
                 && let Some(f) = flags.first_mut()
             {
                 *f = true;

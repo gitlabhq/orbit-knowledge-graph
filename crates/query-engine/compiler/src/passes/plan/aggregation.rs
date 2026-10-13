@@ -29,7 +29,7 @@ pub struct AggregationPlan {
 
 impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
-        let aggregation = &self.query.aggregation;
+        let aggregation = self.query.aggregation().expect("aggregation query");
         let mut source = &execution.source;
         let condition = loop {
             match source {
@@ -61,10 +61,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                 } => {
                     let node = &self.query.node(*node).alias;
                     let group = Group {
-                        column: Column::new(
-                            node,
-                            property.column.as_deref().unwrap_or(&property.name),
-                        ),
+                        column: Column::new(node, property.column()),
                         truncate: *truncate,
                     };
                     plan.group_outputs.push((group.clone(), alias.clone()));
@@ -96,7 +93,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                         .nodes
                         .get(node)
                         .is_some_and(|node| node.hydration == HydrationStrategy::Skip)))
-                .then(|| Column::new(node, property.column.as_deref().unwrap_or(&property.name)))
+                .then(|| Column::new(node, property.column()))
             });
             plan.measures.push(Measure {
                 function: metric.function,

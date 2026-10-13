@@ -399,7 +399,7 @@ where
 
 fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query = require(ctx.query().clone(), "query")?;
-    let query_type: &str = query.query_type.into();
+    let query_type: &str = query.query_type().into();
     let mut config = settings::resolve(query_type);
 
     let ast = require(ctx.ast().clone(), "ast")?;
@@ -426,7 +426,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.
-    if query.query_type == QueryType::PathFinding {
+    if query.query_type() == QueryType::PathFinding {
         if config.max_execution_time.is_none()
             || config.max_execution_time > Some(PATHFINDING_MAX_EXECUTION_TIME)
         {
@@ -453,7 +453,7 @@ fn codegen(
     let query = require(ctx.query().clone(), "query")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::codegen(&ast, result_context, query_config)?;
-    let query_type = query.query_type;
+    let query_type = query.query_type();
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
@@ -475,7 +475,7 @@ fn duckdb_codegen(
     let query = require(ctx.query().clone(), "query")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::duckdb::codegen(&ast, result_context)?;
-    let query_type = query.query_type;
+    let query_type = query.query_type();
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,

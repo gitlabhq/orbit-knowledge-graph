@@ -71,17 +71,11 @@ pub fn emit_neighbors(
         dedup_subquery(alias, table, select, scan_where)
     }
 
-    let order_by = match &query.order {
+    let order_by = match query.order() {
         Some(ob) => vec![if ob.direction == OrderDirection::Desc {
-            OrderExpr::desc(Expr::col(
-                &query.node(ob.node).alias,
-                ob.property.column.as_deref().unwrap_or(&ob.property.name),
-            ))
+            OrderExpr::desc(Expr::col(&query.node(ob.node).alias, ob.property.column()))
         } else {
-            OrderExpr::asc(Expr::col(
-                &query.node(ob.node).alias,
-                ob.property.column.as_deref().unwrap_or(&ob.property.name),
-            ))
+            OrderExpr::asc(Expr::col(&query.node(ob.node).alias, ob.property.column()))
         }],
         None => vec![],
     };

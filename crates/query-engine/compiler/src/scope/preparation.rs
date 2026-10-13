@@ -12,7 +12,7 @@ pub fn prepare(
 ) -> QueryScope {
     let mut scope = QueryScope {
         relationships: query
-            .relationships
+            .relationships()
             .iter()
             .map(|relationship| relationship_proof(query, relationship, &proofs, model))
             .collect(),
@@ -20,18 +20,22 @@ pub fn prepare(
         requirements: Vec::new(),
         table_scans: Default::default(),
     };
-    if query.query_type != QueryType::Aggregation {
+    if query.query_type() != QueryType::Aggregation {
         return scope;
     }
     let non_fk: Vec<_> = query
-        .relationships
+        .relationships()
         .iter()
         .enumerate()
         .filter(|(_, relationship)| {
             let from = query.node(relationship.from);
             let to = query.node(relationship.to);
             model
-                .foreign_key(&relationship.names, &from.entity_name, &to.entity_name)
+                .foreign_key(
+                    &relationship.names_vec(),
+                    &from.entity_name,
+                    &to.entity_name,
+                )
                 .is_none()
         })
         .collect();
@@ -43,8 +47,9 @@ pub fn prepare(
     };
     let from = query.node(relationship.from);
     let to = query.node(relationship.to);
-    let scope_preserving = !relationship.names.is_empty()
-        && relationship.names.iter().all(|kind| {
+    let names = relationship.names_vec();
+    let scope_preserving = !names.is_empty()
+        && names.iter().all(|kind| {
             model
                 .variant_scope(kind, &from.entity_name, &to.entity_name)
                 .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
@@ -71,7 +76,7 @@ pub fn prepare(
     scope.nodes.insert(target_alias, target_proof);
     scope.requirements.push(proof);
     scope.relationships.remove(index);
-    query.relationships.remove(index);
+    query.remove_relationship(index);
     query.remove_node(anchor);
     scope
 }
@@ -89,7 +94,7 @@ fn relationship_proof(
     if from_proof == to_proof {
         return from_proof.cloned();
     }
-    relationship.names.iter().find_map(|kind| {
+    relationship.names().find_map(|kind| {
         match model.variant_scope(kind, &from.entity_name, &to.entity_name) {
             Some(ontology::EdgeVariantScope::PruneToSource) => from_proof,
             Some(ontology::EdgeVariantScope::PruneToTarget) => to_proof,
@@ -106,24 +111,26 @@ fn scope_only_container(query: &Query, node: crate::query::NodeId) -> bool {
         && node_ref.id_range.is_none()
         && node_ref.node_ids.len() <= 1
         && query
-            .relationships
+            .relationships()
             .iter()
             .filter(|relationship| relationship.from == node || relationship.to == node)
             .count()
             == 1
         && !query
-            .aggregation
+            .aggregation()
+            .expect("aggregation query")
             .groups
             .iter()
             .any(|group| group.node() == node)
         && !query
-            .aggregation
+            .aggregation()
+            .expect("aggregation query")
             .metrics
             .iter()
             .any(|metric| metric.target == node)
-        && !query.order.as_ref().is_some_and(|order| order.node == node)
+        && !query.order().is_some_and(|order| order.node == node)
         && !query
-            .comparisons
+            .comparisons()
             .iter()
             .any(|comparison| comparison.left.node == node || comparison.right.node == node)
 }

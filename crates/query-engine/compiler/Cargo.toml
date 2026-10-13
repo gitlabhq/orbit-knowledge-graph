@@ -9,6 +9,7 @@ orbit-server-config = { path = "../../orbit-server-config" }
 orbit-utils = { path = "../../utils" }
 orbit-versions = { path = "../../orbit-versions" }
 base64 = { workspace = true }
+chrono = { workspace = true }
 ontology = { path = "../../ontology" }
 query-data-model = { path = "../../query-data-model" }
 compiler-pipeline-macros = { path = "../compiler-pipeline-macros" }
@@ -21,6 +22,7 @@ pest_derive = { workspace = true }
 pest_consume = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }
 jsonschema = { workspace = true }
 
 [build-dependencies]

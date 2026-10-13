@@ -109,7 +109,7 @@ pub fn enforce_lowered_return<S>(
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
-    let mut ctx = ResultContext::new().with_query_type(query.query_type);
+    let mut ctx = ResultContext::new().with_query_type(query.query_type());
     ctx.entity_auth.clone_from(model.entity_auth());
     enforce_lowered_return_with(ast, query, metadata, &mut ctx, |entity| {
         query
@@ -130,7 +130,7 @@ pub fn enforce_local_return<S>(
     metadata: &LoweredMetadata,
     _model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
-    let mut ctx = ResultContext::new().with_query_type(query.query_type);
+    let mut ctx = ResultContext::new().with_query_type(query.query_type());
     enforce_lowered_return_with(ast, query, metadata, &mut ctx, |_| {
         DEFAULT_PRIMARY_KEY.to_string()
     })?;
@@ -144,9 +144,10 @@ fn enforce_lowered_return_with<S>(
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
-    let selectable_nodes: HashSet<&str> = match query.query_type {
+    let selectable_nodes: HashSet<&str> = match query.query_type() {
         QueryType::Aggregation => query
-            .aggregation
+            .aggregation()
+            .expect("aggregation query")
             .groups
             .iter()
             .filter(|&group| matches!(group, crate::query::Group::Node { .. }))
@@ -170,7 +171,7 @@ fn enforce_lowered_return_with<S>(
     )?;
 
     if matches!(
-        query.query_type,
+        query.query_type(),
         QueryType::Traversal | QueryType::Aggregation
     ) {
         use crate::constants::{
@@ -349,13 +350,13 @@ fn enforce_return_columns(
             if !q.selects_alias(&name) {
                 q.select.push(SelectExpr::new(identity.clone(), name));
             }
-            ensure_in_group_by(q, query.query_type, identity.clone());
+            ensure_in_group_by(q, query.query_type(), identity.clone());
         }
         if !q.selects_alias(&id_col) {
             q.select
                 .push(SelectExpr::new(authorization_id.clone(), &id_col));
         }
-        ensure_in_group_by(q, query.query_type, authorization_id);
+        ensure_in_group_by(q, query.query_type(), authorization_id);
         let type_col = redaction_type_column(&node.alias);
         if !q.selects_alias(&type_col) {
             let position = q
@@ -366,7 +367,7 @@ fn enforce_return_columns(
             q.select
                 .insert(position, SelectExpr::new(Expr::string(entity), type_col));
         }
-        if query.query_type != QueryType::Aggregation
+        if query.query_type() != QueryType::Aggregation
             && node.has_traversal_path
             && let Some(path) = traversal_path
         {

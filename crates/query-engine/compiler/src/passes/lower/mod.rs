@@ -142,12 +142,13 @@ impl EmitOutput {
                     table_alias: None,
                     traversal_path: None,
                 },
-                _ if query.query_type == QueryType::Aggregation
+                _ if query.query_type() == QueryType::Aggregation
                     && plan.nodes.get(&source.0).is_some_and(|holder| {
                         holder.hydration == super::plan::HydrationStrategy::FilterOnly
                     })
                     && !query
-                        .aggregation
+                        .aggregation()
+                        .expect("aggregation query")
                         .groups
                         .iter()
                         .any(|group| group.node() == node.id) =>
@@ -217,7 +218,7 @@ where
         QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, query.limit),
     }?;
 
-    if !query.comparisons.is_empty() {
+    if !query.comparisons().is_empty() {
         let column = |alias: &str, property: &str| -> Result<Expr> {
             nodes
                 .get(alias)
@@ -227,28 +228,18 @@ where
                 .property(property)
         };
         let predicates = query
-            .comparisons
+            .comparisons()
             .iter()
             .map(|comparison| {
                 sql::comparison(
                     column(
                         &query.node(comparison.left.node).alias,
-                        comparison
-                            .left
-                            .property
-                            .column
-                            .as_deref()
-                            .unwrap_or(&comparison.left.property.name),
+                        comparison.left.property.column(),
                     )?,
                     comparison.op,
                     column(
                         &query.node(comparison.right.node).alias,
-                        comparison
-                            .right
-                            .property
-                            .column
-                            .as_deref()
-                            .unwrap_or(&comparison.right.property.name),
+                        comparison.right.property.column(),
                     )?,
                 )
             })
@@ -310,7 +301,7 @@ where
                 )),
             ],
         },
-        QueryPlan::Traversal(_) if query.relationships.is_empty() => query
+        QueryPlan::Traversal(_) if query.relationships().is_empty() => query
             .nodes
             .iter()
             .filter_map(|node| nodes.get(&node.alias))

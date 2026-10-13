@@ -10,8 +10,7 @@ where
     let query = context.query;
     let model = context.model;
     let path = query
-        .path
-        .as_ref()
+        .path()
         .ok_or_else(|| crate::error::QueryError::Lowering("path config missing".into()))?;
 
     let start_node = find_node(query, path.from);
@@ -23,10 +22,15 @@ where
     let end_np = context.resolve_node(end_node)?;
 
     let scoped_by_tp = start_np.has_traversal_path && end_np.has_traversal_path;
-    let edge = EdgeTableConfig::from_model(model, &path.relationship_names);
+    let relationship_names: Vec<_> = if path.wildcard {
+        vec!["*".into()]
+    } else {
+        path.routes.iter().map(|route| route.name.clone()).collect()
+    };
+    let edge = EdgeTableConfig::from_model(model, &relationship_names);
 
     let endpoint_kinds = |entity: &str, source: bool| {
-        if !crate::query::is_wildcard(&path.relationship_names) {
+        if !path.wildcard {
             return None;
         }
         let relationships = if source {

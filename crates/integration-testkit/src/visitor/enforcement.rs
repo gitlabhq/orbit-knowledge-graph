@@ -144,7 +144,7 @@ impl QueryRequirements for Input {
 impl QueryRequirements for Query {
     fn requirements(&self) -> HashSet<Requirement> {
         let mut reqs = HashSet::new();
-        if self.order.is_some() {
+        if self.order().is_some() {
             reqs.insert(Requirement::OrderBy);
         }
         for node in &self.nodes {
@@ -154,12 +154,12 @@ impl QueryRequirements for Query {
                 });
             }
         }
-        if self.query_type != QueryType::PathFinding
+        if self.query_type() != QueryType::PathFinding
             && self.nodes.iter().any(|node| !node.node_ids.is_empty())
         {
             reqs.insert(Requirement::NodeIds);
         }
-        match self.query_type {
+        match self.query_type() {
             QueryType::PathFinding => {
                 reqs.insert(Requirement::PathFinding);
             }
@@ -175,16 +175,19 @@ impl QueryRequirements for Query {
             }
             QueryType::Hydration => {}
         }
-        if self.query_type == QueryType::Traversal {
-            for relationship in &self.relationships {
-                for name in &relationship.names {
+        if self.query_type() == QueryType::Traversal {
+            for relationship in self.relationships() {
+                for name in relationship.names() {
                     reqs.insert(Requirement::Relationship {
-                        edge_type: name.clone(),
+                        edge_type: name.to_string(),
                     });
                 }
             }
         }
-        if self.aggregation.sort.is_some() {
+        if self
+            .aggregation()
+            .is_some_and(|aggregation| aggregation.sort.is_some())
+        {
             reqs.insert(Requirement::AggregationSort);
         }
         if self.cursor.is_some() {
@@ -194,7 +197,7 @@ impl QueryRequirements for Query {
     }
 
     fn query_type(&self) -> QueryType {
-        self.query_type
+        self.query_type()
     }
 
     fn is_search(&self) -> bool {
