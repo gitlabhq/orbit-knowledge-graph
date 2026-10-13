@@ -413,7 +413,9 @@ fn invalid_gitlab_url_warns_and_serves_the_embedded_skill() {
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
-    assert!(stderr(&output).contains("invalid Orbit API base URL"));
+    assert!(stderr(&output).contains("GITLAB_URL must be an absolute https URL"));
+    assert!(!stderr(&output).contains("plaintext"));
+    assert!(!stderr(&output).contains("builder error"));
     assert!(!stderr(&output).contains("no GitLab credential"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
 }

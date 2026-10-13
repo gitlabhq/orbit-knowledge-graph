@@ -46,14 +46,14 @@ impl OrbitClient {
     }
 
     /// Resolves credentials like `from_env`, but a missing credential is not an
-    /// error: it returns `None` so callers serve the embedded local skill.
+    /// error: it returns `None` so callers serve the embedded local skill. An
+    /// invalid base URL is still an error so callers can say why they fall back.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
-        let Ok(endpoint) =
-            resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper)
-        else {
-            return Ok(None);
-        };
-        Self::new(endpoint).map(Some)
+        match resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper) {
+            Ok(endpoint) => Self::new(endpoint).map(Some),
+            Err(error) if error.is::<MissingCredential>() => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn new(endpoint: ResolvedEndpoint) -> Result<Self, RemoteError> {
@@ -241,6 +241,7 @@ fn resolve_endpoint(
         non_empty("ORBIT_AUTH_HEADER_NAME"),
         non_empty("ORBIT_AUTH_HEADER_VALUE"),
     ) {
+        validate_base_url("ORBIT_API_BASE_URL", &base_url)?;
         return Ok(ResolvedEndpoint {
             base_url,
             header_name,
@@ -251,6 +252,7 @@ fn resolve_endpoint(
     if let Some(token) = non_empty("GITLAB_TOKEN") {
         let base_url =
             non_empty("GITLAB_URL").unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
+        validate_base_url("GITLAB_URL", &base_url)?;
         if !base_url.starts_with("https://") {
             eprintln!(
                 "warning: GITLAB_URL is not https ({base_url}); the token will be sent in plaintext"
@@ -267,13 +269,33 @@ fn resolve_endpoint(
         return Ok(endpoint);
     }
 
-    bail!(
-        "no Orbit credential found\n\n\
+    Err(MissingCredential.into())
+}
+
+fn validate_base_url(variable: &str, base_url: &str) -> anyhow::Result<()> {
+    let is_absolute_http = reqwest::Url::parse(base_url)
+        .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some());
+    if !is_absolute_http {
+        bail!("{variable} must be an absolute https URL (got `{base_url}`)");
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct MissingCredential;
+
+impl std::fmt::Display for MissingCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "no Orbit credential found\n\n\
          Set ORBIT_API_BASE_URL, ORBIT_AUTH_HEADER_NAME, and ORBIT_AUTH_HEADER_VALUE,\n\
          set GITLAB_TOKEN with an optional GITLAB_URL, or run `glab auth login` so the\n\
-         credential-helper can provide a token. Running through `glab orbit` works too."
-    );
+         credential-helper can provide a token. Running through `glab orbit` works too.",
+        )
+    }
 }
+
+impl std::error::Error for MissingCredential {}
 
 fn resolve_via_credential_helper() -> Option<ResolvedEndpoint> {
     static CACHED: OnceLock<Option<ResolvedEndpoint>> = OnceLock::new();
@@ -444,6 +466,36 @@ mod tests {
     fn no_credential_is_a_clear_error() {
         let result = resolve_endpoint(env_from(&[]), || None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn scheme_less_gitlab_url_is_rejected_with_a_clear_error() {
+        for url in ["gitlab.com", "gitlab.com:8080", "ftp://gitlab.com"] {
+            let error = resolve_endpoint(
+                env_from(&[("GITLAB_TOKEN", "t"), ("GITLAB_URL", url)]),
+                || None,
+            )
+            .err()
+            .unwrap();
+            assert!(!error.is::<MissingCredential>());
+            assert_eq!(
+                error.to_string(),
+                format!("GITLAB_URL must be an absolute https URL (got `{url}`)")
+            );
+        }
+    }
+
+    #[test]
+    fn http_gitlab_url_is_accepted() {
+        let endpoint = resolve_endpoint(
+            env_from(&[
+                ("GITLAB_TOKEN", "t"),
+                ("GITLAB_URL", "http://localhost:3000"),
+            ]),
+            || None,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(endpoint.base_url, "http://localhost:3000");
     }
 
     #[test]

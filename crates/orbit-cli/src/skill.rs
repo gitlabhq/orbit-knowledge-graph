@@ -155,11 +155,17 @@ fn is_skill_name(value: &str) -> bool {
 }
 
 fn skill_client() -> Result<Option<OrbitClient>> {
-    let client = OrbitClient::from_skill_env()?;
-    if client.is_none() {
-        eprintln!("warning: no GitLab credential found; using the embedded local skill");
+    match OrbitClient::from_skill_env() {
+        Ok(Some(client)) => Ok(Some(client)),
+        Ok(None) => {
+            eprintln!("warning: no GitLab credential found; using the embedded local skill");
+            Ok(None)
+        }
+        Err(error) => {
+            eprintln!("warning: {error}; using the embedded local skill");
+            Ok(None)
+        }
     }
-    Ok(client)
 }
 
 async fn list_skills() -> Result<()> {
