@@ -5,6 +5,92 @@ use integration_testkit::cli::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn checkout_revision_journey_through_cli_and_mcp() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let first = git(&repo.path, &["rev-parse", "HEAD"]);
+    let command = |args: &[&str]| {
+        let output = orbit_cmd()
+            .args(args)
+            .current_dir(&repo.path)
+            .env("ORBIT_DATA_DIR", data.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    command(&["index", "."]);
+    git(&repo.path, &["switch", "-c", "feature"]);
+    std::fs::write(
+        repo.path.join("feature.py"),
+        "def revision_feature(): return 42\n",
+    )
+    .unwrap();
+    git(&repo.path, &["add", "feature.py"]);
+    git(&repo.path, &["commit", "-m", "add feature"]);
+    let second = git(&repo.path, &["rev-parse", "HEAD"]);
+    command(&["index", "."]);
+    command(&["index", "."]);
+
+    let listed: Value = serde_json::from_str(&command(&["list", "-F", "json"])).unwrap();
+    assert_eq!(rows(&listed).len(), 2);
+    for commit in [&first, &second] {
+        assert_eq!(
+            rows_where(&listed, "commit_sha", commit)[0]["status"],
+            "indexed"
+        );
+    }
+    let all: Value = serde_json::from_str(&command(&[
+        "sql",
+        "-F",
+        "json",
+        "SELECT commit_sha, count(*) AS files FROM gl_file GROUP BY commit_sha ORDER BY files",
+    ]))
+    .unwrap();
+    assert_eq!(
+        all,
+        json!([{"commit_sha": first, "files": 2}, {"commit_sha": second, "files": 3}])
+    );
+
+    for (commit, files) in [(&second, 3), (&first, 2)] {
+        git(&repo.path, &["checkout", "--detach", commit]);
+        let scoped: Value = serde_json::from_str(&command(&[
+            "sql",
+            "--repo",
+            ".",
+            "-F",
+            "json",
+            "SELECT count(*) AS files FROM gl_file",
+        ]))
+        .unwrap();
+        assert_eq!(scoped, json!([{"files": files}]));
+        assert!(command(&["grep", "hello"]).contains("src/main.py"));
+        assert!(command(&["context", "src/main.py"]).contains("hello"));
+        assert!(command(&["repo-map", "overview"]).contains(commit.as_str()));
+    }
+    let responses = mcp_roundtrip(
+        data.path(),
+        &[
+            mcp_tool_call(
+                1,
+                "run_sql",
+                json!({"sql": ["SELECT count(*) AS files FROM gl_file"]}),
+            ),
+            mcp_tool_call(2, "get_graph_schema", json!({})),
+        ],
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(mcp_tool_text(&responses[0])).unwrap(),
+        json!([[{"files": 5}]])
+    );
+    assert!(mcp_tool_text(&responses[1]).contains("gl_file"));
+}
+
 fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path::PathBuf {
     let path = data_dir.join(format!("{name}.duckdb"));
     let graph = duckdb_client::DuckDbClient::open(&path).unwrap();
