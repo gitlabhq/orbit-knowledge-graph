@@ -11,77 +11,14 @@ use super::rank::{is_code, is_test, names, ranked};
 use super::scan::Hit;
 use super::term::{Term, matcher};
 
-/// Graph context rides on rg's context-line form (`path-N-`), so every line keeps its path.
+/// Graph context rides on rg's context-line form (`N-`), marked so it reads as a label.
 const NOTE: &str = "» ";
 /// A query that names a definition gets that definition's source first, so `head` keeps it.
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
 const LOOKUP_LINES: usize = 80;
-/// Rows print each file once: the first few matching lines of a definition in full, the rest as
-/// line numbers.
-const SEP: &str = " │ ";
-const FULL_LINES: usize = 3;
+/// Matched lines are cut here, as rg does with `-M`, unless `-M` sets another limit.
 const LINE_CHARS: usize = 160;
 const EDITED_MARK: &str = " (edited since index)";
-
-fn located(lines: &[&Hit], max_columns: Option<usize>) -> String {
-    let mut parts: Vec<String> = lines
-        .iter()
-        .take(FULL_LINES)
-        .map(|h| match max_columns {
-            Some(max) if h.text.len() > max => format!(":{} [Omitted long line]", h.line),
-            None if h.text.chars().count() > LINE_CHARS => format!(
-                ":{} {}…",
-                h.line,
-                h.text.chars().take(LINE_CHARS).collect::<String>()
-            ),
-            _ => format!(":{} {}", h.line, h.text),
-        })
-        .collect();
-    let rest: Vec<usize> = lines.iter().skip(FULL_LINES).map(|h| h.line).collect();
-    if !rest.is_empty() {
-        parts.push(runs(&rest));
-    }
-    parts.join(SEP)
-}
-
-fn runs(lines: &[usize]) -> String {
-    let mut parts = Vec::new();
-    let mut index = 0;
-    while index < lines.len() {
-        let mut end = index;
-        while end + 1 < lines.len() && lines[end + 1] == lines[end] + 1 {
-            end += 1;
-        }
-        parts.push(match end > index {
-            true => format!(":{}-{}", lines[index], lines[end]),
-            false => format!(":{}", lines[index]),
-        });
-        index = end + 1;
-    }
-    parts.join(" ")
-}
-
-fn code_row(hits: &[&Hit], connections: &Connections, max_columns: Option<usize>) -> String {
-    let mut groups: Vec<(Option<&Def>, Vec<&Hit>)> = Vec::new();
-    for hit in hits {
-        match groups.last_mut() {
-            Some((def, list)) if *def == hit.def.as_ref() => list.push(hit),
-            _ => groups.push((hit.def.as_ref(), vec![hit])),
-        }
-    }
-    groups
-        .iter()
-        .map(|(def, list)| {
-            let label = def.map(|d| format!("{} ", definition_note(d, connections)));
-            format!(
-                "{}{}",
-                label.unwrap_or_default(),
-                located(list, max_columns)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(SEP)
-}
 
 fn definition_note(def: &Def, connections: &Connections) -> String {
     let span = match def.end > def.start {
@@ -184,50 +121,45 @@ pub(super) fn render(
         out.push_str(body);
         out.push('\n');
     }
-    if options.before == 0 && options.after == 0 {
-        for (file, list) in &rows {
-            let mark = if edited.contains(file) {
-                EDITED_MARK
-            } else {
-                ""
-            };
-            let row = match is_code(file) {
-                true => code_row(list, connections, options.max_columns),
-                false => located(list, options.max_columns),
-            };
-            out.push_str(&format!("  {file}{mark}{SEP}{row}\n"));
+    // rg's heading layout: each file's path once, then `line:text` for matches, `line-text` for
+    // -A/-B/-C context, and `line-» Kind name:start-end ←callers →callees` before each enclosing
+    // definition, with `--` between separate groups and a blank line between files.
+    for (index, (file, list)) in rows.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
         }
-        return Ok(out);
-    }
-    let separated = options.before > 0 || options.after > 0;
-    let mut previous: Option<(&str, usize)> = None;
-    for (file, list) in &rows {
+        let mark = if edited.contains(file) {
+            EDITED_MARK
+        } else {
+            ""
+        };
+        out.push_str(&format!("{file}{mark}\n"));
         let mut current: Option<&Def> = None;
-        for (index, hit) in list.iter().enumerate() {
-            if separated && previous.is_some_and(|(f, l)| f != hit.file || hit.line != l + 1) {
+        let mut previous: Option<usize> = None;
+        for hit in list {
+            if previous.is_some_and(|line| hit.line > line + 1)
+                && (options.before > 0 || options.after > 0)
+            {
                 out.push_str("--\n");
             }
-            previous = Some((&hit.file, hit.line));
-            if index == 0 && edited.contains(&hit.file) {
-                out.push_str(&format!(
-                    "{file}-{}-{NOTE}edited since index; definitions not shown\n",
-                    hit.line
-                ));
-            }
+            previous = Some(hit.line);
             if let Some(def) = hit.def.as_ref().filter(|def| current != Some(*def)) {
                 out.push_str(&format!(
-                    "{file}-{}-{NOTE}{}\n",
+                    "{}-{NOTE}{}\n",
                     def.start,
                     definition_note(def, connections)
                 ));
             }
             current = hit.def.as_ref();
-            let text = match options.max_columns.is_some_and(|max| hit.text.len() > max) {
-                true => "[Omitted long line]",
-                false => hit.text.as_str(),
+            let text = match options.max_columns {
+                Some(max) if hit.text.len() > max => "[Omitted long line]".to_string(),
+                None if hit.text.chars().count() > LINE_CHARS => {
+                    format!("{}…", hit.text.chars().take(LINE_CHARS).collect::<String>())
+                }
+                _ => hit.text.clone(),
             };
             let sep = if hit.context { '-' } else { ':' };
-            out.push_str(&format!("{file}{sep}{}{sep}{text}\n", hit.line));
+            out.push_str(&format!("{}{sep}{text}\n", hit.line));
         }
     }
     Ok(out)
@@ -353,9 +285,16 @@ mod tests {
         assert_eq!(
             show(&hits, &terms, Output::Lines, &["src/b.rs"]),
             "grep: 4 lines in 3 files (go 4, nope 0)
-  src/a.rs │ Function run:1-9 :3 go(); │ :4 go();
-  src/b.rs (edited since index) │ :2 fn go() {}
-  data.json │ :1 \"go\": 0,
+src/a.rs
+1-» Function run:1-9
+3:go();
+4:go();
+
+src/b.rs (edited since index)
+2:fn go() {}
+
+data.json
+1:\"go\": 0,
 "
         );
         assert_eq!(
