@@ -1,17 +1,24 @@
 use orbit_utils::vfs::{
-    Limits, Options, Vfs,
+    Decision, File, Limits, Options, Pass, Vfs,
     sources::{Archive, Diff, Directory},
 };
 
 #[test]
 fn native_sources_keep_host_paths_for_lazy_reads() {
+    struct LazyFiles;
+    impl Pass for LazyFiles {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::KeepLazy(())
+        }
+    }
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();
     let original = root.path().join("src").join("file.rs");
     std::fs::write(&original, b"before").unwrap();
     let directory = Vfs::load(
         Directory(root.path()),
-        (),
+        LazyFiles,
         Limits::default(),
         Options::default(),
     )
@@ -27,7 +34,7 @@ fn native_sources_keep_host_paths_for_lazy_reads() {
                     .into(),
             ],
         },
-        (),
+        LazyFiles,
         Limits::default(),
         Options::default(),
     )

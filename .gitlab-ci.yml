@@ -71,6 +71,7 @@ include:
   - local: .gitlab/ci/doc-principles-sync.yml
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
+  - local: .gitlab/ci/rails-contract.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'
@@ -495,17 +496,6 @@ system-note-actions-check:
   script:
     - apk add --no-cache bash curl python3 yq
     - bash ./scripts/vendored/run.sh check gitlab_system_note_actions
-
-duckdb-fts-sources-sync-check:
-  stage: lint
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .alpine-image-mr-only
-  needs: []
-  script:
-    - apk add --no-cache bash git gzip tar yq
-    - bash ./scripts/vendored/run.sh check duckdb
 
 unused-deps-check:
   stage: lint

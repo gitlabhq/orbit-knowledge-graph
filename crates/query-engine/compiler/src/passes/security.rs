@@ -131,16 +131,6 @@ fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
-pub(crate) fn collect_node_aliases(
-    table_ref: &TableRef,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Vec<String> {
-    collect_aliased_tables(table_ref, model)
-        .into_iter()
-        .map(|(a, _)| a)
-        .collect()
-}
-
 /// Collect `(alias, table)` pairs for every scan that should receive a
 /// security filter. Returning the table lets the caller pick a per-entity
 /// minimum role before building the `startsWith(...)` predicate.
@@ -194,7 +184,10 @@ mod tests {
 
     fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        collect_node_aliases(table, model.as_ref())
+        collect_aliased_tables(table, model.as_ref())
+            .into_iter()
+            .map(|(alias, _)| alias)
+            .collect()
     }
 
     fn applies(table: &str, ontology: &Ontology) -> bool {

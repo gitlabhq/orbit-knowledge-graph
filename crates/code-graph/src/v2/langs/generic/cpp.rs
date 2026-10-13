@@ -112,10 +112,10 @@ impl DslLanguage for CppDsl {
     fn bindings() -> Vec<BindingRule> {
         vec![
             binding("init_declarator", BindingKind::Assignment)
-                .name_from(&["declarator"])
+                .name_hook(c_family::binding_declarator_name)
                 .value_from("value"),
             binding("parameter_declaration", BindingKind::Parameter)
-                .name_from(&["declarator"])
+                .name_hook(c_family::binding_declarator_name)
                 .no_value(),
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])

@@ -20,6 +20,7 @@ async fn indexing_status_response() {
         project_path_gets_its_root_phases_and_its_own_projects,
         organization_path_is_unknown,
         error_and_project_gaps_reach_the_proto,
+        last_completed_at_reaches_the_proto,
     );
 }
 
@@ -154,5 +155,14 @@ async fn error_and_project_gaps_reach_the_proto(ctx: &TestContext) {
                 gaps: 1
             })
         )]
+    );
+}
+
+async fn last_completed_at_reaches_the_proto(ctx: &TestContext) {
+    let status = respond(ctx, &["1/113/"]).await.remove(0);
+
+    assert_eq!(
+        status.last_completed_at.as_deref(),
+        Some("2026-01-01T00:00:00Z")
     );
 }

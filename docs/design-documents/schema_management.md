@@ -156,7 +156,7 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 - Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
 - Restore historical archives from their exact release, never from current sources.
 - Migration and rollback require usable active and target archives before changing versioned tables.
-- The server embeds and build-time validates every retained archive in `config/ontology-archives/`.
+- The server embeds every retained archive in `config/ontology-archives/`, and unit tests validate each one.
 - If the active archive is missing, the dispatcher publishes its bundled copy before migration. Existing entries are verified and reused, never replaced; corruption, conflicting concurrent publication, and NATS errors still block migration.
 - Legacy schema 93 (release `v0.115.0`) is bundled from its exact release sources, so it can upgrade directly without manual catalog seeding or an intermediate deployment. See `config/ontology-archives/README.md` for provenance and how to add support for another starting schema.
 - A missing active archive with no bundled copy still blocks migration before versioned DDL. Restore that archive from the exact release or add it to the supported bundle; do not synthesize it from current sources or ClickHouse tables.
@@ -253,8 +253,8 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-The migration ledger is the versioned-schema gate. `orbit-server`'s build script fails if versioned
-ontology sources, generated versioned DDL, or auxiliary schema drift from the committed
+The migration ledger is the versioned-schema gate. A unit test fails on drift. It covers versioned
+ontology sources, generated versioned DDL, and auxiliary schema, each compared with the committed
 fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`). It also fails if the ledger is malformed.
 Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`
 and does not advance the schema pin or re-index graph data. The snapshot command refuses to
@@ -266,8 +266,7 @@ changes automatically affect both ClickHouse and DuckDB schemas.
 
 Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
 edits do not require a bump. A genuinely non-invalidating change can bypass the CI base-diff
-guard with `[skip migration-ledger-check]` in the MR description; build-time fingerprint drift
-still fails.
+guard with `[skip migration-ledger-check]` in the MR description; fingerprint drift still fails.
 
 ### Ledger scopes
 

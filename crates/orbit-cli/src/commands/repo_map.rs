@@ -25,7 +25,7 @@ const SIG_REGEX: &str = concat!(
     r"|interface|namespace|object|fun|record)\s+[A-Za-z_$<({]"
 );
 
-const TYPE_KINDS: &[&str] = &[
+pub(crate) const TYPE_KINDS: &[&str] = &[
     "Class",
     "Struct",
     "Enum",
@@ -42,7 +42,7 @@ const TYPE_KINDS: &[&str] = &[
     "AnnotationClass",
 ];
 
-const CALLABLE_KINDS: &[&str] = &[
+pub(crate) const CALLABLE_KINDS: &[&str] = &[
     "Method",
     "Function",
     "AssociatedFunction",
@@ -59,7 +59,8 @@ const CALLABLE_KINDS: &[&str] = &[
     "Macro",
 ];
 
-const MEMBER_EXTRA_KINDS: &[&str] = &["Field", "Attribute", "Property", "ComputedProperty"];
+pub(crate) const MEMBER_EXTRA_KINDS: &[&str] =
+    &["Field", "Attribute", "Property", "ComputedProperty"];
 
 /// Types treated as containers for `class` / `extends` / `overview` lookups.
 const CONTAINER_KINDS: &[&str] = &[
@@ -125,11 +126,6 @@ pub(crate) fn run(
 ) -> Result<()> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
 
-    // The db path (from `--db` or `ORBIT_DATA_DIR`) may be relative to the
-    // caller's CWD, so resolve it before the chdir below moves the CWD to the
-    // repo root — otherwise a relative db resolves against the repo instead.
-    let db = workspace::resolve_db_path(db)?;
-
     // `orbit index` stores paths relative to the git working-tree root, so a
     // `--repo` pointing at a subdirectory must anchor there too, not at the
     // subdirectory itself.
@@ -137,6 +133,13 @@ pub(crate) fn run(
         .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
     let git = workspace::git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
+    let db = workspace::resolve_db_path(db, &git)?;
+    anyhow::ensure!(
+        db.exists(),
+        "current commit {} is not indexed in the local graph\n       run:  {} index .",
+        git.commit_sha,
+        crate::commands::setup::spec::launcher()
+    );
 
     // `read_text` in the api/class queries resolves its globs against the
     // process CWD, and the graph stores repo-relative file paths, so anchor
@@ -159,7 +162,7 @@ pub(crate) fn run(
         source_exts,
     };
 
-    let client = sql::open_graph(Some(db))?;
+    let client = crate::database::GraphReader::open(Some(db))?;
     map.preflight(&client)?;
 
     let mut out = std::io::stdout().lock();

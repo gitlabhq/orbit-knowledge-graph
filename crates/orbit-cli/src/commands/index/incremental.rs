@@ -3,29 +3,32 @@
 //! next run only parses what changed.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, bail};
-use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, BooleanArray, Int64Array, StringArray};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::pipeline::{
-    Changes, Context, Display, Emit, Export, FileTiming, Observer, Pipeline, Report, Resolved,
-    State,
+    Context, Display, Emit, Export, FileStats, Observer, Pipeline, Report, Resolved, State,
 };
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Env, Envelope, Scalar, inventory, templates};
+use code_graph_incremental::{Env, Envelope, Scalar, templates};
 use ontology::Ontology;
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
+use orbit_utils::vfs::{Limits, Options as VfsOptions, Vfs, sources::{Diff, Directory}};
+use orbit_utils::vfs_policies::CodePolicy;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::database::{GraphWriter, manifest};
 use crate::workspace::{self, GitInfo};
 
 const STATE_FILE: &str = "index.json";
+const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
+const SOURCE_MEMORY_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
 
 /// What a run leaves behind besides the snapshots: the commit the graph
 /// reflects and the working-tree paths that differed from it, so `reindex`
@@ -65,7 +68,9 @@ struct FamilyOutput {
 #[derive(Serialize)]
 struct SlowFile {
     path: String,
-    phase: String,
+    language: String,
+    parse_ms: f64,
+    resolve_ms: f64,
     ms: f64,
 }
 
@@ -100,28 +105,45 @@ enum Mode {
 
 fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
     super::install_tracing(options.verbose, false);
-    let db_path = workspace::resolve_db_path(options.db.clone())?;
     let workspace = workspace::Workspace::open_default()?;
+    let manifest_path = std::path::absolute(workspace.manifest_path())?;
     let repos = workspace.resolve_repos(&path)?;
     if repos.is_empty() {
         bail!("no git repository found in {}", path.display());
     }
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
-    workspace::ensure_graph_schema(&db_path, super::LOCAL_DDL)?;
     for repo in repos {
         let git = workspace::git_info(&repo)?;
+        let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
+        let writer = GraphWriter::open(&db_path, &git)?;
+        manifest::record_status(
+            &manifest_path,
+            &git,
+            manifest::RepoStatus::Indexing,
+            None,
+            &db_path,
+        )?;
         let project = Project {
             git: &git,
-            db_path: &db_path,
+            writer: &writer,
             ontology: &ontology,
             state_dir: workspace.var_dir(git.project_id),
             budget_ms: options.budget_seconds * 1000,
             stats: options.stats,
         };
-        let output = match mode {
+        let result = match mode {
             Mode::Full => project.index_all()?,
             Mode::Changed => project.index_changed()?,
         };
+        writer.complete(&git.commit_sha)?;
+        manifest::record_status(
+            &manifest_path,
+            &git,
+            manifest::RepoStatus::Indexed,
+            None,
+            &db_path,
+        )?;
+        let output = result;
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
@@ -129,7 +151,7 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
 
 struct Project<'a> {
     git: &'a GitInfo,
-    db_path: &'a Path,
+    writer: &'a GraphWriter,
     ontology: &'a Ontology,
     state_dir: PathBuf,
     budget_ms: u64,
@@ -138,8 +160,11 @@ struct Project<'a> {
 
 /// The work one family gets in a run.
 enum FamilyWork {
-    Index(Vec<FileInventoryEntry>),
-    Reindex(Changes),
+    Index(Vec<String>),
+    Reindex {
+        paths: Vec<String>,
+        removed: Vec<String>,
+    },
     /// Nothing changed; its rows are re-emitted from the snapshot because the
     /// project's rows are replaced as a whole.
     Keep,
@@ -148,19 +173,17 @@ enum FamilyWork {
 impl Project<'_> {
     fn index_all(&self) -> Result<IncrementalOutput> {
         let started = Instant::now();
-        let inventory = inventory::walk(&self.git.repo_path)
-            .context("failed to walk repository files")?
-            .into_inner();
+        let repository = load_repository(Directory(&self.git.repo_path))?;
         info!(
             "walk {:.2}s, {} files",
             started.elapsed().as_secs_f64(),
-            inventory.len()
+            repository.usage().files
         );
-        let by_family = split_by_family(inventory, None);
-        let owner = by_family.values().next().map(|(lang, _)| *lang);
+        let by_family = split_repository(&repository, None);
+        let owner = by_family.values().next().map(|(family, _)| *family);
         let work = by_family
             .into_values()
-            .map(|(family, entries)| (family, FamilyWork::Index(entries)));
+            .map(|(family, paths)| (family, FamilyWork::Index(paths)));
         let families = self.run_families(work, owner, Mode::Full)?;
         Ok(self.output("index", started, families, None))
     }
@@ -187,8 +210,11 @@ impl Project<'_> {
             &saved.commit_sha[..8.min(saved.commit_sha.len())]
         );
         let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-        let changed = inventory::classify(&self.git.repo_path, changes.changed);
-        let mut changed = split_by_family(changed, owner);
+        let changed = load_repository(Diff {
+            root: &self.git.repo_path,
+            paths: changes.changed,
+        })?;
+        let mut changed_families = split_repository(&changed, owner);
         let mut removed = split_paths_by_family(changes.removed, owner);
 
         let mut work: BTreeMap<&'static str, (SupportLang, FamilyWork)> = BTreeMap::new();
@@ -196,21 +222,21 @@ impl Project<'_> {
             let family = SupportLang::from_family(name).with_context(|| {
                 format!("{STATE_FILE} names a language family this build does not know: {name}")
             })?;
-            let entries = changed
+            let paths = changed_families
                 .remove(family.family())
-                .map_or_else(Vec::new, |(_, entries)| entries);
+                .map_or_else(Vec::new, |(_, paths)| paths);
             let gone = removed.remove(family.family()).unwrap_or_default();
-            let job = match entries.is_empty() && gone.is_empty() {
+            let job = match paths.is_empty() && gone.is_empty() {
                 true => FamilyWork::Keep,
-                false => FamilyWork::Reindex(Changes {
-                    changed: entries,
+                false => FamilyWork::Reindex {
+                    paths,
                     removed: gone,
-                }),
+                },
             };
             work.insert(family.family(), (family, job));
         }
-        for (family, entries) in changed.into_values() {
-            work.insert(family.family(), (family, FamilyWork::Index(entries)));
+        for (family, paths) in changed_families.into_values() {
+            work.insert(family.family(), (family, FamilyWork::Index(paths)));
         }
         let families = self.run_families(work.into_values(), owner, Mode::Changed)?;
         Ok(self.output("reindex", started, families, Some(counts)))
@@ -224,20 +250,14 @@ impl Project<'_> {
         owner: Option<SupportLang>,
         mode: Mode,
     ) -> Result<Vec<FamilyOutput>> {
-        let client = duckdb_client::DuckDbClient::open(self.db_path)
-            .context("failed to open DuckDB for writing")?;
         let mut shared = match mode {
             Mode::Full => {
-                super::clear_project(&client, self.git, self.ontology)?;
+                self.writer.clear(self.ontology)?;
                 SharedRows::default()
             }
-            Mode::Changed => {
-                self.stamp_commit(&client)?;
-                SharedRows::in_database(&client, self.git.project_id)?
-            }
+            Mode::Changed => SharedRows::default(),
         };
         std::fs::create_dir_all(&self.state_dir)?;
-        let root = &self.git.repo_path;
         let mut families = Vec::new();
         let mut outputs = Vec::new();
         for (family, job) in work {
@@ -246,100 +266,41 @@ impl Project<'_> {
             let log = PhaseLog(family.family());
             let mut env;
             let graph = match job {
-                FamilyWork::Index(entries) => {
+                FamilyWork::Index(paths) => {
                     env = Env::for_lang(family)?;
                     env.limits.total_ms = self.budget_ms;
-                    templates::index(Context::new(&env).observe(log), root, entries)?
+                    let repository = load_repository(Diff {
+                        root: &self.git.repo_path,
+                        paths,
+                    })?;
+                    templates::index(Context::new(&env, repository).observe(log))?
                 }
-                FamilyWork::Reindex(changes) => {
+                FamilyWork::Reindex {
+                    paths,
+                    removed,
+                } => {
                     let (loaded, state) = State::load(&snapshot, family)
                         .with_context(|| format!("failed to load {}", snapshot.display()))?;
                     env = loaded;
                     env.limits.total_ms = self.budget_ms;
-                    let previous = state.trees.iter().map(|t| t.label.as_str());
-                    let removed = changes.removed.iter().map(String::as_str);
-                    self.forget_files(&client, previous.chain(removed))?;
-                    templates::reindex(Context::new(&env).observe(log), state, root, changes)?
+                    let repository = load_repository(Diff {
+                        root: &self.git.repo_path,
+                        paths,
+                    })?;
+                    templates::reindex(Context::new(&env, repository).observe(log), state, removed)?
                 }
-                FamilyWork::Keep => continue,
+                FamilyWork::Keep => {
+                    let (loaded, state) = State::load(&snapshot, family)
+                        .with_context(|| format!("failed to load {}", snapshot.display()))?;
+                    env = loaded;
+                    outputs.push(self.export_state(family, &env, state, None, &mut shared)?);
+                    continue;
+                }
             };
-            outputs.push(self.export(family, &env, graph, &client, &mut shared)?);
+            outputs.push(self.export(family, &env, graph, &mut shared)?);
         }
-        let started = Instant::now();
-        super::finish_project(&client, self.git, self.ontology)?;
-        info!("search index {:.2}s", started.elapsed().as_secs_f64());
         self.save_state(&families, owner)?;
         Ok(outputs)
-    }
-
-    /// Kept families' rows stay as they are; they now describe this commit.
-    fn stamp_commit(&self, client: &duckdb_client::DuckDbClient) -> Result<()> {
-        for table in [
-            "gl_directory",
-            "gl_file",
-            "gl_definition",
-            "gl_imported_symbol",
-        ] {
-            client.execute(
-                &format!("UPDATE {table} SET commit_sha = ?, branch = ? WHERE project_id = ?"),
-                &[
-                    serde_json::json!(self.git.commit_sha),
-                    serde_json::json!(self.git.branch),
-                    serde_json::json!(self.git.project_id),
-                ],
-            )?;
-        }
-        Ok(())
-    }
-
-    /// Drops the rows of the given files and every edge touching them: the
-    /// family's share of the project before it is exported again.
-    fn forget_files<'p>(
-        &self,
-        client: &duckdb_client::DuckDbClient,
-        paths: impl Iterator<Item = &'p str>,
-    ) -> Result<()> {
-        let paths = RecordBatch::try_from_iter([(
-            "path",
-            Arc::new(StringArray::from_iter_values(paths)) as ArrayRef,
-        )])?;
-        client.execute(
-            "CREATE OR REPLACE TEMP TABLE stale_paths (path VARCHAR)",
-            &[],
-        )?;
-        client.insert_batch("stale_paths", &paths)?;
-        let project = serde_json::json!(self.git.project_id);
-        let files = [
-            ("gl_file", "path"),
-            ("gl_definition", "file_path"),
-            ("gl_imported_symbol", "file_path"),
-        ];
-        let stale = |(table, column): &(&str, &str)| {
-            format!(
-                "SELECT id FROM {table} WHERE project_id = {} AND {column} IN (SELECT path FROM stale_paths)",
-                self.git.project_id
-            )
-        };
-        let stale_ids = files
-            .iter()
-            .map(stale)
-            .collect::<Vec<_>>()
-            .join(" UNION ALL ");
-        client.execute(
-            &format!(
-                "DELETE FROM gl_edge WHERE source_id IN ({stale_ids}) OR target_id IN ({stale_ids})"
-            ),
-            &[],
-        )?;
-        for (table, column) in files {
-            client.execute(
-                &format!(
-                    "DELETE FROM {table} WHERE project_id = ? AND {column} IN (SELECT path FROM stale_paths)"
-                ),
-                std::slice::from_ref(&project),
-            )?;
-        }
-        Ok(())
     }
 
     /// Writes the family's rows into DuckDB and the snapshot the next run
@@ -349,7 +310,6 @@ impl Project<'_> {
         family: SupportLang,
         env: &Env,
         graph: Pipeline<'_, Resolved>,
-        client: &duckdb_client::DuckDbClient,
         shared: &mut SharedRows,
     ) -> Result<FamilyOutput> {
         let envelope = Envelope::new([
@@ -367,21 +327,59 @@ impl Project<'_> {
             .then(Emit(|table: &str, batch: RecordBatch| -> Result<()> {
                 let batch = shared.unseen(table, &batch)?;
                 *rows.entry(table.to_string()).or_default() += batch.num_rows();
-                Ok(client.insert_batch(table, &batch)?)
+                self.writer.insert_batch(table, &batch)
             }))?
             .finish();
         let state = exported.state;
+        let mut output = self.export_state(family, env, state, Some(&context.report), shared)?;
+        output.rows = rows;
+        Ok(output)
+    }
+
+    fn export_state(
+        &self,
+        family: SupportLang,
+        env: &Env,
+        state: code_graph_incremental::pipeline::State,
+        report: Option<&Report>,
+        shared: &mut SharedRows,
+    ) -> Result<FamilyOutput> {
+        if report.is_none() {
+            let envelope = Envelope::new([
+                ("project_id", Scalar::Int(self.git.project_id)),
+                ("branch", Scalar::Str(&self.git.branch)),
+                ("commit_sha", Scalar::Str(&self.git.commit_sha)),
+            ]);
+            let plan = code_graph_incremental::export::ExportPlan::from_config(
+                &env.export_config,
+                self.ontology,
+                &env.lang,
+            )?;
+            for (table, batch) in code_graph_incremental::export::export(
+                &state.trees,
+                &state.edges,
+                &env.lang,
+                &plan,
+                &envelope,
+                true,
+                &|_| true,
+            )? {
+                self.writer.insert_batch(&table, &shared.unseen(&table, &batch)?)?;
+            }
+        }
         state
             .save(env, &self.snapshot_path(family))
             .context("failed to save snapshot")?;
+        let empty = Report::default();
+        let report = report.unwrap_or(&empty);
         Ok(FamilyOutput {
             family: family.family().to_string(),
             files: state.trees.len(),
-            rows,
-            skipped_files: context.report.skipped.len(),
-            phases: phase_seconds(&context.report),
+            rows: BTreeMap::new(),
+            skipped_files: report.skipped.len(),
+            phases: phase_seconds(report),
             slowest_files: match self.stats {
-                true => slowest_files(&context.report, 20),
+                true => slowest_files(report, 20),
                 false => Vec::new(),
             },
         })
@@ -437,27 +435,41 @@ impl Project<'_> {
     }
 }
 
-/// One pipeline per language family. Files no language parses belong to the
-/// repository rather than a language, so `owner` (the first family when
-/// unset) records them.
-fn split_by_family(
-    inventory: Vec<FileInventoryEntry>,
+fn load_repository(source: impl orbit_utils::vfs::Source) -> Result<Arc<Vfs<()>>> {
+    Ok(Arc::new(Vfs::load(
+        source,
+        CodePolicy,
+        Limits {
+            file_bytes: Some(MAX_INDEXED_FILE_BYTES),
+            resident_bytes: Some(SOURCE_MEMORY_BUDGET_BYTES),
+            ..Limits::default()
+        },
+        VfsOptions::default(),
+    )?))
+}
+
+fn split_repository(
+    repository: &Vfs<()>,
     owner: Option<SupportLang>,
-) -> BTreeMap<&'static str, (SupportLang, Vec<FileInventoryEntry>)> {
-    let mut by_family: BTreeMap<&'static str, (SupportLang, Vec<FileInventoryEntry>)> =
-        BTreeMap::new();
+) -> BTreeMap<&'static str, (SupportLang, Vec<String>)> {
+    let mut by_family: BTreeMap<&'static str, (SupportLang, Vec<String>)> = BTreeMap::new();
     let mut unparsed = Vec::new();
-    for entry in inventory {
-        match parsed_language(&entry) {
-            Some(lang) => by_family
-                .entry(lang.family())
-                .or_insert_with(|| (lang.family_members()[0], Vec::new()))
+    for file in repository.files() {
+        let language = file
+            .keeps()
+            .then(|| SupportLang::from_path(&file.path))
+            .flatten()
+            .filter(|language| language.has_rules());
+        match language {
+            Some(language) => by_family
+                .entry(language.family())
+                .or_insert_with(|| (language.family_members()[0], Vec::new()))
                 .1
-                .push(entry),
-            None => unparsed.push(entry),
+                .push(file.path.to_string()),
+            None => unparsed.push(file.path.to_string()),
         }
     }
-    let owner = owner.or_else(|| by_family.values().next().map(|(lang, _)| *lang));
+    let owner = owner.or_else(|| by_family.values().next().map(|(family, _)| *family));
     if let Some(owner) = owner.filter(|_| !unparsed.is_empty()) {
         by_family
             .entry(owner.family())
@@ -481,13 +493,6 @@ fn split_paths_by_family(
     by_family
 }
 
-fn parsed_language(entry: &FileInventoryEntry) -> Option<SupportLang> {
-    (entry.decision == Decision::Parse)
-        .then(|| SupportLang::from_path(&entry.path))
-        .flatten()
-        .filter(|lang| lang.has_rules())
-}
-
 /// Every family exports the directories above its files, so a directory
 /// and its edge to a parent come out once per run: the first family wins.
 #[derive(Default)]
@@ -499,33 +504,6 @@ struct SharedRows {
 impl SharedRows {
     /// What a reindex must not add again: the directories and their edges
     /// already in the database.
-    fn in_database(client: &duckdb_client::DuckDbClient, project_id: i64) -> Result<Self> {
-        let mut shared = Self::default();
-        let ids = client.query_arrow(&format!(
-            "SELECT id FROM gl_directory WHERE project_id = {project_id}"
-        ))?;
-        for batch in &ids {
-            shared.directories.extend(int_column(batch, "id")?.values());
-        }
-        let edges = client.query_arrow(&format!(
-            "SELECT source_id, target_id FROM gl_edge WHERE target_kind = 'Directory' AND target_id IN (SELECT id FROM gl_directory WHERE project_id = {project_id})"
-        ))?;
-        for batch in &edges {
-            let (sources, targets) = (
-                int_column(batch, "source_id")?,
-                int_column(batch, "target_id")?,
-            );
-            shared.containment.extend(
-                sources
-                    .values()
-                    .iter()
-                    .zip(targets.values())
-                    .map(|(&s, &t)| (s, t)),
-            );
-        }
-        Ok(shared)
-    }
-
     fn unseen(&mut self, table: &str, batch: &RecordBatch) -> Result<RecordBatch> {
         let keep: Vec<bool> = match table {
             "gl_directory" => {
@@ -576,15 +554,19 @@ fn string_column<'b>(batch: &'b RecordBatch, name: &str) -> Result<&'b StringArr
 }
 
 fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
-    let mut timings: Vec<&FileTiming> = report.files.iter().collect();
-    timings.sort_by_key(|t| std::cmp::Reverse(t.elapsed));
+    let mut timings: Vec<(&String, &FileStats)> = report.files.iter().collect();
+    timings.sort_by(|(_, a), (_, b)| {
+        (b.parse + b.resolve).cmp(&(a.parse + a.resolve))
+    });
     timings
         .into_iter()
         .take(count)
-        .map(|t| SlowFile {
-            path: t.path.clone(),
-            phase: t.phase.clone(),
-            ms: t.elapsed.as_secs_f64() * 1000.0,
+        .map(|(path, timing)| SlowFile {
+            path: path.clone(),
+            language: <&str>::from(timing.language).to_owned(),
+            parse_ms: timing.parse.as_secs_f64() * 1000.0,
+            resolve_ms: timing.resolve.as_secs_f64() * 1000.0,
+            ms: (timing.parse + timing.resolve).as_secs_f64() * 1000.0,
         })
         .collect()
 }

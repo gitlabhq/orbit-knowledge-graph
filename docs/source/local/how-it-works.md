@@ -32,7 +32,7 @@ When you run `orbit index`, GitLab Orbit Local:
 1. Walks the current working tree, including uncommitted files and respecting `.gitignore`.
 1. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
 1. Extracts definitions (functions, classes, modules), import declarations, and cross-file symbol references.
-1. Writes the results as nodes and edges into a local DuckDB file at `~/.gitlab/orbit/graph.duckdb`.
+1. Writes the results into a DuckDB file for that checkout and commit under `~/.gitlab/orbit/local/revisions/`.
 
 Indexing does not enumerate or check out other Git branches. Each checkout or
 worktree is indexed from the files currently on disk.
@@ -57,7 +57,7 @@ Edges connect files to their definitions, files to their imports, and definition
 GitLab Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
 against it with `orbit sql`:
 
-1. `orbit sql` opens `~/.gitlab/orbit/graph.duckdb` read-only.
+1. `orbit sql` attaches all indexed revisions read-only to one DuckDB client. Use `--repo` to select a checkout revision.
 1. Your SQL runs directly against the graph tables — no DSL compilation,
    no authorization layer.
 1. Results stream back as a table, JSON, NDJSON, or CSV.
@@ -66,12 +66,7 @@ All data in the graph is accessible to whoever runs the CLI.
 
 ## Storage
 
-The graph is stored in a single DuckDB file at `~/.gitlab/orbit/graph.duckdb`. Multiple
-repository checkout paths can share the database. The canonical checkout path
-determines the project ID. Switching branches alone does not update the stored
-graph. Reindexing the same checkout replaces its previous graph in that database
-with the current working-tree contents. To retain graphs for multiple branches,
-index them from separate checkout or worktree paths.
+GitLab Orbit Local stores each checkout revision in a separate DuckDB file under `~/.gitlab/orbit/local/`, as described in [storage and upgrades](access/cli.md#storage).
 
 ## Supported languages
 

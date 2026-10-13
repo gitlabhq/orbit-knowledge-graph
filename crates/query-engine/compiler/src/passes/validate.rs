@@ -11,12 +11,13 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{
     AggFunction, ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, InputNode,
     QueryType, group_by_output_names,
 };
-use crate::schema_limits::{
+use crate::query_limits::{
     MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
     MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT,
 };
@@ -293,6 +294,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         }
         for node in &input.nodes {
             validate_identifier(&node.id)?;
+            check_reserved_prefix("node id", &node.id, &format!("{}_", node.id))?;
             let entity = node
                 .entity
                 .as_deref()
@@ -431,19 +433,37 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    /// Reject queries that exceed hard caps on complexity. The JSON schema
-    /// enforces the same limits first for JSON input, so this is the primary
-    /// enforcement for other frontends and a backstop for JSON. Every cap
-    /// reports `Validation` to match the schema's category.
+    /// Enforce query limits for every frontend, including counts across input fields.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
-        use crate::schema_limits::{
+        use crate::query_limits::{
             MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTERS_PER_NODE,
             MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP,
-            MAX_REL_TYPES, MAX_RELS_CAP,
+            MAX_PREDICATES, MAX_REL_TYPES, MAX_RELS_CAP,
         };
         const MAX_AGGS_CAP: usize = 10;
         const MAX_GROUP_BY_KEYS: usize = 4;
 
+        let predicate_count = input.join_predicates.len()
+            + input
+                .nodes
+                .iter()
+                .map(|node| {
+                    node.filters.values().map(Vec::len).sum::<usize>()
+                        + usize::from(!node.node_ids.is_empty())
+                        + 2 * usize::from(node.id_range.is_some())
+                })
+                .sum::<usize>()
+            + input
+                .relationships
+                .iter()
+                .flat_map(|relationship| relationship.filters.values())
+                .map(Vec::len)
+                .sum::<usize>();
+        if predicate_count > MAX_PREDICATES {
+            return Err(QueryError::Validation(format!(
+                "Query has {predicate_count} predicates; the maximum is {MAX_PREDICATES} across the entire query. Remove redundant conditions or simplify the query."
+            )));
+        }
         if input.nodes.len() > MAX_NODES_CAP {
             return Err(QueryError::Validation(format!(
                 "nodes count ({}) must not exceed {MAX_NODES_CAP}",
@@ -720,6 +740,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     continue;
                 };
                 for filter in filters {
+                    if is_traversal_path_filter {
+                        Self::check_traversal_path_filter(
+                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                            filter,
+                        )?;
+                    }
                     if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
                         let rhs_entity = input
                             .nodes
@@ -744,12 +770,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                             }
                         }
                         continue;
-                    }
-                    if is_traversal_path_filter {
-                        Self::check_traversal_path_filter(
-                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                            filter,
-                        )?;
                     }
                     self.check_one_filter(entity, prop, filter, data_type)?;
                 }
@@ -1039,6 +1059,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let group_output_names = group_by_output_names(&input.aggregation.group_by);
         let mut seen_group_output_names = HashSet::new();
         for name in &group_output_names {
+            check_reserved_prefix("output column", name, name)?;
             if !seen_group_output_names.insert(name.clone()) {
                 return Err(QueryError::Validation(format!(
                     "duplicate group_by output column \"{name}\""
@@ -1049,6 +1070,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let mut seen_output_names = seen_group_output_names.clone();
         for agg in &input.aggregation.metrics {
             let alias = agg.output_name();
+            check_reserved_prefix("output column", &alias, &alias)?;
             if !seen_output_names.insert(alias.clone()) {
                 return Err(QueryError::Validation(format!(
                     "aggregation \"{alias}\" conflicts with another output column"
@@ -1346,6 +1368,16 @@ pub(crate) fn validate_identifier(identifier: &str) -> Result<()> {
             "invalid identifier {identifier:?}"
         )))
     }
+}
+
+fn check_reserved_prefix(kind: &str, name: &str, column: &str) -> Result<()> {
+    let prefix = internal_column_prefix();
+    if column.starts_with(prefix) {
+        return Err(QueryError::Validation(format!(
+            "{kind} {name:?} conflicts with reserved prefix {prefix:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn is_valid_filter_value(value: &serde_json::Value) -> bool {

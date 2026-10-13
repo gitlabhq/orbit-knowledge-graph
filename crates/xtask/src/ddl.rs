@@ -68,47 +68,20 @@ pub fn run_remote(
     }
 }
 
-/// Manifest and search-index DDL for DuckDB. Passed through to the compiler
-/// as external DDL so the codegen crate stays schema-agnostic. The doc
-/// macros are the single definition of search-document text: the indexer
-/// derives a per-project gl_def_doc_<pid> table from gl_definition with them
-/// and builds the FTS index over it, so write and read sides cannot drift and
-/// BM25 statistics stay scoped to one project.
-const MANIFEST_DDL: &str = "\
-CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
-
-CREATE TABLE IF NOT EXISTS _orbit_manifest (
-    repo_path VARCHAR PRIMARY KEY,
-    project_id BIGINT NOT NULL,
-    parent_repo_path VARCHAR,
-    branch VARCHAR,
-    commit_sha VARCHAR,
-    status repo_status NOT NULL DEFAULT 'pending',
-    last_indexed_at TIMESTAMP,
-    error_message VARCHAR
-);
-
+const LOCAL_DDL: &str = "\
 CREATE TABLE IF NOT EXISTS _orbit_meta (
     key VARCHAR PRIMARY KEY,
     value VARCHAR NOT NULL
 );
 
 CREATE OR REPLACE MACRO def_name(fqn) AS
-    regexp_replace(fqn, '^.*[:.#/]', '');
-
-CREATE OR REPLACE MACRO camel_split(txt) AS
-    regexp_replace(regexp_replace(txt, '([A-Z]+)([A-Z][a-z])', '\\1 \\2', 'g'),
-                   '([a-z0-9])([A-Z])', '\\1 \\2', 'g');
-
-CREATE OR REPLACE MACRO fts_doc(txt) AS
-    CASE WHEN camel_split(txt) = txt THEN txt
-         ELSE txt || ' ' || camel_split(txt) END;";
+    regexp_replace(fqn, '^.*[:.#/]', '');";
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ontology = load_ontology(ontology_path.as_ref())?;
     print!(
         "{}",
-        query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL)
+        query_engine::compiler::generate_local_ddl(&ontology, LOCAL_DDL)
     );
     Ok(())
 }
@@ -321,13 +294,13 @@ mod tests {
     }
 
     #[test]
-    fn local_ddl_contains_create_table_and_manifest() {
+    fn local_ddl_contains_graph_tables_without_manifest() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let ddl = query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL);
+        let ddl = query_engine::compiler::generate_local_ddl(&ontology, LOCAL_DDL);
         assert!(ddl.contains("CREATE TABLE"));
-        assert!(ddl.contains("_orbit_manifest"));
+        assert!(!ddl.contains("_orbit_manifest"));
         assert!(ddl.contains("_orbit_meta"));
-        assert!(ddl.contains("MACRO fts_doc"));
+        assert!(ddl.contains("MACRO def_name"));
         assert!(ddl.contains("SCHEMA_VERSION="));
     }
 

@@ -22,8 +22,6 @@ struct SetupTexts {
     mcp_server: McpServerText,
     instructions: String,
     nudge_search: String,
-    nudge_read: String,
-    graph_first_deny: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -66,12 +64,6 @@ static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instruc
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
-
-static RENDERED_NUDGE_READ: LazyLock<String> =
-    LazyLock::new(|| substitute_launcher(TEXTS.nudge_read.trim_end(), launcher()));
-
-static RENDERED_GRAPH_FIRST_DENY: LazyLock<String> =
-    LazyLock::new(|| substitute_launcher(TEXTS.graph_first_deny.trim_end(), launcher()));
 
 fn describe_graph_contents() -> String {
     use strum::IntoEnumIterator;
@@ -118,14 +110,6 @@ pub(crate) fn instructions_text() -> &'static str {
 
 pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
-}
-
-pub(crate) fn read_nudge_text() -> &'static str {
-    &RENDERED_NUDGE_READ
-}
-
-pub(crate) fn graph_first_deny_text() -> &'static str {
-    &RENDERED_GRAPH_FIRST_DENY
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,15 +248,6 @@ pub(crate) fn agent_names() -> Vec<&'static str> {
     AGENT_SPECS.iter().map(|spec| spec.name.as_str()).collect()
 }
 
-impl AgentSpec {
-    pub(super) fn supports_graph_first(&self) -> bool {
-        self.json_merges
-            .iter()
-            .flat_map(|merge| &merge.entries)
-            .any(|entry| entry.to_string().contains("{{graph_first}}"))
-    }
-}
-
 const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
@@ -310,8 +285,6 @@ mod tests {
             assert!(agent_named(name).is_some(), "missing spec for {name}");
         }
         assert_eq!(agent_names().len(), agents().count());
-        assert!(agent_named("claude").unwrap().supports_graph_first());
-        assert!(!agent_named("codex").unwrap().supports_graph_first());
     }
 
     #[test]
@@ -341,19 +314,16 @@ mod tests {
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
             for phrase in [
-                "` commands to bash tools for file/code search and callers/callees",
-                "FTS.",
-                "Terms AND; `a|b` OR",
-                "Grep means `",
-                "grep shows IDs and file:lines",
-                "Do not reread unchanged files",
+                " grep` must be used for search",
+                "Ignores case, `_`, `-`",
+                "`a|b` OR",
+                "definitions you need in one call",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
             }
             assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
-        assert!(search_nudge_text().contains("FTS."));
-        assert!(read_nudge_text().contains("Do not reread unchanged files"));
+        assert!(search_nudge_text().contains("MANDATORY"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }

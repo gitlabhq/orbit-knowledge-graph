@@ -1,17 +1,15 @@
 //! Hidden `orbit hook-guard` — the Claude Code PreToolUse guard installed by `orbit setup`.
-//! Reads a tool call from stdin and nudges the agent to query the graph before grepping or
-//! reading source. Fails open: on any error it prints nothing and exits 0, never blocking a
-//! tool call.
+//! Reads a tool call from stdin and nudges the agent to use `orbit grep` instead of grep or
+//! rg. Fails open: on any error it prints nothing and exits 0, never blocking a tool call.
+//! `read` is accepted for installs that still register it, and never nudges.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
 use crate::commands::setup::spec;
-use crate::{telemetry, workspace};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub(crate) enum Kind {
@@ -19,335 +17,277 @@ pub(crate) enum Kind {
     Read,
 }
 
-const SEARCH_COMMANDS: &[&str] = &[
-    "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
-];
-
-const READ_COMMANDS: &[&str] = &["bat", "cat", "head", "less", "more", "sed", "tail"];
+const SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
 
 const COMMAND_WRAPPERS: &[&str] = &[
     "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
 ];
 
-const SOURCE_EXTS: &[&str] = &[
-    "py", "js", "cjs", "mjs", "ts", "tsx", "jsx", "vue", "svelte", "go", "rs", "java", "rb", "c",
-    "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
+const WRAPPER_VALUE_FLAGS: &[&str] = &[
+    "-C", "-E", "-I", "-L", "-P", "-a", "-c", "-d", "-g", "-n", "-s", "-u",
 ];
 
-const GRAPH_FIRST_ENV: &str = "ORBIT_GRAPH_FIRST";
+const SHELLS: &[&str] = &["bash", "sh", "zsh"];
 
-const SESSION_TTL: Duration = Duration::from_secs(2 * 24 * 60 * 60);
+const PATTERN_FLAGS: &[&str] = &["-e", "-f", "--regexp", "--file"];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Event {
-    Deny,
-    OrbitUsed,
-}
+const INFO_FLAGS: &[&str] = &["--files", "--type-list", "--version", "-V", "--help"];
 
-impl Event {
-    fn action(self) -> &'static str {
-        match self {
-            Event::Deny => "graph_first_deny",
-            Event::OrbitUsed => "graph_first_orbit_used",
-        }
-    }
-}
+/// Short flags whose value is the next word, and the long ones, per tool family.
+const RG_VALUE_SHORT: &str = "ABCEMTdefgjmrt";
+const GREP_VALUE_SHORT: &str = "ABCDdefm";
+const VALUE_LONG: &[&str] = &[
+    "--after-context",
+    "--before-context",
+    "--colors",
+    "--context",
+    "--context-separator",
+    "--devices",
+    "--directories",
+    "--encoding",
+    "--exclude",
+    "--exclude-dir",
+    "--file",
+    "--glob",
+    "--iglob",
+    "--ignore-dir",
+    "--include",
+    "--label",
+    "--max-columns",
+    "--max-count",
+    "--max-depth",
+    "--max-filesize",
+    "--pre",
+    "--pre-glob",
+    "--regexp",
+    "--replace",
+    "--sort",
+    "--sortr",
+    "--threads",
+    "--type",
+    "--type-add",
+    "--type-not",
+];
 
-pub(crate) fn run(
-    kind: Kind,
-    graph_first: bool,
-    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
-    coding_agent: Option<&str>,
-) {
+/// Returns whether it nudged, so telemetry counts nudges rather than every tool call.
+pub(crate) fn run(kind: Kind) -> bool {
     let mut input = String::new();
-    if std::io::stdin().read_to_string(&mut input).is_err() {
-        return;
+    if std::io::stdin().read_to_string(&mut input).is_err() || !local_graph_exists() {
+        return false;
     }
     let Ok(call) = serde_json::from_str::<Value>(&input) else {
-        return;
+        return false;
     };
-    if !local_graph_exists() {
-        return;
-    }
-    let graph_first =
-        graph_first_enabled(graph_first, std::env::var(GRAPH_FIRST_ENV).ok().as_deref())
-            .then(|| {
-                Some(GraphFirst {
-                    sessions: session_dir()?,
-                    project_dir: std::env::var("CLAUDE_PROJECT_DIR")
-                        .ok()
-                        .filter(|dir| !dir.is_empty()),
-                })
-            })
-            .flatten();
-    let (response, event) = respond(kind, &call, graph_first.as_ref());
-    if let Some(response) = response {
-        println!("{response}");
-    }
-    if let (Some(tracker), Some(event)) = (tracker, event) {
-        telemetry::emit_hook_guard_event(tracker, event.action(), coding_agent);
-    }
+    respond(kind, &call)
+        .inspect(|response| println!("{response}"))
+        .is_some()
 }
 
-struct GraphFirst {
-    sessions: PathBuf,
-    project_dir: Option<String>,
-}
-
-fn respond(
-    kind: Kind,
-    call: &Value,
-    graph_first: Option<&GraphFirst>,
-) -> (Option<Value>, Option<Event>) {
-    let session = graph_first.zip(session_id(call));
-    let mut event = None;
-    if runs_orbit(call)
-        && let Some((graph_first, id)) = &session
-        && claim_session(&graph_first.sessions, id)
-    {
-        event = Some(Event::OrbitUsed);
-    }
-    if !should_nudge(kind, call) {
-        return (None, event);
-    }
-    if let Some((graph_first, id)) = &session
-        && should_block(kind, call, graph_first)
-        && claim_session(&graph_first.sessions, id)
-    {
-        let deny = json!({
+fn respond(kind: Kind, call: &Value) -> Option<Value> {
+    (matches!(kind, Kind::Search) && should_nudge(call)).then(|| {
+        json!({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": spec::graph_first_deny_text(),
-            }
-        });
-        return (Some(deny), Some(Event::Deny));
-    }
-    let nudge = json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": nudge_text(kind),
-        }
-    });
-    (Some(nudge), event)
-}
-
-fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
-    match env
-        .map(|value| value.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("1" | "true" | "on" | "yes") => true,
-        Some("0" | "false" | "off" | "no") => false,
-        _ => installed,
-    }
-}
-
-fn session_dir() -> Option<PathBuf> {
-    let base = dirs::runtime_dir()
-        .or_else(dirs::cache_dir)
-        .unwrap_or_else(std::env::temp_dir);
-    Some(base.join("orbit-hook-sessions"))
-}
-
-fn session_id(call: &Value) -> Option<String> {
-    let raw = call.get("session_id").and_then(Value::as_str)?;
-    let id: String = raw
-        .chars()
-        .map(
-            |c| match c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                true => c,
-                false => '_',
-            },
-        )
-        .take(64)
-        .collect();
-    (!id.is_empty()).then_some(id)
-}
-
-fn claim_session(dir: &Path, id: &str) -> bool {
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    let claimed = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(dir.join(id))
-        .is_ok();
-    if claimed {
-        prune_sessions(dir, SystemTime::now());
-    }
-    claimed
-}
-
-fn prune_sessions(dir: &Path, now: SystemTime) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let stale = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > SESSION_TTL);
-        if stale {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-}
-
-fn command_of(call: &Value) -> &str {
-    call.get("tool_input")
-        .unwrap_or(call)
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-}
-
-fn runs_orbit(call: &Value) -> bool {
-    let tool = call.get("tool_name").and_then(Value::as_str).unwrap_or("");
-    tool.starts_with("mcp__orbit__") || invokes_orbit(command_of(call))
-}
-
-fn invokes_orbit(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(|segment| {
-            let mut words = segment
-                .split_whitespace()
-                .filter(|t| !t.starts_with('-') && !t.contains('='))
-                .map(basename)
-                .skip_while(|word| COMMAND_WRAPPERS.contains(word));
-            match words.next() {
-                Some("orbit") => true,
-                Some("glab") => words.next() == Some("orbit"),
-                _ => false,
+                "additionalContext": spec::search_nudge_text(),
             }
         })
+    })
 }
 
-fn should_block(kind: Kind, call: &Value, graph_first: &GraphFirst) -> bool {
-    let cwd = call.get("cwd").and_then(Value::as_str);
-    let Some(root) = graph_first.project_dir.as_deref().or(cwd) else {
-        return false;
-    };
-    if cwd.is_some_and(|cwd| !Path::new(cwd).starts_with(root)) {
-        return false;
-    }
-    let command = command_of(call);
-    if !command.is_empty() {
-        return command_paths(command).all(|path| path.starts_with(root));
-    }
-    let key = match kind {
-        Kind::Search => "path",
-        Kind::Read => "file_path",
-    };
-    let path = Path::new(
-        call.get("tool_input")
-            .unwrap_or(call)
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or(""),
-    );
-    path.is_relative() || path.starts_with(root)
-}
-
-fn command_paths(command: &str) -> impl Iterator<Item = PathBuf> + '_ {
-    let home = dirs::home_dir();
-    command
-        .split(|c: char| c.is_whitespace() || "|;&()`<>=".contains(c))
-        .map(|token| token.trim_matches(['\'', '"']))
-        .filter_map(move |token| match token.strip_prefix("~/") {
-            Some(rest) => home.as_ref().map(|home| home.join(rest)),
-            None => token.starts_with('/').then(|| PathBuf::from(token)),
-        })
-        .filter(|path| !path.starts_with("/dev") && path.exists())
-}
-
+/// Checks the graph's default location without creating or migrating the data directory.
 fn local_graph_exists() -> bool {
-    workspace::resolve_db_path(None)
-        .map(|path| path.is_file())
-        .unwrap_or(false)
+    let root = match std::env::var("ORBIT_DATA_DIR") {
+        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => match dirs::home_dir() {
+            Some(home) => home.join(".gitlab").join("orbit"),
+            None => return false,
+        },
+    };
+    root.join("local/manifest.duckdb").is_file()
 }
 
-fn nudge_text(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Search => spec::search_nudge_text(),
-        Kind::Read => spec::read_nudge_text(),
-    }
+/// The enclosing git work tree, found without running git.
+fn work_tree(cwd: &Path) -> Option<PathBuf> {
+    let cwd = dunce::canonicalize(cwd).ok()?;
+    cwd.ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .map(Path::to_path_buf)
 }
 
-fn should_nudge(kind: Kind, call: &Value) -> bool {
+fn should_nudge(call: &Value) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
-    match kind {
-        Kind::Search => {
-            let command = tool_input
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let is_pattern_tool = command.is_empty()
-                && tool_input
-                    .get("pattern")
-                    .and_then(Value::as_str)
-                    .is_some_and(|p| !p.is_empty());
-            is_pattern_tool || invokes_search(command) || reads_source(command)
+    let cwd = Path::new(call.get("cwd").and_then(Value::as_str).unwrap_or("."));
+    let Some(root) = work_tree(cwd) else {
+        return false;
+    };
+    let field = |name: &str| tool_input.get(name).and_then(Value::as_str).unwrap_or("");
+    let command = field("command");
+    if command.is_empty() {
+        let path = field("path");
+        return call.get("tool_name").and_then(Value::as_str) != Some("Glob")
+            && !field("pattern").is_empty()
+            && (path.is_empty() || tree_dir(cwd, &root, path));
+    }
+    command_searches_tree(command, cwd, &root)
+}
+
+fn command_searches_tree(command: &str, cwd: &Path, root: &Path) -> bool {
+    segments(command)
+        .iter()
+        .any(|(words, piped)| searches_tree(words, *piped, cwd, root))
+}
+
+fn tree_dir(cwd: &Path, root: &Path, path: &str) -> bool {
+    dunce::canonicalize(cwd.join(path)).is_ok_and(|full| full.is_dir() && full.starts_with(root))
+}
+
+/// Splits a shell command into simple commands, each as its words and whether its input is piped.
+/// Quotes and escapes are honored; redirections and their targets are dropped.
+fn segments(command: &str) -> Vec<(Vec<String>, bool)> {
+    let mut segments = Vec::new();
+    let (mut words, mut word, mut started) = (Vec::new(), String::new(), false);
+    let (mut quote, mut piped) = (None, false);
+    let mut chars = command.chars().peekable();
+    let finish = |words: &mut Vec<String>, word: &mut String, started: &mut bool| {
+        if *started {
+            words.push(std::mem::take(word));
+            *started = false;
         }
-        Kind::Read => {
-            let path = tool_input
-                .get("file_path")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            is_source_path(path)
+    };
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some('"'), '\\') => word.extend(chars.next()),
+            (Some(_), c) => word.push(c),
+            (None, '\'' | '"') => (quote, started) = (Some(c), true),
+            (None, '\\') => {
+                word.extend(chars.next());
+                started = true;
+            }
+            (None, '>' | '<') => {
+                if !word.is_empty() && word.chars().all(|d| d.is_ascii_digit()) {
+                    word.clear();
+                    started = false;
+                } else {
+                    finish(&mut words, &mut word, &mut started);
+                }
+                let mut duplicates = false;
+                while let Some(&next) = chars.peek().filter(|n| matches!(n, '>' | '<' | '&')) {
+                    duplicates |= next == '&';
+                    chars.next();
+                }
+                match duplicates {
+                    true => while chars.next_if(|n| n.is_ascii_digit() || *n == '-').is_some() {},
+                    false => {
+                        while chars.next_if(|n| n.is_whitespace() && *n != '\n').is_some() {}
+                        while chars
+                            .next_if(|n| !n.is_whitespace() && !"|;&<>()`".contains(*n))
+                            .is_some()
+                        {}
+                    }
+                }
+            }
+            (None, '|' | ';' | '&' | '\n' | '(' | ')' | '`') => {
+                finish(&mut words, &mut word, &mut started);
+                segments.push((std::mem::take(&mut words), piped));
+                let doubled = matches!(c, '|' | '&') && chars.next_if_eq(&c).is_some();
+                piped = c == '|' && !doubled;
+            }
+            (None, c) if c.is_whitespace() => finish(&mut words, &mut word, &mut started),
+            (None, c) => {
+                word.push(c);
+                started = true;
+            }
         }
     }
+    finish(&mut words, &mut word, &mut started);
+    segments.push((words, piped));
+    segments.retain(|(words, _)| !words.is_empty());
+    segments
 }
 
-fn invokes_search(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(segment_invokes_search)
+fn program(word: &str) -> &str {
+    let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
+    name.strip_suffix(".exe").unwrap_or(name)
 }
 
-fn segment_invokes_search(segment: &str) -> bool {
-    for token in segment.split_whitespace() {
-        if token.starts_with('-') || token.contains('=') {
+fn searches_tree(words: &[String], piped: bool, cwd: &Path, root: &Path) -> bool {
+    let mut words = words.iter().map(String::as_str);
+    let mut via_git = false;
+    let mut in_wrapper = false;
+    let name = loop {
+        match words.next() {
+            None => return false,
+            Some(w) if in_wrapper && WRAPPER_VALUE_FLAGS.contains(&w) => {
+                words.next();
+            }
+            Some(w) if w.starts_with('-') || w.contains('=') => continue,
+            Some(w) => {
+                let name = program(w);
+                if !COMMAND_WRAPPERS.contains(&name) {
+                    break name;
+                }
+                in_wrapper = true;
+                via_git |= matches!(name, "git" | "xargs");
+            }
+        }
+    };
+    let rest: Vec<&str> = words.collect();
+    if SHELLS.contains(&name) {
+        return rest
+            .iter()
+            .position(|w| w.starts_with('-') && !w.starts_with("--") && w.ends_with('c'))
+            .and_then(|at| rest.get(at + 1))
+            .is_some_and(|script| command_searches_tree(script, cwd, root));
+    }
+    if !SEARCH_COMMANDS.contains(&name) {
+        return false;
+    }
+    let ripgrep_like = matches!(name, "rg" | "ripgrep" | "ag" | "ack");
+    let value_short = match ripgrep_like {
+        true => RG_VALUE_SHORT,
+        false => GREP_VALUE_SHORT,
+    };
+    let (mut positionals, mut recursive, mut pattern_flag) = (Vec::new(), false, false);
+    let mut rest = rest.into_iter();
+    while let Some(word) = rest.next() {
+        if word == "--" {
+            positionals.extend(rest.by_ref());
+            break;
+        }
+        if INFO_FLAGS.contains(&word) || (ripgrep_like && word == "-h") {
+            return false;
+        }
+        if let Some(long) = word.strip_prefix("--") {
+            let flag = long.split('=').next().unwrap_or(long);
+            recursive |= matches!(flag, "recursive" | "dereference-recursive")
+                || word == "--directories=recurse";
+            pattern_flag |= PATTERN_FLAGS.contains(&format!("--{flag}").as_str());
+            if !long.contains('=') && VALUE_LONG.contains(&word) {
+                let value = rest.next();
+                recursive |= word == "--directories" && value == Some("recurse");
+            }
             continue;
         }
-        let name = basename(token);
-        if COMMAND_WRAPPERS.contains(&name) {
+        if let Some(cluster) = word.strip_prefix('-').filter(|c| !c.is_empty()) {
+            let value_at = cluster.find(|c: char| value_short.contains(c));
+            let flags = &cluster[..value_at.map_or(cluster.len(), |at| at + 1)];
+            recursive |= !ripgrep_like && flags.contains(['r', 'R']);
+            pattern_flag |= flags.ends_with(['e', 'f']) && value_at.is_some();
+            if value_at.is_some_and(|at| at + 1 == cluster.len()) {
+                rest.next();
+            }
             continue;
         }
-        return SEARCH_COMMANDS.contains(&name);
+        positionals.push(word);
     }
-    false
-}
-
-fn reads_source(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(|segment| {
-            let mut tokens = segment.split_whitespace().filter(|t| !t.starts_with('-'));
-            let is_reader = tokens
-                .find(|t| !COMMAND_WRAPPERS.contains(&basename(t)))
-                .is_some_and(|t| READ_COMMANDS.contains(&basename(t)));
-            is_reader && tokens.any(is_source_path)
-        })
-}
-
-fn basename(token: &str) -> &str {
-    token.rsplit('/').next().unwrap_or(token)
-}
-
-fn is_source_path(path: &str) -> bool {
-    let normalized = path.replace('\\', "/");
-    let name = normalized.rsplit('/').next().unwrap_or("");
-    match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => {
-            SOURCE_EXTS.contains(&ext.to_ascii_lowercase().as_str())
-        }
-        _ => false,
-    }
+    let paths = match pattern_flag {
+        true => positionals.as_slice(),
+        false => positionals.get(1..).unwrap_or_default(),
+    };
+    let greps_tree = ripgrep_like && paths.is_empty() && !piped;
+    let greps_here = recursive && paths.is_empty();
+    via_git || greps_tree || greps_here || paths.iter().any(|p| tree_dir(cwd, root, p))
 }
 
 #[cfg(test)]
@@ -355,171 +295,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grep_tool_pattern_nudges() {
-        let call = json!({"tool_input": {"pattern": "fn main"}});
-        assert!(should_nudge(Kind::Search, &call));
-    }
-
-    #[test]
-    fn bash_search_commands_nudge() {
+    fn grep_family_and_the_grep_tool_nudge() {
         for command in [
             "rg -n foo src/",
             "grep -r foo .",
-            "find . -name '*.rs'",
             "sudo rg foo",
-            "xargs -n1 grep foo",
-            "/usr/bin/rg foo",
             "git grep foo",
-            "cat x.txt | grep foo",
             "RUST_LOG=debug rg foo",
+            "rg -nA3 foo",
+            "rg foo 2>&1 | head",
+            "bash -lc \"rg foo\"",
+            "cd src && rg foo",
         ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(should_nudge(Kind::Search, &call), "{command}");
+            let call =
+                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
+            assert!(respond(Kind::Search, &call).is_some(), "{command}");
         }
+        let tool = json!({"tool_name": "Grep", "tool_input": {"pattern": "fn main"}});
+        assert!(respond(Kind::Search, &tool).is_some());
+        let file = json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_name": "Grep", "tool_input": {"pattern": "rand", "path": "Cargo.toml"}});
+        assert!(respond(Kind::Search, &file).is_none());
     }
 
     #[test]
-    fn bash_source_reads_nudge() {
+    fn reads_listings_and_other_commands_never_nudge() {
         for command in [
             "cat src/main.rs",
-            "head -50 crates/foo/src/lib.rs",
-            "sed -n '1,40p' app/models/user.rb",
-            "cd repo && cat lib/x.py",
-        ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(should_nudge(Kind::Search, &call), "{command}");
-        }
-    }
-
-    #[test]
-    fn non_search_bash_does_not_nudge() {
-        for command in [
-            "cargo build",
-            "ls -la",
-            "git status",
-            "git tag -a v1.0",
-            "docker tag img repo/img",
-            "npm run build --flag foo",
+            "find . -name '*.rs'",
             "git log --grep=foo",
-            "echo storage",
-            "cat README.md",
-            "cat Cargo.toml",
-            "tail -f server.log",
+            "cat x.txt | grep foo",
+            "rg -n rand Cargo.toml",
+            "rg --files",
+            "rg foo /usr/include",
+            "git commit -m \"x; rg foo\"",
         ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(!should_nudge(Kind::Search, &call), "{command}");
+            let call =
+                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
+            assert!(respond(Kind::Search, &call).is_none(), "{command}");
         }
-    }
-
-    #[test]
-    fn source_reads_nudge_but_docs_do_not() {
-        let source = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
-        assert!(should_nudge(Kind::Read, &source));
-
-        for path in [
-            "/repo/README.md",
-            "/repo/config.yaml",
-            "/repo/.env",
-            "/repo/Cargo.toml",
-        ] {
-            let call = json!({"tool_input": {"file_path": path}});
-            assert!(!should_nudge(Kind::Read, &call), "{path}");
-        }
-    }
-
-    #[test]
-    fn dotfiles_are_not_source() {
-        assert!(!is_source_path("/repo/.rs"));
-        assert!(!is_source_path(""));
-        assert!(is_source_path("C:\\repo\\src\\main.RS"));
-    }
-
-    #[test]
-    fn missing_tool_input_falls_back_to_root() {
-        let call = json!({"pattern": "foo"});
-        assert!(should_nudge(Kind::Search, &call));
-    }
-
-    fn decide(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> &'static str {
-        match respond(kind, call, graph_first).0 {
-            None => "none",
-            Some(out) if out["hookSpecificOutput"]["permissionDecision"] == "deny" => "deny",
-            Some(_) => "nudge",
-        }
-    }
-
-    #[test]
-    fn graph_first_blocks_once_per_session_unless_orbit_ran_first() {
-        let dir = tempfile::tempdir().unwrap();
-        let graph_first = GraphFirst {
-            sessions: dir.path().to_path_buf(),
-            project_dir: Some("/repo".to_string()),
-        };
-        let read =
-            |id: &str, path: &str| json!({"session_id": id, "tool_input": {"file_path": path}});
-        let bash = |id: &str, cmd: &str| json!({"session_id": id, "tool_input": {"command": cmd}});
-        let glob =
-            json!({"session_id": "c", "tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
-        let mcp = json!({"session_id": "h", "tool_name": "mcp__orbit__run_sql", "tool_input": {}});
-        for (kind, call, expected) in [
-            (Kind::Read, read("a", "/repo/src/main.rs"), "deny"),
-            (Kind::Read, read("a", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, bash("b", "cd repo && rg foo"), "deny"),
-            (Kind::Search, glob, "deny"),
-            (Kind::Search, bash("c2", "find . -name '*.rs'"), "deny"),
-            (Kind::Search, bash("d", "glab orbit grep foo"), "none"),
-            (Kind::Read, read("d", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, bash("g", "time orbit grep foo"), "none"),
-            (Kind::Read, read("g", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, mcp, "none"),
-            (Kind::Read, read("h", "/repo/src/main.rs"), "nudge"),
-            (Kind::Read, read("e", "/elsewhere/lib.rs"), "nudge"),
-            (
-                Kind::Search,
-                bash("i", "orbit context Foo && grep bar src/"),
-                "nudge",
-            ),
-            (Kind::Search, bash("j", "rg foo /etc"), "nudge"),
-            (Kind::Search, bash("k", "rg foo src 2>/dev/null"), "deny"),
-            (
-                Kind::Read,
-                json!({"tool_input": {"file_path": "/repo/a.rs"}}),
-                "nudge",
-            ),
-        ] {
-            assert_eq!(decide(kind, &call, Some(&graph_first)), expected, "{call}");
-        }
-        assert_eq!(decide(Kind::Read, &read("f", "/repo/a.rs"), None), "nudge");
-        let mixed = bash("f", "orbit context Foo && grep bar src/");
-        assert_eq!(decide(Kind::Search, &mixed, None), "nudge");
-        let event = |kind, call| respond(kind, &call, Some(&graph_first)).1;
-        assert_eq!(
-            event(Kind::Search, bash("m", "orbit grep x")),
-            Some(Event::OrbitUsed)
-        );
-        assert_eq!(
-            event(Kind::Read, read("n", "/repo/a.rs")),
-            Some(Event::Deny)
-        );
-        assert_eq!(event(Kind::Read, read("n", "/repo/a.rs")), None);
-        prune_sessions(dir.path(), SystemTime::now() + SESSION_TTL * 2);
-        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
-        assert_eq!(
-            session_id(&json!({"session_id": "../x"})).as_deref(),
-            Some("___x")
-        );
-    }
-
-    #[test]
-    fn graph_first_env_overrides_the_installed_flag() {
-        assert!(graph_first_enabled(false, Some("1")) && !graph_first_enabled(true, Some("off")));
-        assert!(graph_first_enabled(true, None) && graph_first_enabled(true, Some("junk")));
-    }
-
-    #[test]
-    fn nudge_text_names_the_launcher_verbs() {
-        assert!(nudge_text(Kind::Search).contains("`orbit grep"));
-        assert!(nudge_text(Kind::Read).contains("`orbit context"));
-        assert!(spec::graph_first_deny_text().contains("`orbit grep"));
+        let outside = json!({"cwd": "/", "tool_input": {"command": "rg foo"}});
+        assert!(respond(Kind::Search, &outside).is_none());
+        let elsewhere = json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_name": "Grep", "tool_input": {"pattern": "x", "path": "/usr"}});
+        assert!(respond(Kind::Search, &elsewhere).is_none());
+        let glob = json!({"tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
+        assert!(respond(Kind::Search, &glob).is_none());
+        let read = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
+        assert!(respond(Kind::Read, &read).is_none());
     }
 }

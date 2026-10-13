@@ -375,11 +375,11 @@ fn neighbors_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_neighbor_id"));
-    assert!(rendered.contains("_gkg_neighbor_type"));
-    assert!(rendered.contains("_gkg_relationship_type"));
+    assert!(rendered.contains("_orbit_neighbor_id"));
+    assert!(rendered.contains("_orbit_neighbor_type"));
+    assert!(rendered.contains("_orbit_relationship_type"));
     assert!(
-        rendered.contains("_gkg_neighbor_is_outgoing"),
+        rendered.contains("_orbit_neighbor_is_outgoing"),
         "bidirectional should include direction"
     );
     assert!(rendered.contains("gl_edge"));
@@ -536,10 +536,10 @@ fn valid_identifiers_produce_renderable_sql() {
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
-    assert!(rendered.contains("_gkg_user_node_id"));
-    assert!(rendered.contains("_gkg__private_id"));
-    assert!(rendered.contains("_gkg_CamelCase_id"));
-    assert!(rendered.contains("_gkg_node123_id"));
+    assert!(rendered.contains("_orbit_user_node_id"));
+    assert!(rendered.contains("_orbit__private_id"));
+    assert!(rendered.contains("_orbit_CamelCase_id"));
+    assert!(rendered.contains("_orbit_node123_id"));
 }
 
 fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
@@ -1471,6 +1471,40 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
 }
 
 #[test]
+fn orbit_query_caps_reject_during_lowering() {
+    let nodes: Vec<String> = (0..4_000).map(|i| format!("(a{i})")).collect();
+    let properties: Vec<String> = (0..51).map(|i| format!("u.c{i}")).collect();
+    for (query, first_rejected, message) in [
+        (
+            format!("MATCH {} RETURN a0", nodes.join(",")),
+            "(a5)",
+            "a query declares at most 5 nodes",
+        ),
+        (
+            format!("MATCH (u:User) RETURN {}", properties.join(", ")),
+            "u.c50",
+            "a node projects at most 50 properties",
+        ),
+    ] {
+        let column = query.find(first_rejected).unwrap() + 1;
+        let expected = format!("line 1, column {column}: {message}");
+        let error = compiler::passes::frontend::gql::parse(&query).unwrap_err();
+        assert!(
+            matches!(&error, QueryError::Validation(m) if *m == expected),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn orbit_query_rejects_traversal_path_column_comparisons() {
+    let context = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
+    let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
+    assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
+}
+
+#[test]
 fn orbit_query_schema_caps_reject_with_the_json_category() {
     let cases = [
         (
@@ -1783,7 +1817,7 @@ fn orbit_query_page_matches_json_cursor() {
         "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 5";
     let compiled = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = compiled.base.render();
-    assert!(rendered.contains("_gkg_cursor_0"), "{rendered}");
+    assert!(rendered.contains("_orbit_cursor_0"), "{rendered}");
     assert!(rendered.contains("LIMIT 6"), "{rendered}");
     assert_eq!(compiled.input.cursor.as_ref().map(|c| c.page_size), Some(5));
 }

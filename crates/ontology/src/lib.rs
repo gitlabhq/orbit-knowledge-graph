@@ -27,7 +27,6 @@ pub mod introspection;
 mod loading;
 pub mod migrations;
 pub mod pipelines;
-pub mod query_dsl;
 pub mod sql_template;
 
 pub use constants::{
@@ -211,7 +210,7 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
-            internal_column_prefix: "_gkg_".to_string(),
+            internal_column_prefix: "_orbit_".to_string(),
             local_entities: BTreeMap::new(),
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
@@ -2389,18 +2388,6 @@ mod tests {
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
-    #[test]
-    fn test_data_type_to_json_schema_type() {
-        assert_eq!(DataType::String.to_json_schema_type(), "string");
-        assert_eq!(DataType::Int.to_json_schema_type(), "integer");
-        assert_eq!(DataType::Float.to_json_schema_type(), "number");
-        assert_eq!(DataType::Bool.to_json_schema_type(), "boolean");
-        assert_eq!(DataType::Date.to_json_schema_type(), "string");
-        assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
-        assert_eq!(DataType::Enum.to_json_schema_type(), "string");
-        assert_eq!(DataType::Uuid.to_json_schema_type(), "string");
-    }
-
     fn assert_redaction(
         ontology: &Ontology,
         entity: &str,
@@ -2714,7 +2701,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
@@ -2755,7 +2742,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
@@ -2784,7 +2771,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   default_edge_table: kg_edge
-  internal_column_prefix: "_gkg_"
+  internal_column_prefix: "_orbit_"
   default_entity_sort_key: [traversal_path, id]
   edge_tables:
     kg_edge:
@@ -2981,7 +2968,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .unwrap_err();
@@ -3029,7 +3016,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");

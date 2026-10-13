@@ -11,18 +11,28 @@ use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::EdgeKind;
 
-static EXPORT_YAML: &str = include_str!("../../config/export.yaml");
-
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ExportYaml {
+pub struct ExportConfig {
     ids: IdsYaml,
     header: Vec<ColumnYaml>,
     entities: indexmap::IndexMap<String, EntityYaml>,
     edges: EdgesYaml,
+    #[serde(skip)]
+    pub schemas: std::collections::HashMap<String, Vec<ColumnSpec>>,
 }
 
-#[derive(serde::Deserialize)]
+impl ExportConfig {
+    pub fn embedded() -> &'static Self {
+        static CONFIG: std::sync::LazyLock<ExportConfig> = std::sync::LazyLock::new(|| {
+            orbit_utils::yaml::from_str(include_str!("../../config/export.yaml"))
+                .expect("embedded export config must parse")
+        });
+        &CONFIG
+    }
+}
+
+#[derive(Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EntityYaml {
     source: String,
@@ -34,18 +44,18 @@ struct EntityYaml {
     columns: Vec<ColumnYaml>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct IdsYaml {
     prefix: Vec<String>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct IdYaml {
     seed: String,
     columns: Vec<String>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ColumnYaml {
     name: String,
@@ -65,7 +75,7 @@ struct ColumnYaml {
     on: Option<String>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EdgesYaml {
     columns: Vec<ColumnYaml>,
@@ -73,14 +83,14 @@ struct EdgesYaml {
     graph: Vec<GraphEdgeYaml>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct ContainmentYaml {
     from: String,
     to: String,
     kind: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct GraphEdgeYaml {
     edge: String,
     #[serde(default)]
@@ -125,33 +135,20 @@ pub(super) enum On {
 
 pub(super) struct EntityColumn {
     pub(super) name: String,
+    pub(super) col_type: ColumnType,
     pub(super) on: On,
     pub(super) source: Source,
 }
 
-/// Where a header column's value comes from: the row's own id, a named
-/// envelope value, or a literal.
-#[derive(Clone)]
-pub(super) enum HeaderSource {
-    RowId,
-    Envelope(String),
+pub(super) enum RowSource {
+    Value(String),
     Const(String),
 }
 
-/// Where an edge column's value comes from.
-#[derive(Clone)]
-pub(super) enum EdgeSource {
-    SourceId,
-    SourceEntity,
-    Kind,
-    TargetId,
-    TargetEntity,
-    Const(String),
-}
-
-pub(super) struct Column<S> {
+pub(super) struct Column {
     pub(super) name: String,
-    pub(super) source: S,
+    pub(super) col_type: ColumnType,
+    pub(super) source: RowSource,
 }
 
 /// A part of the row id: a column's value, or the node's byte range.
@@ -164,6 +161,7 @@ pub(super) struct EntityPlan {
     pub(super) name: String,
     pub(super) table: String,
     pub(super) specs: Vec<ColumnSpec>,
+    pub(super) header: Vec<Column>,
     pub(super) source_kinds: Vec<u16>,
     pub(super) exclude_parent: Option<u16>,
     pub(super) expand: Option<u16>,
@@ -189,36 +187,49 @@ pub(super) struct GraphEdge {
 /// `export.yaml` checked against the ontology and interned for one `Lang`.
 pub struct ExportPlan {
     pub(super) id_prefix: Vec<String>,
-    pub(super) header: Vec<Column<HeaderSource>>,
     pub(super) entities: Vec<EntityPlan>,
     pub(super) edge_table: String,
     pub(super) edge_specs: Vec<ColumnSpec>,
-    pub(super) edge_columns: Vec<Column<EdgeSource>>,
+    pub(super) edge_columns: Vec<Column>,
     pub(super) containment: Vec<Containment>,
     pub(super) graph: Vec<GraphEdge>,
+    pub batch_bytes: usize,
 }
 
 impl ExportPlan {
-    pub fn load(ontology: &Ontology, lang: &Lang) -> Result<Self, LoadError> {
-        let yaml: ExportYaml = orbit_utils::yaml::from_str(EXPORT_YAML)?;
-        let header: Vec<Column<HeaderSource>> = yaml
-            .header
-            .iter()
-            .map(|c| {
-                Ok(Column {
-                    name: c.name.clone(),
-                    source: header_source(c)?,
-                })
-            })
-            .collect::<Result<_, LoadError>>()?;
-
+    pub fn from_config(
+        config: &ExportConfig,
+        ontology: &Ontology,
+        lang: &Lang,
+    ) -> Result<Self, LoadError> {
+        let yaml = config;
         let mut entities = Vec::new();
         for name in ontology.local_entity_names() {
             let entity = yaml
                 .entities
                 .get(name)
                 .ok_or_else(|| LoadError::new(format!("export.yaml has no entity '{name}'")))?;
-            entities.push(compile_entity(name, entity, &yaml.header, ontology, lang)?);
+            let mut entity = compile_entity(name, entity, &yaml.header, ontology, lang)?;
+            if let Some(specs) = config.schemas.get(&entity.table) {
+                check_schema(&entity.specs, specs)?;
+                entity.specs = specs.clone();
+            }
+            entity.header = entity
+                .specs
+                .iter()
+                .filter(|spec| !entity.columns.iter().any(|column| column.name == spec.name))
+                .map(|spec| {
+                    Ok(Column {
+                        name: spec.name.clone(),
+                        col_type: spec.col_type,
+                        source: match yaml.header.iter().find(|column| column.name == spec.name) {
+                            Some(column) => row_source(column)?,
+                            None => RowSource::Value(spec.name.clone()),
+                        },
+                    })
+                })
+                .collect::<Result<_, LoadError>>()?;
+            entities.push(entity);
         }
         for name in yaml.entities.keys() {
             if !entities.iter().any(|e| e.name == *name) {
@@ -238,7 +249,7 @@ impl ExportPlan {
             .iter()
             .map(|c| (c.name.clone(), c.data_type, false))
             .collect();
-        check_columns(
+        let edge_specs = compile_specs(
             "edges",
             &yaml.edges.columns.iter().collect::<Vec<_>>(),
             &edge_fields,
@@ -250,7 +261,8 @@ impl ExportPlan {
             .map(|c| {
                 Ok(Column {
                     name: c.name.clone(),
-                    source: edge_source(c)?,
+                    col_type: yaml_column_type(&c.dtype)?,
+                    source: row_source(c)?,
                 })
             })
             .collect::<Result<_, LoadError>>()?;
@@ -284,23 +296,16 @@ impl ExportPlan {
 
         Ok(Self {
             id_prefix: yaml.ids.prefix.clone(),
-            header,
             entities,
             edge_table: ontology
                 .local_edge_table_name()
                 .ok_or_else(|| LoadError::new("ontology has no local edge table"))?
                 .to_string(),
-            edge_specs: edge_fields
-                .iter()
-                .map(|(name, data_type, nullable)| ColumnSpec {
-                    name: name.clone(),
-                    col_type: column_type(data_type),
-                    nullable: *nullable,
-                })
-                .collect(),
+            edge_specs,
             edge_columns,
             containment,
             graph,
+            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
         })
     }
 }
@@ -310,60 +315,81 @@ fn edge_kind(name: &str) -> Result<EdgeKind, LoadError> {
         .map_err(|_| LoadError::new(format!("export.yaml: unknown edge kind '{name}'")))
 }
 
-fn column_type(data_type: &DataType) -> ColumnType {
-    match data_type {
-        DataType::Int => ColumnType::Int,
-        _ => ColumnType::Str,
+fn yaml_column_type(name: &str) -> Result<ColumnType, LoadError> {
+    match name {
+        "Int64" => Ok(ColumnType::Int),
+        "Utf8" => Ok(ColumnType::Str),
+        "DictionaryUtf8" => Ok(ColumnType::DictStr),
+        "Boolean" => Ok(ColumnType::Bool),
+        "TimestampMicros" => Ok(ColumnType::TimestampMicros),
+        _ => Err(LoadError::new(format!(
+            "unsupported export column type '{name}'"
+        ))),
     }
 }
 
-/// The Arrow type name `export.yaml` uses for an ontology type.
-fn arrow_name(data_type: &DataType) -> &'static str {
-    match data_type {
-        DataType::Int => "Int64",
-        _ => "Utf8",
-    }
+fn column_spec(column: &ColumnYaml) -> Result<ColumnSpec, LoadError> {
+    Ok(ColumnSpec {
+        name: column.name.clone(),
+        col_type: yaml_column_type(&column.dtype)?,
+        nullable: column.nullable,
+    })
 }
 
-/// The YAML columns and the ontology's must agree exactly: same names, same
-/// types, same nullability, nothing missing on either side.
-fn check_columns(
-    table: &str,
-    columns: &[&ColumnYaml],
-    fields: &[(String, DataType, bool)],
-) -> Result<(), LoadError> {
-    for column in columns {
-        let (_, data_type, nullable) = fields
-            .iter()
-            .find(|(name, _, _)| *name == column.name)
-            .ok_or_else(|| {
-                LoadError::new(format!(
-                    "export.yaml: {table}.{} is not a column of the ontology",
-                    column.name
-                ))
-            })?;
-        let expected = arrow_name(data_type);
-        if column.dtype != expected {
-            return Err(LoadError::new(format!(
-                "export.yaml: {table}.{} is {} here but {expected} in the ontology",
-                column.name, column.dtype
-            )));
-        }
-        if column.nullable != *nullable {
-            return Err(LoadError::new(format!(
-                "export.yaml: {table}.{} nullable={} here but {nullable} in the ontology",
-                column.name, column.nullable
-            )));
-        }
+fn check_schema(mapped: &[ColumnSpec], schema: &[ColumnSpec]) -> Result<(), LoadError> {
+    let names: std::collections::HashSet<_> = schema.iter().map(|spec| &spec.name).collect();
+    if names.len() != schema.len() {
+        return Err(LoadError::new("duplicate export schema column"));
     }
-    for (name, _, _) in fields {
-        if !columns.iter().any(|c| c.name == *name) {
+    for column in mapped {
+        if !schema.iter().any(|spec| {
+            spec.name == column.name
+                && spec.nullable == column.nullable
+                && (spec.col_type == column.col_type
+                    || matches!(
+                        (column.col_type, spec.col_type),
+                        (ColumnType::Str, ColumnType::DictStr)
+                    ))
+        }) {
             return Err(LoadError::new(format!(
-                "export.yaml: {table}.{name} is in the ontology but not mapped"
+                "incompatible export schema column '{}'",
+                column.name
             )));
         }
     }
     Ok(())
+}
+
+fn compile_specs(
+    table: &str,
+    columns: &[&ColumnYaml],
+    fields: &[(String, DataType, bool)],
+) -> Result<Vec<ColumnSpec>, LoadError> {
+    let mut specs = columns
+        .iter()
+        .map(|column| column_spec(column))
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected: Vec<_> = fields
+        .iter()
+        .map(|(name, data_type, nullable)| ColumnSpec {
+            name: name.clone(),
+            col_type: match data_type {
+                DataType::Int => ColumnType::Int,
+                DataType::Bool => ColumnType::Bool,
+                DataType::DateTime => ColumnType::TimestampMicros,
+                _ => ColumnType::Str,
+            },
+            nullable: *nullable,
+        })
+        .collect();
+    check_schema(&expected, &specs)?;
+    if specs.len() != expected.len() {
+        return Err(LoadError::new(format!(
+            "unexpected export columns in '{table}'"
+        )));
+    }
+    specs.sort_by_key(|spec| fields.iter().position(|(name, _, _)| *name == spec.name));
+    Ok(specs)
 }
 
 fn compile_entity(
@@ -385,7 +411,7 @@ fn compile_entity(
         .map(|f| (f.name.clone(), f.data_type, f.nullable))
         .collect();
     let all_columns: Vec<&ColumnYaml> = header.iter().chain(&yaml.columns).collect();
-    check_columns(name, &all_columns, &fields)?;
+    let specs = compile_specs(name, &all_columns, &fields)?;
 
     let columns = yaml
         .columns
@@ -410,6 +436,7 @@ fn compile_entity(
             };
             Ok(EntityColumn {
                 name: column.name.clone(),
+                col_type: yaml_column_type(&column.dtype)?,
                 on,
                 source,
             })
@@ -439,14 +466,8 @@ fn compile_entity(
     Ok(EntityPlan {
         name: name.to_string(),
         table,
-        specs: fields
-            .iter()
-            .map(|(name, data_type, nullable)| ColumnSpec {
-                name: name.clone(),
-                col_type: column_type(data_type),
-                nullable: *nullable,
-            })
-            .collect(),
+        specs,
+        header: Vec::new(),
         source_kinds: yaml
             .source
             .split('|')
@@ -460,59 +481,48 @@ fn compile_entity(
     })
 }
 
-fn one_of(column: &ColumnYaml, flags: &[bool]) -> Result<(), LoadError> {
-    if flags.iter().filter(|b| **b).count() == 1 {
-        Ok(())
-    } else {
-        Err(LoadError::new(format!(
+fn row_source(column: &ColumnYaml) -> Result<RowSource, LoadError> {
+    match (&column.from, &column.r#const) {
+        (Some(name), None) => Ok(RowSource::Value(name.clone())),
+        (None, Some(value)) => Ok(RowSource::Const(value.clone())),
+        _ => Err(LoadError::new(format!(
             "export.yaml: {} needs exactly one source",
             column.name
-        )))
+        ))),
     }
-}
-
-fn header_source(column: &ColumnYaml) -> Result<HeaderSource, LoadError> {
-    one_of(column, &[column.from.is_some(), column.r#const.is_some()])?;
-    if let Some(value) = &column.r#const {
-        return Ok(HeaderSource::Const(value.clone()));
-    }
-    Ok(match column.from.as_deref().unwrap_or_default() {
-        "id" => HeaderSource::RowId,
-        name => HeaderSource::Envelope(name.to_string()),
-    })
 }
 
 impl ExportPlan {
     /// Every envelope name the header and id prefix refer to.
     pub(super) fn envelope_names(&self) -> impl Iterator<Item = &str> {
-        self.header
+        self.entities
             .iter()
+            .flat_map(|entity| &entity.header)
             .filter_map(|c| match &c.source {
-                HeaderSource::Envelope(name) => Some(name.as_str()),
+                RowSource::Value(name) if name != "id" => Some(name.as_str()),
                 _ => None,
             })
             .chain(self.id_prefix.iter().map(String::as_str))
+            .chain(
+                self.edge_columns
+                    .iter()
+                    .filter_map(|column| match &column.source {
+                        RowSource::Value(name)
+                            if !matches!(
+                                name.as_str(),
+                                "source.id"
+                                    | "source.entity"
+                                    | "kind"
+                                    | "target.id"
+                                    | "target.entity"
+                            ) =>
+                        {
+                            Some(name.as_str())
+                        }
+                        _ => None,
+                    }),
+            )
     }
-}
-
-fn edge_source(column: &ColumnYaml) -> Result<EdgeSource, LoadError> {
-    one_of(column, &[column.from.is_some(), column.r#const.is_some()])?;
-    if let Some(value) = &column.r#const {
-        return Ok(EdgeSource::Const(value.clone()));
-    }
-    Ok(match column.from.as_deref().unwrap_or_default() {
-        "source.id" => EdgeSource::SourceId,
-        "source.entity" => EdgeSource::SourceEntity,
-        "kind" => EdgeSource::Kind,
-        "target.id" => EdgeSource::TargetId,
-        "target.entity" => EdgeSource::TargetEntity,
-        other => {
-            return Err(LoadError::new(format!(
-                "export.yaml: edges.{}: unknown source '{other}'",
-                column.name
-            )));
-        }
-    })
 }
 
 fn compile_source(entity: &str, column: &ColumnYaml, lang: &Lang) -> Result<Source, LoadError> {

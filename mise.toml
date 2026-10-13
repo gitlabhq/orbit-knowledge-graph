@@ -418,6 +418,14 @@ description = "Snapshot auxiliary tables and refreshable views without bumping t
 run = "cargo xtask migration-ledger check"
 description = "Fail if the migration ledger or fingerprint snapshot drifted from the ontology"
 
+[tasks."rails-contract:check"]
+run = "test -s \"${RAILS_CONTRACT_SNAPSHOT:?run mise run rails-contract:export first}\" && cargo test -p ontology --test rails_contract"
+description = "Fail if the ontology redaction config does not match the Rails contract in RAILS_CONTRACT_SNAPSHOT"
+
+[tasks."rails-contract:export"]
+run = "cd \"${GITLAB_DIR:?set GITLAB_DIR to a GitLab checkout}\" && bundle exec rails runner - < \"$MISE_PROJECT_ROOT/scripts/rails-contract/export.rb\" | sed -n '/^{$/,/^}$/p' > \"${RAILS_CONTRACT_SNAPSHOT:-/tmp/rails-contract.json}\""
+description = "Export the Rails contract from the GitLab checkout in GITLAB_DIR to RAILS_CONTRACT_SNAPSHOT (default /tmp/rails-contract.json)"
+
 [tasks."metrics:catalog"]
 run = "cargo xtask metrics-catalog"
 description = "Regenerate crates/orbit-observability/orbit-dashboards/gkg-metrics.json"

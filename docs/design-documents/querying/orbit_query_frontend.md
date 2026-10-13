@@ -52,14 +52,17 @@ Syntax-tree errors carry the pair's line and column; a child shape the conversio
 Scalar values use the same value type as the compiler's filters.
 
 The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases. GQL presets add `validate_relationships` after `validate`.
-The `gql_parse` phase parses raw query text when supplied. Preparation supplies parsed Input instead, so the wrapper leaves it unchanged without parsing twice.
+The `gql_parse` phase parses raw query text when supplied. Preparation supplies a `ParsedQuery` instead, so the wrapper leaves it unchanged without parsing twice.
+A `ParsedQuery` holds the lowered Input and its statement hash. `ParsedQuery::load` sets both the Input and the pagination hash on either path, so `PAGE ... AFTER` cursors bind to the same hash.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
-`compiler::gql::route` parses once and returns lowered query Input or resolved schema metadata. `compiler::gql::prepare` uses that result to compile MATCH or return CALL metadata.
+`compiler::gql::route` parses once and returns a `ParsedQuery` or resolved schema metadata. `compiler::gql::prepare` uses that result to compile MATCH or return CALL metadata.
 `compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
-Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
+Its limits are shared Rust constants in `query_limits` for both JSON and GQL.
+The compiler's build script checks matching constraints in the JSON schema.
+The shared validator also enforces the total predicate count, which spans multiple input fields.
 `validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
 Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
@@ -121,7 +124,7 @@ The catalog renders `raw_query` in that mode, without a language field. Tool and
 REST and MCP `query_graph` have no public language selector. Rails, not agents or public client input, sets the transport language. Payload shape only validates that selected language. Flag off accepts only JSON objects; flag on accepts only GQL strings. Existing JSON callers for opted-in users reject. Discovery results must not cross users or modes in caches.
 Orbit Remote does not evaluate the flag. The CLI sends its argument as the `query` string, for example `orbit query 'CALL db.schema()'`. `--file` reads a request envelope from a file, or from stdin with `--file -`; `query` is an object for JSON or a string for GQL. The CLI has no language selector.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
-For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
+For MATCH, it carries the `ParsedQuery` into path resolution and compilation; the `gql_parse` wrapper leaves it unchanged.
 For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
 Request authentication and query quota checks happen before this dispatch. Schema calls return raw JSON or TOON in the existing result envelope and do not emit graph-query billing events.
 Successful and failed schema calls each record one query outcome and its elapsed duration, without graph-stage or result-row metric samples.
@@ -215,6 +218,8 @@ Syntax errors report line, column, and expected tokens without echoing query tex
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
 Existing compiler limits still apply after lowering.
+Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
+An ID selector or IN list counts as one predicate; an ID range counts as two.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
 Custom ID-property spellings remain outside the frontend.

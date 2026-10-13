@@ -1,6 +1,6 @@
 //! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
 //! Limits count offered files before policy runs. Rejected content is not materialized.
-//! On-demand readers retain their backing; pending files are read for classification during loading.
+//! Files are read, classified, and stored during loading unless metadata explicitly requests KeepLazy.
 //! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
@@ -32,6 +32,10 @@ pub enum Put<'a> {
         read: ContentReader,
     },
     Symlink(String),
+    Listed {
+        size: u64,
+        reason: &'static str,
+    },
 }
 
 const ENTRY_SHARDS: usize = 64;
@@ -63,6 +67,7 @@ pub(super) enum Content {
     Spilled { offset: u64, len: u64, raw_len: u64 },
     ReadOnDemand(ContentReader),
     Symlink(String),
+    Excluded,
 }
 
 impl<T: Tag> Loading<T> {
@@ -96,6 +101,7 @@ impl<T: Tag> Loading<T> {
             Put::Bytes(bytes) => bytes.len() as u64,
             Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,
             Put::Symlink(_) => 0,
+            Put::Listed { size, .. } => *size,
         };
         add_capped(
             &self.files,
@@ -115,6 +121,13 @@ impl<T: Tag> Loading<T> {
             self.add_entry(file, Content::Symlink(target));
             return Ok(());
         }
+        if let Put::Listed { reason, .. } = what {
+            self.add_entry(
+                File::new(key, size, Decision::List(reason)),
+                Content::Excluded,
+            );
+            return Ok(());
+        }
         let mut file = File::new(key, size, Decision::Pending);
         file.metadata_decision = match self.limits.file_bytes {
             Some(cap) if size > cap => Decision::List("oversize"),
@@ -122,19 +135,17 @@ impl<T: Tag> Loading<T> {
         };
         match (file.decision(), what) {
             (Decision::List(_), _) => self.add_entry(file, Content::Unavailable),
-            (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes), None)?,
-            (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read(), None)?,
-            (Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
+            (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes))?,
+            (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read())?,
+            (Decision::KeepLazy(_), Put::ReadOnDemand { read, .. }) => {
                 self.add_entry(file, Content::ReadOnDemand(read))
             }
-            (Decision::Pending, Put::ReadOnDemand { read, .. }) => {
-                self.put_bytes(
-                    file,
-                    read(self.limits.file_bytes.unwrap_or(u64::MAX)),
-                    Some(read),
-                )?;
+            (Decision::Pending | Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
+                self.put_bytes(file, read(self.limits.file_bytes.unwrap_or(u64::MAX)))?;
             }
-            (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
+            (_, Put::Symlink(_) | Put::Listed { .. }) => {
+                unreachable!("symlinks and listed entries return above")
+            }
         }
         Ok(())
     }
@@ -143,7 +154,6 @@ impl<T: Tag> Loading<T> {
         &self,
         file: File<'static, T>,
         bytes: io::Result<Vec<u8>>,
-        reader: Option<ContentReader>,
     ) -> Result<(), SourceError> {
         let bytes = match bytes.and_then(|bytes| {
             if bytes.len() as u64 != file.size {
@@ -162,9 +172,8 @@ impl<T: Tag> Loading<T> {
             }
         };
         file.classify(&*self.passes, &bytes);
-        let content = match (file.decision(), reader) {
-            (Decision::Keep(_), Some(read)) => Content::ReadOnDemand(read),
-            (Decision::Keep(_), None) => self.store(bytes)?,
+        let content = match file.decision() {
+            Decision::Keep(_) => self.store(bytes)?,
             _ => Content::Unavailable,
         };
         self.add_entry(file, content);
@@ -215,7 +224,9 @@ impl<T: Tag> Loading<T> {
             if later.file.path != earlier.file.path {
                 return false;
             }
-            std::mem::swap(later, earlier);
+            if !matches!(later.content, Content::Excluded) {
+                std::mem::swap(later, earlier);
+            }
             true
         });
         let duplicate_paths = offered - entries.len();

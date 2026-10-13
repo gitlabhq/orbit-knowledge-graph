@@ -8,12 +8,13 @@ use crate::input::{
     PropertyRef, QueryType,
 };
 use crate::passes::cursor;
+use crate::query_limits::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 
 use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
-use super::{QueryParser, Rule, invalid};
+use super::{ParsedQuery, QueryParser, Rule, invalid};
 
-pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
+pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
@@ -39,12 +40,18 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
                 after,
             });
             lowering.input.options.include_debug_sql = query.debug;
-            return Ok((lowering.input, statement_hash(source, span)));
+            return Ok(ParsedQuery {
+                query_hash: statement_hash(source, span),
+                input: lowering.input,
+            });
         }
         None => {}
     };
     lowering.input.options.include_debug_sql = query.debug;
-    Ok((lowering.input, 0))
+    Ok(ParsedQuery {
+        input: lowering.input,
+        query_hash: 0,
+    })
 }
 
 fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
@@ -135,6 +142,12 @@ impl Lowering {
                 ));
             }
             return Ok(id);
+        }
+        if self.input.nodes.len() == MAX_NODES_CAP {
+            return Err(invalid(
+                pattern.span,
+                &format!("a query declares at most {MAX_NODES_CAP} nodes"),
+            ));
         }
         let mut node = InputNode {
             id: id.clone(),
@@ -320,7 +333,7 @@ fn is_type_shaped(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     fn hash(query: &str) -> u64 {
-        super::super::parse_with_hash(query).unwrap().1
+        super::super::parse_with_hash(query).unwrap().query_hash
     }
 
     #[test]

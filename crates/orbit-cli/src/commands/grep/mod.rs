@@ -1,301 +1,191 @@
+mod defs;
+mod kind;
 mod local;
+mod rank;
+mod render;
+mod scan;
+mod term;
 
-use std::collections::HashSet;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use duckdb_client::search::NodeValue;
 use orbit_search::{RecallFilter, query_alternatives};
 
-use crate::commands::context;
 use local::LocalBackend;
+
+/// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
+/// nothing but the exit status with `-q`; `--kind File` and `--kind Directory` list where
+/// the matches are with their definitions.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Output {
+    #[default]
+    Lines,
+    Files,
+    Count,
+    Quiet,
+    FileRows,
+    Directories,
+}
+
+/// The rg and grep flags a search honors.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Options {
+    pub(crate) fixed: bool,
+    pub(crate) word: bool,
+    pub(crate) invert: bool,
+    pub(crate) before: usize,
+    pub(crate) after: usize,
+    pub(crate) max_count: Option<u64>,
+    /// rg `-g` globs: a leading `!` excludes.
+    pub(crate) globs: Vec<String>,
+    pub(crate) types: Vec<String>,
+    pub(crate) types_not: Vec<String>,
+    pub(crate) max_columns: Option<usize>,
+    pub(crate) output: Output,
+}
+
+/// A search that found nothing; exits 1 without a message, as rg does.
+#[derive(Debug)]
+pub(crate) struct NoMatches;
+
+impl std::fmt::Display for NoMatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no matches")
+    }
+}
+
+impl std::error::Error for NoMatches {}
 
 pub(crate) fn run(
     query: Option<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
-    limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
+    mut options: Options,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
-    if let Some(query) = &query
-        && query_alternatives(query).is_err()
-    {
-        anyhow::bail!(
-            "no usable search terms in query: {query:?} — to list every definition in a \
-             file or directory instead, run `{launcher} grep --path <path>`; for a file's \
-             definition map and connections, `{launcher} context <path>`"
-        );
-    }
+    let alternatives = match &query {
+        Some(query) => query_alternatives(query).map_err(|_| {
+            anyhow::anyhow!(
+                "no usable search terms in query: {query:?} — for a file's definitions and \
+                 connections, run `{launcher} context <path>`"
+            )
+        })?,
+        None => Vec::new(),
+    };
 
+    let mut terms: Vec<term::Term> = alternatives.iter().map(|a| term::Term::parse(a)).collect();
+    if options.fixed {
+        terms = terms.iter().map(term::Term::fixed).collect();
+    }
+    let scan = match query.is_some() {
+        true => {
+            let matcher = term::matcher(&terms, &options).or_else(|_| {
+                terms = terms.iter().map(term::Term::literal).collect();
+                term::matcher(&terms, &options)
+            })?;
+            let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))?;
+            let scope = crate::workspace::repo_relative_paths(&root, &paths);
+            let hits = scan::scan(&root, &scope, &matcher, &options)?;
+            let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
+            files.sort();
+            files.dedup();
+            let edited = crate::workspace::edited_since_index(&root, &files);
+            Some((hits, edited))
+        }
+        false => None,
+    };
     let backend = LocalBackend::open(repo, db, &paths)?;
+    let paths = backend.paths().to_vec();
+    let kinds = resolve_kinds(&backend, &filter.kinds)?;
+    if let (Some(shape), Output::Lines) = (kinds.output, options.output) {
+        options.output = shape;
+    }
+    let (kinds, shown) = (kinds.definitions, kinds.shown);
 
     let mut out = std::io::stdout().lock();
-    let Some(query) = query else {
-        return report_outline(&mut out, &backend, &paths, &filter, launcher);
+    let (Some(query), Some((mut hits, edited))) = (query, scan) else {
+        anyhow::bail!("orbit grep needs a pattern, as with rg");
     };
-    if !paths.is_empty() {
-        writeln!(out, "path: {}", paths.join(" "))?;
-    }
-    if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
-    }
-
-    writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    let (outcome, nodes) = backend.grep(&query, limit, &filter)?;
-    report_exact_query_note(&mut out, &outcome)?;
-
-    if nodes.is_empty() {
-        if paths.is_empty() && filter.is_empty() {
-            writeln!(
-                out,
-                "No definitions match. Try a symbol name, or `{launcher} context <path>`."
-            )?;
-        } else {
-            writeln!(
-                out,
-                "No definitions match in scope. Drop --path/--kind, or try a symbol name."
-            )?;
-        }
-        return Ok(());
-    }
-
-    report_results(&mut out, &outcome, &nodes)?;
-    Ok(())
-}
-
-fn report_outline(
-    out: &mut impl Write,
-    backend: &LocalBackend,
-    paths: &[String],
-    filter: &RecallFilter,
-    launcher: &str,
-) -> Result<()> {
-    writeln!(out, "outline {} @ {}", paths.join(" "), backend.header())?;
-    if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
-    }
-    let rows = backend.search().list_corpus(filter)?;
-    if rows.is_empty() {
-        writeln!(
-            out,
-            "\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`."
-        )?;
-        return Ok(());
-    }
-    writeln!(out, "\nDefinitions ({}):", rows.len())?;
-    for node in &rows {
-        report_definition(out, node)?;
-    }
-    Ok(())
-}
-
-fn report_results(
-    out: &mut impl Write,
-    outcome: &orbit_search::GrepOutcome,
-    nodes: &[NodeValue],
-) -> Result<()> {
-    for (node, hit) in nodes.iter().zip(&outcome.matches) {
-        let range = context::source_range(node)?;
-        let label = if hit.exact_name {
-            "exact-name"
-        } else if hit.name_match {
-            "name/path"
-        } else {
-            "body-only"
-        };
-        let body = hit
-            .body_offset
-            .filter(|_| !hit.exact_name && !hit.name_match)
-            .map(|offset| {
-                let text: String = hit.body_text.chars().take(BODY_PREVIEW_CHARS).collect();
-                (range.start + offset - 1, text)
-            });
-        let mentions = match body {
-            Some(_) => format!(" \u{d7}{}", hit.mentions),
-            None => String::new(),
-        };
-        writeln!(
-            out,
-            "  {}:{}  {}  [{}]  {}:{}-{}  {label}{mentions}",
-            node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
-        )?;
-        if let Some((line, text)) = body {
-            writeln!(out, "      {line}| {text}")?;
-        }
-    }
-    let hidden = outcome.total.saturating_sub(outcome.matches.len());
-    if hidden >= BROAD_HIDDEN_HITS {
-        writeln!(
-            out,
-            "  … {hidden} more; broad query. Add --path/--kind or a specific name."
-        )?;
-    } else if hidden > 0 {
-        writeln!(out, "  … {hidden} more; add --path/--kind or --limit.")?;
-    }
-    Ok(())
-}
-
-fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
-    let range = context::source_range(node)?;
-    writeln!(
-        out,
-        "  {}:{}  {}  [{}]  {}:{}-{}",
-        node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
+    let alternatives = terms;
+    hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+    defs::attach_definitions(
+        backend.client(),
+        backend.git(),
+        &mut hits,
+        &alternatives,
+        &kinds,
+        &edited,
     )?;
-    Ok(())
-}
-
-const BROAD_HIDDEN_HITS: usize = 100;
-const BODY_PREVIEW_CHARS: usize = 100;
-
-fn report_exact_query_note(
-    out: &mut impl Write,
-    outcome: &orbit_search::GrepOutcome,
-) -> std::io::Result<()> {
-    let exact: HashSet<_> = outcome
-        .exact_alternatives
-        .iter()
-        .map(|alternative| alternative.to_lowercase())
-        .collect();
-    let alternatives: Vec<_> = outcome
-        .alternatives
-        .iter()
-        .map(String::as_str)
-        .filter(|alternative| !alternative.chars().any(char::is_whitespace))
-        .collect();
-    let matched: Vec<_> = alternatives
-        .iter()
-        .copied()
-        .filter(|alternative| exact.contains(&alternative.to_lowercase()))
-        .collect();
-    let missing: Vec<_> = alternatives
-        .iter()
-        .copied()
-        .filter(|alternative| !exact.contains(&alternative.to_lowercase()))
-        .collect();
-    if !matched.is_empty() {
-        writeln!(out, "exact: {}", matched.join(" | "))?;
+    let connections = match options.output {
+        Output::Lines => defs::connections(backend.client(), &hits)?,
+        _ => defs::Connections::new(),
+    };
+    let mut header = format!("grep {query:?}");
+    for path in &paths {
+        header.push_str(&format!(" {path}"));
     }
-    if !missing.is_empty() {
-        writeln!(out, "exact-miss: {}", missing.join(" | "))?;
+    if !shown.is_empty() {
+        header.push_str(&format!(" --kind {}", shown.join(",")));
     }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn outcome() -> orbit_search::GrepOutcome {
-        orbit_search::GrepOutcome {
-            alternatives: Vec::new(),
-            exact_alternatives: Vec::new(),
-            matches: Vec::new(),
-            total: 0,
-        }
-    }
-
-    #[test]
-    fn results_print_definition_identity_and_range() {
-        let mut result = outcome();
-        result.matches.push(orbit_search::GrepMatch {
-            id: 481,
-            score: 1.0,
-            exact_name: true,
-            name_match: true,
-            body_offset: None,
-            body_text: String::new(),
-            mentions: 0,
-        });
-        result.total = 1;
-        let node = NodeValue {
-            entity_type: "Definition".to_string(),
-            id: 481,
-            properties: serde_json::from_value(serde_json::json!({
-                "fqn": "Repo::commit_hook",
-                "definition_type": "Method",
-                "file_path": "crates/repo/src/lib.rs",
-                "start_line": 42,
-                "end_line": 57
-            }))
-            .unwrap(),
-        };
-        let mut buf = Vec::new();
-        report_results(&mut buf, &result, &[node]).unwrap();
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            "  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57  exact-name\n"
-        );
-    }
-
-    #[test]
-    fn body_only_results_print_the_first_matching_line() {
-        let mut result = outcome();
-        result.matches.push(orbit_search::GrepMatch {
-            id: 7,
-            score: 1.0,
-            exact_name: false,
-            name_match: false,
-            body_offset: Some(3),
-            body_text: "x".repeat(140),
-            mentions: 2,
-        });
-        result.total = 1;
-        let node = NodeValue {
-            entity_type: "Definition".to_string(),
-            id: 7,
-            properties: serde_json::from_value(serde_json::json!({
-                "fqn": "Repo::run",
-                "definition_type": "Method",
-                "file_path": "src/lib.rs",
-                "start_line": 10,
-                "end_line": 20
-            }))
-            .unwrap(),
-        };
-        let mut buf = Vec::new();
-        report_results(&mut buf, &result, &[node]).unwrap();
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!(
-                "  Definition:7  Repo::run  [Method]  src/lib.rs:10-20  body-only ×2\n      12| {}\n",
-                "x".repeat(100)
+    header.push_str(&format!(" @ {}", backend.header()));
+    write!(
+        out,
+        "{}",
+        render::render(
+            &header,
+            &hits,
+            &alternatives,
+            &connections,
+            &edited,
+            &options,
+            render::lookup(
+                &backend.git().repo_path,
+                &hits,
+                &alternatives,
+                &connections,
+                &options
             )
+            .as_deref(),
+        )?
+    )?;
+    out.flush()?;
+    match hits.iter().any(|hit| !hit.context) {
+        true => Ok(()),
+        false => Err(NoMatches.into()),
+    }
+}
+
+fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::Kinds> {
+    if requested.is_empty() {
+        return Ok(kind::Kinds::default());
+    }
+    let git = backend.git();
+    let batches = backend.client().query_arrow_json(
+        "SELECT DISTINCT definition_type AS kind FROM gl_definition
+         WHERE project_id = ?1 AND commit_sha = ?2 ORDER BY 1",
+        &[git.project_id.into(), git.commit_sha.clone().into()],
+    )?;
+    let known = duckdb_client::string_column(&batches, "kind");
+    let kinds = kind::resolve(requested, &known)?;
+    let launcher = crate::commands::setup::spec::launcher();
+    let hosted = kinds.hosted.join(", ");
+    anyhow::ensure!(
+        kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
+        "{hosted} lives in the hosted graph, which `{launcher} grep` does not search yet; \
+         use `{launcher} query`"
+    );
+    if !kinds.hosted.is_empty() {
+        eprintln!("orbit: skipping hosted --kind {hosted}; use `{launcher} query`");
+    }
+    if !kinds.unknown.is_empty() {
+        eprintln!(
+            "orbit: ignoring unknown --kind {}; kinds here: File, Directory, Definition, {}",
+            kinds.unknown.join(", "),
+            known.join(", ")
         );
     }
-
-    #[test]
-    fn truncated_results_report_how_many_were_hidden() {
-        let mut o = outcome();
-        o.total = 42;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o, &[]).unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("42 more; add"), "{text}");
-
-        o.total = 0;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o, &[]).unwrap();
-        assert!(!String::from_utf8(buf).unwrap().contains(" more"));
-    }
-
-    #[test]
-    fn exact_query_note_distinguishes_or_alternatives() {
-        let mut result = outcome();
-        result.alternatives = vec![
-            "present".into(),
-            "missing".into(),
-            "natural language".into(),
-        ];
-        result.exact_alternatives = vec!["present".to_string()];
-        let mut buf = Vec::new();
-        report_exact_query_note(&mut buf, &result).unwrap();
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            "exact: present\nexact-miss: missing\n"
-        );
-    }
+    Ok(kinds)
 }

@@ -75,11 +75,23 @@ fn unlimited() -> Env {
     Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap()
 }
 
+fn empty_sources() -> code_graph_incremental::pipeline::Sources {
+    Arc::new(
+        orbit_utils::vfs::Vfs::load(
+            orbit_utils::vfs::sources::Memory(vec![]),
+            (),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap(),
+    )
+}
+
 #[test]
 fn phases_chain_by_type_and_every_boundary_is_reported() {
     let env = unlimited();
     let (log, second) = (Log::default(), Log::default());
-    let context = Context::new(&env)
+    let context = Context::new(&env, empty_sources())
         .observe(log.clone())
         .observe(second.clone());
     let (context, value) = Pipeline::new(context, 21)
@@ -121,7 +133,8 @@ fn run_budget_stops_the_run_at_the_next_phase_boundary() {
     .unwrap();
     let log = Log::default();
 
-    let result = Pipeline::new(Context::new(&env).observe(log.clone()), 1).then(Double);
+    let result =
+        Pipeline::new(Context::new(&env, empty_sources()).observe(log.clone()), 1).then(Double);
 
     let Err(Error::Killed(killed)) = result else {
         panic!("a run past its budget must fail with Killed");
@@ -140,12 +153,13 @@ fn run_budget_stops_the_run_at_the_next_phase_boundary() {
 fn a_skipped_item_is_reported_and_the_run_continues() {
     let env = unlimited();
     let log = Log::default();
-    let (context, value) = Pipeline::new(Context::new(&env).observe(log.clone()), 1)
-        .then(Skip("big.py"))
-        .unwrap()
-        .then(Double)
-        .unwrap()
-        .finish();
+    let (context, value) =
+        Pipeline::new(Context::new(&env, empty_sources()).observe(log.clone()), 1)
+            .then(Skip("big.py"))
+            .unwrap()
+            .then(Double)
+            .unwrap()
+            .finish();
 
     assert_eq!(value, 2);
     assert_eq!(context.report.skipped.len(), 1);
@@ -178,10 +192,4 @@ fn item_phases_pipe_into_one_named_pass() {
         .run(&env, &Sentinel::new("run", "", 0), 1)
         .unwrap_err();
     assert_eq!(killed.label, "run");
-}
-
-#[test]
-fn limits_load_from_the_shipped_config() {
-    let env = Env::for_lang(SupportLang::Python).unwrap();
-    assert!(env.limits.total_ms >= env.limits.file_rewrite_ms);
 }
