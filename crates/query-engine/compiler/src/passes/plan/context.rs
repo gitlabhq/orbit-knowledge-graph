@@ -9,7 +9,7 @@ use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
 
 pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
-    pub input: &'a Query,
+    pub query: &'a Query,
     pub model: &'a M,
     pub hops: Vec<Hop>,
     pub nodes: HashMap<String, NodePlan>,
@@ -48,7 +48,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     }
 
     pub fn aggregate(&self) -> bool {
-        self.input.query_type == QueryType::Aggregation
+        self.query.query_type == QueryType::Aggregation
     }
 
     pub fn node(&self, alias: &str) -> Result<&NodePlan> {

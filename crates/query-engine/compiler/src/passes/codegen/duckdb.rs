@@ -14,7 +14,7 @@
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{
-    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
+    Ast, Cte, Expr, Function, Insert, JoinType, Op, Select, SqlType, TableRef, TextMatch,
 };
 use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
@@ -51,11 +51,17 @@ pub(super) fn render_literal(parameter: &ParamValue) -> String {
     }
 }
 
-pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
+pub fn codegen(
+    ast: &Ast<
+        query_data_model::Relational<query_data_model::implementations::duckdb::layout::DuckDb>,
+    >,
+    result_context: ResultContext,
+) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
-    let sql = match ast {
-        Node::Query(q) => ctx.emit_query(q)?,
-        Node::Insert(ins) => ctx.emit_insert(ins),
+    let sql = if let Some(select) = ast.select_ref() {
+        ctx.emit_query(select)?
+    } else {
+        ctx.emit_insert(ast.insert_ref().expect("AST contains a statement"))
     };
     if let Some(error) = ctx.error {
         return Err(QueryError::Codegen(error));
@@ -102,11 +108,11 @@ impl Context {
         )
     }
 
-    fn emit_query(&mut self, q: &Query) -> Result<String> {
+    fn emit_query(&mut self, q: &Select) -> Result<String> {
         self.emit_query_with_limit(q, true)
     }
 
-    fn emit_query_with_limit(&mut self, q: &Query, include_limit: bool) -> Result<String> {
+    fn emit_query_with_limit(&mut self, q: &Select, include_limit: bool) -> Result<String> {
         let mut parts = Vec::new();
 
         if !q.ctes.is_empty() {
@@ -129,7 +135,7 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                let inner = self.emit_query_with_limit(&cte.query, !cte.recursive)?;
+                let inner = self.emit_query_with_limit(&cte.select, !cte.recursive)?;
                 Ok(format!("{} AS ({})", cte.name, inner))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -137,7 +143,7 @@ impl Context {
         Ok(format!("{} {}", keyword, cte_parts.join(", ")))
     }
 
-    fn emit_query_body_inner(&mut self, q: &Query, include_limit: bool) -> Result<String> {
+    fn emit_query_body_inner(&mut self, q: &Select, include_limit: bool) -> Result<String> {
         let mut parts = Vec::new();
 
         let select_items: Vec<_> = q
@@ -231,11 +237,11 @@ impl Context {
             Expr::TextSearch {
                 mode: TextMatch::Contains,
                 value,
-                query,
+                pattern,
             } => format!(
                 "contains({}, {})",
                 self.emit_expr(value),
-                self.emit_expr(query)
+                self.emit_expr(pattern)
             ),
             Expr::TextSearch { .. } => {
                 self.error = Some("token search is not supported by the DuckDB backend".into());
@@ -328,16 +334,16 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!("{e} IN (SELECT {column} FROM {cte_name})")
             }
-            Expr::InSelect { expr, query } => {
+            Expr::InSelect { expr, select } => {
                 let e = self.emit_expr(expr);
                 let q = self
-                    .emit_query(query)
+                    .emit_query(select)
                     .expect("inline narrow subquery must not fail");
                 format!("{e} IN ({q})")
             }
-            Expr::Scalar(query) => {
+            Expr::Scalar(select) => {
                 let q = self
-                    .emit_query(query)
+                    .emit_query(select)
                     .expect("scalar subquery must not fail");
                 format!("({q})")
             }
@@ -520,15 +526,15 @@ impl Context {
                     ))
                 }
             }
-            TableRef::Union { queries, alias } => {
-                let union_parts: Vec<String> = queries
+            TableRef::Union { selects, alias } => {
+                let union_parts: Vec<String> = selects
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
                 Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
-            TableRef::Subquery { query, alias } => {
-                let inner_sql = self.emit_query(query)?;
+            TableRef::Subquery { select, alias } => {
+                let inner_sql = self.emit_query(select)?;
                 Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
@@ -579,13 +585,17 @@ mod tests {
     use super::*;
     use crate::ast::{Cte, JoinType, SelectExpr};
 
+    type TestAst = Ast<
+        query_data_model::Relational<query_data_model::implementations::duckdb::layout::DuckDb>,
+    >;
+
     fn empty_ctx() -> ResultContext {
         ResultContext::new()
     }
 
     #[test]
     fn positional_param_placeholders() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
@@ -593,7 +603,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         assert!(
             result.sql.contains("$1"),
             "expected $1 placeholder: {}",
@@ -608,7 +618,7 @@ mod tests {
 
     #[test]
     fn function_remapping() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::func(
@@ -618,7 +628,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         assert!(
             result.sql.contains("starts_with("),
             "expected starts_with: {}",
@@ -641,14 +651,14 @@ mod tests {
         )
         .unwrap();
 
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("e", "id"), "id")],
             from: TableRef::scan("edges", "e"),
             where_clause: Some(type_filter),
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         assert!(
             result.sql.contains("IN ($1, $2, $3)"),
             "expected expanded positional params: {}",
@@ -663,7 +673,7 @@ mod tests {
 
     #[test]
     fn if_to_case_when() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(
                 Expr::func(
                     Function::If,
@@ -679,7 +689,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         assert!(
             result.sql.contains("CASE WHEN"),
             "expected CASE WHEN: {}",
@@ -697,13 +707,13 @@ mod tests {
 
     #[test]
     fn recursive_cte_strips_limit() {
-        let q = Query {
+        let q = Select {
             ctes: vec![Cte {
                 name: "path_cte".into(),
-                query: Box::new(Query {
+                select: Box::new(Select {
                     select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
                     from: TableRef::scan("gl_project", "p"),
-                    union_all: vec![Query {
+                    union_all: vec![Select {
                         select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
                         from: TableRef::scan("path_cte", "c"),
                         ..Default::default()
@@ -720,7 +730,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         // The outer LIMIT 10 should be present
         assert!(result.sql.contains("LIMIT 10"), "{}", result.sql);
         // The CTE body should NOT have LIMIT 1000
@@ -735,7 +745,7 @@ mod tests {
 
     #[test]
     fn cross_join_emits_cross_join() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("a", "id"), "id")],
             from: TableRef::join(
                 JoinType::Cross,
@@ -746,7 +756,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         assert!(
             result.sql.contains("CROSS JOIN"),
             "expected CROSS JOIN: {}",
@@ -761,14 +771,14 @@ mod tests {
 
     #[test]
     fn render_inlines_positional_params() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::eq(Expr::col("n", "name"), Expr::lit("alice"))),
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx()).unwrap();
         assert!(result.sql.contains("$1"), "{}", result.sql);
 
         let rendered = result.render();

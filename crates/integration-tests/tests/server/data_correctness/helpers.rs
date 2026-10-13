@@ -100,7 +100,7 @@ pub(super) async fn run_query_with_security(
     let mut query_result = hydration_output.query_result;
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
-        &compiled.input,
+        &compiled.query,
         &compiled.pagination,
     ));
 
@@ -124,7 +124,7 @@ pub(super) async fn run_query_with_security(
         !response.format_version.is_empty(),
         "every response must carry a non-empty format_version"
     );
-    ResponseView::for_query(&compiled.input, response)
+    ResponseView::for_query(&compiled.query, response)
 }
 
 pub(super) fn allow_all() -> MockRedactionService {

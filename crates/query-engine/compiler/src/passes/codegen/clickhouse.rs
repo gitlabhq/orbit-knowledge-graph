@@ -3,7 +3,7 @@
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{
-    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
+    Ast, Cte, Expr, Function, Insert, JoinType, Op, Select, SqlType, TableRef, TextMatch,
 };
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
@@ -14,14 +14,19 @@ use super::{ParamValue, ParameterizedQuery, SqlDialect};
 use orbit_utils::query_types::ParamBindings;
 
 pub fn codegen(
-    ast: &Node,
+    ast: &Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
-    let mut sql = match ast {
-        Node::Query(q) => ctx.emit_query(q)?,
-        Node::Insert(ins) => ctx.emit_insert(ins),
+    let mut sql = if let Some(select) = ast.select_ref() {
+        ctx.emit_query(select)?
+    } else {
+        ctx.emit_insert(ast.insert_ref().expect("AST contains a statement"))
     };
     if let Some(error) = ctx.error {
         return Err(crate::error::QueryError::Codegen(error));
@@ -30,7 +35,7 @@ pub fn codegen(
     // SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION arms.
     // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
     // (bare integers, 0/1 bools, escaped quoted strings).
-    if matches!(ast, Node::Query(_)) {
+    if ast.is_select() {
         let mut settings = query_config
             .to_clickhouse_settings()
             .map_err(crate::error::QueryError::Codegen)?;
@@ -58,11 +63,18 @@ pub fn codegen(
 /// `check_ast`, `enforce_return`). It must only be used for trusted, internally
 /// constructed ASTs (e.g. schema version management DDL/DML), never for
 /// user-supplied query input.
-pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
+pub fn emit_simple_query(
+    ast: &Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >,
+) -> Result<(String, HashMap<String, ParamValue>)> {
     let mut ctx = Context::new();
-    let sql = match node {
-        Node::Query(q) => ctx.emit_query(q)?,
-        Node::Insert(ins) => ctx.emit_insert(ins),
+    let sql = if let Some(select) = ast.select_ref() {
+        ctx.emit_query(select)?
+    } else {
+        ctx.emit_insert(ast.insert_ref().expect("AST contains a statement"))
     };
     if let Some(error) = ctx.error {
         return Err(crate::error::QueryError::Codegen(error));
@@ -101,7 +113,7 @@ impl Context {
         )
     }
 
-    fn emit_query(&mut self, q: &Query) -> Result<String> {
+    fn emit_query(&mut self, q: &Select) -> Result<String> {
         let mut parts = Vec::new();
 
         if !q.ctes.is_empty() {
@@ -124,7 +136,7 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                let inner = self.emit_query(&cte.query)?;
+                let inner = self.emit_query(&cte.select)?;
                 if cte.materialized {
                     Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
                 } else {
@@ -136,7 +148,7 @@ impl Context {
         Ok(format!("{} {}", keyword, cte_parts.join(", ")))
     }
 
-    fn emit_query_body(&mut self, q: &Query) -> Result<String> {
+    fn emit_query_body(&mut self, q: &Select) -> Result<String> {
         let mut parts = Vec::new();
 
         let select_items: Vec<_> = q
@@ -257,13 +269,17 @@ impl Context {
                     format!("toDate32({bucket})")
                 }
             }
-            Expr::TextSearch { mode, value, query } => {
-                let (value, query) = (self.emit_expr(value), self.emit_expr(query));
+            Expr::TextSearch {
+                mode,
+                value,
+                pattern,
+            } => {
+                let (value, pattern) = (self.emit_expr(value), self.emit_expr(pattern));
                 match mode {
-                    TextMatch::Contains => format!("multiSearchAny({value}, [{query}])"),
-                    TextMatch::TokenMatch => format!("hasToken({value}, {query})"),
-                    TextMatch::AllTokens => format!("hasAllTokens({value}, {query})"),
-                    TextMatch::AnyTokens => format!("hasAnyTokens({value}, {query})"),
+                    TextMatch::Contains => format!("multiSearchAny({value}, [{pattern}])"),
+                    TextMatch::TokenMatch => format!("hasToken({value}, {pattern})"),
+                    TextMatch::AllTokens => format!("hasAllTokens({value}, {pattern})"),
+                    TextMatch::AnyTokens => format!("hasAnyTokens({value}, {pattern})"),
                 }
             }
             Expr::Aggregate {
@@ -332,16 +348,16 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!("{e} IN (SELECT {column} FROM {cte_name})")
             }
-            Expr::InSelect { expr, query } => {
+            Expr::InSelect { expr, select } => {
                 let e = self.emit_expr(expr);
                 let q = self
-                    .emit_query(query)
+                    .emit_query(select)
                     .expect("inline narrow subquery must not fail");
                 format!("{e} IN ({q})")
             }
-            Expr::Scalar(query) => {
+            Expr::Scalar(select) => {
                 let q = self
-                    .emit_query(query)
+                    .emit_query(select)
                     .expect("scalar subquery must not fail");
                 format!("({q})")
             }
@@ -419,15 +435,15 @@ impl Context {
                     ))
                 }
             }
-            TableRef::Union { queries, alias } => {
-                let union_parts: Vec<String> = queries
+            TableRef::Union { selects, alias } => {
+                let union_parts: Vec<String> = selects
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
                 Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
-            TableRef::Subquery { query, alias } => {
-                let inner_sql = self.emit_query(query)?;
+            TableRef::Subquery { select, alias } => {
+                let inner_sql = self.emit_query(select)?;
                 Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
@@ -471,13 +487,19 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, OrderExpr, SelectExpr};
 
+    type TestAst = Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >;
+
     fn empty_ctx() -> ResultContext {
         ResultContext::new()
     }
 
     #[test]
     fn simple_select() {
-        let q = Query {
+        let q = Select {
             select: vec![
                 SelectExpr {
                     expr: Expr::col("n", "id"),
@@ -494,12 +516,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
@@ -512,7 +529,7 @@ mod tests {
 
     #[test]
     fn with_join() {
-        let q = Query {
+        let q = Select {
             select: vec![
                 SelectExpr {
                     expr: Expr::col("n", "id"),
@@ -532,12 +549,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
@@ -546,7 +558,7 @@ mod tests {
 
     #[test]
     fn aggregation() {
-        let q = Query {
+        let q = Select {
             select: vec![
                 SelectExpr {
                     expr: Expr::col("n", "label"),
@@ -569,12 +581,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
@@ -583,7 +590,7 @@ mod tests {
 
     #[test]
     fn in_operator() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
@@ -601,12 +608,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
@@ -615,7 +617,7 @@ mod tests {
 
     #[test]
     fn and_or_conditions() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
@@ -635,12 +637,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
@@ -701,7 +698,7 @@ mod tests {
 
     #[test]
     fn edge_type_filter() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::join(
                 JoinType::Inner,
@@ -717,12 +714,7 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let r = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(
             r.sql.contains("e.relationship_kind = {p0:String}"),
             "{}",
@@ -743,7 +735,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::join(
                 JoinType::Inner,
@@ -756,12 +748,7 @@ mod tests {
             ),
             ..Default::default()
         };
-        let r = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let r = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(
             r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
             "{}",
@@ -775,20 +762,20 @@ mod tests {
         let mut ctx = ResultContext::new();
         ctx.add_node("u", "User");
 
-        let q = Query {
+        let q = Select {
             select: vec![],
             from: TableRef::scan("nodes", "n"),
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), ctx, QueryConfig::default()).unwrap();
+        let result = codegen(&TestAst::select(q), ctx, QueryConfig::default()).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
 
     #[test]
     fn having_clause() {
-        let q = Query {
+        let q = Select {
             select: vec![
                 SelectExpr::new(Expr::col("n", "label"), "type"),
                 SelectExpr::new(
@@ -806,12 +793,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
@@ -820,7 +802,7 @@ mod tests {
 
     #[test]
     fn having_without_group_by() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(
                 Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("n", "id"))),
                 "total",
@@ -834,19 +816,14 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(result.sql.contains("HAVING"));
         assert!(!result.sql.contains("GROUP BY"));
     }
 
     #[test]
     fn subquery_in_from() {
-        let inner = Query {
+        let inner = Select {
             select: vec![
                 SelectExpr::new(Expr::col("p", "id"), "id"),
                 SelectExpr::new(Expr::col("p", "name"), "name"),
@@ -856,18 +833,13 @@ mod tests {
             ..Default::default()
         };
 
-        let outer = Query {
+        let outer = Select {
             select: vec![SelectExpr::new(Expr::col("sub", "id"), "id")],
             from: TableRef::subquery(inner, "sub"),
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(outer)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(outer), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(result.sql.contains("(SELECT"));
         assert!(result.sql.contains(") AS sub"));
         assert!(result.sql.contains("gl_project AS p"));
@@ -875,7 +847,7 @@ mod tests {
 
     #[test]
     fn subquery_in_join() {
-        let inner = Query {
+        let inner = Select {
             select: vec![SelectExpr::new(Expr::col("e", "source_id"), "source_id")],
             from: TableRef::scan("gl_edge", "e"),
             group_by: vec![Expr::col("e", "source_id")],
@@ -889,7 +861,7 @@ mod tests {
             ..Default::default()
         };
 
-        let outer = Query {
+        let outer = Select {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::join(
                 JoinType::Inner,
@@ -900,12 +872,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(outer)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(outer), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(result.sql.contains("INNER JOIN (SELECT"));
         assert!(result.sql.contains("HAVING"));
         assert!(result.sql.contains(") AS deduped_e ON"));
@@ -915,13 +882,13 @@ mod tests {
     fn union_all_in_cte_body() {
         use crate::ast::Cte;
 
-        let q = Query {
+        let q = Select {
             ctes: vec![Cte {
                 name: "path_cte".into(),
-                query: Box::new(Query {
+                select: Box::new(Select {
                     select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
                     from: TableRef::scan("gl_project", "p"),
-                    union_all: vec![Query {
+                    union_all: vec![Select {
                         select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
                         from: TableRef::scan("path_cte", "c"),
                         ..Default::default()
@@ -937,22 +904,17 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(result.sql.contains("WITH RECURSIVE"));
         assert!(result.sql.contains("UNION ALL"));
     }
 
     #[test]
     fn union_all_in_top_level_query() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::scan("gl_user", "u"),
-            union_all: vec![Query {
+            union_all: vec![Select {
                 select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
                 from: TableRef::scan("gl_project", "p"),
                 ..Default::default()
@@ -961,12 +923,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         // Outer LIMIT must apply to the whole union, not just the last branch.
         // ClickHouse binds a trailing LIMIT after a bare UNION ALL to the last
         // SELECT only, so the union is wrapped in a subquery.
@@ -979,16 +936,16 @@ mod tests {
 
     #[test]
     fn table_ref_union_emits_derived_table() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("all_edges", "id"), "id")],
             from: TableRef::Union {
-                queries: vec![
-                    Query {
+                selects: vec![
+                    Select {
                         select: vec![SelectExpr::new(Expr::col("e1", "source"), "id")],
                         from: TableRef::scan("gl_edge", "e1"),
                         ..Default::default()
                     },
-                    Query {
+                    Select {
                         select: vec![SelectExpr::new(Expr::col("e2", "source"), "id")],
                         from: TableRef::scan("gl_edge", "e2"),
                         ..Default::default()
@@ -999,12 +956,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(result.sql.contains("UNION ALL"));
         assert!(result.sql.contains(") AS all_edges"));
     }
@@ -1020,12 +972,7 @@ mod tests {
             ],
         );
 
-        let result = codegen(
-            &Node::Insert(Box::new(ins)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::insert(ins), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "INSERT INTO gl_schema_versions (key, version) VALUES ({p0:String}, {p1:Int64}), ({p2:String}, {p3:Int64})"
@@ -1050,7 +997,7 @@ mod tests {
             query_cache_ttl: Some(60),
             ..Default::default()
         };
-        let result = codegen(&Node::Insert(Box::new(ins)), empty_ctx(), cfg).unwrap();
+        let result = codegen(&TestAst::insert(ins), empty_ctx(), cfg).unwrap();
         assert!(
             !result.sql.contains("SETTINGS"),
             "INSERT should not have SETTINGS: {}",
@@ -1060,18 +1007,13 @@ mod tests {
 
     #[test]
     fn scan_final() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr::new(Expr::col("t", "id"), "id")],
             from: TableRef::scan_final("gl_schema_versions", "t"),
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert_eq!(
             result.sql,
             "SELECT t.id AS id FROM gl_schema_versions AS t FINAL"
@@ -1080,7 +1022,7 @@ mod tests {
 
     #[test]
     fn emit_simple_query_with_final_and_params() {
-        let q = Query {
+        let q = Select {
             select: vec![
                 SelectExpr::new(Expr::col("t", "key"), "key"),
                 SelectExpr::new(Expr::col("t", "version"), "version"),
@@ -1090,7 +1032,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (sql, params) = emit_simple_query(&Node::Query(Box::new(q))).unwrap();
+        let (sql, params) = emit_simple_query(&TestAst::select(q)).unwrap();
         assert_eq!(
             sql,
             "SELECT t.key AS key, t.version AS version FROM gl_schema_versions AS t FINAL WHERE (t.key = {p0:String})"
@@ -1168,7 +1110,7 @@ mod tests {
 
     #[test]
     fn query_settings_emitted_after_limit() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
@@ -1183,7 +1125,7 @@ mod tests {
             query_cache_ttl: Some(60),
             ..QueryConfig::default()
         };
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), cfg).unwrap();
         assert!(
             result.sql.contains("LIMIT 100 SETTINGS"),
             "SETTINGS should come after LIMIT: {}",
@@ -1199,7 +1141,7 @@ mod tests {
 
     #[test]
     fn compiler_derived_settings_reach_the_settings_clause() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
@@ -1213,7 +1155,7 @@ mod tests {
             .compiler_derived
             .use_index_for_in_with_subqueries_max_values = Some(100_000);
 
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), config).unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), config).unwrap();
         assert!(
             result
                 .sql
@@ -1232,7 +1174,7 @@ mod tests {
 
     #[test]
     fn no_query_settings_when_empty() {
-        let q = Query {
+        let q = Select {
             select: vec![SelectExpr {
                 expr: Expr::col("n", "id"),
                 alias: None,
@@ -1241,12 +1183,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = codegen(&TestAst::select(q), empty_ctx(), QueryConfig::default()).unwrap();
         assert!(
             !result.sql.contains("SETTINGS"),
             "no SETTINGS with default config: {}",

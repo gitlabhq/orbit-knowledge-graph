@@ -3,7 +3,13 @@ use super::helpers::*;
 #[tokio::test]
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     use compiler::AggFunction;
-    use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+    use compiler::ast::{Ast, Cte, Expr, Select, SelectExpr, TableRef};
+
+    type TestAst = Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >;
 
     let ctx = TestContext::new(&[]).await;
     ctx.execute("CREATE TABLE measurements(value Nullable(Int64), keep Bool) ENGINE=Memory")
@@ -13,13 +19,13 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     for (argument, distinct, expected) in
         [(false, false, "3"), (true, false, "2"), (true, true, "1")]
     {
-        let ast = Node::Query(Box::new(Query {
+        let ast = TestAst::select(Box::new(Select {
             ctes: vec![Cte::new(
                 "result",
-                Query {
+                Select {
                     ctes: vec![Cte::new(
                         "seed",
-                        Query {
+                        Select {
                             select: vec![SelectExpr::star()],
                             from: TableRef::scan("measurements", "m"),
                             ..Default::default()
@@ -50,13 +56,11 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
             arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
             expected
         );
-        let Node::Query(arm) = ast else {
-            unreachable!()
-        };
-        let union = Node::Query(Box::new(Query {
+        let arm = ast.select_ref().expect("select AST").clone();
+        let union = TestAst::select(Box::new(Select {
             select: vec![SelectExpr::new(Expr::int(0), "n")],
             from: TableRef::scan("system.one", "one"),
-            union_all: vec![*arm],
+            union_all: vec![arm],
             ..Default::default()
         }));
         let compiled =

@@ -179,7 +179,7 @@ impl PipelineObserver for BillingObserver {
         self.query_type = query_type;
     }
     fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
-        self.metrics.input = Some(ctx.input.clone());
+        self.metrics.query = Some(ctx.query.clone());
         self.metrics.hydration = Some(ctx.hydration.clone());
     }
     fn compiled(&mut self, elapsed: Duration) {

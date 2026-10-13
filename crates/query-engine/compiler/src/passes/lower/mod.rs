@@ -99,8 +99,8 @@ pub struct LoweredEdge {
     pub rel_types: Vec<String>,
 }
 
-pub struct LoweredQuery {
-    pub ast: Node,
+pub struct LoweredQuery<S> {
+    pub ast: Ast<S>,
     pub metadata: LoweredMetadata,
 }
 
@@ -166,15 +166,15 @@ impl EmitOutput {
         Ok(std::mem::take(&mut self.nodes))
     }
 
-    pub fn into_query(
+    pub fn into_select(
         self,
         mut select: Vec<SelectExpr>,
         group_by: Vec<Expr>,
         order_by: Vec<OrderExpr>,
         limit: u32,
-    ) -> Query {
+    ) -> Select {
         select.extend(self.select);
-        Query {
+        Select {
             ctes: self.ctes,
             select,
             from: self.from,
@@ -187,9 +187,16 @@ impl EmitOutput {
     }
 }
 
-pub fn emit(plan: &QueryPlan, input: &crate::query::Query) -> Result<LoweredQuery> {
+pub fn emit<M>(
+    plan: &QueryPlan,
+    input: &crate::query::Query,
+    _model: &M,
+) -> Result<LoweredQuery<M::Schema>>
+where
+    M: query_data_model::OrbitQueryModel + ?Sized,
+{
     let mut nodes = HashMap::new();
-    let mut node = match plan {
+    let mut select = match plan {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
@@ -210,9 +217,7 @@ pub fn emit(plan: &QueryPlan, input: &crate::query::Query) -> Result<LoweredQuer
         QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
     }?;
 
-    if !input.comparisons.is_empty()
-        && let Node::Query(q) = &mut node
-    {
+    if !input.comparisons.is_empty() {
         let column = |alias: &str, property: &str| -> Result<Expr> {
             nodes
                 .get(alias)
@@ -248,7 +253,8 @@ pub fn emit(plan: &QueryPlan, input: &crate::query::Query) -> Result<LoweredQuer
                 )
             })
             .collect::<Result<Vec<_>>>()?;
-        q.where_clause = Expr::and_all([q.where_clause.take(), Expr::conjoin(predicates)]);
+        select.where_clause =
+            Expr::and_all([select.where_clause.take(), Expr::conjoin(predicates)]);
     }
 
     let edges = plan
@@ -270,10 +276,12 @@ pub fn emit(plan: &QueryPlan, input: &crate::query::Query) -> Result<LoweredQuer
         .collect();
     let stable_order = match plan {
         QueryPlan::Hydration(_) => vec![],
-        QueryPlan::Aggregation(_) => match &node {
-            Node::Query(query) => query.group_by.iter().cloned().map(OrderExpr::asc).collect(),
-            Node::Insert(_) => Vec::new(),
-        },
+        QueryPlan::Aggregation(_) => select
+            .group_by
+            .iter()
+            .cloned()
+            .map(OrderExpr::asc)
+            .collect(),
         QueryPlan::PathFinding(_) => vec![
             OrderExpr::asc(Expr::func(
                 Function::ToString,
@@ -320,7 +328,7 @@ pub fn emit(plan: &QueryPlan, input: &crate::query::Query) -> Result<LoweredQuer
             .collect(),
     };
     Ok(LoweredQuery {
-        ast: node,
+        ast: Ast::select(select),
         metadata: LoweredMetadata {
             nodes,
             edges,

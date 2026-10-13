@@ -4,6 +4,10 @@ use crate::compiler::setup::test_ontology;
 use crate::compiler::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
+type TestAst = compiler::ast::Ast<
+    query_data_model::Relational<query_data_model::implementations::duckdb::layout::DuckDb>,
+>;
+
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
     compile_local(json, Frontend::JsonDsl, &test_ontology()).unwrap()
 }
@@ -61,7 +65,7 @@ fn fused_neighbors_execute_both_directions_including_self_loops() {
 
 #[test]
 fn canonical_functions_execute_in_duckdb() {
-    use compiler::ast::{Expr, Function, Node, Op, Query, SelectExpr, TableRef};
+    use compiler::ast::{Expr, Function, Op, Select, SelectExpr, TableRef};
 
     let directory = tempfile::tempdir().unwrap();
     let database =
@@ -136,7 +140,7 @@ fn canonical_functions_execute_in_duckdb() {
             "{\"k\":\"v\"}",
         ),
     ] {
-        let ast = Node::Query(Box::new(Query {
+        let ast = TestAst::select(Box::new(Select {
             select: vec![SelectExpr::new(expression, "value")],
             from: TableRef::scan("source", "s"),
             ..Default::default()
@@ -155,13 +159,13 @@ fn canonical_functions_execute_in_duckdb() {
 #[test]
 fn week_buckets_start_sunday_and_return_dates() {
     use compiler::TruncateUnit;
-    use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
+    use compiler::ast::{Expr, Select, SelectExpr, TableRef};
 
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("weeks.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE events(created_at TIMESTAMP); INSERT INTO events VALUES ('2026-10-03 23:59:59'), ('2026-10-04 00:00:00'), ('2026-10-05 12:00:00');").unwrap();
-    let ast = Node::Query(Box::new(Query {
+    let ast = TestAst::select(Box::new(Select {
         select: vec![SelectExpr::new(
             Expr::TimeBucket {
                 unit: TruncateUnit::Week,
@@ -187,13 +191,13 @@ fn week_buckets_start_sunday_and_return_dates() {
 
 #[test]
 fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
-    use compiler::ast::{Expr, Node, Query, SelectExpr, SqlType, TableRef, TimeZone};
+    use compiler::ast::{Expr, Select, SelectExpr, SqlType, TableRef, TimeZone};
 
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("parameters.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE events(created_at TIMESTAMPTZ); INSERT INTO events VALUES ('2026-10-05T01:02:03.123456Z');").unwrap();
-    let ast = Node::Query(Box::new(Query {
+    let ast = TestAst::select(Box::new(Select {
         select: vec![SelectExpr::col("e", "created_at")],
         from: TableRef::scan("events", "e"),
         where_clause: Some(Expr::eq(
@@ -222,7 +226,7 @@ fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
 
 #[test]
 fn nested_cte_codegen_executes_with_its_local_definition() {
-    use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+    use compiler::ast::{Cte, Expr, Select, SelectExpr, TableRef};
 
     let directory = tempfile::tempdir().unwrap();
     let database =
@@ -230,13 +234,13 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
     database
         .initialize_schema("CREATE TABLE nodes(id BIGINT); INSERT INTO nodes VALUES (7);")
         .unwrap();
-    let ast = Node::Query(Box::new(Query {
+    let ast = TestAst::select(Box::new(Select {
         ctes: vec![Cte::new(
             "result",
-            Query {
+            Select {
                 ctes: vec![Cte::new(
                     "seed",
-                    Query {
+                    Select {
                         select: vec![SelectExpr::col("n", "id")],
                         from: TableRef::scan("nodes", "n"),
                         ..Default::default()
@@ -257,13 +261,11 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
         arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
         "7"
     );
-    let Node::Query(arm) = ast else {
-        unreachable!()
-    };
-    let union = Node::Query(Box::new(Query {
+    let arm = ast.select_ref().expect("select AST").clone();
+    let union = TestAst::select(Box::new(Select {
         select: vec![SelectExpr::col("n", "id")],
         from: TableRef::scan("nodes", "n"),
-        union_all: vec![*arm],
+        union_all: vec![arm],
         ..Default::default()
     }));
     let query = compiler::passes::codegen::duckdb::codegen(&union, Default::default()).unwrap();
@@ -277,7 +279,7 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
 #[test]
 fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
     use compiler::AggFunction;
-    use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
+    use compiler::ast::{Expr, Select, SelectExpr, TableRef};
 
     let directory = tempfile::tempdir().unwrap();
     let database =
@@ -297,7 +299,7 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
         (AggFunction::Collect, true, true, true, "[2]"),
     ] {
         for empty in [false, true] {
-            let ast = Node::Query(Box::new(Query {
+            let ast = TestAst::select(Box::new(Select {
                 select: vec![SelectExpr::new(
                     Expr::Aggregate {
                         function,

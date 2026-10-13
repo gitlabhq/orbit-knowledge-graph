@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Expr, Function, Node, Op, SelectExpr};
+use crate::ast::{Ast, Expr, Function, Op, SelectExpr};
 use crate::query::Query;
 use ontology::DataType;
 
@@ -8,12 +8,14 @@ const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
 const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 
-pub fn apply_text_excerpts(
-    node: &mut Node,
+pub fn apply_text_excerpts<S>(
+    ast: &mut Ast<S>,
     input: &Query,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) {
-    let Node::Query(query) = node else { return };
+    let Some(query) = ast.select_mut() else {
+        return;
+    };
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
         / u64::from(input.fetch_limit().max(1))) as u32;

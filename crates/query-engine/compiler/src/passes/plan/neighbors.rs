@@ -12,7 +12,7 @@ pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<P
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let input = context.input;
+    let input = context.query;
     let model = context.model;
     let config = input
         .neighbors

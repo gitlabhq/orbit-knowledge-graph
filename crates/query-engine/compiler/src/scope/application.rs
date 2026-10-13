@@ -1,20 +1,20 @@
 use query_data_model::OrbitQueryModel;
 
 use super::{QueryScope, resolved_scope_guard, scope_predicate};
-use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Node, TableRef};
+use crate::ast::visit::{visit_relations, visit_selects_mut};
+use crate::ast::{Ast, Expr, TableRef};
 use crate::error::Result;
 
-pub fn apply(
-    node: &mut Node,
+pub fn apply<S>(
+    ast: &mut Ast<S>,
     scope: &QueryScope,
     model: &(impl OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let Node::Query(query) = node else {
+    let Some(query) = ast.select_mut() else {
         return Ok(());
     };
-    visit_queries_mut(query, &mut |query| {
-        apply_scan_predicates(&query.from, &mut query.where_clause, scope, model);
+    visit_selects_mut(query, &mut |select| {
+        apply_scan_predicates(&select.from, &mut select.where_clause, scope, model);
         Ok(())
     })?;
     for requirement in &scope.requirements {

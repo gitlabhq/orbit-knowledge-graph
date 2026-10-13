@@ -214,7 +214,7 @@ where
     M: OrbitQueryModel + ?Sized,
 {
     let context = context::PlanningContext {
-        input,
+        query: input,
         model,
         nodes: HashMap::new(),
         hops: Vec::new(),

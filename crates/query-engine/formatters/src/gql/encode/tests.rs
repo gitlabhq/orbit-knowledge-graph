@@ -57,7 +57,7 @@ fn output(
                 dialect: Default::default(),
             },
             hydration: HydrationPlan::None,
-            input,
+            query: input,
             pagination: Default::default(),
             has_virtual_columns: false,
         }),

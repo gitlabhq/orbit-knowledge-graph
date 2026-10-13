@@ -108,7 +108,7 @@ async fn query_with_security(
     assert!(errors.is_empty(), "Schema validation failed: {errors:?}");
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(value).expect("response should deserialize");
-    ResponseView::for_query(&compiled.input, response)
+    ResponseView::for_query(&compiled.query, response)
 }
 
 #[tokio::test]

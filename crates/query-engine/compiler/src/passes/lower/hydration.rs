@@ -18,7 +18,7 @@ use crate::passes::plan::{HydrationNodePlan, hydration::HydrationPathFilter};
 
 use orbit_utils::traversal_path::TraversalPath;
 
-pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
+pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Select> {
     let mut arms = nodes.iter().map(emit_arm);
     let mut first = arms
         .next()
@@ -27,10 +27,10 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
         first.union_all.push(arm);
     }
     first.limit = Some(limit);
-    Ok(Node::Query(Box::new(first)))
+    Ok(first)
 }
 
-fn emit_arm(node: &HydrationNodePlan) -> Query {
+fn emit_arm(node: &HydrationNodePlan) -> Select {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -86,7 +86,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
         }
     }
     let (order_by, limit_by) = latest_row_dedup(alias, &node.sort_key);
-    let keys = Query {
+    let keys = Select {
         select: inner_select,
         from: TableRef::scan(&node.table, alias),
         where_clause: Expr::conjoin(scan_where),
@@ -94,7 +94,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
         limit_by,
         ..Default::default()
     };
-    Query {
+    Select {
         select: vec![
             SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
             SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
@@ -155,19 +155,34 @@ mod tests {
     use crate::passes::enforce::ResultContext;
     use orbit_server_config::QueryConfig;
 
-    fn render(node: &Node) -> String {
-        codegen(node, ResultContext::new(), QueryConfig::default())
-            .unwrap()
-            .sql
+    type TestAst = Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >;
+
+    fn render(select: &Select) -> String {
+        codegen(
+            &TestAst::select(select.clone()),
+            ResultContext::new(),
+            QueryConfig::default(),
+        )
+        .unwrap()
+        .sql
     }
 
     fn render_with_params(
-        node: &Node,
+        select: &Select,
     ) -> (
         String,
         std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
     ) {
-        let q = codegen(node, ResultContext::new(), QueryConfig::default()).unwrap();
+        let q = codegen(
+            &TestAst::select(select.clone()),
+            ResultContext::new(),
+            QueryConfig::default(),
+        )
+        .unwrap();
         (q.sql, q.params)
     }
 
@@ -193,11 +208,11 @@ mod tests {
         }
     }
 
-    fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Node {
+    fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Select {
         emit_hydration(plans, limit).unwrap()
     }
 
-    fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Node {
+    fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Select {
         emit_hydration(plans, limit).unwrap()
     }
 

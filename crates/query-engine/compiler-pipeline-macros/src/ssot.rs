@@ -7,7 +7,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{Ident, Result, Token, Type, braced, bracketed};
+use syn::{Ident, Result, Token, Type, braced, bracketed, parse_quote};
 
 use crate::to_pascal;
 
@@ -197,6 +197,27 @@ fn find_state_ty(fields: &[Field], name: &Ident) -> Type {
         .clone()
 }
 
+fn resolve_state_ty(ty: Type, model: &Type) -> Type {
+    match ty {
+        Type::Path(path) if path.path.is_ident("ModelSchema") => {
+            parse_quote!(<#model as query_data_model::OrbitQueryModel>::Schema)
+        }
+        Type::Path(mut path) => {
+            for segment in &mut path.path.segments {
+                if let syn::PathArguments::AngleBracketed(arguments) = &mut segment.arguments {
+                    for argument in &mut arguments.args {
+                        if let syn::GenericArgument::Type(ty) = argument {
+                            *ty = resolve_state_ty(ty.clone(), model);
+                        }
+                    }
+                }
+            }
+            Type::Path(path)
+        }
+        ty => ty,
+    }
+}
+
 fn phases_with_access(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
     phases
         .iter()
@@ -238,7 +259,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
     for sf in &ctx.state_fields {
         let name = &sf.name;
-        let ty = &sf.ty;
+        let model: Type = parse_quote!(Self::Model);
+        let ty = resolve_state_ty(sf.ty.clone(), &model);
         let getter_mut = format_ident!("{}_mut", name);
         let setter = format_ident!("set_{}", name);
         let taker = format_ident!("take_{}", name);
@@ -273,7 +295,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
             .state
             .iter()
             .map(|n| {
-                let ty = find_state_ty(&ctx.state_fields, n);
+                let ty = resolve_state_ty(find_state_ty(&ctx.state_fields, n), model_ty);
                 quote! { #n: Option<#ty> }
             })
             .collect();
@@ -344,7 +366,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
         for sf in &ctx.state_fields {
             let name = &sf.name;
-            let ty = &sf.ty;
+            let ty = resolve_state_ty(sf.ty.clone(), model_ty);
             let name_str = name.to_string();
             let getter_mut = format_ident!("{}_mut", name);
             let setter = format_ident!("set_{}", name);

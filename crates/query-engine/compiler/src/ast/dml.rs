@@ -3,6 +3,7 @@
 //! Intermediate representation between JSON input and SQL output.
 //! Each node maps directly to ClickHouse SQL constructs.
 
+use std::marker::PhantomData;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -42,7 +43,7 @@ pub enum Expr {
     TextSearch {
         mode: TextMatch,
         value: Box<Expr>,
-        query: Box<Expr>,
+        pattern: Box<Expr>,
     },
     Lambda {
         param: String,
@@ -69,11 +70,11 @@ pub enum Expr {
     /// ClickHouse's correlated subquery rejection in parameterized mode.
     InSelect {
         expr: Box<Expr>,
-        query: Box<Query>,
+        select: Box<Select>,
     },
     /// Single-row, single-column subquery used as a value; ClickHouse folds it
     /// to a constant before index analysis, so it still drives PK pruning.
-    Scalar(Box<Query>),
+    Scalar(Box<Select>),
     Star,
 }
 
@@ -179,9 +180,9 @@ pub enum TableRef {
         on: Expr,
     },
     /// Used for multi-hop traversals with unrolled joins.
-    Union { queries: Vec<Query>, alias: String },
+    Union { selects: Vec<Select>, alias: String },
     /// Used internally for deduplication of aggregation queries.
-    Subquery { query: Box<Query>, alias: String },
+    Subquery { select: Box<Select>, alias: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -238,7 +239,7 @@ impl OrderExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cte {
     pub name: String,
-    pub query: Box<Query>,
+    pub select: Box<Select>,
     pub recursive: bool,
     /// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates
     /// the CTE body once and caches the result. Without this, ClickHouse
@@ -248,10 +249,10 @@ pub struct Cte {
 }
 
 impl Cte {
-    pub fn new(name: impl Into<String>, query: Query) -> Self {
+    pub fn new(name: impl Into<String>, select: Select) -> Self {
         Self {
             name: name.into(),
-            query: Box::new(query),
+            select: Box::new(select),
             recursive: false,
             materialized: false,
         }
@@ -266,7 +267,7 @@ impl Cte {
 /// SETTINGS key = value
 /// ```
 #[derive(Debug, Clone, PartialEq)]
-pub struct Query {
+pub struct Select {
     pub ctes: Vec<Cte>,
     pub distinct: bool,
     pub select: Vec<SelectExpr>,
@@ -279,10 +280,10 @@ pub struct Query {
     pub limit_by: Option<(u32, Vec<Expr>)>,
     pub limit: Option<u32>,
     /// UNION ALL with this query, used for recursive CTEs.
-    pub union_all: Vec<Query>,
+    pub union_all: Vec<Select>,
 }
 
-impl Query {
+impl Select {
     pub fn selects_alias(&self, alias: &str) -> bool {
         self.select
             .iter()
@@ -290,7 +291,7 @@ impl Query {
     }
 }
 
-impl Default for Query {
+impl Default for Select {
     fn default() -> Self {
         Self {
             ctes: vec![],
@@ -360,9 +361,76 @@ impl Insert {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Node {
-    Query(Box<Query>),
+enum Statement {
+    Select(Box<Select>),
     Insert(Box<Insert>),
+}
+
+pub struct Ast<S> {
+    statement: Statement,
+    schema: PhantomData<fn() -> S>,
+}
+
+impl<S> Ast<S> {
+    pub fn select(select: impl Into<Box<Select>>) -> Self {
+        Self {
+            statement: Statement::Select(select.into()),
+            schema: PhantomData,
+        }
+    }
+
+    pub fn insert(insert: impl Into<Box<Insert>>) -> Self {
+        Self {
+            statement: Statement::Insert(insert.into()),
+            schema: PhantomData,
+        }
+    }
+
+    pub fn select_ref(&self) -> Option<&Select> {
+        match &self.statement {
+            Statement::Select(select) => Some(select),
+            Statement::Insert(_) => None,
+        }
+    }
+
+    pub fn select_mut(&mut self) -> Option<&mut Select> {
+        match &mut self.statement {
+            Statement::Select(select) => Some(select),
+            Statement::Insert(_) => None,
+        }
+    }
+
+    pub fn insert_ref(&self) -> Option<&Insert> {
+        match &self.statement {
+            Statement::Select(_) => None,
+            Statement::Insert(insert) => Some(insert),
+        }
+    }
+
+    pub fn is_select(&self) -> bool {
+        matches!(self.statement, Statement::Select(_))
+    }
+}
+
+impl<S> Clone for Ast<S> {
+    fn clone(&self) -> Self {
+        Self {
+            statement: self.statement.clone(),
+            schema: PhantomData,
+        }
+    }
+}
+
+impl<S> std::fmt::Debug for Ast<S> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.statement.fmt(formatter)
+    }
+}
+
+impl<S> PartialEq for Ast<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.statement == other.statement
+    }
 }
 
 impl Expr {
@@ -522,10 +590,10 @@ impl TableRef {
     fn set_relationship(&mut self, index: usize) {
         match self {
             Self::Scan { relationship, .. } => *relationship = Some(index),
-            Self::Subquery { query, .. } => query.from.set_relationship(index),
-            Self::Union { queries, .. } => {
-                for query in queries {
-                    query.from.set_relationship(index);
+            Self::Subquery { select, .. } => select.from.set_relationship(index),
+            Self::Union { selects, .. } => {
+                for select in selects {
+                    select.from.set_relationship(index);
                 }
             }
             Self::Join { left, right, .. } => {
@@ -562,16 +630,16 @@ impl TableRef {
         }
     }
 
-    pub fn union_all(queries: Vec<Query>, alias: impl Into<String>) -> Self {
+    pub fn union_all(selects: Vec<Select>, alias: impl Into<String>) -> Self {
         TableRef::Union {
-            queries,
+            selects,
             alias: alias.into(),
         }
     }
 
-    pub fn subquery(query: Query, alias: impl Into<String>) -> Self {
+    pub fn subquery(select: Select, alias: impl Into<String>) -> Self {
         TableRef::Subquery {
-            query: Box::new(query),
+            select: Box::new(select),
             alias: alias.into(),
         }
     }

@@ -11,8 +11,7 @@ use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::passes::lower::LoweredMetadata;
-use crate::query::Query as BoundQuery;
-use crate::query::{AggFunction, QueryType};
+use crate::query::{AggFunction, Query, QueryType};
 use orbit_utils::query_types::SqlType;
 
 pub fn cursor_column(i: usize) -> String {
@@ -89,13 +88,13 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
     hash
 }
 
-pub fn apply(
-    node: &mut Node,
-    input: &BoundQuery,
+pub fn apply<S>(
+    ast: &mut Ast<S>,
+    input: &Query,
     metadata: &LoweredMetadata,
     query_hash: u64,
 ) -> Result<usize> {
-    let Node::Query(q) = node else {
+    let Some(q) = ast.select_mut() else {
         return Ok(0);
     };
     q.limit = Some(input.fetch_limit());
@@ -139,7 +138,7 @@ pub fn apply(
     Ok(order_by.len())
 }
 
-fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
+fn append_readback_columns(q: &mut Select, order_by: &[OrderExpr]) {
     for (i, o) in order_by.iter().enumerate() {
         let hidden = SelectExpr::new(
             Expr::func(crate::ast::Function::ToString, vec![o.expr.clone()]),
@@ -155,7 +154,7 @@ fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
 /// User sort properties and aggregation keys can be NULL (NULLs sort last in
 /// ClickHouse, both directions); compiler-generated tie-breakers are primary
 /// keys and never are.
-fn nullable_flags(input: &BoundQuery, key_count: usize) -> Vec<bool> {
+fn nullable_flags(input: &Query, key_count: usize) -> Vec<bool> {
     let mut flags = vec![false; key_count];
     match input.query_type {
         QueryType::Aggregation => {
@@ -187,7 +186,7 @@ fn nullable_flags(input: &BoundQuery, key_count: usize) -> Vec<bool> {
 }
 
 fn place_seek_in_having(
-    q: &mut Query,
+    q: &mut Select,
     order_by: &[OrderExpr],
     values: &[Option<String>],
     nullable: &[bool],
@@ -203,7 +202,7 @@ fn place_seek_in_having(
 /// arrayJoin projections) silently fails to filter in ClickHouse, so hoist
 /// ORDER BY/LIMIT and the seek above a subquery whose aliases are real columns.
 fn hoist_page_subquery(
-    q: &mut Query,
+    q: &mut Select,
     order_by: &[OrderExpr],
     values: &[Option<String>],
     nullable: &[bool],
@@ -213,7 +212,7 @@ fn hoist_page_subquery(
     let mut inner = std::mem::take(q);
     let limit = inner.limit.take();
     inner.order_by = vec![];
-    *q = Query {
+    *q = Select {
         select: vec![SelectExpr::star()],
         from: TableRef::subquery(inner, "_page"),
         where_clause: Some(seek),
@@ -224,7 +223,7 @@ fn hoist_page_subquery(
 }
 
 fn merge_seek_into_where(
-    q: &mut Query,
+    q: &mut Select,
     order_by: &[OrderExpr],
     values: &[Option<String>],
     nullable: &[bool],

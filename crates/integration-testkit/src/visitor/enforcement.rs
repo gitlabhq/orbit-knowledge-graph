@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use query_engine::compiler::input::Input;
-use query_engine::compiler::{BoundQuery, QueryType};
+use query_engine::compiler::{Query, QueryType};
 
 /// Some variants carry data from the AST (field name, edge type) so the
 /// enforcement is granular: a query with two filter fields or two
@@ -139,7 +139,7 @@ impl QueryRequirements for Input {
     }
 }
 
-impl QueryRequirements for BoundQuery {
+impl QueryRequirements for Query {
     fn requirements(&self) -> HashSet<Requirement> {
         let mut reqs = HashSet::new();
         if self.order.is_some() {

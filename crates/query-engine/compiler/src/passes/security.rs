@@ -26,8 +26,8 @@ use regex::Regex;
 
 use serde_json::Value;
 
-use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Function, Node, Query, TableRef};
+use crate::ast::visit::{visit_relations, visit_selects_mut};
+use crate::ast::{Ast, Expr, Function, Select, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -39,8 +39,8 @@ static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// Per-alias role floors come from `ontology.min_access_level_for_table`;
 /// tables without a `redaction` block keep the historical Reporter floor.
-pub fn apply_security_context(
-    node: &mut Node,
+pub fn apply_security_context<S>(
+    ast: &mut Ast<S>,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
@@ -60,14 +60,14 @@ pub fn apply_security_context(
                 .into(),
         ));
     }
-    match node {
-        Node::Query(q) => visit_queries_mut(q, &mut |query| apply_to_query(query, ctx, model)),
-        Node::Insert(_) => Ok(()),
-    }
+    let Some(select) = ast.select_mut() else {
+        return Ok(());
+    };
+    visit_selects_mut(select, &mut |select| apply_to_select(select, ctx, model))
 }
 
-fn apply_to_query(
-    q: &mut Query,
+fn apply_to_select(
+    q: &mut Select,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
@@ -180,16 +180,22 @@ fn should_apply_security_filter(
 mod tests {
     use super::*;
     use crate::AuthorizedPath;
-    use crate::ast::visit::{visit_expressions, visit_queries};
-    use crate::ast::{JoinType, Op, SelectExpr};
+    use crate::ast::visit::{visit_expressions, visit_selects};
+    use crate::ast::{Ast, JoinType, Op, SelectExpr};
     use crate::scope::ScopeProof;
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
 
-    fn apply(node: &mut Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
+    type TestAst = Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >;
+
+    fn apply(ast: &mut TestAst, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        apply_security_context(node, context, model.as_ref())
+        apply_security_context(ast, context, model.as_ref())
     }
 
     fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
@@ -202,8 +208,8 @@ mod tests {
         should_apply_security_filter(table, model.as_ref())
     }
 
-    fn simple_query() -> Node {
-        Node::Query(Box::new(Query {
+    fn simple_query() -> TestAst {
+        TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("p", "id"),
                 alias: None,
@@ -348,7 +354,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
 
-        let anchor = Query {
+        let anchor = Select {
             select: vec![SelectExpr::col("e0p", "source_id")],
             from: TableRef::scan(EDGE_TABLE, "e0p"),
             where_clause: Some(Expr::eq(
@@ -357,12 +363,12 @@ mod tests {
             )),
             ..Default::default()
         };
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr::col("e0", "source_id")],
             from: TableRef::scan(EDGE_TABLE, "e0"),
             where_clause: Some(Expr::InSelect {
                 expr: Box::new(Expr::col("e0", "target_id")),
-                query: Box::new(anchor),
+                select: Box::new(anchor),
             }),
             limit: Some(10),
             ..Default::default()
@@ -370,11 +376,9 @@ mod tests {
 
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let mut paths = Vec::new();
-        visit_queries(q, &mut |query| {
+        visit_selects(q, &mut |query| {
             if let Some(predicate) = &query.where_clause {
                 paths.extend(starts_with_paths_for_alias(predicate, "e0p"));
             }
@@ -402,7 +406,7 @@ mod tests {
 
         let ontology = ontology_with_sm_vulnerability();
 
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("v", "id"),
                 alias: None,
@@ -419,9 +423,7 @@ mod tests {
 
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let where_sql = format!("{:?}", q.where_clause);
         assert!(
             where_sql.contains("1/100/"),
@@ -450,7 +452,7 @@ mod tests {
 
         let ontology = ontology_with_sm_vulnerability();
 
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("v", "id"),
                 alias: None,
@@ -462,9 +464,7 @@ mod tests {
 
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let where_sql = format!("{:?}", q.where_clause);
         assert!(
             !where_sql.contains("1/100/"),
@@ -509,13 +509,13 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
         apply(&mut node, &ctx, &Ontology::new()).unwrap();
-        assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
+        assert!(node.select_ref().is_some_and(|q| q.where_clause.is_some()));
     }
 
     #[test]
     fn inject_filters_edge_table() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("e", "id"),
                 alias: None,
@@ -525,7 +525,7 @@ mod tests {
         }));
 
         apply(&mut node, &ctx, &Ontology::new()).unwrap();
-        assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
+        assert!(node.select_ref().is_some_and(|q| q.where_clause.is_some()));
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn union_aliases_are_not_collected() {
         let from = TableRef::union_all(
-            vec![Query {
+            vec![Select {
                 select: vec![SelectExpr {
                     expr: Expr::col("e", "source_id"),
                     alias: None,
@@ -594,7 +594,7 @@ mod tests {
     fn inject_recurses_into_union_from_arms() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("outer_e", "source_id"),
                 alias: None,
@@ -603,7 +603,7 @@ mod tests {
                 JoinType::Inner,
                 TableRef::scan(EDGE_TABLE, "outer_e"),
                 TableRef::union_all(
-                    vec![Query {
+                    vec![Select {
                         select: vec![SelectExpr {
                             expr: Expr::col("e1", "source_id"),
                             alias: None,
@@ -622,18 +622,16 @@ mod tests {
 
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         assert!(
             q.where_clause.is_some(),
             "outer query should have security filter on outer_e"
         );
 
         if let TableRef::Join { right, .. } = &q.from {
-            if let TableRef::Union { queries, .. } = right.as_ref() {
+            if let TableRef::Union { selects, .. } = right.as_ref() {
                 assert!(
-                    queries[0].where_clause.is_some(),
+                    selects[0].where_clause.is_some(),
                     "UNION ALL arm should have security filter applied"
                 );
             } else {
@@ -648,7 +646,7 @@ mod tests {
     fn multi_path_authz_omits_redundant_common_prefix() {
         let ctx = SecurityContext::new(1, vec!["1/9970/".into(), "1/6543/".into()]).unwrap();
 
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("e", "id"),
                 alias: None,
@@ -660,9 +658,7 @@ mod tests {
 
         apply(&mut node, &ctx, &Ontology::new()).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let mut got = starts_with_paths_for_alias(q.where_clause.as_ref().unwrap(), "e");
         got.sort();
         assert_eq!(
@@ -680,7 +676,7 @@ mod tests {
             .unwrap()
             .with_scope_proofs(proofs);
 
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("p", "id"),
                 alias: None,
@@ -698,9 +694,7 @@ mod tests {
         let ontology = Ontology::new().with_path_scopable_nodes(["Project", "WorkItem"]);
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let where_clause = q.where_clause.as_ref().unwrap();
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "p"),
@@ -723,7 +717,7 @@ mod tests {
             .unwrap()
             .with_scope_proofs(proofs);
 
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("v", "id"),
                 alias: None,
@@ -734,9 +728,7 @@ mod tests {
         }));
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let where_sql = format!("{:?}", q.where_clause);
         assert!(
             where_sql.contains("Bool") && where_sql.contains("false"),
@@ -754,7 +746,7 @@ mod tests {
 
         let ontology = Ontology::new().with_nodes(["Global"]);
 
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("g", "id"),
                 alias: None,
@@ -766,9 +758,7 @@ mod tests {
 
         apply(&mut node, &ctx, &ontology).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         let where_clause = q.where_clause.as_ref().unwrap();
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "g"),
@@ -780,14 +770,14 @@ mod tests {
     #[test]
     fn inject_recurses_into_union_all_arms() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("u", "id"),
                 alias: None,
             }],
             from: TableRef::scan("gl_project", "u"),
             where_clause: None,
-            union_all: vec![Query {
+            union_all: vec![Select {
                 select: vec![SelectExpr {
                     expr: Expr::col("p", "id"),
                     alias: None,
@@ -801,9 +791,7 @@ mod tests {
 
         apply(&mut node, &ctx, &Ontology::new()).unwrap();
 
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
+        let q = node.select_ref().expect("select AST");
         assert!(
             q.where_clause.is_some(),
             "base query should have security filter"

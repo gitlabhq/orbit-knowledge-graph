@@ -17,7 +17,7 @@ use super::sql::{
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -> Result<Node> {
+pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -> Result<Select> {
     let pf = &plan.operation;
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];
@@ -99,7 +99,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -
         )
     };
 
-    let direct_query = Query {
+    let direct_query = Select {
         select: vec![
             SelectExpr::col(FORWARD_ALIAS, DEPTH_COLUMN),
             SelectExpr::new(
@@ -133,7 +133,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -
         ..Default::default()
     };
 
-    let intersection_query = Query {
+    let intersection_query = Select {
         select: vec![
             SelectExpr::new(
                 Expr::binary(
@@ -212,7 +212,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -
     };
 
     let order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
-    Ok(Node::Query(Box::new(Query {
+    Ok(Select {
         ctes: {
             let mut ctes = anchor_ctes;
             if let Some(scope) = path_scope_cte {
@@ -233,7 +233,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &crate::query::Query) -
         order_by,
         limit: Some(input.limit),
         ..Default::default()
-    })))
+    })
 }
 
 #[derive(Clone)]
@@ -296,10 +296,10 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         outer_select.push(SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN));
     }
 
-    let cte_query = Query {
+    let cte_query = Select {
         select: outer_select,
         from: TableRef::Subquery {
-            query: Box::new(dedup_scan),
+            select: Box::new(dedup_scan),
             alias: alias.to_string(),
         },
         where_clause: Some(deleted_false(alias)),
@@ -327,7 +327,7 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     }
     // UNION, not intersect: endpoints at different namespace depths are linked
     // by edges carrying only the deeper tp, so equality yields an empty scope.
-    let arm = |cte: &str, alias: &str| Query {
+    let arm = |cte: &str, alias: &str| Select {
         select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
         from: TableRef::scan(cte, alias),
         group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
@@ -335,7 +335,7 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     };
     Some(Cte::new(
         PATH_SCOPE_CTE,
-        Query {
+        Select {
             union_all: vec![arm(end_cte, PATH_SCOPE_END_ALIAS)],
             ..arm(start_cte, PATH_SCOPE_START_ALIAS)
         },
@@ -396,8 +396,8 @@ fn build_frontier(
     max_depth: u32,
     direction: FDir,
     opts: &FrontierOpts<'_>,
-) -> Query {
-    let arms: Vec<Query> = (1..=max_depth)
+) -> Select {
+    let arms: Vec<Select> = (1..=max_depth)
         .map(|depth| build_frontier_arm(anchor_cond.clone(), depth, direction, opts))
         .collect();
     if arms.len() == 1 {
@@ -405,7 +405,7 @@ fn build_frontier(
     } else {
         let mut first = arms.into_iter();
         let base = first.next().unwrap();
-        Query {
+        Select {
             union_all: first.collect(),
             ..base
         }
@@ -417,7 +417,7 @@ fn build_frontier_arm(
     depth: u32,
     direction: FDir,
     opts: &FrontierOpts<'_>,
-) -> Query {
+) -> Select {
     let (anchor_col, next_col, next_kind_col) = match direction {
         FDir::Forward => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
         FDir::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
@@ -516,7 +516,7 @@ fn build_frontier_arm(
     ];
     all_conds.extend(opts.anchor_denorm_tags.iter().cloned().map(Some));
 
-    Query {
+    Select {
         select,
         from,
         where_clause: Expr::and_all(all_conds),

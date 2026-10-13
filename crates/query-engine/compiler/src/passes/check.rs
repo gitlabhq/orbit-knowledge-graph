@@ -8,27 +8,27 @@
 
 use serde_json::Value;
 
-use crate::ast::visit::visit_queries;
-use crate::ast::{Expr, Function, Node, Op, Query};
+use crate::ast::visit::visit_selects;
+use crate::ast::{Ast, Expr, Function, Op, Select};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_node_aliases};
 #[cfg(test)]
 use ontology::Ontology;
 
-pub fn check_ast(
-    node: &Node,
+pub fn check_ast<S>(
+    ast: &Ast<S>,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    match node {
-        Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
-        Node::Insert(_) => Ok(()),
-    }
+    let Some(select) = ast.select_ref() else {
+        return Ok(());
+    };
+    visit_selects(select, &mut |select| check_select(select, ctx, model))
 }
 
-fn check_query(
-    q: &Query,
+fn check_select(
+    q: &Select,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
@@ -97,19 +97,25 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{SelectExpr, TableRef};
+    use crate::ast::{Ast, SelectExpr, TableRef};
 
-    fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
+    type TestAst = Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >;
+
+    fn apply_security(ast: &mut TestAst, context: &SecurityContext, ontology: &Ontology) {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        crate::passes::security::apply_security_context(node, context, model.as_ref()).unwrap();
+        crate::passes::security::apply_security_context(ast, context, model.as_ref()).unwrap();
     }
 
-    fn check(node: &Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
+    fn check(ast: &TestAst, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        check_ast(node, context, model.as_ref())
+        check_ast(ast, context, model.as_ref())
     }
-    fn project_query(where_clause: Option<Expr>) -> Node {
-        Node::Query(Box::new(Query {
+    fn project_query(where_clause: Option<Expr>) -> TestAst {
+        TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("p", "id"),
                 alias: None,
@@ -151,13 +157,13 @@ mod tests {
             "derived",
             "table_union",
         ] {
-            let inner = Query {
+            let inner = Select {
                 select: vec![SelectExpr::col("protected", "id")],
                 from: TableRef::scan("gl_project", "protected"),
                 ..Default::default()
             };
             let scalar = Expr::Scalar(Box::new(inner.clone()));
-            let mut query = Query {
+            let mut query = Select {
                 select: vec![SelectExpr::new(Expr::int(1), "result")],
                 from: TableRef::scan("constant_source", "outer"),
                 ..Default::default()
@@ -180,7 +186,7 @@ mod tests {
                 "in_operand" => {
                     query.where_clause = Some(Expr::InSelect {
                         expr: Box::new(scalar),
-                        query: Box::new(Query {
+                        select: Box::new(Select {
                             from: TableRef::scan("constant_source", "lookup"),
                             ..Default::default()
                         }),
@@ -200,7 +206,7 @@ mod tests {
                 }
                 "nested_cte" => query.ctes.push(Cte::new(
                     "outer_cte",
-                    Query {
+                    Select {
                         ctes: vec![Cte::new("inner_cte", inner)],
                         from: TableRef::scan("inner_cte", "nested"),
                         ..Default::default()
@@ -212,18 +218,16 @@ mod tests {
                 _ => unreachable!(),
             }
             let outer_predicate = query.where_clause.clone();
-            let mut node = Node::Query(Box::new(query));
+            let mut node = TestAst::select(Box::new(query));
             assert!(check(&node, &context, &ontology).is_err(), "{position}");
             apply_security(&mut node, &context, &ontology);
             check(&node, &context, &ontology).unwrap_or_else(|error| panic!("{position}: {error}"));
-            let Node::Query(query) = &node else {
-                unreachable!()
-            };
+            let query = node.select_ref().expect("select AST");
             if outer_predicate.is_none() {
                 assert!(query.where_clause.is_none(), "{position}");
             }
             let mut protected_scans = 0;
-            visit_queries(query, &mut |query| {
+            visit_selects(query, &mut |query| {
                 if matches!(&query.from, TableRef::Scan { alias, .. } if alias == "protected") {
                     protected_scans += 1;
                     assert_eq!(
@@ -433,7 +437,7 @@ mod tests {
     #[test]
     fn skips_non_gl_tables() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let node = Node::Query(Box::new(Query {
+        let node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("c", "id"),
                 alias: None,
@@ -446,8 +450,8 @@ mod tests {
         assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
-    fn wrap_in_subquery(inner: Query) -> Node {
-        Node::Query(Box::new(Query {
+    fn wrap_in_subquery(inner: Select) -> TestAst {
+        TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("sq", "id"),
                 alias: None,
@@ -458,8 +462,8 @@ mod tests {
         }))
     }
 
-    fn inner_project_query(where_clause: Option<Expr>) -> Query {
-        Query {
+    fn inner_project_query(where_clause: Option<Expr>) -> Select {
+        Select {
             select: vec![SelectExpr {
                 expr: Expr::col("p", "id"),
                 alias: None,
@@ -486,7 +490,7 @@ mod tests {
     fn accepts_subquery_with_inner_security_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut inner = inner_project_query(None);
-        let mut wrapped = Node::Query(Box::new(inner.clone()));
+        let mut wrapped = TestAst::select(Box::new(inner.clone()));
         apply_security(&mut wrapped, &ctx, &ontology::Ontology::new());
         let filter = Expr::func(
             Function::StartsWith,
@@ -504,7 +508,7 @@ mod tests {
     #[test]
     fn rejects_aggregate_subquery_without_inner_security_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let inner = Query {
+        let inner = Select {
             select: vec![SelectExpr {
                 expr: Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("p", "id"))),
                 alias: Some("cnt".into()),
@@ -537,7 +541,7 @@ mod tests {
                 Expr::string("42/43/"),
             ],
         );
-        let inner = Query {
+        let inner = Select {
             select: vec![SelectExpr {
                 expr: Expr::aggregate(crate::query::AggFunction::Count, Some(Expr::col("p", "id"))),
                 alias: Some("cnt".into()),
@@ -560,7 +564,7 @@ mod tests {
     #[test]
     fn accepts_subquery_wrapping_non_sensitive_table() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let inner = Query {
+        let inner = Select {
             select: vec![SelectExpr {
                 expr: Expr::col("d", "value"),
                 alias: None,
@@ -581,14 +585,14 @@ mod tests {
             Function::StartsWith,
             vec![Expr::col("u", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
-        let node = Node::Query(Box::new(Query {
+        let node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("u", "id"),
                 alias: None,
             }],
             from: TableRef::scan("gl_project", "u"),
             where_clause: Some(filter),
-            union_all: vec![Query {
+            union_all: vec![Select {
                 select: vec![SelectExpr {
                     expr: Expr::col("p", "id"),
                     alias: None,
@@ -610,14 +614,14 @@ mod tests {
     #[test]
     fn accepts_union_all_arms_with_security_filters() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let mut node = Node::Query(Box::new(Query {
+        let mut node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("u", "id"),
                 alias: None,
             }],
             from: TableRef::scan("gl_project", "u"),
             where_clause: None,
-            union_all: vec![Query {
+            union_all: vec![Select {
                 select: vec![SelectExpr {
                     expr: Expr::col("p", "id"),
                     alias: None,
@@ -637,10 +641,10 @@ mod tests {
     fn rejects_cte_with_sensitive_table_missing_filter() {
         use crate::ast::Cte;
 
-        let node = Node::Query(Box::new(Query {
+        let node = TestAst::select(Box::new(Select {
             ctes: vec![Cte::new(
                 "base",
-                Query {
+                Select {
                     select: vec![SelectExpr {
                         expr: Expr::col("p", "id"),
                         alias: Some("node_id".into()),
@@ -680,10 +684,10 @@ mod tests {
                 Expr::string("42/43/"),
             ],
         );
-        let node = Node::Query(Box::new(Query {
+        let node = TestAst::select(Box::new(Select {
             ctes: vec![Cte::new(
                 "base",
-                Query {
+                Select {
                     select: vec![SelectExpr {
                         expr: Expr::col("p", "id"),
                         alias: Some("node_id".into()),
@@ -715,7 +719,7 @@ mod tests {
             Function::StartsWith,
             vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
-        let node = Node::Query(Box::new(Query {
+        let node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("hop", "source_id"),
                 alias: None,
@@ -724,7 +728,7 @@ mod tests {
                 crate::ast::JoinType::Inner,
                 TableRef::scan(EDGE_TABLE, "e"),
                 TableRef::Union {
-                    queries: vec![Query {
+                    selects: vec![Select {
                         select: vec![SelectExpr {
                             expr: Expr::col("p", "id"),
                             alias: None,
@@ -768,7 +772,7 @@ mod tests {
                 Expr::string("42/43/"),
             ],
         );
-        let node = Node::Query(Box::new(Query {
+        let node = TestAst::select(Box::new(Select {
             select: vec![SelectExpr {
                 expr: Expr::col("hop", "source_id"),
                 alias: None,
@@ -777,7 +781,7 @@ mod tests {
                 crate::ast::JoinType::Inner,
                 TableRef::scan(EDGE_TABLE, "e"),
                 TableRef::Union {
-                    queries: vec![Query {
+                    selects: vec![Select {
                         select: vec![SelectExpr {
                             expr: Expr::col("e1", "source_id"),
                             alias: None,

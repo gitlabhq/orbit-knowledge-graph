@@ -25,7 +25,7 @@ impl PipelineStage for OutputStage {
 
         let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
 
-        let requested = compiled.input.include_debug_sql;
+        let requested = compiled.query.include_debug_sql;
         let raw_query_strings = if requested && can_see_debug_sql(ctx) {
             let debug_json = json!({
                 "base": compiled.base.sql,
@@ -46,7 +46,7 @@ impl PipelineStage for OutputStage {
         let mut query_result = input.query_result;
         let pagination = Some(crate::types::paginate(
             &mut query_result,
-            &compiled.input,
+            &compiled.query,
             &compiled.pagination,
         ));
 

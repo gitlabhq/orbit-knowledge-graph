@@ -83,7 +83,7 @@ pub(crate) fn filter_expression(
             Expr::TextSearch {
                 mode,
                 value: Box::new(col),
-                query: Box::new(needle),
+                pattern: Box::new(needle),
             }
         }
     }
@@ -221,7 +221,7 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
         .collect();
     let queries = tables
         .iter()
-        .map(|table| Query {
+        .map(|table| Select {
             select: columns.clone(),
             from: TableRef::scan(table, &inner_alias),
             ..Default::default()
@@ -245,9 +245,9 @@ pub fn edge_table_scan_filtered(
             .map(|col| SelectExpr::col(&inner_alias, *col))
             .collect();
         common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
-        let arms: Vec<Query> = tables
+        let arms: Vec<Select> = tables
             .iter()
-            .map(|table| Query {
+            .map(|table| Select {
                 select: common_cols.clone(),
                 from: TableRef::scan(table, &inner_alias),
                 where_clause: Expr::conjoin(arm_where(&inner_alias)),
@@ -266,8 +266,8 @@ pub fn dedup_query(
     table: &str,
     select: Vec<SelectExpr>,
     scan_where: Vec<Expr>,
-) -> Query {
-    Query {
+) -> Select {
+    Select {
         select,
         from: TableRef::scan_final(table, alias),
         where_clause: Expr::conjoin(scan_where),
@@ -285,7 +285,7 @@ pub fn dedup_subquery(
     let query = dedup_query(alias, table, select, scan_where);
     (
         TableRef::Subquery {
-            query: Box::new(query),
+            select: Box::new(query),
             alias: alias.to_string(),
         },
         deleted_false(alias),

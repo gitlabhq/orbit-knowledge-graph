@@ -230,10 +230,7 @@ fn check<M: OrbitQueryModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(
-        &compiler::BoundQuery,
-        plan::HydrationCompileOptions,
-    ) -> compiler::Result<plan::QueryPlan>,
+    build: impl Fn(&compiler::Query, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -281,7 +278,8 @@ fn check<M: OrbitQueryModel>(
         let query =
             bind::bind(input, model, mode).unwrap_or_else(|error| panic!("{label}: {error}"));
         let plan = build(&query, options).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered = lower::emit(&plan, &query).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let lowered =
+            lower::emit(&plan, &query, model).unwrap_or_else(|error| panic!("{label}: {error}"));
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
         assert!(
@@ -297,16 +295,6 @@ fn check<M: OrbitQueryModel>(
                     .check(&actual, &format!("{label}.physical.{backend}.{phase}"))
                     .unwrap_or_else(|error| panic!("{error}"));
             }
-        }
-        match backend {
-            "clickhouse" => {
-                compiler::emit_simple_query(&lowered.ast).unwrap();
-            }
-            "duckdb" => {
-                compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
-                    .unwrap();
-            }
-            _ => unreachable!(),
         }
     }
 }
@@ -698,7 +686,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &query).unwrap();
+        let lowered = lower::emit(&plan, &query, &model).unwrap();
         let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(

@@ -171,8 +171,8 @@ impl GraphFormatter {
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
-        let aggregations = Some(&output.compiled.input.aggregation.metrics);
-        let group_by = &output.compiled.input.aggregation.groups;
+        let aggregations = Some(&output.compiled.query.aggregation.metrics);
+        let group_by = &output.compiled.query.aggregation.groups;
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -194,11 +194,11 @@ impl GraphFormatter {
                 if let Some(aggs) = aggregations {
                     columns = Some(Self::build_column_descriptors(
                         aggs,
-                        &output.compiled.input.nodes,
+                        &output.compiled.query.nodes,
                     ));
                     group_columns = Some(Self::build_group_column_descriptors(
                         group_by,
-                        &output.compiled.input.nodes,
+                        &output.compiled.query.nodes,
                     ));
                     rows = Some(Self::extract_aggregation_rows(
                         result,
@@ -206,7 +206,7 @@ impl GraphFormatter {
                         &edge_prefixes,
                         aggs,
                         group_by,
-                        &output.compiled.input.nodes,
+                        &output.compiled.query.nodes,
                     ));
                 }
             }
@@ -535,7 +535,7 @@ impl GraphFormatter {
     ) {
         let direction = output
             .compiled
-            .input
+            .query
             .neighbors
             .as_ref()
             .map(|n| n.direction);
@@ -646,7 +646,7 @@ mod tests {
     use compiler::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
     use std::sync::Arc;
 
-    fn query(value: serde_json::Value) -> compiler::BoundQuery {
+    fn query(value: serde_json::Value) -> compiler::Query {
         let input: compiler::Input = serde_json::from_value(value).unwrap();
         let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
             ontology::Ontology::load_embedded().unwrap(),
@@ -692,7 +692,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: query(serde_json::json!({
+                query: query(serde_json::json!({
                     "query_type": "traversal",
                     "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
@@ -739,7 +739,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: query(serde_json::json!({
+                query: query(serde_json::json!({
                     "query_type": "aggregation",
                     "nodes": [{"id": "v", "entity": "Vulnerability"}],
                     "group_by": ["v.severity"],
@@ -934,7 +934,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: query(serde_json::json!({
+                query: query(serde_json::json!({
                     "query_type": "traversal",
                     "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
@@ -1061,7 +1061,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: query(serde_json::json!({
+                query: query(serde_json::json!({
                     "query_type": "path_finding",
                     "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
                     "nodes": [
@@ -1158,7 +1158,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: query(serde_json::json!({
+                query: query(serde_json::json!({
                     "query_type": "path_finding",
                     "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
                     "nodes": [

@@ -129,18 +129,18 @@ fn apply_metrics(
     redacted_count: usize,
     total_elapsed: Duration,
 ) {
-    if let Some(input) = &metrics.input {
-        let query_type: &str = input.query_type.into();
+    if let Some(query) = &metrics.query {
+        let query_type: &str = query.query_type.into();
         q.query_type = query_type.parse().ok();
-        q.node_count = Some(input.nodes.len() as i64);
-        q.relationship_count = Some(input.relationships.len() as i64);
-        q.is_search = Some(input.is_search());
-        q.has_cursor = Some(input.cursor.is_some());
-        q.has_order_by = Some(input.order.is_some());
-        q.limit = Some(input.limit as i64);
-        q.group_by_count = Some(input.aggregation.groups.len() as i64);
-        q.dynamic_columns = <&str>::from(input.dynamic_columns).parse().ok();
-        q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as i64);
+        q.node_count = Some(query.nodes.len() as i64);
+        q.relationship_count = Some(query.relationships.len() as i64);
+        q.is_search = Some(query.is_search());
+        q.has_cursor = Some(query.cursor.is_some());
+        q.has_order_by = Some(query.order.is_some());
+        q.limit = Some(query.limit as i64);
+        q.group_by_count = Some(query.aggregation.groups.len() as i64);
+        q.dynamic_columns = <&str>::from(query.dynamic_columns).parse().ok();
+        q.path_max_depth = query.path.as_ref().map(|p| p.max_depth as i64);
 
         let mut entities = BTreeSet::new();
         let mut rel_types = BTreeSet::new();
@@ -153,7 +153,7 @@ fn apply_metrics(
         let mut columns = BTreeSet::new();
         let has_star = false;
 
-        for node in &input.nodes {
+        for node in &query.nodes {
             entities.insert(node.entity_name.clone());
             columns.extend(node.columns.iter().map(|property| property.name.clone()));
             for filter in &node.filters {
@@ -162,7 +162,7 @@ fn apply_metrics(
                 ops.insert(filter.predicate.op.as_ref().to_owned());
             }
         }
-        for rel in &input.relationships {
+        for rel in &query.relationships {
             rel_types.extend(rel.names.iter().cloned());
             max_hops = max_hops.max(rel.hops.max as i64);
             variable_hops |= rel.hops.min != rel.hops.max;
@@ -181,7 +181,7 @@ fn apply_metrics(
         q.filter_fields = Some(to_vec(fields));
         q.filter_ops = Some(to_vec(ops));
         q.agg_functions = Some(
-            input
+            query
                 .aggregation
                 .metrics
                 .iter()
@@ -209,7 +209,7 @@ fn apply_metrics(
         } else {
             Some(to_vec(columns))
         };
-        q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
+        q.traversal_shape = traversal_shape(query).and_then(|s| s.parse().ok());
         let label: &str = metrics
             .hydration
             .as_ref()
@@ -233,18 +233,18 @@ fn apply_metrics(
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
 /// Returns `None` for search queries (no relationships).
-fn traversal_shape(input: &query_engine::compiler::BoundQuery) -> Option<String> {
-    if input.relationships.is_empty() {
+fn traversal_shape(query: &query_engine::compiler::Query) -> Option<String> {
+    if query.relationships.is_empty() {
         return None;
     }
     let mut parts = Vec::new();
-    for rel in &input.relationships {
+    for rel in &query.relationships {
         let types = rel.names.join("|");
         parts.push(format!(
             "{}-[{}]->{}",
-            input.node(rel.from).entity_name,
+            query.node(rel.from).entity_name,
             types,
-            input.node(rel.to).entity_name,
+            query.node(rel.to).entity_name,
         ));
     }
     Some(parts.join(", "))
@@ -626,9 +626,9 @@ mod tests {
             &security,
         )
         .unwrap()
-        .input;
+        .query;
         let metrics = ExecMetrics {
-            input: Some(input),
+            query: Some(input),
             hydration: Some(HydrationPlan::Static(vec![])),
             ..Default::default()
         };

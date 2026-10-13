@@ -4009,7 +4009,7 @@ async fn fetch_page(
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
+    let meta = query_engine::shared::paginate(&mut result, &query.query, &query.pagination);
     (result, meta)
 }
 
@@ -4094,7 +4094,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     run_redaction(&mut result, &mock_service);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
+    let meta = query_engine::shared::paginate(&mut result, &query.query, &query.pagination);
 
     assert!(meta.has_more);
     assert_eq!(
@@ -4116,7 +4116,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     run_redaction(&mut result, &mock_service);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
+    let meta = query_engine::shared::paginate(&mut result, &query.query, &query.pagination);
 
     assert_eq!(
         page_ids(&result),

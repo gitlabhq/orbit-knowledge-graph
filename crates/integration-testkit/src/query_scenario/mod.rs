@@ -338,7 +338,7 @@ async fn run_frontend(
 
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(resp).expect("response should deserialize");
-    let view = ResponseView::for_query(&compiled.input, response);
+    let view = ResponseView::for_query(&compiled.query, response);
 
     apply_expect(&view, expect, label);
 }
@@ -469,7 +469,6 @@ async fn run_pages(
             .as_ref()
             .and_then(|p| p.next_cursor.clone());
 
-        // Collect IDs and edges for all_pages assertions.
         if expect.all_pages.is_some() {
             for node in &response.nodes {
                 collected_ids
@@ -483,7 +482,7 @@ async fn run_pages(
         }
         page_count += 1;
 
-        let view = ResponseView::for_query(&compiled.input, response);
+        let view = ResponseView::for_query(&compiled.query, response);
 
         if let Some(ap) = &expect.all_pages {
             for key in ap.group_node_ids.keys() {
@@ -639,7 +638,7 @@ async fn execute_pipeline(
     let mut query_result = hydration_output.query_result;
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
-        &compiled.input,
+        &compiled.query,
         &compiled.pagination,
     ));
 

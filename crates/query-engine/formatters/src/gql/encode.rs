@@ -14,7 +14,7 @@ use crate::graph::{GraphFormatter, group_node_cell, is_reserved_node_key};
 use crate::text::{ordered_pairs, truncate, truncated_len};
 
 pub fn encode(output: &PipelineOutput) -> String {
-    let (columns, rows) = match output.compiled.input.query_type {
+    let (columns, rows) = match output.compiled.query.query_type {
         QueryType::Aggregation => aggregation_table(output),
         QueryType::PathFinding | QueryType::Neighbors => path_table(output),
         _ => node_table(output),
@@ -29,7 +29,7 @@ fn node_table(output: &PipelineOutput) -> Table {
     let prefixes = edge_prefixes(context);
     let aliases: Vec<String> = output
         .compiled
-        .input
+        .query
         .nodes
         .iter()
         .map(|node| node.alias.clone())
@@ -50,7 +50,7 @@ fn node_table(output: &PipelineOutput) -> Table {
 fn path_table(output: &PipelineOutput) -> Table {
     let prefixes = edge_prefixes(&output.result_context);
     let rows = output.query_result.authorized_rows().filter_map(|row| {
-        match output.compiled.input.query_type {
+        match output.compiled.query.query_type {
             QueryType::Neighbors => neighbor_path(row, output, &prefixes),
             _ => shortest_path(row),
         }
@@ -64,7 +64,7 @@ fn path_table(output: &PipelineOutput) -> Table {
 }
 
 fn aggregation_table(output: &PipelineOutput) -> Table {
-    let aggregation = &output.compiled.input.aggregation;
+    let aggregation = &output.compiled.query.aggregation;
     let columns: Vec<String> = aggregation
         .groups
         .iter()
@@ -117,8 +117,8 @@ fn neighbor_path(
     output: &PipelineOutput,
     prefixes: &[&str],
 ) -> Option<String> {
-    let input = &output.compiled.input;
-    let center = input
+    let query = &output.compiled.query;
+    let center = query
         .nodes
         .first()
         .and_then(|center| row_node(row, &output.result_context, prefixes, &center.alias))
@@ -132,7 +132,7 @@ fn neighbor_path(
         .and_then(|value| value.as_int64().copied())
         .map(|value| value != 0)
         .unwrap_or(!matches!(
-            input.neighbors.as_ref().map(|n| n.direction),
+            query.neighbors.as_ref().map(|n| n.direction),
             Some(Direction::Incoming)
         ));
     Some(if outgoing {

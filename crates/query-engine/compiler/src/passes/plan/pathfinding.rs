@@ -7,7 +7,7 @@ pub(super) fn plan_pathfinding<M>(mut context: PlanningContext<'_, M>) -> Result
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let input = context.input;
+    let input = context.query;
     let model = context.model;
     let path = input
         .path

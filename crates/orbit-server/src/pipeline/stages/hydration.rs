@@ -76,7 +76,7 @@ impl HydrationStage {
         let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
         let options = HydrationCompileOptions {
             dynamic: matches!(
-                ctx.compiled()?.input.query_type,
+                ctx.compiled()?.query.query_type,
                 QueryType::Neighbors | QueryType::PathFinding
             ),
             path_segment_budget: Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS),
@@ -99,7 +99,7 @@ impl HydrationStage {
         })?;
 
         let rendered_sql = compiled.base.render();
-        let debug = if ctx.compiled()?.input.include_debug_sql {
+        let debug = if ctx.compiled()?.query.include_debug_sql {
             vec![DebugQuery {
                 sql: compiled.base.sql.clone(),
                 rendered: rendered_sql.clone(),

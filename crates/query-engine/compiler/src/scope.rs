@@ -23,7 +23,7 @@ impl QueryScope {
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
+use crate::ast::{Expr, Function, Op, Select, SelectExpr, SqlType, TableRef};
 use crate::query::{Direction, FilterOp, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -308,7 +308,7 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Exp
             Expr::string(UNRESOLVED_PATH),
         ],
     );
-    Expr::Scalar(Box::new(Query {
+    Expr::Scalar(Box::new(Select {
         select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
         from,
         where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),

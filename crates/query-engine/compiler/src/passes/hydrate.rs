@@ -8,7 +8,7 @@ use ontology::FieldSource;
 use ontology::VirtualSource;
 use query_data_model::PropertyRealization;
 
-use crate::ast::Node;
+use crate::ast::Ast;
 use crate::query::{DynamicColumnMode, Query, QueryType};
 use crate::types::SecurityContext;
 
@@ -99,9 +99,9 @@ pub struct VirtualColumnRequest {
 /// `admin_only` fields before they reach the hydration query — static
 /// plans rely on `RestrictPass` having already pruned them from
 /// `node.columns`.
-pub fn generate_hydration_plan(
+pub fn generate_hydration_plan<S>(
     input: &Query,
-    emitted: &Node,
+    emitted: &Ast<S>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
@@ -127,12 +127,16 @@ pub fn generate_hydration_plan(
     }
 }
 
-fn build_static_templates(
+fn build_static_templates<S>(
     input: &Query,
-    emitted: &Node,
+    emitted: &Ast<S>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<HydrationTemplate> {
-    let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
+    let projected = |alias: &str| {
+        emitted
+            .select_ref()
+            .is_some_and(|select| select.selects_alias(alias))
+    };
     input
         .nodes
         .iter()
@@ -729,7 +733,12 @@ mod tests {
         let ctx = non_admin_ctx();
         let query = neighbors_query(DynamicColumnMode::All);
 
-        let emitted = Node::Query(Box::default());
+        type TestAst = crate::ast::Ast<
+            query_data_model::Relational<
+                query_data_model::implementations::clickhouse::layout::ClickHouse,
+            >,
+        >;
+        let emitted = TestAst::select(crate::ast::Select::default());
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
         let plan = generate_hydration_plan(&query, &emitted, model.as_ref(), &ctx);
 

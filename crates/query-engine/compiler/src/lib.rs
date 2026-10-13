@@ -51,7 +51,7 @@ pub mod config;
 pub mod passes;
 
 pub use ast::ddl;
-pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
+pub use ast::{Ast, Expr, Insert, JoinType, Op, OrderExpr, Select, SelectExpr, TableRef};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,
     EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, HYDRATION_NODE_ALIAS, edge_kinds_column,
@@ -63,8 +63,8 @@ pub use input::{ColumnSelection, Input, InputFilter, InputNode, parse_input};
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 pub use query::{
-    AggFunction, Direction, DynamicColumnMode, FilterOp, OrderDirection, Query as BoundQuery,
-    QueryType, TruncateUnit,
+    AggFunction, Direction, DynamicColumnMode, FilterOp, OrderDirection, Query, QueryType,
+    TruncateUnit,
 };
 pub use query_data_model::EntityAuthConfig;
 
@@ -165,7 +165,7 @@ pub fn compile_local(
     }
 }
 
-pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<BoundQuery> {
+pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Query> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeCtx::new(data_model);
@@ -179,7 +179,7 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .count_err()
 }
 
-pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<BoundQuery> {
+pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Query> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);

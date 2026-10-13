@@ -10,7 +10,7 @@ use crate::query::Query;
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExecMetrics {
     #[serde(skip)]
-    pub input: Option<Query>,
+    pub query: Option<Query>,
     #[serde(skip)]
     pub hydration: Option<HydrationPlan>,
     #[serde(skip)]

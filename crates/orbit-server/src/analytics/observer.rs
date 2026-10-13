@@ -54,7 +54,7 @@ impl AnalyticsObserver {
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
     fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
-        self.metrics.input = Some(ctx.input.clone());
+        self.metrics.query = Some(ctx.query.clone());
         self.metrics.has_virtual_columns = ctx.has_virtual_columns;
         self.metrics.hydration = Some(ctx.hydration.clone());
     }
@@ -208,9 +208,7 @@ mod tests {
                 dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
             },
             hydration: query_engine::compiler::HydrationPlan::None,
-            input: query_engine::compiler::BoundQuery::new(
-                query_engine::compiler::QueryType::Traversal,
-            ),
+            query: query_engine::compiler::Query::new(query_engine::compiler::QueryType::Traversal),
             pagination: Default::default(),
             has_virtual_columns: false,
         });

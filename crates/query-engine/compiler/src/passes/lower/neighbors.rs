@@ -19,7 +19,7 @@ use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 pub fn emit_neighbors(
     plan: &Plan<Neighbors>,
     input: &crate::query::Query,
-) -> Result<(Node, NodeBinding)> {
+) -> Result<(Select, NodeBinding)> {
     let Neighbors {
         center: center_alias,
         direction,
@@ -86,7 +86,7 @@ pub fn emit_neighbors(
         None => vec![],
     };
 
-    let build_arm = |dir: Direction| -> Query {
+    let build_arm = |dir: Direction| -> Select {
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
         {
             Direction::Outgoing => (
@@ -132,7 +132,7 @@ pub fn emit_neighbors(
             {
                 wp.push(Expr::InSelect {
                     expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
-                    query: Box::new(Query {
+                    select: Box::new(Select {
                         select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
                         from: TableRef::scan(src.as_str(), "_tpd"),
                         where_clause: Expr::conjoin(vec![
@@ -254,7 +254,7 @@ pub fn emit_neighbors(
             ));
         }
 
-        Query {
+        Select {
             select,
             from,
             where_clause: Expr::conjoin(where_parts),
@@ -300,10 +300,7 @@ pub fn emit_neighbors(
             .expr
             .clone()
     });
-    Ok((
-        Node::Query(Box::new(query)),
-        NodeBinding::Projected { role_identity },
-    ))
+    Ok((query, NodeBinding::Projected { role_identity }))
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).
@@ -324,7 +321,7 @@ fn build_fused_both_arm(
     edge: &EdgeTableConfig,
     edge_table: &str,
     edge_alias: &str,
-) -> Query {
+) -> Select {
     let arm_predicate = |kind_col: &str,
                          id_col: &str,
                          direction: query_data_model::DenormalizedDirection|
@@ -427,7 +424,7 @@ fn build_fused_both_arm(
     }
     where_parts.push(deleted_false(edge_alias));
 
-    let inner = Query {
+    let inner = Select {
         select: inner_select,
         from: TableRef::scan(edge_table, edge_alias),
         where_clause: Expr::conjoin(where_parts),
@@ -459,10 +456,10 @@ fn build_fused_both_arm(
         ));
     }
 
-    Query {
+    Select {
         select,
         from: TableRef::Subquery {
-            query: Box::new(inner),
+            select: Box::new(inner),
             alias: inner_alias.to_string(),
         },
         ..Default::default()

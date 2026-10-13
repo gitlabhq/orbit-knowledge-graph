@@ -1,4 +1,4 @@
-use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
+use compiler::ast::{Ast, Expr, Op, Select, SelectExpr, TableRef};
 use compiler::input::{ColumnSelection, Input, InputFilter};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
@@ -221,7 +221,7 @@ fn bound_property_filter(alias: &str, property: &str, filter: &BoundPredicate) -
     format!("{alias}.{property} {operator} {value}")
 }
 
-pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
+pub fn physical<S>(plan: &QueryPlan, ast: &Ast<S>) -> (Tree, Tree) {
     let planned = match plan {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
@@ -420,10 +420,9 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .collect(),
         ),
     };
-    let emitted = match ast {
-        Node::Query(value) => query(value),
-        Node::Insert(_) => leaf(Operator::Insert, ""),
-    };
+    let emitted = ast
+        .select_ref()
+        .map_or_else(|| leaf(Operator::Insert, ""), select);
     (planned, emitted)
 }
 
@@ -673,8 +672,12 @@ fn literal(value: &serde_json::Value) -> String {
 fn expression(value: &Expr) -> String {
     match value {
         Expr::EmptyTupleArray(fields) => format!("empty_tuple_array({fields:?})"),
-        Expr::TextSearch { mode, value, query } => {
-            format!("{mode}({}, {})", expression(value), expression(query))
+        Expr::TextSearch {
+            mode,
+            value,
+            pattern,
+        } => {
+            format!("{mode}({}, {})", expression(value), expression(pattern))
         }
         Expr::TimeBucket { unit, value } => {
             format!("bucket({}, {})", unit.name(), expression(value))
@@ -742,10 +745,10 @@ fn query_filter(predicate: &Expr, input: Tree) -> Tree {
             left,
             right,
         } => query_filter(right, query_filter(left, input)),
-        Expr::InSelect { expr, query: keys } => Tree::node(
+        Expr::InSelect { expr, select: keys } => Tree::node(
             Operator::SemiJoin,
             format!("{} IN subquery", expression(expr)),
-            vec![input, query(keys)],
+            vec![input, select(keys)],
         ),
         _ => filter(vec![expression(predicate)], input),
     }
@@ -783,18 +786,18 @@ fn relation(value: &TableRef) -> Tree {
             vec![relation(left), relation(right)],
         ),
         TableRef::Subquery {
-            query: inner,
+            select: inner,
             alias,
-        } => Tree::node(Operator::Bind, alias, vec![query(inner)]),
-        TableRef::Union { queries, alias } => Tree::node(
+        } => Tree::node(Operator::Bind, alias, vec![select(inner)]),
+        TableRef::Union { selects, alias } => Tree::node(
             Operator::Union,
             format!("ALL AS {alias}"),
-            queries.iter().map(query).collect(),
+            selects.iter().map(select).collect(),
         ),
     }
 }
 
-fn query(value: &Query) -> Tree {
+fn select(value: &Select) -> Tree {
     let mut tree = relation(&value.from);
     if let Some(predicate) = &value.where_clause {
         tree = query_filter(predicate, tree);
@@ -845,7 +848,7 @@ fn query(value: &Query) -> Tree {
             Operator::Union,
             "ALL",
             std::iter::once(tree)
-                .chain(value.union_all.iter().map(query))
+                .chain(value.union_all.iter().map(select))
                 .collect(),
         );
     }
@@ -859,7 +862,7 @@ fn query(value: &Query) -> Tree {
             value
                 .ctes
                 .iter()
-                .map(|cte| Tree::node(Operator::Cte, &cte.name, vec![query(&cte.query)]))
+                .map(|cte| Tree::node(Operator::Cte, &cte.name, vec![select(&cte.select)]))
                 .chain([tree])
                 .collect(),
         );

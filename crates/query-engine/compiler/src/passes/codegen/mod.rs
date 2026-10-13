@@ -9,8 +9,7 @@ use orbit_server_config::QueryConfig;
 
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
-use crate::query::Query;
-use crate::query::QueryType;
+use crate::query::{Query, QueryType};
 pub use orbit_utils::query_types::ParamValue;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -53,7 +52,7 @@ pub struct CompiledQueryContext {
     pub query_type: QueryType,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
-    pub input: Query,
+    pub query: Query,
     pub pagination: PaginationContext,
     pub has_virtual_columns: bool,
 }
@@ -108,7 +107,16 @@ impl std::fmt::Display for ParameterizedQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+    use crate::ast::{Ast, Cte, Expr, Select, SelectExpr, TableRef};
+
+    type ClickHouseTestAst = Ast<
+        query_data_model::Relational<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >,
+    >;
+    type DuckDbTestAst = Ast<
+        query_data_model::Relational<query_data_model::implementations::duckdb::layout::DuckDb>,
+    >;
 
     #[test]
     fn aggregate_codegen_rejects_missing_arguments_except_row_count() {
@@ -124,7 +132,7 @@ mod tests {
         ] {
             for distinct in [false, true] {
                 for filtered in [false, true] {
-                    let ast = Node::Query(Box::new(Query {
+                    let select = Select {
                         select: vec![SelectExpr::new(
                             Expr::Aggregate {
                                 function,
@@ -136,10 +144,12 @@ mod tests {
                         )],
                         from: TableRef::scan("nodes", "n"),
                         ..Default::default()
-                    }));
-                    let remote = codegen(&ast, ResultContext::new(), QueryConfig::default());
-                    let local = duckdb::codegen(&ast, ResultContext::new());
-                    let simple = clickhouse::emit_simple_query(&ast);
+                    };
+                    let remote_ast = ClickHouseTestAst::select(select.clone());
+                    let local_ast = DuckDbTestAst::select(select);
+                    let remote = codegen(&remote_ast, ResultContext::new(), QueryConfig::default());
+                    let local = duckdb::codegen(&local_ast, ResultContext::new());
+                    let simple = clickhouse::emit_simple_query(&remote_ast);
                     if function == AggFunction::Count && !distinct {
                         assert!(remote.is_ok());
                         assert!(local.is_ok());
@@ -166,23 +176,29 @@ mod tests {
             (TextMatch::AllTokens, "hasAllTokens"),
             (TextMatch::AnyTokens, "hasAnyTokens"),
         ] {
-            let ast = Node::Query(Box::new(Query {
+            let select = Select {
                 select: vec![SelectExpr::col("n", "id")],
                 from: TableRef::scan("nodes", "n"),
                 where_clause: Some(Expr::TextSearch {
                     mode,
                     value: Box::new(Expr::col("n", "text")),
-                    query: Box::new(Expr::string("graph query")),
+                    pattern: Box::new(Expr::string("graph query")),
                 }),
                 ..Default::default()
-            }));
-            let remote = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+            };
+            let remote = codegen(
+                &ClickHouseTestAst::select(select.clone()),
+                ResultContext::new(),
+                QueryConfig::default(),
+            )
+            .unwrap();
             assert!(
                 remote
                     .render()
                     .contains(&format!("{function}(n.text, 'graph query')"))
             );
-            let error = duckdb::codegen(&ast, ResultContext::new()).unwrap_err();
+            let error =
+                duckdb::codegen(&DuckDbTestAst::select(select), ResultContext::new()).unwrap_err();
             assert!(error.to_string().contains("token search is not supported"));
         }
     }
@@ -206,7 +222,7 @@ mod tests {
         ] {
             for filtered in [false, true] {
                 for distinct in [false, true] {
-                    let ast = Node::Query(Box::new(Query {
+                    let select = Select {
                         select: vec![SelectExpr::new(
                             Expr::Aggregate {
                                 function,
@@ -218,10 +234,16 @@ mod tests {
                         )],
                         from: TableRef::scan("nodes", "n"),
                         ..Default::default()
-                    }));
-                    let remote =
-                        codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-                    let local_query = duckdb::codegen(&ast, ResultContext::new()).unwrap();
+                    };
+                    let remote = codegen(
+                        &ClickHouseTestAst::select(select.clone()),
+                        ResultContext::new(),
+                        QueryConfig::default(),
+                    )
+                    .unwrap();
+                    let local_query =
+                        duckdb::codegen(&DuckDbTestAst::select(select), ResultContext::new())
+                            .unwrap();
                     let name = if distinct {
                         format!(
                             "{}Distinct{}",
@@ -270,12 +292,12 @@ mod tests {
     #[test]
     fn nested_cte_definitions_survive_both_renderers() {
         for recursive in [false, true] {
-            let seed = Query {
+            let seed = Select {
                 select: vec![SelectExpr::new(Expr::int(7), "id")],
                 from: TableRef::scan("system.one", "one"),
                 ..Default::default()
             };
-            let body = Query {
+            let body = Select {
                 ctes: vec![Cte::new("seed", seed)],
                 select: vec![SelectExpr::col("s", "id")],
                 from: TableRef::scan("seed", "s"),
@@ -284,14 +306,20 @@ mod tests {
             };
             let mut outer = Cte::new("result", body);
             outer.recursive = recursive;
-            let ast = Node::Query(Box::new(Query {
+            let select = Select {
                 ctes: vec![outer],
                 select: vec![SelectExpr::col("r", "id")],
                 from: TableRef::scan("result", "r"),
                 ..Default::default()
-            }));
-            let remote = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-            let local = duckdb::codegen(&ast, ResultContext::new()).unwrap();
+            };
+            let remote = codegen(
+                &ClickHouseTestAst::select(select.clone()),
+                ResultContext::new(),
+                QueryConfig::default(),
+            )
+            .unwrap();
+            let local =
+                duckdb::codegen(&DuckDbTestAst::select(select), ResultContext::new()).unwrap();
             for sql in [&remote.sql, &local.sql] {
                 assert!(sql.contains("result AS (WITH seed AS (SELECT"), "{sql}");
                 assert_eq!(sql.starts_with("WITH RECURSIVE"), recursive, "{sql}");

@@ -245,7 +245,7 @@ pub(super) async fn pipeline_output(
     let mut query_result = hydration_output.query_result;
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
-        &compiled.input,
+        &compiled.query,
         &compiled.pagination,
     ));
 

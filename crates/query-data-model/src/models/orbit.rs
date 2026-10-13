@@ -24,6 +24,7 @@ where
     M: crate::Mapping<crate::Relational<B>> + RelationalMapping,
     A: GitLabPolicy,
 {
+    type Schema = crate::Relational<B>;
     type BackendCatalog = M;
     type AuthorizationCatalog = A;
 
@@ -42,6 +43,7 @@ pub trait OrbitQueryModel {
     fn property_is_hidden(&self, property: PropertyId) -> bool {
         self.query_authorization().is_hidden(property)
     }
+    type Schema;
     type BackendCatalog: RelationalMapping;
     type AuthorizationCatalog: GitLabPolicy;
 

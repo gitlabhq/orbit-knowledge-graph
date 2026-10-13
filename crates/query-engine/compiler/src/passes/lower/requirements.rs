@@ -92,7 +92,7 @@ fn group(value: &Group) -> Expr {
     }
 }
 
-pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, limit: u32) -> Node {
+pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, limit: u32) -> Select {
     let condition = Expr::conjoin(plan.condition.iter().map(predicate).collect());
     let select = plan
         .group_outputs
@@ -125,10 +125,10 @@ pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, lim
             }
         })
         .collect();
-    Node::Query(Box::new(output.into_query(
+    output.into_select(
         select,
         plan.groups.iter().map(group).collect(),
         order,
         limit,
-    )))
+    )
 }

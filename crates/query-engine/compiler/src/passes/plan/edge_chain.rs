@@ -172,7 +172,7 @@ pub(super) fn plan<M>(
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let input = context.input;
+    let input = context.query;
     let model = context.model;
     let hops = build_hops(input, model);
     let mut nodes: HashMap<_, _> = input

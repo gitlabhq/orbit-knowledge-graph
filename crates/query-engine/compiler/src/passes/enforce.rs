@@ -1,4 +1,4 @@
-use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
+use crate::ast::{Ast, Expr, JoinType, Select, SelectExpr, TableRef};
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
@@ -7,8 +7,7 @@ use crate::passes::lower::sql::{
     deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
-use crate::query::Query as BoundQuery;
-use crate::query::QueryType;
+use crate::query::{Query, QueryType};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
@@ -104,15 +103,15 @@ impl ResultContext {
     }
 }
 
-pub fn enforce_lowered_return(
-    node: &mut Node,
-    input: &BoundQuery,
+pub fn enforce_lowered_return<S>(
+    ast: &mut Ast<S>,
+    input: &Query,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
-    enforce_lowered_return_with(node, input, metadata, &mut ctx, |entity| {
+    enforce_lowered_return_with(ast, input, metadata, &mut ctx, |entity| {
         input
             .nodes
             .iter()
@@ -125,22 +124,22 @@ pub fn enforce_lowered_return(
     Ok(ctx)
 }
 
-pub fn enforce_local_return(
-    node: &mut Node,
-    input: &BoundQuery,
+pub fn enforce_local_return<S>(
+    ast: &mut Ast<S>,
+    input: &Query,
     metadata: &LoweredMetadata,
     _model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    enforce_lowered_return_with(node, input, metadata, &mut ctx, |_| {
+    enforce_lowered_return_with(ast, input, metadata, &mut ctx, |_| {
         DEFAULT_PRIMARY_KEY.to_string()
     })?;
     Ok(ctx)
 }
 
-fn enforce_lowered_return_with(
-    node: &mut Node,
-    input: &BoundQuery,
+fn enforce_lowered_return_with<S>(
+    ast: &mut Ast<S>,
+    input: &Query,
     metadata: &LoweredMetadata,
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
@@ -158,17 +157,17 @@ fn enforce_lowered_return_with(
         }
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
-    match node {
-        Node::Query(q) => enforce_return_columns(
-            q,
-            input,
-            &selectable_nodes,
-            ctx,
-            &metadata.nodes,
-            redaction_column,
-        )?,
-        Node::Insert(_) => return Ok(()),
-    }
+    let Some(select) = ast.select_mut() else {
+        return Ok(());
+    };
+    enforce_return_columns(
+        select,
+        input,
+        &selectable_nodes,
+        ctx,
+        &metadata.nodes,
+        redaction_column,
+    )?;
 
     if matches!(
         input.query_type,
@@ -197,13 +196,13 @@ fn enforce_lowered_return_with(
     Ok(())
 }
 
-pub fn enforce_role_scans(
-    node: &mut Node,
-    input: &BoundQuery,
+pub fn enforce_role_scans<S>(
+    ast: &mut Ast<S>,
+    input: &Query,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let Node::Query(query) = node else {
+    let Some(query) = ast.select_mut() else {
         return Ok(());
     };
     for input_node in &input.nodes {
@@ -239,7 +238,7 @@ pub fn enforce_role_scans(
     Ok(())
 }
 
-fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
+fn ensure_in_group_by(q: &mut Select, query_type: QueryType, expr: Expr) {
     if query_type == QueryType::Aggregation && !q.group_by.is_empty() && !q.group_by.contains(&expr)
     {
         q.group_by.push(expr);
@@ -247,8 +246,8 @@ fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
 }
 
 fn enforce_return_columns(
-    q: &mut Query,
-    input: &BoundQuery,
+    q: &mut Select,
+    input: &Query,
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
@@ -312,7 +311,7 @@ fn enforce_return_columns(
                     }
                     predicates.push(deleted_false(&node.alias));
                     TableRef::subquery(
-                        Query {
+                        Select {
                             select: vec![SelectExpr::star()],
                             from: TableRef::scan_final(table, &node.alias),
                             where_clause: Expr::conjoin(predicates),

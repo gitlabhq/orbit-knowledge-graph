@@ -1824,7 +1824,7 @@ fn orbit_query_page_matches_json_cursor() {
     let rendered = compiled.base.render();
     assert!(rendered.contains("_orbit_cursor_0"), "{rendered}");
     assert!(rendered.contains("LIMIT 6"), "{rendered}");
-    assert_eq!(compiled.input.cursor.as_ref().map(|c| c.page_size), Some(5));
+    assert_eq!(compiled.query.cursor.as_ref().map(|c| c.page_size), Some(5));
 }
 
 #[test]
@@ -1847,7 +1847,7 @@ fn orbit_query_after_token_binds_to_the_statement() {
     ] {
         let compiled = compile(&next, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
         assert_eq!(compiled.pagination.query_hash, hash);
-        assert_eq!(compiled.input.cursor.as_ref().unwrap().page_size, 7);
+        assert_eq!(compiled.query.cursor.as_ref().unwrap().page_size, 7);
         assert!(
             compiled.base.render().contains("u.id >"),
             "{}",
@@ -1898,7 +1898,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert!(compiled.input.include_debug_sql);
+    assert!(compiled.query.include_debug_sql);
 
     let json = r#"{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"both"},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
@@ -1908,7 +1908,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert_eq!(compiled.input.dynamic_columns, DynamicColumnMode::All);
+    assert_eq!(compiled.query.dynamic_columns, DynamicColumnMode::All);
 
     let json = r#"{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
@@ -1918,7 +1918,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         &test_ctx(),
     )
     .unwrap();
-    assert_eq!(compiled.input.dynamic_columns, DynamicColumnMode::All);
+    assert_eq!(compiled.query.dynamic_columns, DynamicColumnMode::All);
 }
 
 #[test]
@@ -1933,12 +1933,12 @@ fn orbit_query_optional_clauses_preserve_options() {
                 let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
                 let compiled =
                     compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-                let input = compiled.input;
-                assert_eq!(input.include_debug_sql, !debug.is_empty(), "{query}");
-                assert_eq!(input.order.is_some(), !order.is_empty(), "{query}");
-                assert_eq!(input.cursor.as_ref().map(|c| c.page_size), page, "{query}");
+                let bound = compiled.query;
+                assert_eq!(bound.include_debug_sql, !debug.is_empty(), "{query}");
+                assert_eq!(bound.order.is_some(), !order.is_empty(), "{query}");
+                assert_eq!(bound.cursor.as_ref().map(|c| c.page_size), page, "{query}");
                 if let Some(rows) = rows {
-                    assert_eq!(input.limit, rows, "{query}");
+                    assert_eq!(bound.limit, rows, "{query}");
                 }
             }
         }
@@ -1959,7 +1959,7 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
         for comment in ["", " /* DEBUG */", " // DEBUG"] {
             let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
             let compiled = compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-            assert!(!compiled.input.include_debug_sql, "{query}");
+            assert!(!compiled.query.include_debug_sql, "{query}");
             assert!(
                 has_param_value(&compiled.base.params, &serde_json::json!(value)),
                 "{query}"

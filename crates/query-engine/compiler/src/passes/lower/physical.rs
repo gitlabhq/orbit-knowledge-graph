@@ -1,5 +1,5 @@
 use super::sql::latest_row_dedup;
-use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{Cte, Expr, Select, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 
 use super::requirements::{column, predicate, projections};
@@ -33,7 +33,7 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
     }
 }
 
-pub(super) fn query(plan: &PhysicalPlan) -> Query {
+pub(super) fn query(plan: &PhysicalPlan) -> Select {
     let (source, order_by, limit_by, condition) = match &plan.source {
         PhysicalSource::Latest {
             alias,
@@ -53,7 +53,7 @@ pub(super) fn query(plan: &PhysicalPlan) -> Query {
     };
     let mut output = emit_source(source);
     output.predicates.extend(condition.iter().map(predicate));
-    Query {
+    Select {
         select: projections(&plan.outputs),
         from: output.from,
         where_clause: Expr::conjoin(output.predicates),
@@ -104,7 +104,7 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             let mut output = emit_source(input);
             output.predicates.push(Expr::InSelect {
                 expr: Box::new(column(value)),
-                query: Box::new(query(keys)),
+                select: Box::new(query(keys)),
             });
             output
         }
@@ -124,7 +124,7 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
                 _ => (vec![], None),
             };
             output.from = TableRef::subquery(
-                Query {
+                Select {
                     select: vec![SelectExpr::star()],
                     from: output.from,
                     where_clause: Expr::conjoin(std::mem::take(&mut output.predicates)),
