@@ -180,10 +180,8 @@ pub(in crate::modules::code) fn run(
 const SLOWEST_FILES: usize = 100;
 
 fn file_timings(timings: &[FileTiming], skipped: &[Killed]) -> Vec<FileTimingEntry> {
-    // Unparsed placeholder trees (excluded, binary, over max_files, killed in a
-    // per-file phase) must not count. Kept paths have a parse entry and were not
-    // killed by the parse, rewrite or link budgets. Resolve-budget kills were
-    // parsed, so they stay.
+    // Unparsed placeholder trees get resolve timings too. Resolve-budget kills
+    // were parsed, so they still count.
     let killed_before_resolve: HashSet<&str> = skipped
         .iter()
         .filter(|killed| matches!(killed.label, "tree-sitter" | "rewrite" | "link"))
