@@ -68,6 +68,9 @@ pub struct DirtyGraph {
 
 pub struct Resolved {
     pub state: State,
+    /// Indices into `state.trees` of the files the resolver ran on, after
+    /// invalidation.
+    pub resolved: Vec<u32>,
 }
 
 pub struct Displayed {

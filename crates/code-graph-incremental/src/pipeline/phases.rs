@@ -222,7 +222,7 @@ where
                     items.push(v);
                 }
                 Err(k) => {
-                    // A file killed in any per-file phase never counts as parsed.
+                    // Guard: a killed file must not keep an entry from an earlier phase.
                     context.report.files.remove(&path);
                     context.skip(k);
                 }
@@ -510,8 +510,10 @@ impl Phase<DirtyGraph> for Resolve {
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
-        // Unparsed placeholder trees have no entry, so they stay out.
+        // Only files parsed in this run have an entry.
+        let mut resolved = Vec::with_capacity(result.file_timings.len());
         for (fi, elapsed) in result.file_timings {
+            resolved.push(fi);
             if let Some(stats) = context
                 .report
                 .files
@@ -523,7 +525,7 @@ impl Phase<DirtyGraph> for Resolve {
         for k in result.killed {
             context.skip(k);
         }
-        Ok(Resolved { state })
+        Ok(Resolved { state, resolved })
     }
 }
 
@@ -540,7 +542,7 @@ impl Phase<Resolved> for Display {
     fn run(
         self,
         context: &mut Context,
-        Resolved { mut state }: Resolved,
+        Resolved { mut state, .. }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);

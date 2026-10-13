@@ -163,7 +163,7 @@ pub struct Report {
     pub skipped: Vec<Killed>,
     pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
-    /// Stats per file path, only for files that parsed and were not killed in
+    /// Stats per file path, only for files parsed in this run and not killed in
     /// a per-file phase. Resolve-budget kills keep their entry.
     pub files: HashMap<String, FileStats>,
 }
