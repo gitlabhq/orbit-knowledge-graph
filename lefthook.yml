@@ -64,11 +64,6 @@ pre-commit:
       glob:
         - "AGENTS.md"
         - "CLAUDE.md"
-    - name: orbit-skill-docs-sync
-      run: diff docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md
-      glob:
-        - "docs/source/remote/queries/query-language.md"
-        - "skills/orbit/references/query_language.md"
     - name: rust-toolchain-sync
       run: mise run toolchain:check
       glob:
@@ -94,8 +89,8 @@ pre-commit:
         - "crates/query-engine/formatters/src/**/*.rs"
         - "crates/query-engine/compiler/src/input.rs"
         - "crates/query-engine/compiler/src/passes/validate.rs"
+        - "crates/query-engine/compiler/src/passes/frontend/**/*"
         - "config/schemas/query_response.json"
-        - "config/schemas/graph_query.schema.json"
     - name: metrics-catalog-check
       run: mise run metrics:catalog:check
       glob:
@@ -109,6 +104,5 @@ pre-commit:
         - "crates/xtask/src/query_docs.rs"
         - "crates/ontology/src/lib.rs"
         - "docs/source/remote/queries/query-language.md"
-        - "skills/orbit/references/query_language.md"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit

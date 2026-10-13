@@ -14,7 +14,7 @@ The examples use `orbit` directly after installation. If you prefer to stay
 inside `glab`, replace `orbit` with `glab orbit` in each command.
 
 The current Orbit Local command queries the local DuckDB graph with SQL. The
-Orbit Remote Query DSL is linked at the end after the local graph concepts are
+Orbit Remote query language is linked at the end after the local graph concepts are
 familiar.
 
 ## Install Orbit Local
@@ -218,7 +218,7 @@ between them.
 - [Orbit Local access methods](../../source/local/getting-started.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
 - [Orbit query language reference](../../source/remote/queries/query-language.md)
-  for the Query DSL used by Orbit Remote and agent-facing graph queries.
+  for the query language used by Orbit Remote and agent-facing graph queries.
 - [Cookbook](../../source/remote/cookbook.md) for copy-paste query ideas.
 - [Add a language to the code indexer](../adding-a-language.md) if you want to
   contribute parser coverage for more source languages.

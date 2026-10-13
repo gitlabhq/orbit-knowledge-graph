@@ -42,7 +42,7 @@ and configures supported AI agents.
 
 The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
 `mcp`, and `repo-map`) require no GitLab account or network connection once the
-binary is installed. Hosted verbs (`query`, `status`, `ontology`, `dsl`, `tools`,
+binary is installed. Hosted verbs (`query`, `status`, `ontology`, `tools`,
 and `graph-status`) require an authenticated GitLab account and network access.
 
 ## Install

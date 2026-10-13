@@ -354,23 +354,20 @@ minutes. A sweep picks up existing data no more than one hour later.
 
 To verify the installation, query the graph for a project in the group you turned on indexing for.
 
+For example, this query lists projects in a group:
+
+```gql orbit-query
+MATCH (p:Project)
+WHERE p.full_path STARTS WITH 'your-group/'
+RETURN p{.name, .full_path}
+LIMIT 10
+```
+
 Put the request body in `request.json`:
 
-```json orbit-query
+```json
 {
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "p",
-      "entity": "Project",
-      "columns": ["name", "full_path"],
-      "filters": {
-        "full_path": {"starts_with": "your-group/"}
-      }
-    }],
-    "limit": 10
-  },
-  "response_format": "raw"
+  "query": "MATCH (p:Project) WHERE p.full_path STARTS WITH 'your-group/' RETURN p{.name, .full_path} LIMIT 10"
 }
 ```
 

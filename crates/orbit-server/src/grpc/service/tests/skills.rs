@@ -1,9 +1,12 @@
 use super::*;
-use query_engine::compiler::Frontend;
 use sha2::{Digest, Sha256};
 
-fn catalog_version(frontend: Frontend) -> String {
-    crate::skills::list_skills(frontend).remove(0).version
+fn catalog_version() -> String {
+    crate::skills::list_skills().remove(0).version
+}
+
+fn gql() -> i32 {
+    QueryLanguage::Gql as i32
 }
 
 fn sha256_hex(content: &str) -> String {
@@ -16,7 +19,7 @@ fn sha256_hex(content: &str) -> String {
 #[tokio::test]
 async fn list_skills_returns_deployed_skill_metadata() {
     let response = test_service()
-        .list_skills(authed_request(ListSkillsRequest::default()))
+        .list_skills(authed_request(ListSkillsRequest { language: gql() }))
         .await
         .unwrap()
         .into_inner();
@@ -24,7 +27,7 @@ async fn list_skills_returns_deployed_skill_metadata() {
     assert_eq!(response.skills.len(), 1);
     let skill = &response.skills[0];
     assert_eq!(skill.name, "orbit");
-    assert_eq!(skill.version, catalog_version(Frontend::JsonDsl));
+    assert_eq!(skill.version, catalog_version());
     assert!(skill.description.contains("glab orbit"));
     assert!(skill.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
@@ -34,7 +37,7 @@ async fn list_skills_returns_deployed_skill_metadata() {
 async fn get_skill_returns_sorted_tree_with_file_hashes() {
     let service = test_service();
     let listed = service
-        .list_skills(authed_request(ListSkillsRequest::default()))
+        .list_skills(authed_request(ListSkillsRequest { language: gql() }))
         .await
         .unwrap()
         .into_inner();
@@ -42,7 +45,7 @@ async fn get_skill_returns_sorted_tree_with_file_hashes() {
         .get_skill(authed_request(GetSkillRequest {
             name: "orbit".into(),
             metadata_only: false,
-            ..Default::default()
+            language: gql(),
         }))
         .await
         .unwrap()
@@ -52,7 +55,7 @@ async fn get_skill_returns_sorted_tree_with_file_hashes() {
     assert_eq!(response.version, listed.skills[0].version);
     assert_eq!(response.compatibility, listed.skills[0].compatibility);
     assert_eq!(response.server_version, listed.server_version);
-    assert_eq!(response.files.len(), 9);
+    assert_eq!(response.files.len(), 8);
     assert_eq!(response.files[0].path, "SKILL.md");
     assert!(
         response
@@ -71,14 +74,14 @@ async fn get_skill_metadata_only_omits_files() {
         .get_skill(authed_request(GetSkillRequest {
             name: "orbit".into(),
             metadata_only: true,
-            ..Default::default()
+            language: gql(),
         }))
         .await
         .unwrap()
         .into_inner();
 
     assert_eq!(response.name, "orbit");
-    assert_eq!(response.version, catalog_version(Frontend::JsonDsl));
+    assert_eq!(response.version, catalog_version());
     assert!(response.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
     assert!(response.files.is_empty());
@@ -90,7 +93,7 @@ async fn get_skill_unknown_name_lists_sorted_known_names() {
         .get_skill(authed_request(GetSkillRequest {
             name: "missing".into(),
             metadata_only: false,
-            ..Default::default()
+            language: gql(),
         }))
         .await
         .unwrap_err();
@@ -103,30 +106,22 @@ async fn get_skill_unknown_name_lists_sorted_known_names() {
 }
 
 #[tokio::test]
-async fn skill_requests_select_the_query_language() {
+async fn skill_requests_reject_json_and_unknown_languages() {
     let service = test_service();
-    let gql = service
-        .get_skill(authed_request(GetSkillRequest {
-            name: "orbit".into(),
-            metadata_only: true,
-            language: QueryLanguage::Gql as i32,
-        }))
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(gql.version, catalog_version(Frontend::Gql));
-    let listed = service
-        .list_skills(authed_request(ListSkillsRequest {
-            language: QueryLanguage::Gql as i32,
-        }))
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(listed.skills[0].version, gql.version);
-
-    let error = service
-        .list_skills(authed_request(ListSkillsRequest { language: 99 }))
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    for language in [QueryLanguage::Json as i32, 99] {
+        let error = service
+            .list_skills(authed_request(ListSkillsRequest { language }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        let error = service
+            .get_skill(authed_request(GetSkillRequest {
+                name: "orbit".into(),
+                metadata_only: true,
+                language,
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    }
 }

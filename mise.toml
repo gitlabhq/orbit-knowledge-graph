@@ -72,14 +72,6 @@ description = "Run libFuzzer with AddressSanitizer over every fuzz target, shari
 run = "scripts/fuzz/run.sh smoke"
 description = "Replay each fuzz target's corpus, then a second of random inputs, on stable Rust"
 
-[tasks."fuzz:compile"]
-run = ["scripts/fuzz/corpus.sh pull fuzz_compile", "cargo +nightly bolero test fuzz_compile -p orbit-fuzz"]
-description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
-
-[tasks."fuzz:compile-structured"]
-run = ["scripts/fuzz/corpus.sh pull fuzz_compile_structured", "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"]
-description = "Fuzz the query compiler with structured JSON query generation"
-
 [tasks."fuzz:gql"]
 run = ["scripts/fuzz/corpus.sh pull fuzz_gql", "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"]
 description = "Fuzz the Orbit query frontend with unstructured text"
@@ -535,6 +527,3 @@ description = "Run all documentation linters"
 run = "DRY_RUN=true bash ./scripts/ci/sync-doc-principles.sh"
 description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
 
-[tasks."skill:sync:orbit"]
-run = "cp docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md"
-description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"

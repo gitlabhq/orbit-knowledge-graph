@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install the GitLab Orbit skill to give AI coding agents ready-to-use query recipes, DSL guidance, and troubleshooting for both GitLab Orbit Remote and GitLab Orbit Local.
+description: Install the GitLab Orbit skill to give AI coding agents ready-to-use query recipes, query language guidance, and troubleshooting for both GitLab Orbit Remote and GitLab Orbit Local.
 title: Set up AI coding agents with the GitLab Orbit skill
 ---
 
@@ -19,8 +19,8 @@ GitLab Orbit graph. It includes:
 
 - **Query recipes** - paste-ready queries for common questions, such as
   class inheritance, pipeline history, and grouped counts.
-- **Query language reference** - syntax guidance for the enabled query mode:
-  JSON Query DSL or read-only openCypher 9-based syntax.
+- **Query language reference** - syntax guidance for the read-only
+  openCypher 9-based query language.
 - **Troubleshooting** - exit codes, empty-result diagnostics, and common
   pitfalls.
 - **Repository maps** - the local `repo-map` command for a checkout.

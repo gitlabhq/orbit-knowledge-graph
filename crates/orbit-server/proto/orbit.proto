@@ -60,9 +60,8 @@ service OrbitService {
   // Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
 
-  // Returns the query DSL grammar (JSON Schema for query_graph input).
-  // Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
-  // command catalog and InvokeAgentCommand instead.
+  // Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
+  // CALL db.schema(); kept so existing clients get a clear error.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
 
   // Lists the standalone Orbit Remote skills embedded in this deployment.
@@ -77,9 +76,8 @@ service OrbitService {
   rpc ListNamedQueries(ListNamedQueriesRequest) returns (ListNamedQueriesResponse);
 
   // Returns the JSON Schema describing the query response shape (the formatter
-  // output). Pairs with GetQueryDsl: input grammar there, output shape here.
-  // Direct API helper for REST consumers. MCP agents should use the command
-  // catalog and InvokeAgentCommand instead.
+  // output). Direct API helper for REST consumers. MCP agents should use the
+  // command catalog and InvokeAgentCommand instead.
   rpc GetResponseFormat(GetResponseFormatRequest) returns (GetResponseFormatResponse);
 
   // Returns cluster health and component status.
@@ -114,12 +112,13 @@ message ExecuteQueryMessage {
 }
 
 enum QueryType {
-  QUERY_TYPE_JSON = 0;
+  QUERY_TYPE_JSON = 0;   // `query` is ad hoc query text in the selected language
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 }
 
+// Selects the compiler frontend. Add a value per new query language.
 enum QueryLanguage {
-  QUERY_LANGUAGE_JSON = 0;
+  QUERY_LANGUAGE_JSON = 0;  // Removed JSON Query DSL; servers reject it with INVALID_ARGUMENT
   QUERY_LANGUAGE_GQL = 1;
 }
 
@@ -236,16 +235,14 @@ message SchemaNodeStyle {
 }
 
 // ---------------------------------------------------------------------------
-// GetQueryDsl — unary, returns the JSON Schema for query_graph input
+// GetQueryDsl — removed with the JSON Query DSL; always NOT_FOUND
 // ---------------------------------------------------------------------------
 
-// Request for the query DSL grammar.
 message GetQueryDslRequest {
-  ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
+  ResponseFormat format = 1;
   QueryLanguage language = 2;
 }
 
-// Response carrying the DSL grammar in the requested format.
 message GetQueryDslResponse {
   string version = 3;  // semver string for the query DSL grammar, e.g. "1.0.0"
   oneof content {

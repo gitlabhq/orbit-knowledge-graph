@@ -1,4 +1,3 @@
-use query_engine::compiler::Frontend;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -11,27 +10,18 @@ pub struct ToolDefinition {
     pub parameters: serde_json::Value,
 }
 
-pub(super) fn command_summaries(frontend: Frontend) -> Vec<(&'static str, &'static str)> {
-    let query_prompt = match frontend {
-        Frontend::JsonDsl => "tools/query_graph",
-        Frontend::Gql => "tools/query_graph_gql",
-    };
-    let mut commands = vec![
-        ("query_graph", prompt(query_prompt).summary()),
+pub(super) fn command_summaries() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("query_graph", prompt("tools/query_graph").summary()),
         (
             "get_graph_schema",
             prompt("tools/get_graph_schema").summary(),
         ),
-        ("get_query_dsl", prompt("tools/get_query_dsl").summary()),
         (
             "get_response_format",
             prompt("tools/get_response_format").summary(),
         ),
-    ];
-    if frontend == Frontend::Gql {
-        commands.retain(|(name, _)| *name != "get_query_dsl");
-    }
-    commands
+    ]
 }
 
 fn render_prompt(key: &str, context: minijinja::Value) -> String {
@@ -42,8 +32,8 @@ fn render_prompt(key: &str, context: minijinja::Value) -> String {
         .expect("template placeholders are validated against the prompt file by tests")
 }
 
-pub(super) fn list_commands_description(frontend: Frontend) -> String {
-    let commands = command_summaries(frontend)
+pub(super) fn list_commands_description() -> String {
+    let commands = command_summaries()
         .iter()
         .map(|(name, summary)| format!("- {name}: {summary}"))
         .collect::<Vec<_>>()
@@ -78,11 +68,8 @@ impl From<&ToolDefinition> for CommandCatalogEntry {
 /// Description for callers that cannot afford a discovery turn: the full
 /// command catalog is inlined as compact JSON, followed by the graph
 /// relationship patterns when given.
-pub(super) fn inline_list_commands_description(
-    frontend: Frontend,
-    relationships: Option<&str>,
-) -> String {
-    let entries: Vec<CommandCatalogEntry> = CommandRegistry::commands_for(frontend)
+pub(super) fn inline_list_commands_description(relationships: Option<&str>) -> String {
+    let entries: Vec<CommandCatalogEntry> = CommandRegistry::get_all_commands()
         .iter()
         .map(CommandCatalogEntry::from)
         .collect();
@@ -96,7 +83,6 @@ pub(super) fn inline_list_commands_description(
 }
 
 pub(super) mod params {
-    use query_engine::compiler::Frontend;
     use serde_json::{Value, json};
 
     pub fn format() -> Value {
@@ -107,22 +93,18 @@ pub(super) mod params {
         })
     }
 
-    pub fn query_parameters(frontend: Frontend) -> Value {
-        let mut query_format = format();
-        let query = match frontend {
-            Frontend::JsonDsl => json!({"type": "object", "description": "JSON Query DSL object."}),
-            Frontend::Gql => {
-                query_format["enum"] = json!(["llm", "raw", "gql"]);
-                query_format["description"] = json!(
-                    "Output format. 'llm' (default) returns compact text. 'raw' returns structured JSON. 'gql' returns a graph pattern table."
-                );
-                json!({"type": "string", "description": "Read-only GQL query text."})
-            }
-        };
+    pub fn query_parameters() -> Value {
         json!({
             "type": "object",
             "required": ["query"],
-            "properties": {"query": query, "format": query_format},
+            "properties": {
+                "query": {"type": "string", "description": "Read-only GQL query text."},
+                "format": {
+                    "type": "string",
+                    "enum": ["llm", "raw", "gql"],
+                    "description": "Output format. 'llm' (default) returns compact text. 'raw' returns structured JSON. 'gql' returns a graph pattern table."
+                }
+            },
             "additionalProperties": false
         })
     }
@@ -175,36 +157,27 @@ pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools() -> Vec<ToolDefinition> {
-        Self::tools_for(Frontend::JsonDsl)
-    }
-
-    pub fn tools_for(frontend: Frontend) -> Vec<ToolDefinition> {
-        Self::tools_with_catalog(frontend, false, None)
+        Self::tools_with_catalog(false, None)
     }
 
     /// When `inline_catalog` is set, `list_commands` carries the full command
     /// catalog, plus the graph relationship patterns when given, in its
     /// description so the caller can skip the discovery and schema turns.
     pub fn tools_with_catalog(
-        frontend: Frontend,
         inline_catalog: bool,
         relationships: Option<&str>,
     ) -> Vec<ToolDefinition> {
         vec![
-            Self::list_commands(frontend, inline_catalog, relationships),
+            Self::list_commands(inline_catalog, relationships),
             Self::invoke_command(),
         ]
     }
 
-    fn list_commands(
-        frontend: Frontend,
-        inline_catalog: bool,
-        relationships: Option<&str>,
-    ) -> ToolDefinition {
+    fn list_commands(inline_catalog: bool, relationships: Option<&str>) -> ToolDefinition {
         let description = if inline_catalog {
-            inline_list_commands_description(frontend, relationships)
+            inline_list_commands_description(relationships)
         } else {
-            list_commands_description(frontend)
+            list_commands_description()
         };
         ToolDefinition {
             name: "list_commands".into(),
@@ -244,27 +217,18 @@ pub struct CommandRegistry;
 
 impl CommandRegistry {
     pub fn get_all_commands() -> Vec<ToolDefinition> {
-        Self::commands_for(Frontend::JsonDsl)
+        vec![
+            Self::query_graph(),
+            Self::get_graph_schema(),
+            Self::get_response_format(),
+        ]
     }
 
-    pub fn commands_for(frontend: Frontend) -> Vec<ToolDefinition> {
-        let mut commands = vec![Self::query_graph(frontend), Self::get_graph_schema()];
-        if frontend == Frontend::JsonDsl {
-            commands.push(Self::get_query_dsl());
-        }
-        commands.push(Self::get_response_format());
-        commands
-    }
-
-    fn query_graph(frontend: Frontend) -> ToolDefinition {
-        let prompt_key = match frontend {
-            Frontend::JsonDsl => "tools/query_graph",
-            Frontend::Gql => "tools/query_graph_gql",
-        };
+    fn query_graph() -> ToolDefinition {
         ToolDefinition {
             name: "query_graph".into(),
-            description: prompt(prompt_key).description().into(),
-            parameters: params::query_parameters(frontend),
+            description: prompt("tools/query_graph").description().into(),
+            parameters: params::query_parameters(),
         }
     }
 
@@ -273,20 +237,6 @@ impl CommandRegistry {
             name: "get_graph_schema".into(),
             description: prompt("tools/get_graph_schema").description().into(),
             parameters: params::get_graph_schema_parameters(),
-        }
-    }
-
-    fn get_query_dsl() -> ToolDefinition {
-        ToolDefinition {
-            name: "get_query_dsl".into(),
-            description: prompt("tools/get_query_dsl").description().into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
         }
     }
 
@@ -364,17 +314,17 @@ mod tests {
     #[test]
     fn expected_commands_are_registered() {
         let names: Vec<String> = all_commands().into_iter().map(|t| t.name).collect();
-        assert!(names.contains(&"query_graph".into()));
-        assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"get_query_dsl".into()));
-        assert!(names.contains(&"get_response_format".into()));
+        assert_eq!(
+            names,
+            ["query_graph", "get_graph_schema", "get_response_format"]
+        );
     }
 
     #[test]
     fn command_summary_mapping_matches_registered_commands() {
         for command in all_commands() {
             assert!(
-                command_summaries(Frontend::JsonDsl)
+                command_summaries()
                     .iter()
                     .any(|(name, _summary)| *name == command.name),
                 "{} missing from command summaries",
@@ -389,7 +339,7 @@ mod tests {
             .into_iter()
             .filter(|tool| tool.name == "list_commands")
         {
-            for (name, summary) in command_summaries(Frontend::JsonDsl) {
+            for (name, summary) in command_summaries() {
                 assert!(
                     tool.description.contains(name),
                     "{} missing command name {name}",
@@ -406,34 +356,30 @@ mod tests {
 
     #[test]
     fn descriptions_are_bounded_and_carry_no_schema() {
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            for definition in ToolRegistry::tools_for(frontend)
-                .into_iter()
-                .chain(CommandRegistry::commands_for(frontend))
-            {
+        for definition in all_tools().into_iter().chain(all_commands()) {
+            assert!(
+                !definition.description.is_empty(),
+                "{} missing description",
+                definition.name
+            );
+            if definition.name != "list_commands" {
+                let budget = if definition.name == "query_graph" {
+                    512
+                } else {
+                    400
+                };
                 assert!(
-                    !definition.description.is_empty(),
-                    "{frontend:?}: {} missing description",
-                    definition.name
-                );
-                if definition.name != "list_commands" {
-                    let budget = match (frontend, definition.name.as_str()) {
-                        (Frontend::Gql, "query_graph") => 512,
-                        _ => 400,
-                    };
-                    assert!(
-                        definition.description.len() < budget,
-                        "{frontend:?}: {} description exceeds {budget} bytes",
-                        definition.name
-                    );
-                }
-                assert!(
-                    !definition.description.contains("<toon>")
-                        && !definition.description.contains("Query DSL Schema"),
-                    "{frontend:?}: {} should keep large schemas out of the description",
+                    definition.description.len() < budget,
+                    "{} description exceeds {budget} bytes",
                     definition.name
                 );
             }
+            assert!(
+                !definition.description.contains("<toon>")
+                    && !definition.description.contains("Query DSL Schema"),
+                "{} should keep large schemas out of the description",
+                definition.name
+            );
         }
     }
 
@@ -442,12 +388,12 @@ mod tests {
         build_relationship_patterns(&ontology, IntrospectionScope::All).join("\n")
     }
 
-    fn inline_description(frontend: Frontend) -> String {
-        inline_description_with(frontend, Some(&relationship_patterns()))
+    fn inline_description() -> String {
+        inline_description_with(Some(&relationship_patterns()))
     }
 
-    fn inline_description_with(frontend: Frontend, relationships: Option<&str>) -> String {
-        ToolRegistry::tools_with_catalog(frontend, true, relationships)
+    fn inline_description_with(relationships: Option<&str>) -> String {
+        ToolRegistry::tools_with_catalog(true, relationships)
             .into_iter()
             .find(|tool| tool.name == "list_commands")
             .expect("list_commands tool")
@@ -459,51 +405,42 @@ mod tests {
     // its tokens, or shorten the pattern format in `build_relationship_patterns`.
     #[test]
     fn inlined_description_stays_under_size_budget() {
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            let catalog = inline_description_with(frontend, None).len();
-            assert!(
-                catalog < 4096,
-                "{frontend:?} inlined catalog is {catalog} B"
-            );
-            let full = inline_description(frontend).len();
-            assert!(
-                full < 8192,
-                "{frontend:?} inlined catalog with relationships is {full} B"
-            );
-        }
+        let catalog = inline_description_with(None).len();
+        assert!(catalog < 4096, "inlined catalog is {catalog} B");
+        let full = inline_description().len();
+        assert!(
+            full < 8192,
+            "inlined catalog with relationships is {full} B"
+        );
     }
 
     #[test]
     fn inlined_description_carries_relationship_patterns() {
         let patterns = relationship_patterns();
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            let description = inline_description(frontend);
-            assert!(description.contains(&patterns));
-            assert!(description.contains("(User)-[:AUTHORED]->("));
-            assert!(!inline_description_with(frontend, None).contains("Graph relationships"));
-        }
+        let description = inline_description();
+        assert!(description.contains(&patterns));
+        assert!(description.contains("(User)-[:AUTHORED]->("));
+        assert!(!inline_description_with(None).contains("Graph relationships"));
     }
 
     #[test]
     fn inlined_description_carries_every_command_name_and_schema() {
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            let description = inline_description(frontend);
-            for command in CommandRegistry::commands_for(frontend) {
-                let entry = serde_json::to_string(&CommandCatalogEntry::from(&command)).unwrap();
-                assert!(
-                    description.contains(&entry),
-                    "{frontend:?} missing catalog entry for {}",
-                    command.name
-                );
-            }
-            assert!(!description.contains("Call this before invoke_command"));
-            assert!(!description.contains("\"parameters\":"));
+        let description = inline_description();
+        for command in all_commands() {
+            let entry = serde_json::to_string(&CommandCatalogEntry::from(&command)).unwrap();
+            assert!(
+                description.contains(&entry),
+                "missing catalog entry for {}",
+                command.name
+            );
         }
+        assert!(!description.contains("Call this before invoke_command"));
+        assert!(!description.contains("\"parameters\":"));
     }
 
     #[test]
     fn default_tools_do_not_inline_the_catalog() {
-        let description = ToolRegistry::tools_for(Frontend::JsonDsl)
+        let description = all_tools()
             .into_iter()
             .find(|tool| tool.name == "list_commands")
             .unwrap()
@@ -536,16 +473,14 @@ mod tests {
     }
 
     #[test]
-    fn only_gql_query_commands_advertise_gql_format() {
-        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            for command in CommandRegistry::commands_for(frontend) {
-                let expected = if frontend == Frontend::Gql && command.name == "query_graph" {
-                    json!(["llm", "raw", "gql"])
-                } else {
-                    json!(["llm", "raw"])
-                };
-                assert_eq!(command.parameters["properties"]["format"]["enum"], expected);
-            }
+    fn only_query_graph_advertises_gql_format() {
+        for command in all_commands() {
+            let expected = if command.name == "query_graph" {
+                json!(["llm", "raw", "gql"])
+            } else {
+                json!(["llm", "raw"])
+            };
+            assert_eq!(command.parameters["properties"]["format"]["enum"], expected);
         }
     }
 
@@ -573,25 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn query_graph_description_points_to_discovery_tools() {
+    fn query_graph_takes_text_and_points_to_schema_discovery() {
         let tool = find_command("query_graph");
-        assert!(tool.description.contains("get_query_dsl"));
-        assert!(tool.description.contains("get_graph_schema"));
-    }
-
-    #[test]
-    fn gql_commands_use_text_queries_without_the_json_dsl() {
-        let commands = CommandRegistry::commands_for(Frontend::Gql);
-        assert!(
-            !commands
-                .iter()
-                .any(|command| command.name == "get_query_dsl")
-        );
-        assert_eq!(
-            commands[0].parameters["properties"]["query"]["type"],
-            "string"
-        );
-        assert!(commands[0].description.contains("CALL db.schema()"));
+        assert_eq!(tool.parameters["properties"]["query"]["type"], "string");
+        assert!(tool.description.contains("CALL db.schema()"));
     }
 
     #[test]

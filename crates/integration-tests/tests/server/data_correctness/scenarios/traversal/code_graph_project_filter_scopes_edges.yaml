@@ -1,16 +1,6 @@
 description: Filtering Definition by project_id scopes both node scan and CALLS edge scan
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "caller", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name"]},
-            {"id": "callee", "entity": "Definition", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "limit": 20
-    }
   gql: |
     MATCH (caller:Definition {project_id: 1000})-[:CALLS]->(callee:Definition) RETURN caller.name, callee.name LIMIT 20
 

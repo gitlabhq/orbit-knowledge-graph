@@ -301,28 +301,6 @@ impl Input {
         Ok(())
     }
 
-    pub(crate) fn lift_negated_filters(&mut self) -> crate::error::Result<()> {
-        for index in 0..self.nodes.len() {
-            let alias = self.nodes[index].id.clone();
-            for (property, filters) in std::mem::take(&mut self.nodes[index].negated_filters) {
-                let leaves = filters
-                    .into_iter()
-                    .map(|filter| {
-                        BooleanExpression::Leaf(Condition {
-                            target: PredicateTarget::Node(alias.clone()),
-                            property: property.clone(),
-                            filter,
-                        })
-                    })
-                    .collect();
-                self.absorb(BooleanExpression::Not(Box::new(BooleanExpression::And(
-                    leaves,
-                ))))?;
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn promote_id_filters(&mut self) -> crate::error::Result<()> {
         for node in &mut self.nodes {
             let Some(filters) = node.filters.get_mut("id") else {

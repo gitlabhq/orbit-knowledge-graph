@@ -4,21 +4,6 @@ config:
   security: { org_id: 1, paths: ["1/"] }
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-        {"id": "g", "entity": "Group", "columns": ["name", "traversal_path"]}
-      ],
-      "relationships": [{
-        "type": "MEMBER_OF",
-        "from": "u",
-        "to": "g",
-        "filters": {"traversal_path": "1/102/"}
-      }],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/102/'}]->(g:Group) RETURN u.username, g.name, g.traversal_path LIMIT 10
 

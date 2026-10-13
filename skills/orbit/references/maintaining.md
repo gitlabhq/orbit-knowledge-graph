@@ -9,27 +9,6 @@ For inaccurate guidance, follow [Fix inaccurate guidance](../SKILL.md#fix-inaccu
 Keep `SKILL.md`, `references/`, and `scripts/` in sync, and use `opencode run`
 for meaningful behavior changes.
 
-## Query modes
-
-Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode. Query references
-and the remote repo-map helper are mode-specific; setup and reporting guidance
-are shared. Keep both manifests' name, description, and compatibility equal.
-Set the GQL version to the JSON version plus `+gql` so caches never mix them.
-The server tests check those four fields, each mode's file set, and relative links.
-Both manifests' front matter and local-section placeholders are validated at build time.
-
-## Syncing the query-language reference
-
-`references/query_language.md` is synced from
-`docs/source/remote/queries/query-language.md`. Edit the upstream file, then run:
-
-```bash
-mise run skill:sync:orbit
-```
-
-The lefthook `orbit-skill-docs-sync` job fails the commit if the two files
-drift. Do **not** edit `references/query_language.md` directly.
-
 ## Version bumps
 
 Bump the `version` field in `SKILL.md` frontmatter on every change under

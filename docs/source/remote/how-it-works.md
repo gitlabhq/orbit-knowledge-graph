@@ -56,7 +56,7 @@ Each entity (a project, a user, a function definition) becomes a node.
 Each relationship (a user authored a merge request, a file imports a module)
 becomes a directed edge.
 
-When you send a query, GitLab Orbit compiles the JSON query DSL to ClickHouse SQL,
+When you send a query, GitLab Orbit compiles the query text to ClickHouse SQL,
 executes it, and returns typed results.
 
 ## The graph model
@@ -84,15 +84,15 @@ depending on the size of the change.
 
 All queries go through the same path:
 
-1. GitLab Orbit receives a JSON query payload (via REST, MCP, or GitLab Duo Agent Platform).
+1. GitLab Orbit receives query text (via REST, MCP, or GitLab Duo Agent Platform).
 1. The query engine validates the query against the current schema.
-1. GitLab Orbit compiles the JSON DSL to ClickHouse SQL.
+1. GitLab Orbit compiles the query to ClickHouse SQL.
 1. ClickHouse executes the query against the graph tables.
 1. GitLab Orbit applies authorization filtering: results are scoped to entities the
    requesting user has access to in GitLab. For more information, see [Security](security.md).
 1. GitLab Orbit returns typed JSON results.
 
-You can request the compiled SQL in query responses by setting `options.include_debug_sql: true`.
+You can request the compiled SQL in query responses by ending the query with `DEBUG`.
 This field is only populated for instance administrators and direct GitLab organization members
 with Reporter or higher access.
 

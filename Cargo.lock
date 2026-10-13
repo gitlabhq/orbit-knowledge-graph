@@ -1571,7 +1571,6 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
- "jsonschema",
  "ontology",
  "opentelemetry",
  "orbit-observability",

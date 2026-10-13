@@ -1,12 +1,8 @@
 description: Single-node User lookup (search)
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-      "limit": 5
-    }
+  gql: |
+    MATCH (u:User {id: 1}) RETURN u LIMIT 5
 
 expect:
   compile_only: true

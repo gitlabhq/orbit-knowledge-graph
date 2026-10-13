@@ -65,13 +65,16 @@ before charging begins.
 
 ## Query endpoint
 
-Execute a graph query. The instance decides the query language: a JSON Query DSL object by default, or read-only GQL text when GitLab has enabled GQL for you.
+Execute a graph query written in the
+[GitLab Orbit query language](../queries/query-language.md), a read-only subset
+of openCypher 9.
 
 The request body contains:
 
-- `query`: A JSON Query DSL object, or a text string when GQL is enabled. A query whose shape does not match the enabled language is rejected.
-- `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
-  for compact text optimized for AI agents. Default: `raw`.
+- `query`: The query text.
+- `response_format`: Optional response format. Use `raw` for structured JSON, `llm`
+  for compact text optimized for AI agents, or `gql` for a graph pattern table.
+  Default: `raw`.
 
 The GitLab Orbit CLI explicitly sends `llm` by default.
 
@@ -81,25 +84,13 @@ For example:
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"query": <query_json>, "response_format": "raw"}' \
+  --data '{"query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
-See the [query language reference](../queries/query-language.md) for the full DSL.
-
-The per-user `orbit_gql_queries` feature flag in Rails selects the mode. It is off by default, which accepts only JSON objects.
-With the flag on, the query endpoint, the named-query catalog, and the dashboard editor all use GQL text. JSON queries then reject, including requests from existing JSON callers.
-There is no public language selector. Rails sets the protobuf language for GitLab Orbit to JSON or GQL. Raw or named query kind is separate; named queries render and compile in that selected language. Agents and public REST callers do not send a language selector.
-
-To send read-only query text or inspect its ontology with the flag on:
+To inspect the schema, send a schema call as the query:
 
 ```shell
-curl --request POST \
-  --header "Authorization: Bearer <your_token>" \
-  --header "Content-Type: application/json" \
-  --data '{"query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
-  "https://gitlab.com/api/v4/orbit/query"
-
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
@@ -107,7 +98,7 @@ curl --request POST \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
-The CLI accepts GQL text directly, without a language option:
+The CLI accepts query text directly:
 
 ```shell
 glab orbit query 'CALL db.schema()'
@@ -116,35 +107,22 @@ glab orbit query 'MATCH (u:User {id: 1}) RETURN u'
 
 To send a JSON request envelope, pass `--file <path>`, or `--file -` to read it from stdin.
 
-The query text language, based on openCypher 9 syntax, is documented in the [GitLab Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/orbit_query_frontend.md) design document.
-
 ### Example request
 
-For example, a request to find projects with the most pipeline failures:
+For example, to find projects with the most pipeline failures, use this query:
+
+```gql orbit-query
+MATCH (pl:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+RETURN p{.name, .full_path}, count(pl) AS failed_pipelines
+ORDER BY failed_pipelines DESC
+LIMIT 10
+```
 
 Put the request body in `request.json`:
 
-```json orbit-query
+```json
 {
-  "query": {
-    "query_type": "aggregation",
-    "nodes": [
-      {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
-      {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-    ],
-    "relationships": [
-      {"type": "IN_PROJECT", "from": "pl", "to": "p"}
-    ],
-    "group_by": ["p"],
-    "aggregations": [
-      {
-        "count": "pl",
-        "as": "failed_pipelines"
-      }
-    ],
-    "aggregation_sort": "-failed_pipelines",
-    "limit": 10
-  },
+  "query": "MATCH (pl:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project) RETURN p{.name, .full_path}, count(pl) AS failed_pipelines ORDER BY failed_pipelines DESC LIMIT 10",
   "response_format": "raw"
 }
 ```

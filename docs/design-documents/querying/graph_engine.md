@@ -67,17 +67,14 @@ edge DDL does not define source- or target-ordered projections.
 
 ## Query Engine Design
 
-The compiler supports two query frontends:
-
-1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC default to this frontend for compatibility.
-2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. Rails selects the compiler preset with the default-off `orbit_gql_queries` feature flag. The protobuf `QueryLanguage` enum is independent of the raw or named query kind. Both modes use the same endpoint and authorization pipeline, but each accepts only its own query shape. This is not a Neo4j-compatible driver.
+The compiler takes queries through the [Orbit Query Frontend](orbit_query_frontend.md), a restricted, read-only language based on openCypher 9 syntax. It describes traversal, neighbors, path-finding, and aggregation queries. The protobuf `QueryLanguage` enum selects a compiler `Frontend` and is independent of the raw or named query kind. This is not a Neo4j-compatible driver. Frontends lower to the shared Input, so another language can reuse every pass after parsing.
 
 ### Compiler pass pipeline
 
-Both frontends compile to parameterized ClickHouse SQL through shared passes.
-`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets for graph queries.
+Frontends compile to parameterized ClickHouse SQL through shared passes.
+`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_gql` preset for graph queries.
 `compiler::gql::prepare` parses once: MATCH enters the shared graph passes, while `CALL db.schema(...)` resolves ontology metadata inside the GQL frontend without SQL.
-Schema calls have no state in the shared compiler contexts. `compiler::compile` remains query-only for both frontends.
+Schema calls have no state in the shared compiler contexts. `compiler::compile` remains query-only.
 
 Each active schema snapshot derives one immutable query data model from its loaded ontology.
 The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
@@ -109,7 +106,7 @@ The shared runner and structural matcher live in `integration-testkit::plan_shap
 Logical assertions inspect parsed, normalized Input before query scope application.
 They include node and relationship filters, groups, measures, ordering, and limits.
 Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
-The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
+The explain view renders incoming relationships in source-to-target order so every frontend can share assertions.
 Patterns use the operator grammar from !2590: `(_)` matches one subtree and `(...)` matches zero or more children.
 `...` permits additional Filter, Project, or Aggregate items; a trailing head `...` matches a token prefix.
 These assertions check plan structure; data-correctness scenarios check execution results.
@@ -173,7 +170,7 @@ policy provenance.
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas |
+| 1 | `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
 | 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and derives immutable query scope ([Security](../security.md)) |

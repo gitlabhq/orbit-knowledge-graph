@@ -39,13 +39,13 @@ The `corpus_smoke` test (`crates/integration-tests/tests/server/corpus_smoke.rs`
 runs in the `corpus-smoke-test` CI job. It starts ClickHouse with the graph schema
 from the ontology. Then it compiles and runs three families of queries:
 
-- every entry in this directory, as GQL. An `expect: error` entry must fail.
-- every named query in `config/named_queries`, in JSON and in GQL.
-- every `json orbit-query` and `gql orbit-query` code block in the root Markdown files,
+- every entry in this directory. An `expect: error` entry must fail.
+- every named query in `config/named_queries`, in every spelling.
+- every `gql orbit-query` code block in the root Markdown files,
   `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`.
 
-The test also fails on Orbit query JSON in an unmarked `json` or shell code block,
-and on a code block with no closing fence. It does not check result correctness.
+The test also fails on a removed JSON Query DSL query in an unmarked `json` or shell
+code block, and on a code block with no closing fence. It does not check result correctness.
 
 Run it locally with Docker: `mise test:integration:corpus`. See
 [Query corpus and executable docs](../../../docs/design-documents/testing.md#query-corpus-and-executable-docs).

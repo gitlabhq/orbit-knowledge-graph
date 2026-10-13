@@ -1,16 +1,6 @@
 description: Filter-only group node is projected from its join; the lazy user node still hydrates
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "g", "entity": "Group", "filters": {"name": {"contains": "Private"}}, "columns": ["name", "visibility_level"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "limit": 20
-    }
   gql: |
     MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 AND g.name CONTAINS 'Private' RETURN u.username, g.name, g.visibility_level LIMIT 20
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Unit tests for the pure helpers in remote_repo_map.py.
 
-These cover the partition / hop-bound logic without touching the network: the
-helpers are exercised against canned `nodes`/`edges` payloads shaped like a
-`glab orbit query --response-format raw` response.
+These cover GQL rendering and the partition logic without touching the
+network: the helpers are exercised against canned `nodes`/`edges` payloads
+shaped like a `glab orbit query --response-format raw` response.
 
 Run with: python3 scripts/dev/test_remote_repo_map.py
 """
@@ -37,12 +37,9 @@ def node(nid, *, fqn=None, name=None, file_path=None, **extra):
     return n
 
 
-def edge(from_id, to_id, depth=None):
-    e = {"from": "Definition", "to": "Definition", "type": "EXTENDS",
-         "from_id": from_id, "to_id": to_id}
-    if depth is not None:
-        e["depth"] = depth
-    return e
+def edge(from_id, to_id):
+    return {"from": "Definition", "to": "Definition", "type": "EXTENDS",
+            "from_id": from_id, "to_id": to_id}
 
 
 class QueryTest(unittest.TestCase):
@@ -54,14 +51,98 @@ class QueryTest(unittest.TestCase):
             stderr="",
         )
 
-        response = rrm._query({"query": {"query_type": "traversal"}})
+        response = rrm._query("MATCH (d:Definition {id: 1}) RETURN d")
 
         command = run.call_args.args[0]
-        self.assertEqual(command[:5], [
+        self.assertEqual(command, [
             "glab", "orbit", "query", "--response-format", "raw",
+            "MATCH (d:Definition {id: 1}) RETURN d",
         ])
         self.assertEqual(rrm._nodes(response), [])
         self.assertEqual(rrm._edges(response), [])
+
+
+class LiteralTest(unittest.TestCase):
+    def test_integer_is_bare(self):
+        self.assertEqual(rrm._lit(278964), "278964")
+
+    def test_string_is_single_quoted(self):
+        self.assertEqual(rrm._lit("Ci::Build"), "'Ci::Build'")
+
+    def test_quote_and_backslash_are_escaped(self):
+        self.assertEqual(rrm._lit("O'Brien\\x"), "'O\\'Brien\\\\x'")
+
+    def test_ids_render_as_integers(self):
+        self.assertEqual(rrm._id_list(["18446744073709551615", "7"]),
+                         "[18446744073709551615, 7]")
+
+    def test_single_hop_has_no_range(self):
+        self.assertEqual(rrm._hops(1), "")
+        self.assertEqual(rrm._hops(3), "*1..3")
+
+
+class QueryBuilderTest(unittest.TestCase):
+    def test_extends_scopes_both_nodes_and_matches_fqn(self):
+        gql = rrm.build_extends_query(278964, "master", "Ci::Build", 2)
+        self.assertEqual(gql, (
+            "MATCH (child:Definition)-[:EXTENDS*1..2]->(base:Definition)\n"
+            "WHERE base.project_id = 278964 AND base.branch = 'master'"
+            " AND base.fqn = 'Ci::Build'"
+            " AND child.project_id = 278964 AND child.branch = 'master'\n"
+            "RETURN base.fqn, base.name, child.fqn, child.name,"
+            " child.definition_type, child.file_path, child.start_line\n"
+            "LIMIT 1000"
+        ))
+
+    def test_concerns_filters_ids_and_prefix(self):
+        gql = rrm.build_concerns_query(1, "main", ["10", "20"], "app/models/concerns/")
+        self.assertIn("-[:EXTENDS]->(concern:Definition)", gql)
+        self.assertIn("descendant.id IN [10, 20]", gql)
+        self.assertIn("concern.file_path STARTS WITH 'app/models/concerns/'", gql)
+
+    def test_callers_adds_fqn_only_when_qualified(self):
+        bare = rrm.build_callers_query(1, "main", "execute", None)
+        qualified = rrm.build_callers_query(1, "main", "execute", "A::B::execute")
+        self.assertNotIn("target.fqn =", bare)
+        self.assertIn("target.fqn = 'A::B::execute'", qualified)
+
+    def test_class_and_api_stay_within_in_list_limit(self):
+        self.assertLessEqual(len(rrm.MEMBER_KINDS), 100)
+        self.assertLessEqual(len(rrm.TYPE_KINDS + rrm.CALLABLE_KINDS), 100)
+
+
+class IncludesChunkingTest(unittest.TestCase):
+    def test_concern_lookup_splits_ids_at_the_server_limit(self):
+        descendants = {"result": {"nodes": [
+            node(str(i), fqn=f"D{i}", name=f"D{i}", file_path="app/models/d.rb")
+            for i in range(1, rrm.MAX_IDS_PER_QUERY + 2)
+        ], "edges": []}}
+        empty = {"result": {"nodes": [], "edges": []}}
+        queries = []
+
+        def fake_query(gql):
+            queries.append(gql)
+            return descendants if len(queries) == 1 else empty
+
+        args = rrm.argparse.Namespace(project_id=1, branch="main", base="Base",
+                                      prefix="app/models/concerns", depth=1)
+        with mock.patch.object(rrm, "_query", side_effect=fake_query), \
+                mock.patch("sys.stdout"):
+            rrm.cmd_includes(args)
+
+        self.assertEqual(len(queries), 3)
+        id_lists = [q.split("descendant.id IN [", 1)[1].split("]", 1)[0] for q in queries[1:]]
+        self.assertEqual([len(ids.split(", ")) for ids in id_lists],
+                         [rrm.MAX_IDS_PER_QUERY, 1])
+
+
+class MergeResultsTest(unittest.TestCase):
+    def test_nodes_are_deduplicated_and_edges_kept(self):
+        a = {"result": {"nodes": [node("1"), node("2")], "edges": [edge("1", "2")]}}
+        b = {"result": {"nodes": [node("2"), node("3")], "edges": [edge("3", "2")]}}
+        merged = rrm._merge_results([a, b])
+        self.assertEqual([n["id"] for n in rrm._nodes(merged)], ["1", "2", "3"])
+        self.assertEqual(len(rrm._edges(merged)), 2)
 
 
 class FilterByPrefixTest(unittest.TestCase):

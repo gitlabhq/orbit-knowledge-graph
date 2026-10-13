@@ -13,7 +13,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `object-storage` | Reference client over the `object_store` crate: builds an S3 or GCS store from `AppConfig::object_storage` and exposes write, read and delete. `examples/roundtrip.rs` exercises a config file against a real bucket |
 | `orbit-prompts` | Embeds and validates the versioned YAML prompts under `config/prompts/`, and validates the standalone remote and local Orbit skill trees at build time: matching placeholders and sections, unique combined paths, relative links, and documented CLI commands against the clap source inventory |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
-| `query-engine/compiler` | JSON DSL and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
+| `query-engine/compiler` | Query frontends (GQL) and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |

@@ -80,8 +80,8 @@ orbit repo-map overview                 # then tree, api, class, extends, import
 Gotchas:
 
 - Queries are SQL against `gl_definition`, `gl_edge`, `gl_file`,
-  `gl_directory`, and `gl_imported_symbol`. They are not the JSON DSL, which
-  belongs to Orbit Remote.
+  `gl_directory`, and `gl_imported_symbol`. They are not the GQL that Orbit
+  Remote accepts.
 - `definition_type` values are capitalized. `WHERE definition_type='function'`
   returns zero rows.
 - `sql` queries all indexed revisions by default. Use `--repo .` for the current

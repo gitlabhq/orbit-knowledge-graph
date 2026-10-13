@@ -1,12 +1,6 @@
 description: Inline datetime renders as ISO 8601 UTC
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["created_at"]}],
-        "limit": 10
-    }
   gql: |
     MATCH (n:Note {id: 3000}) RETURN n.created_at LIMIT 10
 

@@ -14,7 +14,6 @@ const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
-const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
 const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
@@ -137,10 +136,6 @@ impl OrbitClient {
         params: &[(&str, String)],
     ) -> Result<Vec<u8>, RemoteError> {
         self.get_bytes(SCHEMA_PATH, params).await
-    }
-
-    pub(crate) async fn get_dsl(&self) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(DSL_PATH, &[]).await
     }
 
     pub(crate) async fn get_tools(&self) -> Result<Vec<u8>, RemoteError> {

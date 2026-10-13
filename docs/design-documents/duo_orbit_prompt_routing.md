@@ -47,7 +47,7 @@ The Orbit MCP tools that this doc gates are themselves designed in:
 
 - **[ADR 011: Agent command surface](decisions/011_agent_command_surface.md)**:
   defines the two-tool MCP surface (`list_commands`, `invoke_command`). It lists the
-  catalog of commands (`query_graph`, `get_graph_schema`, `get_query_dsl`,
+  catalog of commands (`query_graph`, `get_graph_schema`, and
   `get_response_format`) that this doc routes prompts to.
 - **[ADR 003: Orbit API design](decisions/003_api_design.md)**: the REST and
   GraphQL surface (`/api/v4/orbit/*`) that Rails exposes; Workhorse calls it on

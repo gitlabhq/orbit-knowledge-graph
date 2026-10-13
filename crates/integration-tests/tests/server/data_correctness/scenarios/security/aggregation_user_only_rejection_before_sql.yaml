@@ -1,16 +1,6 @@
 description: User-only aggregation rejection happens before SQL compile so backing table and filter values are not leaked
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [{
-        "id": "u", "entity": "User",
-        "filters": {"email": "victim@example.com"}
-      }],
-      "aggregations": [{"count": "u", "as": "oracle"}],
-      "limit": 1
-    }
   gql: |
     MATCH (u:User) WHERE u.email = 'victim@example.com' RETURN count(u) AS oracle LIMIT 1
 

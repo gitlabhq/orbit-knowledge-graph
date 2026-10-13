@@ -187,6 +187,43 @@ ORDER BY pl.created_at DESC
 LIMIT 10
 ```
 
+### Merge requests created by agent sessions
+
+`AgentSession` is an AI agent session, taken from the AI governance sessions
+table. It records that a session ran, where it was recorded (`source`), and
+its flow type. It never records the goal, title, summary, status, or invoker.
+`AgentSession --CREATED_MR--> MergeRequest` links a session to the merge
+requests it created. It does not include the MR a flow was started against.
+
+Only GitLab Duo sessions (`source` is `gitlab_duo`) are indexed today, and only
+Duo sessions have merge request links. Historical sessions appear once the
+governance backfill has finished on the instance. Sessions from external agents
+are not indexed yet.
+
+`flow_type` is the workflow definition with its version dropped, so
+`developer/v1` is `developer`. A definition Orbit does not recognize is
+`other`. Only project sessions are indexed, and you see a session only with
+Reporter access or higher on its project.
+
+Merge requests created by the `developer` flow:
+
+```gql orbit-query
+MATCH (s:AgentSession {flow_type: 'developer'})-[:CREATED_MR]->(mr:MergeRequest)
+RETURN mr.iid, mr.title, mr.state, mr.project_id
+LIMIT 25
+```
+
+Count session-created merge requests per flow type. Aggregations need a filter
+on at least one node, so bound the sessions by date:
+
+```gql orbit-query
+MATCH (s:AgentSession)-[:CREATED_MR]->(mr:MergeRequest)
+WHERE s.session_started_at >= '2026-01-01'
+RETURN s.flow_type, count(mr) AS mrs
+ORDER BY mrs DESC
+LIMIT 25
+```
+
 ### Open work items in a project
 
 ```gql orbit-query

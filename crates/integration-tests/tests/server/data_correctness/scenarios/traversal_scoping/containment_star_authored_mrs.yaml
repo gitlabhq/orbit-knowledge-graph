@@ -30,28 +30,6 @@ config:
       label: [7000, 7001, 7002]
 
 query:
-  json: |
-    {
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "g", "entity": "Group", "filters": {"full_path": "g700"}},
-            {"id": "p", "entity": "Project"},
-            {"id": "mr", "entity": "MergeRequest"},
-            {"id": "u", "entity": "User", "columns": ["username"]}
-        ],
-        "relationships": [
-            {"type": "CONTAINS", "from": "g", "to": "p"},
-            {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-            {"type": "AUTHORED", "from": "u", "to": "mr"}
-        ],
-        "group_by": ["u"],
-        "aggregations": [
-            {"count": "mr", "as": "c"},
-            {"count": "p.id", "as": "project_rows"},
-            {"count": "p.created_at", "as": "dated_projects"}
-        ],
-        "limit": 10
-    }
   gql: |
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c, count(p.id) AS project_rows, count(p.created_at) AS dated_projects LIMIT 10
 

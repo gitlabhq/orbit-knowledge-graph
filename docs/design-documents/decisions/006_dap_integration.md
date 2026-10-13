@@ -180,7 +180,7 @@ The flow version resolver swaps in an Orbit variant of the developer flow when
 Orbit is enabled for the user. That variant is a single agent with shell
 access in its execution environment. Its system prompt includes a shared
 Orbit skill. The skill teaches the agent to reach Orbit through the
-pre-authenticated `glab orbit` CLI. The agent discovers the schema and query DSL
+pre-authenticated `glab orbit` CLI. The agent discovers the schema
 first. It then runs queries against the same REST API the other channels use. The CLI
 also serves a local graph for code-structure questions about the current
 branch, which the remote graph does not cover. Flows that already give the
@@ -225,8 +225,8 @@ for every channel.
 ### Prompt engineering
 
 Adding Orbit tools to an agent takes more than registering them. Each tool
-description embeds the full query DSL grammar (TOON-encoded), which makes
-descriptions large, on the order of a few thousand tokens. Dropped into an
+description carries query-language guidance, which makes descriptions large,
+on the order of a few thousand tokens. Dropped into an
 already crowded tool list without guidance, they can confuse the agent about
 when to prefer them and dilute the context window. The prompt has to cover
 when to prefer Orbit, when to avoid it, and how to use it well.

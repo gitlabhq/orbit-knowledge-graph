@@ -1,12 +1,6 @@
 description: SQL-injection payload stored verbatim, not executed
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]}],
-        "limit": 10
-    }
   gql: |
     MATCH (n:Note {id: 3003}) RETURN n.note LIMIT 10
 

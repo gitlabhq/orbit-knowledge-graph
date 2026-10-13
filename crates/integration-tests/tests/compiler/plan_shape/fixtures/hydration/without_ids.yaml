@@ -1,8 +1,6 @@
 name: Hydration without pinned IDs has no ID predicate
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["path"]}]}
   gql: |
     MATCH (f:File) RETURN f.path
 

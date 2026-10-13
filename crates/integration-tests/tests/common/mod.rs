@@ -31,7 +31,7 @@ pub async fn compile_and_execute(
 ) -> (CompiledQueryContext, QueryResult) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+    let compiled = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     (compiled, result)

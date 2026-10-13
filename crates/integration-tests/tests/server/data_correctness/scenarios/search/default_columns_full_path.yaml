@@ -1,12 +1,6 @@
 description: Default columns include full_path without explicit column selection
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-      "limit": 10
-    }
   gql: |
     MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10
 

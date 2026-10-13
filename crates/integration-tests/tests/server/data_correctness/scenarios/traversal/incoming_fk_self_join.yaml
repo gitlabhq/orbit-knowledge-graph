@@ -12,18 +12,6 @@ config:
       - { id: 14203, iid: 4, status: failed, source: push, ref: main, project_id: 1001, traversal_path: "1/101/1001/" }
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
-        {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
-      ],
-      "relationships": [
-        {"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}
-      ],
-      "limit": 10
-    }
   gql: |
     MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10
 
