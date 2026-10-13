@@ -5,5 +5,5 @@ pub mod schema;
 mod writer;
 
 use locks::{lock_database, read_lock_database};
-pub use reader::LocalGraphReader;
-pub use writer::RevisionWriter;
+pub use reader::GraphReader;
+pub use writer::GraphWriter;

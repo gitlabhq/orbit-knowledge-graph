@@ -18,7 +18,7 @@ use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use super::setup::spec;
-use crate::database::{LocalGraphReader, RevisionWriter, manifest};
+use crate::database::{GraphReader, GraphWriter, manifest};
 use crate::tui;
 use crate::workspace::{self, GitInfo};
 
@@ -289,7 +289,7 @@ impl std::fmt::Display for NoRepositoryFound {
 impl std::error::Error for NoRepositoryFound {}
 
 fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
-    let batches = LocalGraphReader::open(db)
+    let batches = GraphReader::open(db)
         .ok()?
         .query_arrow_json(
             "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
@@ -572,7 +572,7 @@ impl LocalIndexer {
             manifest::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
         })?;
         let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
-        let writer = Arc::new(std::sync::Mutex::new(RevisionWriter::open(
+        let writer = Arc::new(std::sync::Mutex::new(GraphWriter::open(
             &db_path, &git, LOCAL_DDL,
         )?));
         let key = git.repo_path.to_string_lossy().to_string();
@@ -632,7 +632,7 @@ fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> 
 fn index_repo(
     git: &workspace::GitInfo,
     db_path: &std::path::Path,
-    writer: &Arc<std::sync::Mutex<RevisionWriter>>,
+    writer: &Arc<std::sync::Mutex<GraphWriter>>,
     ontology: &Ontology,
     pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {

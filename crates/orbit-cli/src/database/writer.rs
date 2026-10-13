@@ -9,12 +9,12 @@ use ontology::Ontology;
 use super::{lock_database, schema};
 use crate::workspace::GitInfo;
 
-pub struct RevisionWriter {
+pub struct GraphWriter {
     client: DuckDbClient,
     _lock: File,
 }
 
-impl RevisionWriter {
+impl GraphWriter {
     pub fn open(path: &Path, git: &GitInfo, ddl: &str) -> Result<Self> {
         let lock = lock_database(path)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);

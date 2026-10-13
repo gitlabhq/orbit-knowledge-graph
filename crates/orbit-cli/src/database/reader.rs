@@ -5,12 +5,12 @@ use anyhow::{Context, Result};
 use duckdb_client::{DuckDbClient, sql_lit, string_column};
 use std::path::{Path, PathBuf};
 
-pub struct LocalGraphReader {
+pub struct GraphReader {
     client: DuckDbClient,
     _locks: Vec<std::fs::File>,
 }
 
-impl std::ops::Deref for LocalGraphReader {
+impl std::ops::Deref for GraphReader {
     type Target = DuckDbClient;
 
     fn deref(&self) -> &Self::Target {
@@ -18,7 +18,7 @@ impl std::ops::Deref for LocalGraphReader {
     }
 }
 
-impl LocalGraphReader {
+impl GraphReader {
     pub fn open(db: Option<PathBuf>) -> Result<Self> {
         let Some(db_path) = db else {
             return Self::open_workspace();
@@ -42,7 +42,7 @@ impl LocalGraphReader {
                 spec::launcher()
             );
         }
-        Ok(LocalGraphReader {
+        Ok(Self {
             client,
             _locks: vec![lock],
         })
@@ -56,7 +56,7 @@ impl LocalGraphReader {
                 spec::launcher()
             );
         }
-        let mut reader = LocalGraphReader {
+        let mut reader = Self {
             client: DuckDbClient::open_in_memory()?,
             _locks: Vec::new(),
         };

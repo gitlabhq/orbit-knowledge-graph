@@ -162,7 +162,7 @@ pub(crate) fn run(
         source_exts,
     };
 
-    let client = crate::database::LocalGraphReader::open(Some(db))?;
+    let client = crate::database::GraphReader::open(Some(db))?;
     map.preflight(&client)?;
 
     let mut out = std::io::stdout().lock();
