@@ -1,15 +1,6 @@
 name: Exact hop depth excludes shorter arms
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
-        {"id": "b", "entity": "Definition", "columns": ["id"]}
-      ],
-      "relationships": [{"type": "CALLS", "from": "a", "to": "b", "hops": [2, 2]}]
-    }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition) RETURN a.id, b.id
 

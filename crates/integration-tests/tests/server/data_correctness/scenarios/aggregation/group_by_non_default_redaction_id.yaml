@@ -5,18 +5,6 @@ config:
     paths: ["1/"]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
-        {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
-      ],
-      "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
-      "group_by": ["d"],
-      "aggregations": [{"count": "mr", "as": "mr_count"}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN d{.id, .state}, count(mr) AS mr_count LIMIT 10
 

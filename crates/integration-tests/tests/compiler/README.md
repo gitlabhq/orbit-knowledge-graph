@@ -2,8 +2,8 @@
 
 Run `mise test:compiler`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture runs the production compiler pipeline for each
-frontend and backend, and checks the state that named phases leave behind. Most
-fixtures run through both JSON and GQL.
+frontend and backend, and checks the state that named phases leave behind. Fixtures
+run through the GQL frontend.
 
 Assertions live under `physical.<backend>.<phase>.<state field>`:
 
@@ -72,13 +72,14 @@ pipeline, which has no `normalize` or `paginate` phase.
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
 for one fixture. Other fixtures keep the default ontology.
 
-Both `query.json` and `query.gql` are required. If a frontend cannot express the
-tested plan, declare its reason under `missing_frontends`. The runner rejects
-missing, blank, unknown, or redundant exception entries.
+Each fixture needs a query for every frontend, which today is only `query.gql`.
+If a frontend cannot express the tested plan, declare its reason under
+`missing_frontends`. The runner rejects missing, blank, unknown, or redundant
+exception entries.
 
 ```yaml
 missing_frontends:
-  json: The JSON frontend does not expose property-to-property comparisons.
+  gql: GQL does not support property filters on variable-length relationships.
 ```
 
 A file can hold several fixtures in a `cases` list. Every other top-level key
@@ -146,8 +147,6 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 
 ## Coverage boundaries
 
-- JSON incoming variable hops have a dedicated fixture. GQL normalizes the
-  equivalent pattern into outgoing edges, so it exercises a different plan.
 - The testkit's `hydration_planning_selects_paths_before_sql_rendering` test
   checks 256/257 dynamic paths, 257 static paths, and budget-driven mode changes.
   The YAML fixture independently covers the large dynamic mode.

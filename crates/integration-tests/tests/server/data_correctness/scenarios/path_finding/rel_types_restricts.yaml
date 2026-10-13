@@ -1,16 +1,6 @@
 description: MEMBER_OF-only rel_types cannot reach Project from User (needs CONTAINS)
 
 query:
-  json: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {"id": "start", "entity": "User", "node_ids": [1]},
-        {"id": "end", "entity": "Project", "node_ids": [1000]}
-      ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-               "rel_types": ["MEMBER_OF"]}
-    }
   gql: |
     MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN p
 

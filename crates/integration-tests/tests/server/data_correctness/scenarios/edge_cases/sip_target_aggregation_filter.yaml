@@ -1,18 +1,6 @@
 description: Aggregation with state filter counts only opened MRs per user
 
 query:
-  json: |
-    {
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": ["u"],
-        "aggregations": [{"count": "mr", "as": "open_mr_count"}],
-        "limit": 10
-    }
   gql: |
     MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 AND mr.state = 'opened' RETURN u{.id, .username}, count(mr) AS open_mr_count LIMIT 10
 

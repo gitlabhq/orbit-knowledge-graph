@@ -1,8 +1,6 @@
 name: APPROVED neighbor filters use writer-provided target tags
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[99000],"filters":{"state":"opened"}}],"neighbors":{"direction":"incoming","rel_types":["APPROVED"]}}
   gql: |
     MATCH (mr:MergeRequest {id: 99000, state: 'opened'})<-[:APPROVED]-(neighbor)
     RETURN neighbor

@@ -179,11 +179,11 @@ impl TryFrom<RawScenario> for Scenario {
 impl Scenario {
     fn validate_frontends(&self) -> Result<(), String> {
         for language in self.query.keys().chain(self.missing_frontends.keys()) {
-            if !matches!(language.as_str(), "json" | "gql") {
+            if language.parse::<Frontend>().is_err() {
                 return Err(format!("unknown frontend {language}"));
             }
         }
-        for language in ["json", "gql"] {
+        for &language in Frontend::names() {
             match (
                 self.query.get(language),
                 self.missing_frontends.get(language),
@@ -938,28 +938,15 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
 }
 
 #[test]
-fn yaml_requires_both_frontends_or_an_explicit_exception() {
+fn yaml_requires_every_frontend_or_an_explicit_exception() {
     for (query, exceptions, valid) in [
-        ("{json: query, gql: query}", "{}", true),
-        (
-            "{json: query}",
-            "{gql: Normalizes the tested direction}",
-            true,
-        ),
-        (
-            "{gql: query}",
-            "{json: Cannot express property comparisons}",
-            true,
-        ),
-        ("{json: query}", "{}", false),
-        ("{json: query}", "{gql: ' '}", false),
-        (
-            "{json: query, gql: query}",
-            "{gql: Redundant exception}",
-            false,
-        ),
-        ("{json: query, gql: query, sql: query}", "{}", false),
-        ("{json: query, gql: ' '}", "{}", false),
+        ("{gql: query}", "{}", true),
+        ("{}", "{gql: Cannot express the tested shape}", true),
+        ("{}", "{}", false),
+        ("{gql: ' '}", "{}", false),
+        ("{gql: query}", "{gql: Redundant exception}", false),
+        ("{gql: query, json: query}", "{}", false),
+        ("{gql: query}", "{json: Removed frontend}", false),
     ] {
         let yaml = format!(
             "name: frontends\nquery: {query}\nmissing_frontends: {exceptions}\nphysical: {{}}"
@@ -978,7 +965,6 @@ fn directory_runner_reports_every_fixture_failure() {
 cases:
   - name: first failure
     query:
-      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
       gql: 'MATCH (u:User {id: 1}) RETURN u'
     physical:
       clickhouse:
@@ -987,7 +973,6 @@ cases:
             expect: ['(Input neighbors (...))']
   - name: second failure
     query:
-      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}]}'
       gql: 'MATCH (p:Project {id: 1}) RETURN p'
     physical:
       clickhouse:
@@ -1004,7 +989,7 @@ cases:
     )
     .unwrap_err();
 
-    assert_eq!(failures.len(), 4);
+    assert_eq!(failures.len(), 2);
     assert!(
         failures
             .iter()
@@ -1013,17 +998,7 @@ cases:
     assert!(
         failures
             .iter()
-            .any(|failure| failure.contains("first failure [json/clickhouse]"))
-    );
-    assert!(
-        failures
-            .iter()
             .any(|failure| failure.contains("second failure [gql/clickhouse]"))
-    );
-    assert!(
-        failures
-            .iter()
-            .any(|failure| failure.contains("second failure [json/clickhouse]"))
     );
 }
 

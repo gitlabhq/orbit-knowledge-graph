@@ -24,16 +24,6 @@ config:
       label: [7000, 7001, 7002]
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-        {"id": "p", "entity": "Project", "node_ids": [1003]}
-      ],
-      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1003}) WHERE mr.state = 'merged' RETURN mr, p LIMIT 10
 

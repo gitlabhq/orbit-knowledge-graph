@@ -1,8 +1,6 @@
 name: Denormalized singleton sets and boolean filters retain value tokens
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"in":["merged"]},"draft":true}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}]}
   gql: |
     MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest)
     WHERE mr.state IN ['merged'] AND mr.draft = true

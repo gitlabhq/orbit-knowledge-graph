@@ -1,8 +1,5 @@
 name: Aggregation over one edge relation filters the relationship kind before picking the latest row
 
-missing_frontends:
-  json: The JSON query form is being deprecated.
-
 query:
   gql: |
     MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n

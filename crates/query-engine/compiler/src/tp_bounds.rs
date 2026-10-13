@@ -571,8 +571,10 @@ mod tests {
 
     #[test]
     fn bound_edges_resolve_scope_policy() {
-        let input = crate::parse_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}],"limit":1}"#,
+        let input = crate::gql::parse(
+            r#"MATCH (mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)
+                RETURN mr, diff
+                LIMIT 1"#,
         )
         .unwrap();
         let model = crate::data_model::clickhouse(std::sync::Arc::new(

@@ -66,15 +66,11 @@ impl Harness {
 }
 
 fn billable_project_query() -> Request<impl tokio_stream::Stream<Item = ExecuteQueryMessage>> {
-    let query = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "limit": 10
-    });
     let message = ExecuteQueryMessage {
         content: Some(execute_query_message::Content::Request(
             ExecuteQueryRequest {
-                query: query.to_string(),
+                query: "MATCH (p:Project {id: 1}) RETURN p LIMIT 10".into(),
+                language: QueryLanguage::Gql as i32,
                 ..Default::default()
             },
         )),

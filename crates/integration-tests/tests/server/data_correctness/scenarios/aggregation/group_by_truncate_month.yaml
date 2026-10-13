@@ -5,19 +5,6 @@ config:
     paths: ["1/"]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
-        {"id": "n", "entity": "Note", "filters": {"created_at": {"gte": "2024-01-01T00:00:00Z"}}}
-      ],
-      "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
-      "group_by": [{"key": "n.created_at", "truncate": "month"}],
-      "aggregations": [{"count": "n", "as": "note_count"}],
-      "aggregation_sort": "n_created_at_month",
-      "limit": 20
-    }
   gql: |
     MATCH (mr:MergeRequest)-[:HAS_NOTE]->(n:Note) WHERE mr.id IN [2000, 2001] AND n.created_at >= '2024-01-01T00:00:00Z' RETURN date_trunc('month', n.created_at), count(n) AS note_count ORDER BY n_created_at_month LIMIT 20
 

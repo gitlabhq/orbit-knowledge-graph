@@ -6,9 +6,6 @@ query:
     WHERE NOT (p.name CONTAINS 'Public' AND mr.state = 'opened')
     RETURN mr.title
 
-missing_frontends:
-  json: JSON filters cannot express grouped negation.
-
 logical:
   expect:
     - (EdgeScan IN_PROJECT mr->p AS e1)

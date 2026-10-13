@@ -1,19 +1,6 @@
 description: File content contains filter returns matching files
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "f", "entity": "File",
-               "node_ids": [13000, 13001, 13002, 13003, 13004],
-               "columns": ["path", "project_id", "content"],
-               "filters": {
-                   "project_id": {"eq": 1000},
-                   "content": {"contains": "ClickHouse"}
-               }}],
-      "order_by": "f.id",
-      "limit": 10
-    }
   gql: |
     MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content CONTAINS 'ClickHouse' RETURN f.path, f.project_id, f.content ORDER BY f.id LIMIT 10
 

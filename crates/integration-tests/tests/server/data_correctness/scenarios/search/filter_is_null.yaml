@@ -1,14 +1,6 @@
 description: is_null filter matches rows where the nullable column is unset
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username", "avatar_url"],
-                 "filters": {"avatar_url": {"is_null": true}}}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.avatar_url IS NULL RETURN u.username, u.avatar_url LIMIT 10
 

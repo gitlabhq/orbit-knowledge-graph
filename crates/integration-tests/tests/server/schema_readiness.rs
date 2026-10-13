@@ -509,7 +509,7 @@ impl Cluster {
             .invoke_agent_command(authenticated(InvokeAgentCommandRequest {
                 command_name: "get_graph_schema".into(),
                 parameters_json: json!({"format": "raw", "expand_nodes": ["Project"]}).to_string(),
-                language: QueryLanguage::Json as i32,
+                language: QueryLanguage::Gql as i32,
             }))
             .await;
         let response = match command {
@@ -544,14 +544,18 @@ impl Cluster {
 
     async fn list_tools(&mut self) -> Result<ListToolsResponse, Status> {
         self.client
-            .list_tools(authenticated(ListToolsRequest::default()))
+            .list_tools(authenticated(ListToolsRequest {
+                language: QueryLanguage::Gql as i32,
+            }))
             .await
             .map(|response| response.into_inner())
     }
 
     async fn named_query_names(&mut self) -> Vec<String> {
         self.client
-            .list_named_queries(authenticated(ListNamedQueriesRequest::default()))
+            .list_named_queries(authenticated(ListNamedQueriesRequest {
+                language: QueryLanguage::Gql as i32,
+            }))
             .await
             .unwrap()
             .into_inner()
@@ -746,17 +750,13 @@ fn expected_project_row(version: u32) -> ProjectRow {
 
 fn project_query(version: u32) -> ExecuteQueryRequest {
     let columns = if project_has_description_in(version) {
-        json!(["name", "description"])
+        ".name, .description"
     } else {
-        json!(["name"])
+        ".name"
     };
     ExecuteQueryRequest {
-        query: json!({
-            "query_type": "traversal",
-            "nodes": [{"id": "project", "entity": "Project", "node_ids": [1], "columns": columns}],
-            "limit": 10
-        })
-        .to_string(),
+        query: format!("MATCH (project:Project {{id: 1}}) RETURN project{{{columns}}} LIMIT 10"),
+        language: QueryLanguage::Gql as i32,
         ..Default::default()
     }
 }
@@ -765,6 +765,7 @@ fn named_query(name: &str) -> ExecuteQueryRequest {
     ExecuteQueryRequest {
         query_type: QueryType::Named as i32,
         query: json!({"name": name}).to_string(),
+        language: QueryLanguage::Gql as i32,
         ..Default::default()
     }
 }

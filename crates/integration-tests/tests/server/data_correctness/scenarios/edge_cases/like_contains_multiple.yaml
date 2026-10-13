@@ -1,13 +1,6 @@
 description: LIKE contains filter on "arl" matches charlie
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                 "filters": {"username": {"contains": "arl"}}}],
-        "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username CONTAINS 'arl' RETURN u.username LIMIT 10
 

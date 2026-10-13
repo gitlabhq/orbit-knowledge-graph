@@ -97,14 +97,10 @@ fn ids(table: &Value) -> Vec<i64> {
         .collect()
 }
 
-const MEMBERS: &str = r#"{"query_type": "traversal",
-    "nodes": [
-        {"id": "u", "entity": "User", "columns": ["username", "name"]},
-        {"id": "g", "entity": "Group", "node_ids": [100]}
-    ],
-    "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-    "order_by": "u.id",
-    "limit": 10}"#;
+const MEMBERS: &str = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100})
+    RETURN u{.username, .name}, g
+    ORDER BY u.id
+    LIMIT 10"#;
 
 async fn format_stamped_returns_toon_name_and_version(ctx: &TestContext) {
     let output = run_pipeline(ctx, MEMBERS).await;
@@ -152,9 +148,13 @@ async fn toon_and_raw_agree_on_node_and_edge_counts(ctx: &TestContext) {
 }
 
 async fn empty_result_omits_nodes_and_edges(ctx: &TestContext) {
-    let output = run_pipeline(ctx, r#"{"query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
-            "limit": 10}"#)
+    let output = run_pipeline(
+        ctx,
+        r#"MATCH (u:User)
+            WHERE u.id >= 99000 AND u.id <= 99999
+            RETURN u{.username}
+            LIMIT 10"#,
+    )
     .await;
     let value = toon(&output);
     assert_eq!(value["query_type"], "traversal");
@@ -168,19 +168,23 @@ async fn strings_and_booleans_round_trip(ctx: &TestContext) {
     let users = toon(
         &run_pipeline(
             ctx,
-            r#"{"query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [2], "columns": ["name"]}],
-                "limit": 1}"#,
+            r#"MATCH (u:User {id: 2})
+                RETURN u{.name}
+                LIMIT 1"#,
         )
         .await,
     );
     assert_eq!(users["nodes"]["User"][0]["name"], r#"Bob "the Builder""#);
 
     let notes = toon(
-        &run_pipeline(ctx, r#"{"query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000, 3001], "columns": ["note", "internal", "confidential"]}],
-                "order_by": "n.id",
-                "limit": 10}"#)
+        &run_pipeline(
+            ctx,
+            r#"MATCH (n:Note)
+                WHERE n.id IN [3000, 3001]
+                RETURN n{.note, .internal, .confidential}
+                ORDER BY n.id
+                LIMIT 10"#,
+        )
         .await,
     );
     let notes = &notes["nodes"]["Note"];
@@ -192,9 +196,11 @@ async fn strings_and_booleans_round_trip(ctx: &TestContext) {
 
 async fn path_edges_carry_path_and_step(ctx: &TestContext) {
     let value = toon(
-        &run_pipeline(ctx, r#"{"query_type": "path_finding",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group", "node_ids": [100]}],
-                "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 2, "rel_types": ["MEMBER_OF"]}}"#)
+        &run_pipeline(
+            ctx,
+            r#"MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..2]->(g:Group {id: 100})
+                RETURN p"#,
+        )
         .await,
     );
     assert_eq!(value["query_type"], "path_finding");
@@ -208,15 +214,9 @@ async fn aggregation_lifts_group_nodes_and_references_them_by_id(ctx: &TestConte
     let value = toon(
         &run_pipeline(
             ctx,
-            r#"{"query_type": "aggregation",
-                "nodes": [
-                    {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                    {"id": "u", "entity": "User"}
-                ],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "group_by": ["g"],
-                "aggregations": [{"count": "u", "as": "user_count"}],
-                "limit": 10}"#,
+            r#"MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(u:User)
+                RETURN g{.name}, count(u) AS user_count
+                LIMIT 10"#,
         )
         .await,
     );
@@ -230,12 +230,12 @@ async fn aggregation_lifts_group_nodes_and_references_them_by_id(ctx: &TestConte
 
 async fn aggregation_without_node_groups_emits_scalar_rows(ctx: &TestContext) {
     let by_state = toon(
-        &run_pipeline(ctx, r#"{"query_type": "aggregation",
-                "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}, {"id": "u", "entity": "User"}],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "group_by": ["u.state"],
-                "aggregations": [{"count": "u", "as": "user_count"}],
-                "limit": 10}"#)
+        &run_pipeline(
+            ctx,
+            r#"MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(u:User)
+                RETURN u.state, count(u) AS user_count
+                LIMIT 10"#,
+        )
         .await,
     );
     assert!(by_state.get("nodes").is_none(), "{by_state}");
@@ -245,11 +245,12 @@ async fn aggregation_without_node_groups_emits_scalar_rows(ctx: &TestContext) {
     );
 
     let total = toon(
-        &run_pipeline(ctx, r#"{"query_type": "aggregation",
-                "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}, {"id": "u", "entity": "User"}],
-                "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "aggregations": [{"count": "u", "as": "total"}],
-                "limit": 1}"#)
+        &run_pipeline(
+            ctx,
+            r#"MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(u:User)
+                RETURN count(u) AS total
+                LIMIT 1"#,
+        )
         .await,
     );
     assert!(total.get("group_columns").is_none(), "{total}");

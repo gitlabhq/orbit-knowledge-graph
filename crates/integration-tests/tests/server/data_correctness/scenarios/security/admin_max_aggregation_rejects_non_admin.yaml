@@ -1,18 +1,6 @@
 description: Non-admin MAX aggregation on admin-only field rejects at compile
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
-        {"id": "u", "entity": "User", "columns": ["username"]}
-      ],
-      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-      "group_by": ["g"],
-      "aggregations": [{"max": "u.is_admin", "as": "has_admin"}],
-      "limit": 10
-    }
   gql: |
     MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, max(u.is_admin) AS has_admin LIMIT 10
 

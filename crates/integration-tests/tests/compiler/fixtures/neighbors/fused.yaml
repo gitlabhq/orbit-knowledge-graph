@@ -1,8 +1,6 @@
 name: Split IN_PROJECT variants use directional table unions
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}
   gql: |
     MATCH (p:Project {id: 1000})-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
 

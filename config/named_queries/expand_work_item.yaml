@@ -8,16 +8,6 @@ parameters:
     schema: { type: integer, minimum: 1, maximum: 500 }
     example: 100
 query:
-  json:
-    query_type: neighbors
-    nodes:
-      - id: center
-        entity: WorkItem
-        node_ids: { $param: node_ids }
-    neighbors:
-      direction: both
-      rel_types: [AUTHORED, ASSIGNED, HAS_LABEL, IN_MILESTONE, IN_PROJECT, IN_GROUP, CLOSES, RELATED_TO, CONTAINS]
-    limit: { $param: limit }
   gql: |
     MATCH (center:WorkItem)-[:AUTHORED|ASSIGNED|HAS_LABEL|IN_MILESTONE|IN_PROJECT|IN_GROUP|CLOSES|RELATED_TO|CONTAINS]-(neighbor)
     WHERE center.id IN {{ param("node_ids") }}

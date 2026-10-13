@@ -1,19 +1,8 @@
 description: Aggregation with User and declared-but-disconnected Group rejects because User scan would be unbounded
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
-        {"id": "g", "entity": "Group"}
-      ],
-      "group_by": ["g"],
-      "aggregations": [{"count": "u", "as": "hit"}],
-      "limit": 1
-    }
   gql: |
     MATCH (u:User {email: 'target@example.com'}), (g:Group) RETURN g, count(u) AS hit LIMIT 1
 
 expect:
-  compile_error: { gql: schema, json: restrict }
+  compile_error: schema

@@ -57,42 +57,44 @@ pub fn embedded_ontology() -> Arc<Ontology> {
     Arc::new(Ontology::load_embedded().expect("Failed to load embedded ontology"))
 }
 
-pub fn compile_pair(
-    json: &str,
-    orbit_query: &str,
+/// Compiles two spellings of one query and asserts they produce the same SQL,
+/// parameters, and hydration plan.
+pub fn compile_equivalent(
+    expected: &str,
+    query: &str,
     ontology: &Arc<Ontology>,
     context: &SecurityContext,
 ) -> compiler::Result<compiler::CompiledQueryContext> {
-    let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, ontology, context);
-    let orbit_query_result =
-        compiler::compile(orbit_query, compiler::Frontend::Gql, ontology, context);
-    match (json_result, orbit_query_result) {
-        (Ok(json), Ok(orbit_query_result)) => {
+    match (
+        compiler::compile(expected, compiler::Frontend::Gql, ontology, context),
+        compiler::compile(query, compiler::Frontend::Gql, ontology, context),
+    ) {
+        (Ok(expected), Ok(actual)) => {
             assert_eq!(
-                json.base.sql, orbit_query_result.base.sql,
-                "SQL differs for {orbit_query}"
+                expected.base.sql, actual.base.sql,
+                "SQL differs for {query}"
             );
             assert_eq!(
-                json.base.params, orbit_query_result.base.params,
-                "parameters differ for {orbit_query}"
+                expected.base.params, actual.base.params,
+                "parameters differ for {query}"
             );
-            assert_eq!(json.query_type, orbit_query_result.query_type);
+            assert_eq!(expected.query_type, actual.query_type);
             assert_eq!(
-                json.hydration, orbit_query_result.hydration,
-                "hydration differs for {orbit_query}"
+                expected.hydration, actual.hydration,
+                "hydration differs for {query}"
             );
-            Ok(json)
+            Ok(actual)
         }
-        (Err(json), Err(orbit_query_result)) => {
+        (Err(expected), Err(actual)) => {
             assert_eq!(
-                std::mem::discriminant(&json),
-                std::mem::discriminant(&orbit_query_result),
-                "rejection differs for {orbit_query}: JSON={json}; Orbit={orbit_query_result}"
+                std::mem::discriminant(&expected),
+                std::mem::discriminant(&actual),
+                "rejection differs for {query}: expected={expected}; actual={actual}"
             );
-            Err(json)
+            Err(actual)
         }
-        (json, orbit_query_result) => panic!(
-            "frontend acceptance differs for {orbit_query}: JSON={json:?}; Orbit={orbit_query_result:?}"
-        ),
+        (expected, actual) => {
+            panic!("acceptance differs for {query}: expected={expected:?}; actual={actual:?}")
+        }
     }
 }

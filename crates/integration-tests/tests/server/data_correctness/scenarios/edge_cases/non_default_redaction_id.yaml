@@ -1,16 +1,6 @@
 description: MergeRequestDiff (non-default id_column) traversal returns correct diffs
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title"], "node_ids": [2000]},
-            {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
-        ],
-        "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
-        "limit": 20
-    }
   gql: |
     MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(d:MergeRequestDiff) RETURN mr.title, d.state LIMIT 20
 

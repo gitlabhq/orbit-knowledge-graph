@@ -16,9 +16,8 @@ fn compile(
     language: Language,
     params: &Map<String, Value>,
 ) -> compiler::CompiledQueryContext {
-    let rendered = query.render_language(language, &BINDINGS, params).unwrap();
+    let rendered = query.render(language, &BINDINGS, params).unwrap();
     let frontend = match language {
-        Language::Json => Frontend::JsonDsl,
         Language::Gql => Frontend::Gql,
     };
     let security = SecurityContext::new_with_roles(
@@ -32,17 +31,18 @@ fn compile(
 }
 
 #[test]
-fn every_named_query_compiles_identically_in_both_languages() {
+fn every_named_query_compiles_identically_in_every_language() {
     let queries = NamedQueries::load_embedded().unwrap();
     for query in queries.iter() {
         let params = query.example_parameters();
-        let json = compile(query, Language::Json, &params);
-        let gql = compile(query, Language::Gql, &params);
-        assert_eq!(
-            (&json.base.sql, &json.base.params, &json.query_type),
-            (&gql.base.sql, &gql.base.params, &gql.query_type),
-            "{}",
-            query.name
-        );
+        let [first, rest @ ..] = Language::ALL.map(|language| compile(query, language, &params));
+        for other in rest {
+            assert_eq!(
+                (&first.base.sql, &first.base.params, &first.query_type),
+                (&other.base.sql, &other.base.params, &other.query_type),
+                "{}",
+                query.name
+            );
+        }
     }
 }

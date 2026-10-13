@@ -11,13 +11,6 @@ config:
       user: [1, 2, 3, 4, 5, 6, 7, 9001]
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "columns": ["username", "name", "state"],
-                 "node_ids": [9001]}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 9001}) RETURN u.username, u.name, u.state LIMIT 10
 

@@ -3,8 +3,6 @@ description: >
   excludes rows. The filter on the edge's source_id removes merge request 2000.
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["name"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p","filters":{"source_id":{"ne":2000}}}],"limit":20}
   gql: |
     MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
     WHERE r.source_id <> 2000

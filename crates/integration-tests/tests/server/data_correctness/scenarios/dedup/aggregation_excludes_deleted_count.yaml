@@ -22,18 +22,6 @@ config:
       label: [7000, 7001, 7002]
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-        {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
-      ],
-      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": ["p"],
-      "aggregations": [{"count": "mr", "as": "mr_count"}],
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1002}) WHERE mr.state = 'merged' RETURN p{.id, .name}, count(mr) AS mr_count LIMIT 10
 

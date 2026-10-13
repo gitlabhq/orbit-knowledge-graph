@@ -4,13 +4,6 @@ Fuzz testing for Orbit with [Bolero](https://github.com/camshaft/bolero).
 
 ## Fuzz targets
 
-### Query compiler
-
-| Target | What it exercises |
-|---|---|
-| `fuzz_compile` | Unstructured byte input to `compile()` — tests JSON parsing edge cases |
-| `fuzz_compile_structured` | Structured JSON query generation via `FuzzQuery` `TypeGenerator` — generates valid/semi-valid queries that reach deeper compiler logic (normalization, lowering, optimization, security enforcement, codegen) |
-
 ### Orbit query frontend
 
 | Target | What it exercises |
@@ -45,8 +38,6 @@ With mise (recommended):
 ```sh
 mise test:fuzz                 # replay every corpus, then 1s of random inputs
 mise fuzz:deep                 # libFuzzer + AddressSanitizer over every target
-mise fuzz:compile              # fuzz the query compiler (unstructured)
-mise fuzz:compile-structured   # fuzz the query compiler (structured)
 mise fuzz:gql                  # fuzz the Orbit query frontend (unstructured)
 mise fuzz:gql-grammar          # fuzz the Orbit query frontend (grammar derivations)
 mise fuzz:ruby                 # fuzz the Ruby parser

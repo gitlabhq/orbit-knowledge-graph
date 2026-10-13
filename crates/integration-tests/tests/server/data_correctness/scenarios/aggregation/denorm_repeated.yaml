@@ -10,8 +10,6 @@ config:
       - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: function, fqn: function, definition_type: function }
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[99000],"filters":{"definition_type":[{"eq":"function"},{"eq":"class"}]}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"aggregations":[{"count":"b","as":"n"}]}
   gql: |
     MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)
     WHERE a.definition_type = 'function' AND a.definition_type = 'class'

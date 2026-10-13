@@ -4,13 +4,6 @@ config:
   security: admin
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
-                 "filters": {"email": {"in": ["alice@example.com", "bob@example.com"]}}}],
-        "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.email IN ['alice@example.com', 'bob@example.com'] RETURN u.username, u.email LIMIT 10
 

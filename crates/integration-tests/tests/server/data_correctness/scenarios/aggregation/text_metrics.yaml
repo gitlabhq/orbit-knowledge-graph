@@ -7,8 +7,6 @@ cases:
   - name: min_text_rejected
     description: MIN rejects a text property
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[9001]}],"aggregations":[{"min":"w.description","as":"v"}]}
       gql: |
         MATCH (w:WorkItem {id: 9001}) RETURN min(w.description) AS v
     expect:
@@ -17,8 +15,6 @@ cases:
   - name: grouped_max_text_rejected
     description: A node-grouped MAX rejects a text property
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"w","entity":"WorkItem"}],"relationships":[{"type":"IN_PROJECT","from":"w","to":"p"}],"group_by":["p"],"aggregations":[{"max":"w.title","as":"v"}]}
       gql: |
         MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN p, max(w.title) AS v
     expect:
@@ -66,8 +62,6 @@ cases:
         gl_merge_request:
           - { id: 2000, iid: 1, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, merge_status: can_be_merged, created_at: "2024-01-15 10:30:00", project_id: 1000, author_id: 1, traversal_path: "1/100/1000/", _version: { sql: "now64(6) + INTERVAL 1 SECOND" } }
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"group_by":["mr.state","mr.merge_status",{"key":"mr.created_at","truncate":"month"}],"aggregations":[{"count":"mr","as":"n"}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) RETURN mr.state AS mr_state, mr.merge_status AS mr_merge_status, date_trunc('month', mr.created_at), count(mr) AS n
     expect:

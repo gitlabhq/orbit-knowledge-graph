@@ -1,8 +1,6 @@
 name: Incoming neighbors keep path narrowing for scope-preserving relationships
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]}}
   gql: |
     MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
 

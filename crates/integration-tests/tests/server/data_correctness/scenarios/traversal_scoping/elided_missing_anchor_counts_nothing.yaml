@@ -1,24 +1,6 @@
 description: An elided container anchor that does not exist yields an empty aggregation instead of counting the whole authorized scope
 
 query:
-  json: |
-    {
-        "query_type": "aggregation",
-        "nodes": [
-            {"id": "g", "entity": "Group", "filters": {"full_path": "no-such-group"}},
-            {"id": "p", "entity": "Project"},
-            {"id": "mr", "entity": "MergeRequest"},
-            {"id": "u", "entity": "User", "columns": ["username"]}
-        ],
-        "relationships": [
-            {"type": "CONTAINS", "from": "g", "to": "p"},
-            {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-            {"type": "AUTHORED", "from": "u", "to": "mr"}
-        ],
-        "group_by": ["u"],
-        "aggregations": [{"count": "mr", "as": "c"}],
-        "limit": 10
-    }
   gql: |
     MATCH (g:Group {full_path: 'no-such-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u.username, count(mr) AS c LIMIT 10
 

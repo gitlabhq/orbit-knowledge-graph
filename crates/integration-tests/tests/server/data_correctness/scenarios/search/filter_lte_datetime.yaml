@@ -1,19 +1,6 @@
 description: DateTime lte filter returns matching rows
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "mr", "entity": "MergeRequest",
-               "id_range": {"start": 1, "end": 10000},
-               "columns": ["title", "state", "merged_at"],
-               "filters": {
-                   "state": {"eq": "merged"},
-                   "merged_at": {"lte": "2024-07-01T00:00:00Z"}
-               }}],
-      "order_by": "-mr.merged_at",
-      "limit": 10
-    }
   gql: |
     MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 AND mr.state = 'merged' AND mr.merged_at <= '2024-07-01T00:00:00Z' RETURN mr.title, mr.state, mr.merged_at ORDER BY mr.merged_at DESC LIMIT 10
 

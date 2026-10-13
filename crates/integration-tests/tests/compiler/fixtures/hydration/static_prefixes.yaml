@@ -1,8 +1,6 @@
 name: Static hydration keeps individual prefix predicates
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]}]}
   gql: |
     MATCH (f:File {id: 1}) RETURN f.path
 

@@ -653,12 +653,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "traversal",
-                    "nodes": [{"id": "p", "entity": "Project"}],
-                    "limit": 10
-                }))
-                .unwrap(),
+                input: compiler::gql::parse("MATCH (p:Project) RETURN p LIMIT 10").unwrap(),
                 has_virtual_columns: false,
             }),
             query_result: qr,
@@ -701,16 +696,9 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "aggregation",
-                    "nodes": [{"id": "v", "entity": "Vulnerability"}],
-                    "group_by": ["v.severity"],
-                    "aggregations": [{
-                        "count": "v",
-                        "as": "vulnerability_count"
-                    }],
-                    "limit": 10
-                }))
+                input: compiler::gql::parse(
+                    "MATCH (v:Vulnerability) RETURN v.severity, count(v) AS vulnerability_count",
+                )
                 .unwrap(),
                 has_virtual_columns: false,
             }),
@@ -897,12 +885,7 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "traversal",
-                    "nodes": [{"id": "p", "entity": "Project"}],
-                    "limit": 10
-                }))
-                .unwrap(),
+                input: compiler::gql::parse("MATCH (p:Project) RETURN p LIMIT 10").unwrap(),
                 has_virtual_columns: false,
             }),
             query_result: qr,
@@ -1025,15 +1008,9 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "path_finding",
-                    "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
-                    "nodes": [
-                        {"id": "u", "entity": "User"},
-                        {"id": "p", "entity": "Project"}
-                    ],
-                    "limit": 5
-                }))
+                input: compiler::gql::parse(
+                    "MATCH path = ANY SHORTEST (u:User)-[*1..2]->(p:Project) RETURN path",
+                )
                 .unwrap(),
                 has_virtual_columns: false,
             }),
@@ -1123,15 +1100,9 @@ mod tests {
                     dialect: Default::default(),
                 },
                 hydration: HydrationPlan::None,
-                input: serde_json::from_value(serde_json::json!({
-                    "query_type": "path_finding",
-                    "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
-                    "nodes": [
-                        {"id": "u", "entity": "User"},
-                        {"id": "p", "entity": "Project"}
-                    ],
-                    "limit": 5
-                }))
+                input: compiler::gql::parse(
+                    "MATCH path = ANY SHORTEST (u:User)-[*1..2]->(p:Project) RETURN path",
+                )
                 .unwrap(),
                 has_virtual_columns: false,
             }),

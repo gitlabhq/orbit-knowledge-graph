@@ -13,7 +13,7 @@ Read `AGENTS.md` for architecture and CI enforcement, and `docs/pages/engineerin
 
 Crates you'll care about most:
 
-- `query-engine` — JSON DSL to parameterized ClickHouse SQL
+- `query-engine` — GQL to parameterized ClickHouse SQL
 - `indexer` — NATS consumer, SDLC + code handler modules, worker pools
 - `clickhouse-client` — async ClickHouse client, Arrow IPC streaming
 - `code-parser` — tree-sitter + SWC multi-language parser

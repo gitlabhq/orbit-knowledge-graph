@@ -1,18 +1,6 @@
 description: Aggregation over a shortest path rejects at compile for both frontends
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        {"id": "p", "entity": "Project"}
-      ],
-      "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3, "rel_types": ["*"]},
-      "group_by": ["p"],
-      "aggregations": [{"count": "u", "as": "hit"}],
-      "limit": 10
-    }
   gql: |
     MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10
 

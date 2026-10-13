@@ -6,16 +6,6 @@ config:
       merge_request: [2001]
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "d",
-        "entity": "MergeRequestDiff",
-        "filters": {"head_commit_sha": {"starts_with": "bbbb"}}
-      }],
-      "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
-    }
   gql: |
     MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha STARTS WITH 'bbbb' RETURN d, n
 

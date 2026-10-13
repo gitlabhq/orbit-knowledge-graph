@@ -1,8 +1,6 @@
 name: Incoming neighbors keep broad edge scope and verify the center
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
   gql: |
     MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor) RETURN g, neighbor
 

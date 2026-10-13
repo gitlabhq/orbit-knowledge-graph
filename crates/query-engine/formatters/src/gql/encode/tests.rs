@@ -12,19 +12,19 @@ use compiler::{
     path_column, relationship_type_column,
 };
 use orbit_arrow::ColumnValue;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, json};
 use shared::{PaginationMeta, PipelineOutput};
 use types::QueryResult;
 
 use super::{encode, literal, node_literal, render};
 
 fn output(
-    input: Value,
+    query: &str,
     context: &[(&str, &str)],
     columns: Vec<(String, ArrayRef)>,
     pagination: Option<PaginationMeta>,
 ) -> PipelineOutput {
-    let input: compiler::Input = serde_json::from_value(input).unwrap();
+    let input = compiler::gql::parse(query).unwrap();
     let mut result_context = ResultContext::new().with_query_type(input.query_type);
     for (alias, entity) in context {
         result_context.add_node(alias, entity);
@@ -153,7 +153,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
         truncated: true,
     };
     let output = output(
-        json!({"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}, {"id": "g", "entity": "Group"}]}),
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group) RETURN u, g",
         &[("u", "User"), ("g", "Group")],
         vec![
             column("_orbit_u_id", ints(&[1, 1])),
@@ -180,9 +180,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
 #[test]
 fn returned_relationships_add_columns_in_return_order() {
     let mut output = output(
-        json!({"query_type": "traversal",
-               "nodes": [{"id": "u", "entity": "User"}, {"id": "mr", "entity": "MergeRequest"}],
-               "relationships": [{"type": ["AUTHORED", "APPROVED"], "from": "u", "to": "mr"}]}),
+        "MATCH (u:User)-[:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN u, mr",
         &[("u", "User"), ("mr", "MergeRequest")],
         vec![
             column("_orbit_u_id", ints(&[1, 1])),
@@ -239,10 +237,7 @@ fn returned_relationships_add_columns_in_return_order() {
 #[test]
 fn node_groups_render_as_nodes() {
     let output = output(
-        json!({"query_type": "aggregation",
-               "nodes": [{"id": "g", "entity": "Group"}, {"id": "u", "entity": "User"}],
-               "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-               "group_by": ["g"], "aggregations": [{"count": "u", "as": "user_count"}]}),
+        "MATCH (g:Group)<-[:MEMBER_OF]-(u:User) RETURN g, count(u) AS user_count",
         &[("g", "Group")],
         vec![
             column("_orbit_g_id", ints(&[22])),
@@ -266,8 +261,7 @@ fn node_groups_render_as_nodes() {
 #[test]
 fn neighbors_follow_the_stored_edge_direction() {
     let mut output = output(
-        json!({"query_type": "neighbors", "nodes": [{"id": "c", "entity": "Group", "node_ids": [22]}],
-               "neighbors": {"direction": "both"}}),
+        "MATCH (c:Group {id: 22})--(neighbor) RETURN c, neighbor",
         &[("c", "Group")],
         vec![
             column("_orbit_c_id", ints(&[22, 22])),
@@ -332,9 +326,7 @@ fn path_finding_prints_each_distinct_path_once() {
         None,
     );
     let mut output = output(
-        json!({"query_type": "path_finding",
-               "nodes": [{"id": "u", "entity": "User"}, {"id": "p", "entity": "Project"}],
-               "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2}}),
+        "MATCH path = ANY SHORTEST (u:User)-[*1..2]->(p:Project) RETURN path",
         &[],
         vec![
             (path_column().to_string(), Arc::new(paths) as ArrayRef),
