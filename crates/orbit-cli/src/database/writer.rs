@@ -9,13 +9,15 @@ use ontology::Ontology;
 use super::{lock_database, schema};
 use crate::workspace::GitInfo;
 
+const GRAPH_SCHEMA: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
 pub struct GraphWriter {
     client: DuckDbClient,
     _lock: File,
 }
 
 impl GraphWriter {
-    pub fn open(path: &Path, git: &GitInfo, ddl: &str) -> Result<Self> {
+    pub fn open(path: &Path, git: &GitInfo) -> Result<Self> {
         let lock = lock_database(path)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if path.exists() {
@@ -28,7 +30,7 @@ impl GraphWriter {
                 );
             }
         }
-        schema::ensure_graph_schema(path, ddl)?;
+        schema::ensure_graph_schema(path, GRAPH_SCHEMA)?;
         let client = DuckDbClient::open(path)?;
         client.execute(
             "INSERT INTO _orbit_meta (key, value) VALUES ('revision', ?1) ON CONFLICT DO NOTHING",

@@ -22,8 +22,6 @@ use crate::database::{GraphReader, GraphWriter, manifest};
 use crate::tui;
 use crate::workspace::{self, GitInfo};
 
-const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
-
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
@@ -572,9 +570,7 @@ impl LocalIndexer {
             manifest::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
         })?;
         let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
-        let writer = Arc::new(std::sync::Mutex::new(GraphWriter::open(
-            &db_path, &git, LOCAL_DDL,
-        )?));
+        let writer = Arc::new(std::sync::Mutex::new(GraphWriter::open(&db_path, &git)?));
         let key = git.repo_path.to_string_lossy().to_string();
         info!(
             "Indexing repository at: {key} (branch: {}, commit: {})",
