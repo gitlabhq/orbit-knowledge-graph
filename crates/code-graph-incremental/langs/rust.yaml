@@ -496,15 +496,15 @@ display:
       - match: '(__def (__method))'
         tag: { def_type: Method }
       - match: '(__def (__class))'
-        tag: { def_type: '@$ROOT|tag("flavor")|map("module:Module")|default("Class")' }
+        tag: { def_type: Class, language_type: '@$ROOT|tag("flavor")|map("module:Module")|default("Class")' }
       - match: '(__def (__struct))'
-        tag: { def_type: '@$ROOT|tag("flavor")|map("union:Union")|default("Struct")' }
+        tag: { def_type: Struct, language_type: '@$ROOT|tag("flavor")|map("union:Union")|default("Struct")' }
       - match: '(__def (__interface))'
         tag: { def_type: Interface }
       - match: '(__def (__enum))'
         tag: { def_type: Enum }
       - match: '(__def (__enum_variant))'
-        tag: { def_type: Variant }
+        tag: { def_type: EnumVariant, language_type: Variant }
       - match: '(__def (__trait))'
         tag: { def_type: Trait }
       - match: '(__def (__impl))'

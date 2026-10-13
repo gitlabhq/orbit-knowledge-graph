@@ -232,14 +232,17 @@ stages:
         replace: '(__def (__defname @$N) (__enum) $B)'
       - match: '(union_specifier name: $N:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
+        tag: { language_type: Union }
       - match: '(type_definition type: $T declarator: $N:type_identifier)'
         replace: '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
       - match: '(alias_declaration name: $N:type_identifier)'
         replace: '(__def (__defname @$N) (__type_alias))'
       - match: '(concept_definition name: $N:identifier)'
         replace: '(__def (__defname @$N) (__interface))'
+        tag: { language_type: Concept }
       - match: '(namespace_definition name: $N body: $B)'
         replace: '(__def (__defname @$N) (__class) $B)'
+        tag: { language_type: Namespace }
 
   - name: ssa-cleanup
     rules:

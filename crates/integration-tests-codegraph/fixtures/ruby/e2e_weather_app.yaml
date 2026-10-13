@@ -103,6 +103,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp'
         AND d.definition_type = 'Module'
+        AND d.language_type = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }

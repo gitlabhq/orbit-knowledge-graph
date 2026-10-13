@@ -53,6 +53,8 @@ glab orbit ontology
 | `File` | Source code file | `id`, `path`, `name`, `extension`, `language`, `content` |
 | `ImportedSymbol` | Import or cross-file symbol reference | `id`, `file_path`, `import_type`, `import_path`, `identifier_name` |
 
+`definition_type` is the general type, such as Class or Method. `language_type` is the name the source language uses, such as Module or Record.
+
 ## Code review
 
 | Node type | Description | Key properties |

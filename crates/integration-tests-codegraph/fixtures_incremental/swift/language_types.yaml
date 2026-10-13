@@ -1,0 +1,35 @@
+name: Swift language-specific definition types next to the canonical type
+fixtures:
+  - path: Sources/Point.swift
+    content: |
+      struct Point {
+          var x: Int
+          init(x: Int) {
+              self.x = x
+          }
+      }
+
+      extension Point {
+          func moved() -> Point {
+              return self
+          }
+      }
+
+tests:
+  - name: A Swift initializer is a Method with the Constructor language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'init'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method", language_type: "Constructor" } }
+
+  - name: A Swift extension is an Impl with the Extension language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Impl'
+      RETURN d.name AS name, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Point", language_type: "Extension" } }

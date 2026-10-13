@@ -483,7 +483,7 @@ display:
       - match: '(__def (__function))'
         tag: { def_type: Function }
       - match: '(__def (__method))'
-        tag: { def_type: '@$ROOT|tag("flavor")|map("static:StaticMethod", "abstract:Method", "generator:Method")|default("Method")' }
+        tag: { def_type: Method, language_type: '@$ROOT|tag("flavor")|map("static:StaticMethod", "abstract:Method", "generator:Method")|default("Method")' }
       - match: '(__def (__class))'
         tag: { def_type: Class }
       - match: '(__def (__struct))'

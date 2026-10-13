@@ -59,7 +59,7 @@ tests:
       - { row: { fqn: 'outer::Local', type: 'Struct' } }
       - { row: { fqn: 'outer::Local::0', type: 'Field' } }
       - { row: { fqn: 'outer::Choice', type: 'Enum' } }
-      - { row: { fqn: 'outer::Choice::Pick', type: 'Variant' } }
+      - { row: { fqn: 'outer::Choice::Pick', type: 'EnumVariant' } }
       - { row: { fqn: 'outer::Choice::Pick::0', type: 'Field' } }
       - { row: { fqn: 'Container::method::nested', type: 'Function' } }
 
@@ -88,7 +88,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'outer::Choice::Pick', type: 'Variant' } }
+      - { row: { fqn: 'outer::Choice::Pick', type: 'EnumVariant' } }
 
   - name: "local items inside methods are retained and callable"
     query: |
@@ -107,8 +107,8 @@ tests:
           'with_local_mod::local_mod',
           'with_local_mod::local_mod::nested'
         ]
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.definition_type AS type, d.language_type AS language_type
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'with_local_mod::local_mod', type: 'Module' } }
+      - { row: { fqn: 'with_local_mod::local_mod', type: 'Class', language_type: 'Module' } }
       - { row: { fqn: 'with_local_mod::local_mod::nested', type: 'Function' } }

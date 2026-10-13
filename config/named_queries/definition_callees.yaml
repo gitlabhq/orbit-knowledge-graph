@@ -13,7 +13,7 @@ query:
         node_ids: [{ $param: node_id }]
       - id: callee
         entity: Definition
-        columns: [start_line, file_path, name, fqn, definition_type]
+        columns: [start_line, file_path, name, fqn, definition_type, language_type]
     relationships:
       - type: CALLS
         from: caller
@@ -21,5 +21,5 @@ query:
     limit: 100
   gql: |
     MATCH (caller:Definition {id: {{ integer("node_id") }}})-[:CALLS]->(callee:Definition)
-    RETURN caller, callee.start_line, callee.file_path, callee.name, callee.fqn, callee.definition_type
+    RETURN caller, callee.start_line, callee.file_path, callee.name, callee.fqn, callee.definition_type, callee.language_type
     LIMIT 100

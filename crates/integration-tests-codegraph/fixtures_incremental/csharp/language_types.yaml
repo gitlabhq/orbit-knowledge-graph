@@ -1,0 +1,22 @@
+name: C# language-specific definition types next to the canonical type
+fixtures:
+  - path: src/Account.cs
+    content: |
+      namespace Bank
+      {
+          public class Account
+          {
+              private readonly int id;
+              public Account(int id) { this.id = id; }
+          }
+      }
+
+tests:
+  - name: A C# constructor is a Method with the Constructor language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Bank.Account.Account'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method", language_type: "Constructor" } }

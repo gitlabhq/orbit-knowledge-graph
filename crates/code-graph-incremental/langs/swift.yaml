@@ -109,6 +109,7 @@ stages:
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $$$P)'
       - match: '(init_declaration $$$P:__binding body: $B:function_body)'
         replace: '(__def (__defname "init") (__method) $$$P $B)'
+        tag: { language_type: Constructor }
       - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding $RT:type_identifier body: $B:function_body)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $$$P $B)'
       - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding body: $B:function_body)'
@@ -119,6 +120,7 @@ stages:
         replace: '(__def (__defname @$N) (__enum) $$$ANN $$$B)'
       - match: '(class_declaration (extension) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__impl) $$$ANN $$$B)'
+        tag: { language_type: Extension }
       - match: '(class_declaration name: $N:type_identifier $S:__supertype $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__class) $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
       - match: '(class_declaration name: $N:type_identifier $$$ANN body: (class_body $$$B))'

@@ -1,0 +1,49 @@
+name: C and C++ language-specific definition types next to the canonical type
+fixtures:
+  - path: src/value.c
+    content: |
+      union Number {
+          int i;
+          float f;
+      };
+
+  - path: src/geometry.cpp
+    content: |
+      namespace geometry {
+      union Bits {
+          int i;
+          char c;
+      };
+      }
+
+      template <typename T>
+      concept Small = sizeof(T) < 8;
+
+tests:
+  - name: C and C++ unions are Structs with the Union language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['Number', 'Bits']
+      RETURN d.name AS name, d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Number", type: "Struct", language_type: "Union" } }
+      - { row: { name: "Bits", type: "Struct", language_type: "Union" } }
+
+  - name: A C++ namespace keeps the Namespace language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'geometry'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class", language_type: "Namespace" } }
+
+  - name: A C++ concept keeps the Concept language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Small'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Interface", language_type: "Concept" } }

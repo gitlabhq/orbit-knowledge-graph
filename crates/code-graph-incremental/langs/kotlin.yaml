@@ -244,9 +244,14 @@ stages:
 
   - name: data-components
     rules:
+      - match: '(__def $$$A (modifiers (class_modifier "value")) $$$B)'
+        tag: { language_type: ValueClass }
+      - match: '(__def $$$A (modifiers (class_modifier "annotation")) $$$B)'
+        tag: { language_type: AnnotationClass }
       # A data class destructures by its primary-constructor order
       - match: '(__def $$$A (modifiers (class_modifier "data")) $$$B (primary_constructor $$$P) $$$C)'
         replace: '(__def $$$A (modifiers (class_modifier "data")) $$$B (__positional $$$P) $$$C)'
+        tag: { language_type: DataClass }
   - name: ssa-cleanup
     rules:
       - match: '(statements $$$B)'

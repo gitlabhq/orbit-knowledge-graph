@@ -22,6 +22,35 @@ fixtures:
           String value();
       }
 
+  - path: app/Models.kt
+    content: |
+      data class Point(val x: Int, val y: Int)
+
+      @JvmInline
+      value class UserId(val raw: Int)
+
+      annotation class Marker
+
+      class Factory {
+          companion object Builder {
+              fun make() {}
+          }
+      }
+
+  - path: app/Shapes.scala
+    content: |
+      trait Shape
+      object Circle extends Shape {
+        def area(): Double = 0.0
+      }
+
+  - path: src/Account.java
+    content: |
+      public class Account {
+          private final int id;
+          public Account(int id) { this.id = id; }
+      }
+
 tests:
   - name: Kotlin objects keep the Object language type
     query: |
@@ -52,3 +81,41 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { type: "Interface", language_type: "AnnotationDeclaration" } }
+
+  - name: Kotlin data, value and annotation classes keep their language types
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['Point', 'UserId', 'Marker']
+      RETURN d.name AS name, d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "Point", type: "Class", language_type: "DataClass" } }
+      - { row: { name: "UserId", type: "Class", language_type: "ValueClass" } }
+      - { row: { name: "Marker", type: "Class", language_type: "AnnotationClass" } }
+
+  - name: A named companion object keeps the Object language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Builder'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class", language_type: "Object" } }
+
+  - name: A Scala object that extends a trait keeps the Object language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Circle'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class", language_type: "Object" } }
+
+  - name: A Java constructor is a Method with the Constructor language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Account.Account'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method", language_type: "Constructor" } }

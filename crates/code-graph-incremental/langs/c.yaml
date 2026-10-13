@@ -144,6 +144,7 @@ stages:
         replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(union_specifier name: $N:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
+        tag: { language_type: Union }
       - match: '(enum_specifier name: $N:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__enum) $B)'
       - match: '(type_definition type: $T declarator: $N:type_identifier)'

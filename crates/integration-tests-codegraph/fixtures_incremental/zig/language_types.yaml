@@ -1,0 +1,18 @@
+name: Zig language-specific definition types next to the canonical type
+fixtures:
+  - path: src/value.zig
+    content: |
+      const Value = union {
+          int: i32,
+          float: f64,
+      };
+
+tests:
+  - name: A Zig union is a Struct with the Union language type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Value'
+      RETURN d.definition_type AS type, d.language_type AS language_type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Struct", language_type: "Union" } }

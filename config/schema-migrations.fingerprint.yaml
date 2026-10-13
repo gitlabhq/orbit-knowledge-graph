@@ -102,7 +102,7 @@ sources:
   nodes/source_code/branch.yaml: c2f48cdb9fd5e1e28dd6f7d793c70dd8a1d4dd306cb431aa8b14f34bd4577feb
   nodes/source_code/commit.sql.j2: 3846dfaa16525e3ff1c905ae2e8808d939fad0705183acccd8b3ba46743d60d2
   nodes/source_code/commit.yaml: e042544364249306ded56c25a4d39dad515ed70e2e1362eca5fd58246081e292
-  nodes/source_code/definition.yaml: d910a75de3252683d3aeec20801dba1285aa1930b7fe71b49e88da5c6f75414d
+  nodes/source_code/definition.yaml: 58d410efdb022763a41726caa49ab26ec0444a8b0655159fe917663a1bd16ddf
   nodes/source_code/directory.yaml: 1558e53dbc01bb89e6e9c5ce3cb0260530e4d5cb30139376e4ca303612a3c550
   nodes/source_code/file.yaml: 61a5a724245ce5a2185d174c8abd7cdfe4e87413800bae340f25b3d041d5a6e1
   nodes/source_code/imported_symbol.yaml: c5ef53aea749796a422e99a86272d7ac599ece43efa7ad8bdf49353fa707f44d

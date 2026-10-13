@@ -84,7 +84,7 @@ properties:
     source: definition_type
     nullable: false
     mutable: false
-    description: "Definition type, the same across languages (e.g., Class, Method, Function, Struct, Interface, Enum, Trait, Lambda). Use language_type for the name the source language uses."
+    description: "Definition type, such as Class, Module, Method, Function, Struct, Interface, Enum, or Trait. Some indexes put a language-specific type here. To filter on a language-specific type, use language_type."
     selectivity: low
 
   language_type:
@@ -92,7 +92,7 @@ properties:
     source: language_type
     nullable: false
     mutable: false
-    description: "Definition type as the source language names it (e.g., Module, SingletonMethod, Record, Object). Equal to definition_type when the language has no more specific name."
+    description: "Definition type as the source language names it, such as Module, SingletonMethod, Record, or Object. If the language has no more specific name, the value is equal to definition_type."
     selectivity: low
 
   start_line:

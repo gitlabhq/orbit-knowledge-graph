@@ -274,8 +274,10 @@ stages:
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
       - match: '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
+        tag: { language_type: Constructor }
       - match: '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)'
         replace: '(__def (__defname @$N) (__method) $M $B)'
+        tag: { language_type: Constructor }
 
       # Types (after members)
       - match: '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))'
