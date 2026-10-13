@@ -701,7 +701,7 @@ fn bind_aggregation<M: OrbitQueryModel>(
                 }
                 Group::Property {
                     node,
-                    property,
+                    property: Box::new(property),
                     truncate,
                     alias,
                 }
@@ -1026,17 +1026,15 @@ fn check_query(query: &Query, mode: Mode) -> Result<()> {
             query.query_type,
             QueryType::Neighbors | QueryType::Hydration
         )
-    {
-        if let Some(node) = query
+        && let Some(node) = query
             .nodes
             .iter()
             .find(|node| !referenced.contains(&node.id))
-        {
-            return Err(QueryError::ReferenceError(format!(
-                "node \"{}\" is not referenced by any relationship or path",
-                node.alias
-            )));
-        }
+    {
+        return Err(QueryError::ReferenceError(format!(
+            "node \"{}\" is not referenced by any relationship or path",
+            node.alias
+        )));
     }
     Ok(())
 }

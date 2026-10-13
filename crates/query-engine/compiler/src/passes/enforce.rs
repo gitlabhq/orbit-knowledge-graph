@@ -150,10 +150,8 @@ fn enforce_lowered_return_with(
             .aggregation
             .groups
             .iter()
-            .filter_map(|group| {
-                matches!(group, crate::query::Group::Node { .. })
-                    .then(|| input.node(group.node()).alias.as_str())
-            })
+            .filter(|&group| matches!(group, crate::query::Group::Node { .. }))
+            .map(|group| input.node(group.node()).alias.as_str())
             .collect(),
         QueryType::Traversal | QueryType::Neighbors => {
             input.nodes.iter().map(|node| node.alias.as_str()).collect()

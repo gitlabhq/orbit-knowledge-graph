@@ -217,10 +217,8 @@ where
             .aggregation
             .groups
             .iter()
-            .filter_map(|group| {
-                matches!(group, crate::query::Group::Node { .. })
-                    .then(|| input.node(group.node()).alias.as_str())
-            })
+            .filter(|&group| matches!(group, crate::query::Group::Node { .. }))
+            .map(|group| input.node(group.node()).alias.as_str())
             .collect();
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());

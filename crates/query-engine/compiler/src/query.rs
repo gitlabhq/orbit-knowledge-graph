@@ -140,7 +140,7 @@ pub enum Group {
     },
     Property {
         node: NodeId,
-        property: Property,
+        property: Box<Property>,
         truncate: Option<TruncateUnit>,
         alias: String,
     },
