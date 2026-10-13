@@ -33,9 +33,19 @@ fn check_query(
 ) -> Result<()> {
     let mut error = None;
     visit_relations(&q.from, &mut |relation| {
-        if let TableRef::Scan { table, alias, .. } = relation
-            && let Some(columns) = model.table_path_columns(table)
-        {
+        if error.is_some() {
+            return;
+        }
+        if let TableRef::Scan { table, alias, .. } = relation {
+            if table.is_empty() {
+                return;
+            }
+            let Some(columns) = model.table_path_columns(table) else {
+                error = Some(QueryError::Security(format!(
+                    "post-check failed: unresolved table '{table}'"
+                )));
+                return;
+            };
             for column in columns {
                 let access_level = column
                     .entity
@@ -191,7 +201,6 @@ mod tests {
             let scalar = Expr::Scalar(Box::new(inner.clone()));
             let mut query = Query {
                 select: vec![SelectExpr::new(Expr::int(1), "result")],
-                from: TableRef::scan("constant_source", "outer"),
                 ..Default::default()
             };
             match position {
@@ -204,8 +213,8 @@ mod tests {
                 "join" => {
                     query.from = TableRef::join(
                         JoinType::Inner,
-                        query.from,
-                        TableRef::scan("constant_source", "other"),
+                        TableRef::subquery(Query::default(), "outer"),
+                        TableRef::subquery(Query::default(), "other"),
                         Expr::eq(scalar, Expr::int(1)),
                     )
                 }
@@ -213,7 +222,7 @@ mod tests {
                     query.where_clause = Some(Expr::InSelect {
                         expr: Box::new(scalar),
                         query: Box::new(Query {
-                            from: TableRef::scan("constant_source", "lookup"),
+                            from: TableRef::subquery(Query::default(), "lookup"),
                             ..Default::default()
                         }),
                     })
@@ -234,7 +243,7 @@ mod tests {
                     "outer_cte",
                     Query {
                         ctes: vec![Cte::new("inner_cte", inner)],
-                        from: TableRef::scan("inner_cte", "nested"),
+                        from: TableRef::cte("inner_cte", "nested"),
                         ..Default::default()
                     },
                 )),
@@ -516,19 +525,50 @@ mod tests {
     }
 
     #[test]
-    fn skips_non_gl_tables() {
+    fn skips_declared_ctes() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = Node::Query(Box::new(Query {
+            ctes: vec![crate::ast::Cte::new("path_cte", Query::default())],
             select: vec![SelectExpr {
                 expr: Expr::col("c", "id"),
                 alias: None,
             }],
-            from: TableRef::scan("path_cte", "c"),
+            from: TableRef::cte("path_cte", "c"),
             where_clause: None,
             ..Default::default()
         }));
         let ontology = project_ontology();
         assert!(check(&node, &ctx, &ontology).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_graph_tables() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for table in ["gl_unknown", "v42_gl_unknown"] {
+            let node = Node::Query(Box::new(Query {
+                from: TableRef::scan(table, "unknown"),
+                ..Default::default()
+            }));
+            let error = check(&node, &ctx, &Ontology::new()).unwrap_err();
+            assert!(error.to_string().contains(table));
+        }
+    }
+
+    #[test]
+    fn reports_first_invalid_scan() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let ontology = project_ontology().with_nodes(["MergeRequest"]);
+        let node = Node::Query(Box::new(Query {
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_project", "first"),
+                TableRef::scan("gl_merge_request", "second"),
+                Expr::lit(true),
+            ),
+            ..Default::default()
+        }));
+        let error = check(&node, &ctx, &ontology).unwrap_err();
+        assert!(error.to_string().contains("first.traversal_path"));
     }
 
     fn wrap_in_subquery(inner: Query) -> Node {
@@ -643,15 +683,11 @@ mod tests {
     }
 
     #[test]
-    fn accepts_subquery_wrapping_non_sensitive_table() {
+    fn accepts_subquery_wrapping_cte() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let inner = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("d", "value"),
-                alias: None,
-            }],
-            from: TableRef::scan("dedup_cte", "d"),
-            where_clause: None,
+            ctes: vec![crate::ast::Cte::new("dedup_cte", Query::default())],
+            from: TableRef::cte("dedup_cte", "d"),
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
@@ -739,7 +775,7 @@ mod tests {
                 expr: Expr::col("base", "node_id"),
                 alias: None,
             }],
-            from: TableRef::scan("base", "b"),
+            from: TableRef::cte("base", "b"),
             ..Default::default()
         }));
 
@@ -782,7 +818,7 @@ mod tests {
                 expr: Expr::col("base", "node_id"),
                 alias: None,
             }],
-            from: TableRef::scan("base", "b"),
+            from: TableRef::cte("base", "b"),
             ..Default::default()
         }));
 
