@@ -88,19 +88,34 @@ fn collected_rows(
         .collect()
 }
 
-async fn language_timings_for(files: &[(&str, &[u8])], max_files: usize) -> Vec<(String, u64)> {
+struct Timings {
+    languages: Vec<(String, u64)>,
+    slowest_paths: Vec<String>,
+}
+
+async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Limits) -> Timings {
     let mut options = options();
-    options.limits.max_files = max_files;
+    options.limits = limits;
     let sink = Arc::new(|_: &str, _: RecordBatch| Ok(()));
     let report = IndexFixture::new().run(files, options, sink).await.unwrap();
-    let mut timings: Vec<_> = report
+    let mut languages: Vec<_> = report
         .stats
         .language_timings
         .iter()
         .map(|timing| (timing.language.clone(), timing.file_count as u64))
         .collect();
-    timings.sort();
-    timings
+    languages.sort();
+    let mut slowest_paths: Vec<_> = report
+        .stats
+        .slowest_files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect();
+    slowest_paths.sort();
+    Timings {
+        languages,
+        slowest_paths,
+    }
 }
 
 #[tokio::test]
@@ -110,8 +125,9 @@ async fn language_timings_skip_excluded_and_binary_files() {
         ("root/vendor.min.js", b"function v(){}\n"),
         ("root/blob.js", b"function b(){}\0\0\0"),
     ];
-    let timings = language_timings_for(files, 0).await;
-    assert_eq!(timings, [("javascript".to_owned(), 1)]);
+    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+    assert_eq!(timings.slowest_paths, ["a.ts"]);
 }
 
 #[tokio::test]
@@ -121,8 +137,29 @@ async fn language_timings_exclude_files_beyond_max_files() {
         ("root/b.js", b"function b() {}\n"),
         ("root/c.js", b"function c() {}\n"),
     ];
-    let timings = language_timings_for(files, 1).await;
-    assert_eq!(timings, [("javascript".to_owned(), 1)]);
+    let limits = code_graph_incremental::Limits {
+        max_files: 1,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+    assert_eq!(timings.slowest_paths.len(), 1);
+    assert!(["a.js", "b.js", "c.js"].contains(&timings.slowest_paths[0].as_str()));
+}
+
+#[tokio::test]
+async fn language_timings_exclude_files_killed_by_the_parse_budget() {
+    let files: &[(&str, &[u8])] = &[
+        ("root/a.js", b"function a() {}\n"),
+        ("root/b.js", b"function b() {}\n"),
+    ];
+    let limits = code_graph_incremental::Limits {
+        file_parse_ms: 0,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert!(timings.languages.is_empty());
+    assert!(timings.slowest_paths.is_empty());
 }
 
 #[tokio::test]

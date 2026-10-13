@@ -5,7 +5,7 @@ use super::super::pipeline::IndexingReport;
 use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
 use code_graph_incremental::pipeline::FileTiming;
-use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
+use code_graph_incremental::{Envelope, Error, Killed, Scalar, export::ExportConfig, templates};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -140,7 +140,7 @@ pub(in crate::modules::code) fn run(
             });
         }
     };
-    stats.slowest_files = file_timings(&report.files);
+    stats.slowest_files = file_timings(&report.files, &report.skipped);
     stats.language_timings = language_timings(&stats.slowest_files);
     stats.slowest_files.truncate(SLOWEST_FILES);
     stats.phase_timings.total_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -179,16 +179,27 @@ pub(in crate::modules::code) fn run(
 
 const SLOWEST_FILES: usize = 100;
 
-fn file_timings(timings: &[FileTiming]) -> Vec<FileTimingEntry> {
-    // Unparsed placeholder trees (excluded, binary, over max_files) still get
-    // resolve timings; only paths with a parse entry are real files.
+fn file_timings(timings: &[FileTiming], skipped: &[Killed]) -> Vec<FileTimingEntry> {
+    // Unparsed placeholder trees (excluded, binary, over max_files, killed in a
+    // per-file phase) must not count. Kept paths have a parse entry and were not
+    // killed by the parse, rewrite or link budgets. Resolve-budget kills were
+    // parsed, so they stay.
+    let killed_before_resolve: HashSet<&str> = skipped
+        .iter()
+        .filter(|killed| matches!(killed.label, "tree-sitter" | "rewrite" | "link"))
+        .map(|killed| killed.path.as_str())
+        .collect();
     let parsed: HashSet<&str> = timings
         .iter()
         .filter(|timing| timing.phase != "resolve")
         .map(|timing| timing.path.as_str())
+        .filter(|path| !killed_before_resolve.contains(path))
         .collect();
     let mut by_path: HashMap<&str, FileTimingEntry> = HashMap::new();
-    for timing in timings.iter().filter(|t| parsed.contains(t.path.as_str())) {
+    for timing in timings
+        .iter()
+        .filter(|timing| parsed.contains(timing.path.as_str()))
+    {
         let ms = timing.elapsed.as_secs_f64() * 1000.0;
         let file = by_path
             .entry(&timing.path)
