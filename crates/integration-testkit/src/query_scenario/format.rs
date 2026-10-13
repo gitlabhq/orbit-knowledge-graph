@@ -9,6 +9,8 @@ use crate::scenario::Seed;
 #[serde(deny_unknown_fields)]
 pub struct QueryScenario {
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub config: ScenarioConfig,

@@ -286,7 +286,26 @@ data_correctness/
         └── admin_aggregation_compiles.yaml
 ```
 
-Each YAML file contains one `QueryScenario` document.
+Each YAML file contains one `QueryScenario` document, or a `cases` list of them.
+In a `cases` file, every other top-level key is a default for each case. A case
+key replaces the default, and nested maps such as `config` merge key by key.
+A case reports failures as `<file>/<name>`, or `<file>/<index>` when it has no
+`name`.
+
+```yaml
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+cases:
+  - name: not_in
+    query:
+      gql: MATCH (u:User {id: 1}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 1 }
+  - name: admin_not_in
+    config: { security: admin_user }
+    query:
+      gql: MATCH (u:User {id: 2}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 0 }
+```
 
 A scenario can set `config.ontology_overlay` to a name under
 `config/seeds/overlays/`. The overlay changes the query catalog for that scenario.
@@ -451,8 +470,8 @@ mise test:integration:data
 SCENARIO_FILTER=search mise test:integration:data
 ```
 
-The harness finds each scenario file. `SCENARIO_FILTER` keeps the files whose path
-contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
+The harness finds each scenario file and case. `SCENARIO_FILTER` keeps the cases whose
+name contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
 parses every file with no Docker.
 
 ### Example

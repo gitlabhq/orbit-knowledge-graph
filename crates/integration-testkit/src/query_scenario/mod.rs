@@ -46,13 +46,19 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        read_scenario(file);
+        scenario::read_cases::<QueryScenario>(file);
     }
 }
 
-fn read_scenario(file: &Path) -> QueryScenario {
-    let raw = std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-    orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("{}: {e}", file.display()))
+fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
+    let name = scenario::scenario_name(root, file);
+    scenario::read_cases(file)
+        .into_iter()
+        .map(|(case, scenario)| {
+            let name = case.map_or_else(|| name.clone(), |case| format!("{name}/{case}"));
+            (name, scenario)
+        })
+        .collect()
 }
 
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
@@ -78,8 +84,12 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let mut files = Vec::new();
     scenario::discover(root, &mut files);
     files.sort();
+    let mut scenarios: Vec<_> = files
+        .iter()
+        .flat_map(|file| read_scenarios(root, file))
+        .collect();
     assert!(
-        !files.is_empty(),
+        !scenarios.is_empty(),
         "no query scenario files found under {}",
         root.display()
     );
@@ -87,16 +97,16 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
         let filter = filter.trim();
         if !filter.is_empty() {
-            files.retain(|f| scenario::scenario_name(root, f).contains(filter));
+            scenarios.retain(|(name, _)| name.contains(filter));
             assert!(
-                !files.is_empty(),
+                !scenarios.is_empty(),
                 "SCENARIO_FILTER='{filter}' matched no query scenarios under {}",
                 root.display()
             );
         }
     }
 
-    scenario::assert_distinct_database_names(root, &files);
+    scenario::assert_distinct_database_names(scenarios.iter().map(|(name, _)| name.clone()));
 
     let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
         .ok()
@@ -106,8 +116,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let ctx = Arc::new(ctx.clone());
 
     let mut handles = Vec::new();
-    for file in files {
-        let name = scenario::scenario_name(root, &file);
+    for (name, scenario) in scenarios {
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
@@ -116,7 +125,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, &file, &task_name, &presets).await;
+            run_scenario(&ctx, scenario, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -125,8 +134,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path) {
-    let scenario = read_scenario(file);
+async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
     let cfg = &scenario.config;
 
     let needs_fork = !cfg.extra_seed.is_empty();

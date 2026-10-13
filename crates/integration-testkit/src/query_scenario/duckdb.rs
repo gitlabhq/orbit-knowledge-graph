@@ -6,9 +6,9 @@ use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_engine::compiler::{Frontend, compile_local, generate_local_ddl};
 
-use super::{assert_response, format_output, read_scenario, seed_preset};
+use super::{assert_response, format_output, read_scenarios, seed_preset};
 use crate::scenario::seed::{group_by_columns, values_insert};
-use crate::scenario::{Seed, discover, scenario_name};
+use crate::scenario::{Seed, discover};
 
 pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     let root = Path::new(root);
@@ -18,12 +18,10 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
     discover(root, &mut files);
     files.sort();
     let mut ran = 0;
-    for file in files {
-        let scenario = read_scenario(&file);
+    for (name, scenario) in files.iter().flat_map(|file| read_scenarios(root, file)) {
         if !scenario.config.duckdb {
             continue;
         }
-        let name = scenario_name(root, &file);
         let directory = tempfile::tempdir().expect("temporary DuckDB directory");
         let database = DuckDbClient::open(&directory.path().join("scenario.duckdb"))
             .unwrap_or_else(|e| panic!("{name}: open DuckDB: {e}"));
