@@ -1,7 +1,7 @@
 *** Settings ***
 Documentation       type(r) on a relationship variable, end to end through Rails. Seeds a public
-...                 project in the shared namespace with a merge request that closes an issue in a
-...                 private project under another top-level group, then checks that a type(r) filter returns the same
+...                 project with a merge request that closes an issue in a private project under
+...                 another top-level group, then checks that a type(r) filter returns the same
 ...                 edge as the typed pattern, that the gql format adds a type column in RETURN
 ...                 order sorted by type, that raw and llm list the edge type, that NOT type(r)
 ...                 removes the closing edge, that a variable-length type(r) and type(r) inside a
@@ -70,9 +70,11 @@ Type Filter Does Not Reveal An Edge To A User Without Access
 Seed Relationship Type Fixture
     ${suffix}=    Random Suffix
     Start Indexing Budget    400
+    ${public_group}=    Create Group    e2e-rt-pub-${suffix}
     ${private_group}=    Create Group    e2e-rt-priv-${suffix}
+    Enable Orbit    ${public_group["id"]}
     Enable Orbit    ${private_group["id"]}
-    ${public_project}=    Create Project    e2e-rt-prj-pub-${suffix}    ${SHARED_NAMESPACE_ID}
+    ${public_project}=    Create Project    e2e-rt-prj-pub-${suffix}    ${public_group["id"]}
     ${private_project}=    Create Project    e2e-rt-prj-priv-${suffix}    ${private_group["id"]}
     ...    visibility=private
     ${issue}=    Create Issue    ${private_project["id"]}    e2e-rt-issue-${suffix}
@@ -81,7 +83,7 @@ Seed Relationship Type Fixture
     ${victim}=    Create User    e2e-rt-${suffix}-victim
     ${root_headers}=    Root Auth Headers
     ${victim_pat}=    Issue PAT For User    ${root_headers}    ${victim["id"]}
-    Add Group Member    ${SHARED_NAMESPACE_ID}    ${victim["id"]}    20
+    Add Group Member    ${public_group["id"]}    ${victim["id"]}    20
     Set Suite Variable    ${RT_MR_ID}    ${mr["id"]}
     Set Suite Variable    ${RT_ISSUE_ID}    ${issue["id"]}
     Set Suite Variable    ${RT_VICTIM_PAT}    ${victim_pat}
