@@ -11,6 +11,7 @@
 //! - `if(cond, then, else)` is rewritten to `CASE WHEN ... THEN ... ELSE ... END`.
 //! - Recursive CTE bodies have LIMIT/OFFSET stripped (DuckDB restriction).
 
+use ontology::constants::{BLOCK_NUMBER_COLUMN, VERSION_COLUMN};
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{
@@ -187,12 +188,18 @@ impl Context {
             });
         }
 
-        // Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB
-        // has no _version column and no LIMIT 1 BY).
+        // Filter out the ClickHouse dedup tie-break columns: DuckDB has no
+        // _version or _block_number column and no LIMIT 1 BY.
         let orders: Vec<_> = q
             .order_by
             .iter()
-            .filter(|o| !matches!(&o.expr, Expr::Column { column, .. } if column == "_version"))
+            .filter(|o| {
+                !matches!(
+                    &o.expr,
+                    Expr::Column { column, .. }
+                        if column == VERSION_COLUMN || column == BLOCK_NUMBER_COLUMN
+                )
+            })
             .map(|o| {
                 let dir = if o.desc { "DESC" } else { "ASC" };
                 format!("{} {dir}", self.emit_expr(&o.expr))

@@ -133,7 +133,7 @@ properties:
     type: boolean
     source: created_by_duo
     nullable: false
-    description: "Conservative count of merge requests created by a Duo workflow. Private messaging sessions and deleted or unreplicated workflows are excluded."
+    description: "True when a Duo workflow created this merge request. Conservative: private messaging sessions and deleted or unreplicated workflows are excluded."
 
   merged_commit_id:
     type: int64

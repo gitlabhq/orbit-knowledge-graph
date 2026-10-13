@@ -1611,6 +1611,28 @@ mod tests {
     }
 
     #[test]
+    fn local_dedup_has_no_clickhouse_only_columns() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "filters": {"name": "run"}},
+                {"id": "callee", "entity": "Definition", "filters": {"name": "helper"}}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "limit": 10
+        }"#;
+
+        let local = compile_local(query, Frontend::JsonDsl, &ONTOLOGY)
+            .expect("should compile")
+            .base
+            .render();
+        assert!(
+            !local.contains("_block_number") && !local.contains("_version"),
+            "DuckDB graph tables have neither column, got:\n{local}"
+        );
+    }
+
+    #[test]
     fn fk_star_joined_nodes_use_candidate_ctes() {
         let query = r#"{
             "query_type": "traversal",

@@ -283,7 +283,7 @@ It applies no deleted filter, so a link deletion re-extracts.
 
 A source can declare `row_key` when delete tombstones keep only key columns. The parent ID then comes from the row's earlier versions.
 A source can also declare `also_changed_by`: another child table whose changed rows count as changes to the source rows that reference them.
-Each cause is its own `UNION ALL` branch, so every branch keeps the minmax index.
+Each cause is its own `UNION ALL` branch, so every branch stays prunable.
 For `MergeRequest` that table holds the Duo workflows, so a workflow that replicates or changes after its link still re-extracts the merge request.
 Only namespaced authored extracts support this.
 
@@ -296,9 +296,10 @@ A workflow in another root namespace than the merge request is never seen when t
 
 A re-extracted parent keeps its `_version`, so the target holds two rows with the same version and key.
 `ReplacingMergeTree` merges and `FINAL` keep the last inserted row, but unmerged parts may still hold both.
-Graph tables set `enable_block_number_column`.
+ClickHouse graph tables set `enable_block_number_column`.
 The query compiler and stale-edge reconciliation add `_block_number DESC` after `_version DESC` in their `LIMIT 1 BY` dedup.
 The later insert then wins before parts merge.
+The local DuckDB graph has no such column, so its codegen strips it along with `_version`.
 
 The Arrow `RecordBatch` schema is the runtime contract between extraction and transformation.
 DataFusion registers each extracted batch with its own schema, so planning does not duplicate a
