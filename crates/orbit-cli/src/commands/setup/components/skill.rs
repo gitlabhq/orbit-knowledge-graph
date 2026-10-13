@@ -4,13 +4,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::json;
-use super::{Installer, Report, backup_once, file_mentions, remove_empty_parents, write_file};
+use super::{
+    Installer, Report, backup_once, backup_path, file_mentions, remove_empty_parents, write_file,
+};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_files};
 
 /// Written into every directory this component installs. Content cannot identify it, because the
 /// full skill depends on the instance.
+const MANIFEST: &str = "SKILL.md";
 const MARKER_FILE: &str = ".orbit-managed";
 const MARKER_CONTENTS: &str =
     "Installed by `orbit setup`; `orbit uninstall` removes this directory.\n";
@@ -356,6 +359,7 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
     if path.join(MARKER_FILE).exists() {
         remove_path(path)?;
     } else if has_legacy_manifest(path) {
+        retire_legacy_manifest(path, label, report)?;
         let mut directories = BTreeSet::new();
         for (relative, contents) in embedded_files() {
             let file = path.join(&relative);
@@ -386,6 +390,30 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
     }
     remove_empty_parents(path, &target.root()?);
     report.note(label, "legacy skill removed");
+    Ok(())
+}
+
+/// An edited manifest must stop being a skill, or the agent would list `orbit-cli` next to
+/// `orbit`. The unedited one is removed with the other shipped files.
+fn retire_legacy_manifest(dir: &Path, label: &str, report: &mut Report) -> Result<()> {
+    let manifest = dir.join(MANIFEST);
+    let shipped = embedded_files()
+        .into_iter()
+        .find(|(relative, _)| relative == MANIFEST)
+        .map(|(_, contents)| contents);
+    let Ok(current) = std::fs::read(&manifest) else {
+        return Ok(());
+    };
+    if shipped.is_some_and(|shipped| shipped == current) {
+        return Ok(());
+    }
+    let backup = backup_path(&manifest);
+    std::fs::rename(&manifest, &backup)
+        .with_context(|| format!("failed to rename {}", manifest.display()))?;
+    report.note(
+        label,
+        format!("{MANIFEST} edited; kept as {MANIFEST}.orbit-backup"),
+    );
     Ok(())
 }
 

@@ -875,6 +875,30 @@ mod tests {
     }
 
     #[test]
+    fn an_edited_legacy_manifest_is_backed_up_so_only_one_skill_remains() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        write_legacy_skill(&legacy);
+        std::fs::write(
+            legacy.join("SKILL.md"),
+            "---\nname: orbit-cli\n---\nold release\n",
+        )
+        .unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!legacy.join("SKILL.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("SKILL.md.orbit-backup")).unwrap(),
+            "---\nname: orbit-cli\n---\nold release\n"
+        );
+        assert_eq!(
+            skill_manifest_name(&dir.path().join(".agents/skills/orbit")),
+            "orbit"
+        );
+    }
+
+    #[test]
     fn uninstall_removes_allow_rules_written_under_either_launcher() {
         let dir = tempfile::tempdir().unwrap();
         let settings = dir.path().join(".claude/settings.json");

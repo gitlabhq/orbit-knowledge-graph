@@ -241,7 +241,8 @@ Name agents to target only those. It removes what `orbit setup` wrote and leaves
 the rest of each file untouched. Setup marks the skill directory it writes with a `.orbit-managed` file, and
 uninstall removes only directories that carry it. It also removes the `orbit-cli`
 skill that earlier releases installed, but only its unchanged files when
-that directory has no marker. Other files you edited after setup are kept, and
+that directory has no marker. An edited `SKILL.md` there is renamed to
+`SKILL.md.orbit-backup`, so the old skill stops loading. Other files you edited after setup are kept, and
 so are their backups. A backup goes away once its file is back to the original.
 `--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
