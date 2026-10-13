@@ -41,11 +41,12 @@ fn check_query(
                     .entity
                     .and_then(|entity| model.query_authorization().required_access_level(entity))
                     .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
+                let eligible_paths = ctx.paths_at_least(access_level);
                 if !has_valid_path_filter(
                     q.where_clause.as_ref(),
                     alias,
                     &column.name,
-                    &ctx.paths_at_least(access_level),
+                    &eligible_paths,
                 ) {
                     error = Some(QueryError::Security(format!(
                         "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
