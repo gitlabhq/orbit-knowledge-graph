@@ -454,6 +454,7 @@ impl CodeIndexer {
         };
         let queued = Instant::now();
         let permit = tokio::select! {
+            biased;
             permit = tokio::time::timeout(within, acquire(lane, "indexing")) => permit,
             () = lock_lost(cancel) => {
                 return Err(IndexError::NoLane {
