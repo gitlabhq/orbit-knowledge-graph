@@ -1,16 +1,8 @@
 description: Path finding - shortest User -> User within 3 hops
 
 query:
-  json: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {"id": "u1", "entity": "User", "node_ids": [1]},
-        {"id": "u2", "entity": "User", "node_ids": [3]}
-      ],
-      "path": {"type": "shortest", "from": "u1", "to": "u2", "max_depth": 3,
-               "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
-    }
+  gql: |
+    MATCH p = ANY SHORTEST (u1:User {id: 1})-[:MEMBER_OF|CONTAINS|IN_PROJECT*1..3]->(u2:User {id: 3}) RETURN p
 
 expect:
   compile_only: true

@@ -1,8 +1,6 @@
 cases:
   - name: Uncovered endpoint filters join current node rows
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","filters":{"full_path":"gitlab-org/orbit"},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/orbit'})
         RETURN mr.title, p.name
@@ -16,8 +14,6 @@ cases:
 
   - name: Filtered aggregation endpoints use exact reusable keys
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
       gql: |
         MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest {id: 2000})
         RETURN count(mr) AS n
@@ -34,8 +30,6 @@ cases:
 
   - name: FK holder filters use the current holder row
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"},"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
       gql: |
         MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
         RETURN mr.title, p.name
@@ -54,8 +48,6 @@ cases:
 
   - name: Uncovered numeric filters join current node rows
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","filters":{"star_count":1},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {star_count: 1})
         RETURN mr.title, p.name
@@ -69,8 +61,6 @@ cases:
 
   - name: Low-cardinality endpoint filters do not create candidate relations
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"definition_type":"function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
       gql: |
         MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {definition_type: 'function'})-[:CALLS]->(c:Definition)
         RETURN a.id, b.id, c.id

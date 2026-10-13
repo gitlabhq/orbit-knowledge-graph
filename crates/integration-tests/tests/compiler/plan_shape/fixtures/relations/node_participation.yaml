@@ -1,8 +1,6 @@
 cases:
   - name: Stored aggregation uses exact keys for an uncovered endpoint filter
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"title":{"starts_with":"Fix"}}}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
       gql: |
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
         WHERE mr.title STARTS WITH 'Fix'
@@ -19,8 +17,6 @@ cases:
 
   - name: Endpoint IDs and ranges remain visible on the edge relation
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","node_ids":[1000,1001],"id_range":{"start":1000,"end":1001},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
       gql: |
         MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
         WHERE p.id IN [1000, 1001] AND p.id >= 1000 AND p.id <= 1001
@@ -36,8 +32,6 @@ cases:
 
   - name: Nullable aggregate properties retain current node rows and arguments
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr.merged_at","as":"n"}]}
       gql: |
         MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)
         RETURN count(mr.merged_at) AS n

@@ -163,8 +163,8 @@ mod tests {
         let comment = with_correlation("req-abc-123", || {
             log_comment_base(
                 42,
-                r#"{"query_type":"traversal"}"#,
-                Frontend::JsonDsl,
+                "MATCH (u:User) RETURN u",
+                Frontend::Gql,
                 *orbit_migrations::version::SCHEMA_VERSION,
             )
         });
@@ -172,8 +172,8 @@ mod tests {
 
         assert_eq!(p["correlation_id"], "req-abc-123");
         assert_eq!(p["user_id"], 42);
-        assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
-        assert_eq!(p["language"], "json");
+        assert_eq!(p["query"], "MATCH (u:User) RETURN u");
+        assert_eq!(p["language"], "gql");
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
         assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
         assert_eq!(

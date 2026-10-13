@@ -14,8 +14,6 @@ cases:
   - name: text_prefix_on_ungrouped_node_rejected
     description: A text prefix filter requires grouping by its node
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001],"filters":{"title":{"starts_with":"Fix a"}}}],"aggregations":[{"count":"w","as":"n"}]}
       gql: |
         MATCH (w:WorkItem {id: 4001}) WHERE w.title STARTS WITH 'Fix a' RETURN count(w) AS n
     expect:

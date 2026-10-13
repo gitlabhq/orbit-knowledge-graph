@@ -1,16 +1,6 @@
 description: Wildcard relationship infers all User-MergeRequest edge kinds
 
 query:
-  json: |
-    {
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
-        ],
-        "relationships": [{"type": "*", "from": "u", "to": "mr"}],
-        "limit": 20
-    }
   gql: |
     MATCH (u:User {id: 1})-->(mr:MergeRequest) RETURN u.username, mr.title, mr.state LIMIT 20
 

@@ -1,5 +1,4 @@
-// Shared validation enforces these limits for both JSON and GQL queries.
-// build.rs checks matching JSON schema limits and includes this file, so keep it independent of other crate modules.
+// Shared validation enforces these limits for every query frontend.
 
 pub const MAX_HOPS_CAP: u32 = 3;
 pub const MAX_DEPTH_CAP: u32 = 3;

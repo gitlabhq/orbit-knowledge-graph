@@ -2,8 +2,6 @@ cases:
   - name: Equality on a text-indexed string adds a lower-cased twin for the text index
 
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":"Ship feature E"},"columns":["title"]}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {title: 'Ship feature E'}) RETURN mr.title LIMIT 10
 
@@ -20,8 +18,6 @@ cases:
   - name: Membership on a text-indexed string adds a lower-cased twin for the text index
 
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"in":["Ship feature E","Ship feature F"]}},"columns":["title"]}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.title IN ['Ship feature E', 'Ship feature F'] RETURN mr.title LIMIT 10
 
@@ -38,8 +34,6 @@ cases:
   - name: Equality on a property without a text index stays a plain comparison
 
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"},"columns":["title"]}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {state: 'merged'}) RETURN mr.title LIMIT 10
 
