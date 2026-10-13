@@ -1,0 +1,4 @@
+overrides:
+  - files: ["*.yaml", "*.yml"]
+    options:
+      printWidth: 1000

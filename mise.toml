@@ -493,6 +493,18 @@ description = "Lint the prose LLMs read: prompts, skills, agent guides, template
 run = "uv run --quiet scripts/linting/prose_lint_test.py"
 description = "Run the prose linter's unit tests"
 
+[tasks."lint:yaml"]
+run = "uv run --quiet scripts/linting/yaml_lint.py"
+description = "Check the layout of the YAML test suites with Prettier and the blank-line rule (pass files to scope)"
+
+[tasks."lint:yaml:fix"]
+run = "uv run --quiet scripts/linting/yaml_lint.py --fix"
+description = "Fix the layout of the YAML test suites"
+
+[tasks."lint:yaml:test"]
+run = "uv run --quiet scripts/linting/yaml_lint_test.py"
+description = "Run the YAML layout linter's unit tests"
+
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
