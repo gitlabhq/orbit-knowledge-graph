@@ -18,7 +18,7 @@ use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use super::setup::spec;
-use crate::database::{manifest, schema};
+use crate::database::{LocalGraphReader, RevisionWriter, manifest};
 use crate::tui;
 use crate::workspace::{self, GitInfo};
 
@@ -289,7 +289,7 @@ impl std::fmt::Display for NoRepositoryFound {
 impl std::error::Error for NoRepositoryFound {}
 
 fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
-    let batches = crate::database::open_graph(db)
+    let batches = LocalGraphReader::open(db)
         .ok()?
         .query_arrow_json(
             "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
@@ -572,39 +572,29 @@ impl LocalIndexer {
             manifest::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
         })?;
         let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
-        let _revision_lock = crate::database::lock_database(&db_path)?;
-        let revision = format!("{}:{}", git.project_id, git.commit_sha);
-        if db_path.exists() {
-            let client = duckdb_client::DuckDbClient::open_read_only(&db_path)?;
-            if let Some(owner) = schema::stored_meta(&client, "revision")? {
-                anyhow::ensure!(
-                    owner == revision,
-                    "{} belongs to another checkout revision; choose a different --db path",
-                    db_path.display()
-                );
-            }
-        }
-        schema::ensure_graph_schema(&db_path, LOCAL_DDL)?;
-        {
-            let client = duckdb_client::DuckDbClient::open(&db_path)?;
-            client.execute(
-                "INSERT INTO _orbit_meta (key, value) VALUES ('revision', ?1) ON CONFLICT DO NOTHING",
-                &[revision.into()],
-            )?;
-        }
+        let writer = Arc::new(std::sync::Mutex::new(RevisionWriter::open(
+            &db_path, &git, LOCAL_DDL,
+        )?));
         let key = git.repo_path.to_string_lossy().to_string();
         info!(
             "Indexing repository at: {key} (branch: {}, commit: {})",
             git.branch,
             git.short_sha()
         );
-        self.record_status(&git, manifest::RepoStatus::Indexing, None, &db_path)?;
+        manifest::record_status(
+            &self.manifest_path,
+            &git,
+            manifest::RepoStatus::Indexing,
+            None,
+            &db_path,
+        )?;
 
         let mut pipeline_config = self.pipeline_config.clone();
         pipeline_config.progress = reporter.repository_started(&git);
-        let result =
-            index_repo(&git, &db_path, &self.ontology, pipeline_config).inspect_err(|error| {
-                let recorded = self.record_status(
+        let result = index_repo(&git, &db_path, &writer, &self.ontology, pipeline_config)
+            .inspect_err(|error| {
+                let recorded = manifest::record_status(
+                    &self.manifest_path,
                     &git,
                     manifest::RepoStatus::Error,
                     Some(&error.to_string()),
@@ -614,33 +604,19 @@ impl LocalIndexer {
                     tracing::warn!("failed to record error status in manifest: {manifest_error}");
                 }
             })?;
-        self.record_status(&git, manifest::RepoStatus::Indexed, None, &db_path)?;
+        manifest::record_status(
+            &self.manifest_path,
+            &git,
+            manifest::RepoStatus::Indexed,
+            None,
+            &db_path,
+        )?;
         Ok(build_index_output(
             &repository_name(&git),
             &key,
             &result,
             self.show_stats,
         ))
-    }
-
-    fn record_status(
-        &self,
-        git: &GitInfo,
-        status: manifest::RepoStatus,
-        error: Option<&str>,
-        db_path: &Path,
-    ) -> Result<()> {
-        let _lock = crate::database::lock_database(&self.manifest_path)?;
-        let client = manifest::open_manifest(&self.manifest_path)?;
-        manifest::set_status(
-            &client,
-            &git.repo_path.to_string_lossy(),
-            git.project_id,
-            status,
-            error,
-            Some(git),
-            Some(db_path),
-        )
     }
 }
 
@@ -656,6 +632,7 @@ fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> 
 fn index_repo(
     git: &workspace::GitInfo,
     db_path: &std::path::Path,
+    writer: &Arc<std::sync::Mutex<RevisionWriter>>,
     ontology: &Ontology,
     pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
@@ -674,10 +651,7 @@ fn index_repo(
             .context("failed to walk repository files")?,
     );
 
-    let client =
-        duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
-    client.execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])?;
-    clear_revision(&client, ontology)?;
+    writer.lock().unwrap().clear(ontology)?;
 
     let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
         std::sync::Arc::new(duckdb_client::DuckDbConverter {
@@ -686,13 +660,13 @@ fn index_repo(
             commit_sha: git.commit_sha.clone(),
             ontology: std::sync::Arc::new(ontology.clone()),
         });
-    let client = std::sync::Mutex::new(client);
+    let batch_writer = Arc::clone(writer);
     let on_batch: std::sync::Arc<code_graph::v2::OnBatch> = std::sync::Arc::new(
         move |table: &str, batch: arrow::record_batch::RecordBatch| {
             if batch.num_rows() == 0 {
                 return Ok(());
             }
-            client
+            batch_writer
                 .lock()
                 .unwrap()
                 .insert_batch(table, &batch)
@@ -710,9 +684,7 @@ fn index_repo(
         on_batch,
     );
     if cancel.is_cancelled() {
-        let client = duckdb_client::DuckDbClient::open(db_path)
-            .context("failed to open DuckDB to discard a cancelled run")?;
-        clear_revision(&client, ontology)?;
+        writer.lock().unwrap().clear(ontology)?;
         return Err(tui::cancelled("indexing cancelled"));
     }
 
@@ -723,11 +695,7 @@ fn index_repo(
         anyhow::bail!(reason);
     }
 
-    let client = duckdb_client::DuckDbClient::open(db_path)?;
-    client.execute(
-        "INSERT INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",
-        &[git.commit_sha.clone().into()],
-    )?;
+    writer.lock().unwrap().complete(&git.commit_sha)?;
     refresh_git_index(&git.repo_path);
 
     Ok(IndexRunResult {
@@ -748,30 +716,6 @@ fn index_repo(
         language_timings: v2_result.stats.language_timings,
         phase_timings: v2_result.stats.phase_timings,
     })
-}
-
-fn clear_revision(client: &duckdb_client::DuckDbClient, ontology: &Ontology) -> Result<()> {
-    let mut tables: Vec<&str> = ontology
-        .local_entity_names()
-        .iter()
-        .map(|name| {
-            ontology
-                .get_node(name)
-                .expect("local entity must exist")
-                .destination_table
-                .as_str()
-        })
-        .collect();
-    tables.push(
-        ontology
-            .local_edge_table_name()
-            .context("local_db.edge_table.name must be configured")?,
-    );
-
-    client
-        .delete_all_data(&tables)
-        .context("failed to clear revision data")?;
-    Ok(())
 }
 
 fn build_index_output(

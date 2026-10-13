@@ -1,8 +1,7 @@
-use crate::database::schema;
+use crate::database::manifest;
 use crate::sql_format::{self, Format};
 use crate::workspace;
-use anyhow::{Context, Result};
-use arrow::array::RecordBatch;
+use anyhow::Result;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -29,7 +28,7 @@ pub fn run(format: Format, db: Option<PathBuf>) -> Result<()> {
 }
 
 fn run_to<W: Write>(format: Format, db_path: &Path, out: W) -> Result<()> {
-    let batches = load_manifest(db_path)?;
+    let batches = manifest::read(db_path, MANIFEST_QUERY)?;
     // An empty table render is noise for humans, but structured formats
     // must stay parseable on empty input (`orbit list -F json | jq`), so
     // only the table view suppresses the writers.
@@ -37,27 +36,6 @@ fn run_to<W: Write>(format: Format, db_path: &Path, out: W) -> Result<()> {
         return Ok(());
     }
     sql_format::write(out, format, &batches)
-}
-
-fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
-    // Unlike `sql`/`schema`, a missing graph is a normal state for `list`,
-    // not an error. `try_exists` so an unreadable path still errors instead
-    // of reading as empty.
-    let present = db_path
-        .try_exists()
-        .with_context(|| format!("failed to check {}", db_path.display()))?;
-    if !present {
-        return Ok(Vec::new());
-    }
-    let _lock = crate::database::lock_database(db_path)?;
-    let client = duckdb_client::DuckDbClient::open_read_only(db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
-    if !schema::table_exists(&client, "_orbit_manifest")? {
-        return Ok(Vec::new());
-    }
-    client
-        .query_arrow(MANIFEST_QUERY)
-        .context("failed to read _orbit_manifest")
 }
 
 #[cfg(test)]

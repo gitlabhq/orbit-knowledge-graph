@@ -1,4 +1,4 @@
-use crate::database::{open_graph, schema};
+use crate::database::{LocalGraphReader, schema};
 use crate::sql_format::{self, Format};
 use crate::workspace;
 use anyhow::{Context, Result};
@@ -49,7 +49,7 @@ pub fn run(
         (None, Some(git)) => Some(workspace::resolve_db_path(None, git)?),
         (db, _) => db,
     };
-    let client = open_graph(db)?;
+    let client = LocalGraphReader::open(db)?;
     if let Some(git) = git {
         let expected = format!("{}:{}", git.project_id, git.commit_sha);
         anyhow::ensure!(

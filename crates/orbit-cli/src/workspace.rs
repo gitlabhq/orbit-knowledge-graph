@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use crate::database::{LocalGraphReader, open_graph, schema::graph_lacks_commit};
+use crate::database::{LocalGraphReader, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
@@ -152,7 +152,7 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
             );
         }
     }
-    let client = open_graph(Some(db_path))?;
+    let client = LocalGraphReader::open(Some(db_path))?;
     Ok(IndexedRepo { git, client })
 }
 

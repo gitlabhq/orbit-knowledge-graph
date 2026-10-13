@@ -2,6 +2,8 @@ mod locks;
 pub mod manifest;
 mod reader;
 pub mod schema;
+mod writer;
 
-pub use locks::{lock_database, read_lock_database};
-pub use reader::{LocalGraphReader, open_graph};
+use locks::{lock_database, read_lock_database};
+pub use reader::LocalGraphReader;
+pub use writer::RevisionWriter;

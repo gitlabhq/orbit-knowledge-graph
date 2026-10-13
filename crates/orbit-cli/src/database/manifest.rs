@@ -18,7 +18,45 @@ pub enum RepoStatus {
     Error,
 }
 
-pub fn set_status(
+pub fn record_status(
+    path: &Path,
+    git: &GitInfo,
+    status: RepoStatus,
+    error: Option<&str>,
+    database: &Path,
+) -> Result<()> {
+    let _lock = lock_database(path)?;
+    let client = open_manifest(path)?;
+    set_status(
+        &client,
+        &git.repo_path.to_string_lossy(),
+        git.project_id,
+        status,
+        error,
+        Some(git),
+        Some(database),
+    )
+}
+
+pub fn read(path: &Path, query: &str) -> Result<Vec<arrow::record_batch::RecordBatch>> {
+    if !path
+        .try_exists()
+        .with_context(|| format!("failed to check {}", path.display()))?
+    {
+        return Ok(Vec::new());
+    }
+    let _lock = lock_database(path)?;
+    let client = DuckDbClient::open_read_only(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    if !super::schema::table_exists(&client, "_orbit_manifest")? {
+        return Ok(Vec::new());
+    }
+    client
+        .query_arrow(query)
+        .context("failed to read _orbit_manifest")
+}
+
+fn set_status(
     client: &DuckDbClient,
     repo_path: &str,
     project_id: i64,
@@ -89,7 +127,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     }
 }
 
-pub fn open_manifest(path: &Path) -> Result<DuckDbClient> {
+fn open_manifest(path: &Path) -> Result<DuckDbClient> {
     let client = DuckDbClient::open(path)?;
     client.initialize_schema(MANIFEST_DDL)?;
     Ok(client)

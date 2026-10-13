@@ -953,7 +953,7 @@ async fn dispatch(
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
-    let client = database::open_graph(db)?;
+    let client = database::LocalGraphReader::open(db)?;
 
     let batches = if tables.is_empty() {
         sql::query(&client, &sql::schema_introspection_sql())?
