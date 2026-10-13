@@ -4,8 +4,8 @@ use std::sync::Arc;
 use super::super::pipeline::IndexingReport;
 use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
-use code_graph_incremental::pipeline::FileTiming;
-use code_graph_incremental::{Envelope, Error, Killed, Scalar, export::ExportConfig, templates};
+use code_graph_incremental::pipeline::FileStats;
+use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -140,7 +140,7 @@ pub(in crate::modules::code) fn run(
             });
         }
     };
-    stats.slowest_files = file_timings(&report.files, &report.skipped);
+    stats.slowest_files = file_timings(report.files);
     stats.language_timings = language_timings(&stats.slowest_files);
     stats.slowest_files.truncate(SLOWEST_FILES);
     stats.phase_timings.total_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -179,57 +179,24 @@ pub(in crate::modules::code) fn run(
 
 const SLOWEST_FILES: usize = 100;
 
-/// Per-file accumulation: the timing entry plus the facts that decide whether
-/// the file counts as parsed.
-struct FileStats {
-    entry: FileTimingEntry,
-    parsed: bool,
-    killed_before_resolve: bool,
-}
-
-fn file_timings(timings: &[FileTiming], skipped: &[Killed]) -> Vec<FileTimingEntry> {
-    let mut by_path: HashMap<&str, FileStats> = HashMap::new();
-    for timing in timings {
-        let ms = timing.elapsed.as_secs_f64() * 1000.0;
-        let file = by_path.entry(&timing.path).or_insert_with(|| FileStats {
-            entry: FileTimingEntry {
-                path: timing.path.clone(),
-                size_bytes: 0,
-                parse_ms: 0.0,
-                resolve_ms: 0.0,
-                total_ms: 0.0,
-                language: <&str>::from(timing.language).to_owned(),
-            },
-            parsed: false,
-            killed_before_resolve: false,
-        });
-        file.entry.size_bytes += timing.bytes;
-        file.entry.total_ms += ms;
-        match timing.phase.as_str() {
-            "resolve" => file.entry.resolve_ms += ms,
-            _ => {
-                file.entry.parse_ms += ms;
-                // Unparsed placeholder trees get resolve timings too, so only
-                // a parse-phase timing proves the file was parsed.
-                file.parsed = true;
+fn file_timings(files: HashMap<String, FileStats>) -> Vec<FileTimingEntry> {
+    let mut entries: Vec<_> = files
+        .into_iter()
+        .map(|(path, stats)| {
+            let parse_ms = stats.parse.as_secs_f64() * 1000.0;
+            let resolve_ms = stats.resolve.as_secs_f64() * 1000.0;
+            FileTimingEntry {
+                path,
+                size_bytes: stats.bytes,
+                parse_ms,
+                resolve_ms,
+                total_ms: parse_ms + resolve_ms,
+                language: <&str>::from(stats.language).to_owned(),
             }
-        }
-    }
-    // Resolve-budget kills were parsed, so they still count.
-    for killed in skipped {
-        if matches!(killed.label, "tree-sitter" | "rewrite" | "link")
-            && let Some(file) = by_path.get_mut(killed.path.as_str())
-        {
-            file.killed_before_resolve = true;
-        }
-    }
-    let mut files: Vec<_> = by_path
-        .into_values()
-        .filter(|file| file.parsed && !file.killed_before_resolve)
-        .map(|file| file.entry)
+        })
         .collect();
-    files.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
-    files
+    entries.sort_by(|a, b| b.total_ms.total_cmp(&a.total_ms));
+    entries
 }
 
 fn language_timings(files: &[FileTimingEntry]) -> Vec<LanguageTimings> {

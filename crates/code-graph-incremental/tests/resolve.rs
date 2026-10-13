@@ -277,17 +277,8 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
             .unwrap()
             .finish();
     assert!(context.report.skipped.is_empty());
-    let mut resolved_files: Vec<_> = context
-        .report
-        .files
-        .iter()
-        .map(|file| {
-            assert_eq!(file.phase, "resolve");
-            file.path.as_str()
-        })
-        .collect();
-    resolved_files.sort();
-    assert_eq!(resolved_files, ["barrel.js", "main.js"]);
+    // The resolved importers are unparsed placeholders, so they get no stats.
+    assert!(context.report.files.is_empty());
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair("main.js:caller", "package/second.js:run")]
@@ -331,18 +322,9 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
         templates::reindex(Context::new(&env, changes), resolved.state, vec![])
             .unwrap()
             .finish();
-    let mut resolved_files: Vec<_> = context
-        .report
-        .files
-        .iter()
-        .filter(|file| file.phase == "resolve")
-        .map(|file| file.path.as_str())
-        .collect();
-    resolved_files.sort();
-    assert_eq!(
-        resolved_files,
-        ["first.js", "left.js", "main.js", "right.js", "second.js"]
-    );
+    let mut stats_paths: Vec<_> = context.report.files.keys().map(String::as_str).collect();
+    stats_paths.sort();
+    assert_eq!(stats_paths, ["left.js", "right.js"]);
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [
@@ -376,4 +358,50 @@ fn a_file_over_the_resolve_budget_keeps_imports_and_loses_inheritance() {
         ]
     );
     assert!(cross_file(&env, &resolved.state, EdgeKind::Extends).is_empty());
+}
+
+fn stats_paths(limits: Limits) -> Vec<String> {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("a.py", UTILS), ("b.py", MAIN)]);
+    let env = python_env(limits);
+    let (context, _) = templates::index(Context::new(&env, common::walk(repo.path())))
+        .unwrap()
+        .finish();
+    let mut paths: Vec<_> = context.report.files.keys().cloned().collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn file_stats_cover_parsed_files() {
+    assert_eq!(stats_paths(Limits::UNLIMITED), ["a.py", "b.py"]);
+}
+
+#[test]
+fn file_stats_drop_files_killed_in_a_per_file_phase() {
+    for limits in [
+        Limits {
+            file_parse_ms: 0,
+            ..Limits::UNLIMITED
+        },
+        Limits {
+            file_rewrite_ms: 0,
+            ..Limits::UNLIMITED
+        },
+        Limits {
+            file_link_ms: 0,
+            ..Limits::UNLIMITED
+        },
+    ] {
+        assert!(stats_paths(limits).is_empty(), "{limits:?}");
+    }
+}
+
+#[test]
+fn file_stats_keep_files_killed_by_the_resolve_budget() {
+    let limits = Limits {
+        file_resolve_ms: 0,
+        ..Limits::UNLIMITED
+    };
+    assert_eq!(stats_paths(limits), ["a.py", "b.py"]);
 }

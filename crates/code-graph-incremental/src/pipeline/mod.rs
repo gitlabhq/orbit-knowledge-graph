@@ -18,6 +18,7 @@ pub use phases::*;
 pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::env::Env;
@@ -162,8 +163,9 @@ pub struct Report {
     pub skipped: Vec<Killed>,
     pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
-    /// How long each file took in each per-file phase, skipped ones included.
-    pub files: Vec<FileTiming>,
+    /// Stats per file path, only for files that parsed and were not killed in
+    /// a per-file phase. Resolve-budget kills keep their entry.
+    pub files: HashMap<String, FileStats>,
 }
 
 pub struct PhaseReport {
@@ -171,12 +173,12 @@ pub struct PhaseReport {
     pub elapsed: Duration,
 }
 
-pub struct FileTiming {
-    pub path: String,
-    pub phase: String,
+pub struct FileStats {
     pub language: crate::treesitter::SupportLang,
     pub bytes: u64,
-    pub elapsed: Duration,
+    /// Time spent in the per-file phases (parse, rewrite, canonicalize, link).
+    pub parse: Duration,
+    pub resolve: Duration,
 }
 
 /// The file an item of a per-file phase belongs to.

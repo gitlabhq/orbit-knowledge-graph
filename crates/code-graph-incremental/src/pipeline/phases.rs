@@ -1,7 +1,7 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -10,7 +10,7 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase, Labelled,
     LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
     Workset,
 };
@@ -200,7 +200,6 @@ where
             })
             .collect();
         context.run.check()?;
-        let phase_name = self.0.name();
         let mut items = Vec::with_capacity(outcomes.len());
         for outcome in outcomes {
             let (outcome, path, bytes, elapsed) = match outcome {
@@ -210,16 +209,23 @@ where
                     continue;
                 }
             };
-            context.report.files.push(FileTiming {
-                path,
-                phase: phase_name.to_string(),
-                language: env.lang_id,
-                bytes,
-                elapsed,
-            });
             match outcome {
-                Ok(v) => items.push(v),
-                Err(k) => context.skip(k),
+                Ok(v) => {
+                    let stats = context.report.files.entry(path).or_insert(FileStats {
+                        language: env.lang_id,
+                        bytes: 0,
+                        parse: Duration::ZERO,
+                        resolve: Duration::ZERO,
+                    });
+                    stats.bytes += bytes;
+                    stats.parse += elapsed;
+                    items.push(v);
+                }
+                Err(k) => {
+                    // A file killed in any per-file phase never counts as parsed.
+                    context.report.files.remove(&path);
+                    context.skip(k);
+                }
             }
         }
         context.report.unread_files.sort_unstable();
@@ -504,22 +510,16 @@ impl Phase<DirtyGraph> for Resolve {
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
-        context.report.files.extend(
-            result
-                .file_timings
-                .into_iter()
-                .filter(|(fi, _)| {
-                    SupportLang::from_path(&state.trees[*fi as usize].label)
-                        .is_some_and(|lang| context.env.in_family(lang))
-                })
-                .map(|(fi, elapsed)| FileTiming {
-                    path: state.trees[fi as usize].label.clone(),
-                    phase: "resolve".to_string(),
-                    language: context.env.lang_id,
-                    bytes: 0,
-                    elapsed,
-                }),
-        );
+        // Unparsed placeholder trees have no entry, so they stay out.
+        for (fi, elapsed) in result.file_timings {
+            if let Some(stats) = context
+                .report
+                .files
+                .get_mut(state.trees[fi as usize].label.as_str())
+            {
+                stats.resolve += elapsed;
+            }
+        }
         for k in result.killed {
             context.skip(k);
         }
