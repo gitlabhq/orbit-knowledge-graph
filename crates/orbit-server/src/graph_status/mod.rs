@@ -1,6 +1,7 @@
 mod response;
 mod toon;
 
+use std::collections::HashMap;
 use std::slice;
 use std::sync::Arc;
 
@@ -42,8 +43,10 @@ impl GraphStatusService {
         info!(%traversal_path, "Graph status fetching");
 
         let scopes = slice::from_ref(traversal_path);
+        let enabled_at = HashMap::new();
         let (statuses, counts) = tokio::join!(
-            self.indexing_status.read_scope_statuses(schema, scopes),
+            self.indexing_status
+                .read_scope_statuses(schema, scopes, &enabled_at),
             self.item_counts
                 .count_items(&schema.ontology, security_context, scopes),
         );

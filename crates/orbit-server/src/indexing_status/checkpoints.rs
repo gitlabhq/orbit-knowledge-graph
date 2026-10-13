@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::checkpoint::NAMESPACE_KEY_PREFIX;
+use indexer::orchestrator::scheduled::namespace::SWEEP_CHECKPOINT_KEY;
 use ontology::pipelines::PipelineDescriptor;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_migrations::version::prefixed_table_name;
@@ -33,6 +34,13 @@ SELECT root, plan, \
  GROUP BY key, root, plan \
 HAVING argMax(_deleted, _version) = false";
 
+const LAST_SWEEP_SQL: &str = "\
+SELECT argMax(watermark, _version) AS swept_at \
+  FROM {table:Identifier} \
+ WHERE key = {key:String} \
+ GROUP BY key \
+HAVING argMax(_deleted, _version) = false";
+
 struct PlanCheckpoint {
     indexed_at: Option<DateTime<Utc>>,
     attempts: i64,
@@ -59,6 +67,17 @@ impl PlanCheckpoints {
         } else {
             Phase::Syncing
         }
+    }
+
+    pub fn was_missed_by_sweep(
+        &self,
+        enabled_at: Option<DateTime<Utc>>,
+        swept_at: Option<DateTime<Utc>>,
+    ) -> bool {
+        self.by_plan.is_empty()
+            && enabled_at
+                .zip(swept_at)
+                .is_some_and(|(enabled_at, swept_at)| enabled_at + STALE_AFTER <= swept_at)
     }
 
     pub fn get_last_completed_at(&self, plans: &[PipelineDescriptor]) -> Option<DateTime<Utc>> {
@@ -122,4 +141,21 @@ pub async fn read_plan_checkpoints(
             .insert(plan, checkpoint);
     }
     Ok(checkpoints)
+}
+
+pub async fn read_last_sweep_at(
+    client: &ArrowClickHouseClient,
+    schema: &SchemaSnapshot,
+) -> Result<Option<DateTime<Utc>>, Status> {
+    let table = prefixed_table_name(CHECKPOINT_TABLE, schema.migration_version);
+    let batches = fetch_status_query_batches(client, LAST_SWEEP_SQL, "last sweep", |query| {
+        query
+            .param("table", &table)
+            .param("key", SWEEP_CHECKPOINT_KEY)
+    })
+    .await?;
+
+    let swept_at =
+        DateTime::<Utc>::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
+    Ok(swept_at.into_iter().next())
 }

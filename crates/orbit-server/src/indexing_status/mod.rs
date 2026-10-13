@@ -48,6 +48,7 @@ impl IndexingStatusService {
         &self,
         schema: &SchemaSnapshot,
         scopes: &[TraversalPath],
+        enabled_at: &HashMap<String, DateTime<Utc>>,
     ) -> Vec<ScopeStatus> {
         if scopes.is_empty() {
             return Vec::new();
@@ -60,9 +61,10 @@ impl IndexingStatusService {
         roots.sort_unstable();
         roots.dedup();
 
-        let (checkpoints, coverage) = tokio::join!(
+        let (checkpoints, coverage, swept_at) = tokio::join!(
             checkpoints::read_plan_checkpoints(&self.client, schema, &roots),
             projects::read_project_coverage(&self.client, &schema.ontology, scopes),
+            checkpoints::read_last_sweep_at(&self.client, schema),
         );
         let checkpoints = checkpoints
             .inspect_err(|error| warn!(%error, "Indexing status could not read plan checkpoints"))
@@ -70,6 +72,10 @@ impl IndexingStatusService {
         let coverage = coverage
             .inspect_err(|error| warn!(%error, "Indexing status could not read project coverage"))
             .ok();
+        let swept_at = swept_at
+            .inspect_err(|error| warn!(%error, "Indexing status could not read the last sweep"))
+            .ok()
+            .flatten();
 
         let now = Utc::now();
         let plans: Vec<PipelineDescriptor> = schema
@@ -82,7 +88,22 @@ impl IndexingStatusService {
         scopes
             .iter()
             .map(|scope| {
-                build_scope_status(schema, &plans, scope, &checkpoints, coverage.as_ref(), now)
+                let missed_by_sweep = scope
+                    .top_level_namespace_id()
+                    .and_then(|root| checkpoints.get(&root))
+                    .is_some_and(|by_plan| {
+                        by_plan
+                            .was_missed_by_sweep(enabled_at.get(scope.as_str()).copied(), swept_at)
+                    });
+                build_scope_status(
+                    schema,
+                    &plans,
+                    scope,
+                    &checkpoints,
+                    coverage.as_ref(),
+                    missed_by_sweep,
+                    now,
+                )
             })
             .collect()
     }
@@ -94,6 +115,7 @@ fn build_scope_status(
     scope: &TraversalPath,
     checkpoints: &HashMap<i64, PlanCheckpoints>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
+    missed_by_sweep: bool,
     now: DateTime<Utc>,
 ) -> ScopeStatus {
     let root_checkpoints = scope
@@ -103,9 +125,13 @@ fn build_scope_status(
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
         .map(|plan| {
-            let phase = root_checkpoints
-                .map(|by_plan| by_plan.get_plan_phase(&plan.name, now))
-                .unwrap_or(Phase::Unknown);
+            let phase = if missed_by_sweep {
+                Phase::Error
+            } else {
+                root_checkpoints
+                    .map(|by_plan| by_plan.get_plan_phase(&plan.name, now))
+                    .unwrap_or(Phase::Unknown)
+            };
             (plan, phase)
         })
         .collect();

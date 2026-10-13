@@ -3,6 +3,7 @@ use super::*;
 async fn indexing_status_error(paths: &[&str]) -> tonic::Code {
     let request = GetIndexingStatusRequest {
         traversal_paths: paths.iter().map(|path| path.to_string()).collect(),
+        ..Default::default()
     };
     test_service()
         .get_indexing_status(authed_request(request))
@@ -63,4 +64,22 @@ async fn status_rpcs_deny_a_path_outside_the_callers_groups() {
         item_counts_error("1/22/").await,
         tonic::Code::PermissionDenied
     );
+}
+
+#[tokio::test]
+async fn indexing_status_rejects_an_enabled_at_that_is_not_rfc_3339() {
+    let request = GetIndexingStatusRequest {
+        traversal_paths: vec!["1/22/".to_string()],
+        enabled_at: HashMap::from([("1/22/".to_string(), "yesterday".to_string())]),
+    };
+    let claims = Claims {
+        admin: true,
+        ..test_claims()
+    };
+    let error = test_service()
+        .get_indexing_status(signed_request(request, claims))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
 }

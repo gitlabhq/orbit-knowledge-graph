@@ -13,6 +13,16 @@ Accepted
 
 2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
 
+## Update: enrollment that the sweep missed (2026-10-13)
+
+`GetIndexingStatus` takes an optional `enabled_at` per path. It is the time Orbit was
+turned on for the top-level group of the path. A root with no checkpoint row is error when
+`enabled_at` is two hours or more before the last full dispatch sweep
+(`dispatch.sdlc.namespace.sweep`). The sweep reads all enabled namespaces each hour. If it
+did not dispatch the root, the root has no row in the enabled namespaces table, and the
+indexer will never start it. Without `enabled_at`, or before the first sweep, the root
+stays not started.
+
 ## Update: last completed time (2026-10-11)
 
 `GetIndexingStatus` returns `last_completed_at` per path, and `GetGraphStatus` sets it

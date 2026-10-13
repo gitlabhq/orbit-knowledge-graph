@@ -634,11 +634,17 @@ pub struct GraphStatusItem {
     #[prost(enumeration = "IndexingState", optional, tag = "3")]
     pub state: ::core::option::Option<i32>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetIndexingStatusRequest {
     /// 1 to 100 group or project paths (e.g. "1/2/")
     #[prost(string, repeated, tag = "1")]
     pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// traversal path => RFC 3339 time Orbit was turned on for its top-level group
+    #[prost(map = "string, string", tag = "2")]
+    pub enabled_at: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetIndexingStatusResponse {

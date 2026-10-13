@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use integration_testkit::run_subtests_shared;
@@ -30,7 +31,7 @@ async fn respond(ctx: &TestContext, paths: &[&str]) -> Vec<NamespaceIndexingStat
         .map(|path| TraversalPath::new_unchecked(*path))
         .collect();
     let statuses = IndexingStatusService::new(Arc::new(ctx.create_client()))
-        .read_scope_statuses(&pinned_schema(), &paths)
+        .read_scope_statuses(&pinned_schema(), &paths, &HashMap::new())
         .await;
     build_indexing_status_response(&statuses).statuses
 }

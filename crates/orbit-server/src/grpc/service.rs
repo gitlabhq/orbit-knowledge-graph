@@ -1,9 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::pin::Pin;
 use std::slice;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
@@ -750,6 +751,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
         let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
+        let enabled_at = parse_enabled_at(&request.get_ref().enabled_at)?;
 
         info!(
             path_count = paths.len(),
@@ -758,7 +760,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let schema = self.active_schema.snapshot()?;
         let statuses = self
             .indexing_status
-            .read_scope_statuses(&schema, &paths)
+            .read_scope_statuses(&schema, &paths, &enabled_at)
             .await;
         Ok(Response::new(build_indexing_status_response(&statuses)))
     }
@@ -963,6 +965,23 @@ fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<Trave
     paths
         .iter()
         .map(|path| parse_authorized_path(claims, path))
+        .collect()
+}
+
+fn parse_enabled_at(
+    enabled_at: &HashMap<String, String>,
+) -> Result<HashMap<String, DateTime<Utc>>, Status> {
+    enabled_at
+        .iter()
+        .map(|(path, at)| {
+            DateTime::parse_from_rfc3339(at)
+                .map(|at| (path.clone(), at.to_utc()))
+                .map_err(|error| {
+                    Status::invalid_argument(format!(
+                        "enabled_at for {path} is not an RFC 3339 time: {error}"
+                    ))
+                })
+        })
         .collect()
 }
 
