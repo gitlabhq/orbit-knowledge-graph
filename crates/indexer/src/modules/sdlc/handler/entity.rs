@@ -170,6 +170,7 @@ impl EntityHandler {
                 column: &self.plan.watermark_column,
                 last: window.floor.unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
                 current: window.target,
+                sources: self.plan.watermark_sources.as_ref(),
             })
             .with(
                 request

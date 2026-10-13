@@ -49,6 +49,7 @@ SELECT
   metrics.metric_reviewer_first_assigned_at AS metric_reviewer_first_assigned_at,
   ifNull(reviewers.reviewers, CAST([], 'Array(Tuple(user_id UInt64, state Int16, created_at DateTime64(6, ''UTC'')))')) AS reviewers,
   ifNull(approvals.approvals, CAST([], 'Array(Tuple(user_id UInt64, created_at DateTime64(6, ''UTC'')))')) AS approvals,
+  ifNull(duo_links.created_by_duo, false) AS created_by_duo,
   m.{{version_column}} AS _version,
   m.{{deleted_column}} AS _deleted
 FROM (
@@ -68,7 +69,7 @@ FROM (
       )
     ) AS decoded_sha_bytes,
     if(isValidUTF8(decoded_sha_bytes), decoded_sha_bytes, lower(hex(decoded_sha_bytes))) AS decoded_sha
-  FROM merge_requests
+  FROM {{changed_rows}}
 ) AS m
 LEFT JOIN (
   SELECT
@@ -95,13 +96,7 @@ LEFT JOIN (
     argMax({{deleted_column}}, {{version_column}}) AS deleted
   FROM siphon_merge_request_metrics
   WHERE startsWith(traversal_path, {traversal_path:String})
-    AND merge_request_id IN (
-    SELECT
-      id
-    FROM merge_requests
-    WHERE startsWith(traversal_path, {traversal_path:String})
-      AND {{watermark_column}} > {last_watermark:String}
-      AND {{watermark_column}} <= {watermark:String} )
+    AND merge_request_id IN ({{changed_ids}})
   GROUP BY traversal_path, merge_request_id
   HAVING deleted = false ) AS metrics ON m.traversal_path = metrics._mt_tp
   AND m.id = metrics._mt_mr
@@ -121,13 +116,7 @@ LEFT JOIN (
       argMax({{deleted_column}}, {{version_column}}) AS deleted
     FROM siphon_merge_request_reviewers
     WHERE startsWith(traversal_path, {traversal_path:String})
-      AND merge_request_id IN (
-      SELECT
-        id
-      FROM merge_requests
-      WHERE startsWith(traversal_path, {traversal_path:String})
-        AND {{watermark_column}} > {last_watermark:String}
-        AND {{watermark_column}} <= {watermark:String} )
+      AND merge_request_id IN ({{changed_ids}})
     GROUP BY traversal_path, merge_request_id, id )
   GROUP BY traversal_path, merge_request_id ) AS reviewers ON m.traversal_path = reviewers._rv_tp
   AND m.id = reviewers._rv_mr
@@ -146,16 +135,45 @@ LEFT JOIN (
       argMax({{deleted_column}}, {{version_column}}) AS deleted
     FROM siphon_approvals
     WHERE startsWith(traversal_path, {traversal_path:String})
-      AND merge_request_id IN (
-      SELECT
-        id
-      FROM merge_requests
-      WHERE startsWith(traversal_path, {traversal_path:String})
-        AND {{watermark_column}} > {last_watermark:String}
-        AND {{watermark_column}} <= {watermark:String} )
+      AND merge_request_id IN ({{changed_ids}})
     GROUP BY traversal_path, merge_request_id, id )
   GROUP BY traversal_path, merge_request_id ) AS approvals ON m.traversal_path = approvals._ap_tp
   AND m.id = approvals._ap_mr
+LEFT JOIN (
+  SELECT
+    link_merge_request_id AS _dl_mr,
+    max(link_type = 1 AND deleted = false) AS created_by_duo
+  FROM (
+    SELECT
+      workflow_id,
+      id,
+      argMaxIf(merge_request_id, {{version_column}}, merge_request_id != 0) AS link_merge_request_id,
+      argMax(link_type, {{version_column}}) AS link_type,
+      argMax({{deleted_column}}, {{version_column}}) AS deleted
+    FROM siphon_duo_workflows_workflow_merge_requests
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND (workflow_id, id) IN (
+        SELECT workflow_id, id
+        FROM siphon_duo_workflows_workflow_merge_requests
+        WHERE startsWith(traversal_path, {traversal_path:String})
+          AND merge_request_id IN ({{changed_ids}}) )
+      {#- Only links whose workflow is replicated, live and not private to its invoker count.
+          A semi-join (not a LEFT JOIN) keeps an unreplicated workflow fail-closed.
+          Slack is the only messaging adapter private to the invoker today
+          (Ai::Messaging::AdapterRegistry.private_to_invoker_keys); add new ones to the NOT IN list. #}
+      AND workflow_id IN (
+        SELECT id
+        FROM siphon_duo_workflows_workflows
+        WHERE id IN (
+          SELECT workflow_id
+          FROM siphon_duo_workflows_workflow_merge_requests
+          WHERE startsWith(traversal_path, {traversal_path:String})
+            AND merge_request_id IN ({{changed_ids}}) )
+        GROUP BY id
+        HAVING argMax({{deleted_column}}, {{version_column}}) = false
+          AND JSONExtractString(argMax(coalesce(messaging_callback_context, '{}'), {{version_column}}), 'adapter') NOT IN ('slack') )
+    GROUP BY workflow_id, id )
+  GROUP BY link_merge_request_id ) AS duo_links ON m.id = duo_links._dl_mr
 WHERE startsWith(m.traversal_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}

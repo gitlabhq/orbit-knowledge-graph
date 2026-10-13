@@ -13,17 +13,24 @@ use ontology::{
     constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN},
 };
 
+use super::WatermarkSources;
 use super::build::PlanError;
 use lookup::PointLookupJoin;
 
 pub(super) const FILTERS_MARKER: &str = "{{filters}}";
 pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
+/// Optional marker (name only) a template uses when its pipeline declares `watermark_sources`.
+pub(in crate::modules::sdlc) const CHANGED_ROWS_VARIABLE: &str = "changed_rows";
+const CHANGED_ROWS_MARKER: &str = "{{changed_rows}}";
+pub(in crate::modules::sdlc) const CHANGED_IDS_VARIABLE: &str = "changed_ids";
+const CHANGED_IDS_MARKER: &str = "{{changed_ids}}";
 
 #[derive(Debug)]
 pub(in crate::modules::sdlc) struct ExtractSpec {
     pub template: ExtractTemplate,
     pub watermark: String,
     pub deleted: String,
+    pub watermark_sources: Option<WatermarkSources>,
 }
 
 /// Validated template — the only way a `Plan` gets its `extract_template`.
@@ -41,6 +48,7 @@ pub(super) struct ClickHouseExtractDeclaration {
     pub deleted: String,
     pub query: ExtractQuery,
     pub lookup_joins: Vec<PointLookupJoin>,
+    pub watermark_sources: Vec<ontology::WatermarkSource>,
 }
 
 pub(super) struct SourceColumn {
@@ -62,15 +70,28 @@ pub(super) fn compile_extract_spec(
 
 impl ExtractTemplate {
     pub fn new(sql: String) -> Result<Self, PlanError> {
+        Self::compile(sql, false)
+    }
+
+    /// A template whose pipeline declares `watermark_sources` must also use `{{changed_rows}}` and `{{changed_ids}}`.
+    pub fn with_changed_rows(sql: String) -> Result<Self, PlanError> {
+        Self::compile(sql, true)
+    }
+
+    fn compile(sql: String, uses_changed_rows: bool) -> Result<Self, PlanError> {
         let undeclared = sql_template::undeclared_variables(&sql)
             .map_err(|e| PlanError::MalformedTemplate(format!("template parse failed: {e}")))?;
-        let expected: HashSet<String> = [FILTERS_MARKER, BATCH_SIZE_MARKER]
+        let mut expected: HashSet<String> = [FILTERS_MARKER, BATCH_SIZE_MARKER]
             .iter()
             .map(|marker| marker.trim_matches(|c| c == '{' || c == '}').to_string())
             .collect();
+        if uses_changed_rows {
+            expected.insert(CHANGED_ROWS_VARIABLE.to_string());
+            expected.insert(CHANGED_IDS_VARIABLE.to_string());
+        }
         if undeclared != expected {
             return Err(PlanError::MalformedTemplate(format!(
-                "template variables must be exactly {{{{filters}}}} and {{{{batch_size}}}}, found {undeclared:?}"
+                "template variables must be exactly {expected:?}, found {undeclared:?}"
             )));
         }
         for (marker, name) in [
@@ -164,6 +185,7 @@ impl ClickHouseExtractDeclaration {
             order_by: extract.order_by.clone(),
             query: extract.query.clone(),
             lookup_joins,
+            watermark_sources: extract.watermark_sources.clone(),
         }
     }
 
@@ -172,8 +194,21 @@ impl ClickHouseExtractDeclaration {
             template: ExtractTemplate::new(sql)?,
             watermark: self.watermark.clone(),
             deleted: self.deleted.clone(),
+            watermark_sources: watermark_sources(self),
         })
     }
+}
+
+fn watermark_sources(declaration: &ClickHouseExtractDeclaration) -> Option<WatermarkSources> {
+    if declaration.watermark_sources.is_empty() {
+        return None;
+    }
+    Some(WatermarkSources {
+        parent_table: declaration.table.clone(),
+        watermark_column: declaration.watermark.clone(),
+        version_column: declaration.version.clone(),
+        children: declaration.watermark_sources.clone(),
+    })
 }
 
 fn get_edge_source_columns(

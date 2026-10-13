@@ -16,6 +16,13 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 104
+  scope: "*"
+  note: >-
+    MergeRequest gains created_by_duo, derived in merge_request.sql.j2 from created-type Duo
+    workflow links whose workflow is replicated, live and not a private messaging session. A
+    child-table change now re-extracts the parent row. The deriver widens a .sql.j2 change to a
+    full rebuild, so existing MRs backfill the flag.
 - version: 103
   scope: none
   note: >-

@@ -44,9 +44,9 @@ pub use entities::{
     TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
-    ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
-    EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline,
-    ReindexSource, Transform,
+    ChangedBy, ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource,
+    DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef, NodeRefKind,
+    PathResolution, Pipeline, ReindexSource, Transform, WatermarkSource,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
