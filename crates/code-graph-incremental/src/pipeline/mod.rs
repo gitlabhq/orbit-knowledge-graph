@@ -163,8 +163,6 @@ pub struct Report {
     pub skipped: Vec<Killed>,
     pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
-    /// Stats per file path, only for files parsed in this run and not killed in
-    /// a per-file phase. Resolve-budget kills keep their entry.
     pub files: HashMap<String, FileStats>,
 }
 
@@ -176,7 +174,6 @@ pub struct PhaseReport {
 pub struct FileStats {
     pub language: crate::treesitter::SupportLang,
     pub bytes: u64,
-    /// Time spent in the per-file phases (parse, rewrite, canonicalize, link).
     pub parse: Duration,
     pub resolve: Duration,
 }
