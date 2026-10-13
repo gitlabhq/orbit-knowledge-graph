@@ -6,7 +6,8 @@ description: >-
 
 
   Needs the incremental engine (`--ff=inc`) and a repository that `orbit
-  index --ff=inc` has indexed before; its state lives under
-  `~/.gitlab/orbit/var/<project>/`. Changed files come from git: commits
-  since the indexed one, plus uncommitted and untracked changes. Returns
-  JSON with the per-language work done.
+  index --ff=inc` has indexed before. Snapshots live under
+  `~/.gitlab/orbit/var/<project>/`; their metadata lives in the local
+  manifest. Changed files come from git commits since the indexed one,
+  plus uncommitted and untracked changes. Returns JSON with the
+  per-language work done.

@@ -5,27 +5,17 @@ use anyhow::{Context as _, Result};
 use code_graph_incremental::pipeline::{Context, Display, Report};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Env, State, templates};
-use serde::{Deserialize, Serialize};
 
 use super::input;
 use super::output::{Exporter, FamilyOutput};
-use crate::database::GraphWriter;
+use crate::database::{GraphWriter, manifest};
 use crate::workspace::{self, GitInfo};
-
-const STATE_FILE: &str = "index.json";
-
-#[derive(Serialize, Deserialize)]
-struct SavedIndex {
-    commit_sha: String,
-    dirty: Vec<String>,
-    families: Vec<String>,
-    owner: Option<String>,
-}
 
 pub(super) struct Project<'a> {
     pub git: &'a GitInfo,
     pub writer: &'a GraphWriter,
     pub ontology: &'a ontology::Ontology,
+    pub manifest_path: &'a std::path::Path,
     pub state_dir: PathBuf,
     pub budget_ms: u64,
     pub stats: bool,
@@ -54,7 +44,7 @@ impl Project<'_> {
     pub(super) fn index_changed(&self) -> Result<Vec<FamilyOutput>> {
         let saved = self.load_state()?;
         let mut changes = workspace::git_changes(&self.git.repo_path, &saved.commit_sha)?;
-        for path in &saved.dirty {
+        for path in &saved.dirty_paths {
             match self.git.repo_path.join(path).is_file() {
                 true => changes.changed.push(path.clone()),
                 false => changes.removed.push(path.clone()),
@@ -68,7 +58,9 @@ impl Project<'_> {
         let mut work = BTreeMap::new();
         for name in &saved.families {
             let family = SupportLang::from_family(name).with_context(|| {
-                format!("{STATE_FILE} names a language family this build does not know: {name}")
+                format!(
+                    "incremental state names a language family this build does not know: {name}"
+                )
             })?;
             let paths = changed
                 .remove(family.family())
@@ -91,6 +83,14 @@ impl Project<'_> {
         work: impl IntoIterator<Item = (SupportLang, Work)>,
         owner: Option<SupportLang>,
     ) -> Result<Vec<FamilyOutput>> {
+        let work: Vec<_> = work.into_iter().collect();
+        for (family, job) in &work {
+            if !matches!(job, Work::Index(_)) {
+                let snapshot = self.snapshot_path(*family);
+                std::fs::File::open(&snapshot)
+                    .with_context(|| format!("failed to open {}", snapshot.display()))?;
+            }
+        }
         self.writer.clear(self.ontology)?;
         let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
         std::fs::create_dir_all(&self.state_dir)?;
@@ -154,27 +154,26 @@ impl Project<'_> {
 
     fn save_state(&self, families: &[String], owner: Option<SupportLang>) -> Result<()> {
         let dirty = workspace::git_working_changes(&self.git.repo_path)?;
-        let saved = SavedIndex {
-            commit_sha: self.git.commit_sha.clone(),
-            dirty: dirty.paths().cloned().collect(),
-            families: families.to_vec(),
-            owner: owner.map(|lang| lang.family().to_string()),
-        };
-        std::fs::write(
-            self.state_dir.join(STATE_FILE),
-            serde_json::to_vec_pretty(&saved)?,
-        )?;
-        Ok(())
+        manifest::save_incremental_state(
+            self.manifest_path,
+            self.git.project_id,
+            &manifest::IncrementalState {
+                commit_sha: self.git.commit_sha.clone(),
+                dirty_paths: dirty.paths().cloned().collect(),
+                families: families.to_vec(),
+                owner: owner.map(|lang| lang.family().to_string()),
+            },
+        )
     }
 
-    fn load_state(&self) -> Result<SavedIndex> {
-        let path = self.state_dir.join(STATE_FILE);
-        let bytes = std::fs::read(&path).with_context(|| {
-            format!(
-                "no incremental state for {}; run `orbit index --ff=inc` first",
-                self.git.repo_path.display()
-            )
-        })?;
-        serde_json::from_slice(&bytes).with_context(|| format!("failed to read {}", path.display()))
+    fn load_state(&self) -> Result<manifest::IncrementalState> {
+        manifest::load_incremental_state(self.manifest_path, self.git.project_id)?.with_context(
+            || {
+                format!(
+                    "no incremental state for {}; run `orbit index --ff=inc` first",
+                    self.git.repo_path.display()
+                )
+            },
+        )
     }
 }

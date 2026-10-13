@@ -12,3 +12,8 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     error_message VARCHAR,
     PRIMARY KEY (repo_path, commit_sha)
 );
+
+CREATE TABLE IF NOT EXISTS _orbit_incremental_state (
+    project_id BIGINT PRIMARY KEY,
+    state JSON NOT NULL
+);

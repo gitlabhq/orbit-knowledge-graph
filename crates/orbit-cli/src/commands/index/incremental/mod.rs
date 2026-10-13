@@ -4,7 +4,7 @@ use anyhow::{Context as _, Result, bail};
 
 use ontology::Ontology;
 
-use crate::database::{GraphWriter, manifest};
+use crate::database::{GraphWriter, lock_incremental_state, manifest};
 use crate::workspace;
 
 mod input;
@@ -47,6 +47,8 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     for repo in repos {
         let git = workspace::git_info(&repo)?;
+        let state_dir = workspace.var_dir(git.project_id);
+        let _state_lock = lock_incremental_state(&state_dir)?;
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
         let writer = GraphWriter::open(&db_path, &git)?;
         manifest::record_status(
@@ -60,7 +62,8 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
             git: &git,
             writer: &writer,
             ontology: &ontology,
-            state_dir: workspace.var_dir(git.project_id),
+            manifest_path: &manifest_path,
+            state_dir,
             budget_ms: options.budget_seconds * 1000,
             stats: options.stats,
         };

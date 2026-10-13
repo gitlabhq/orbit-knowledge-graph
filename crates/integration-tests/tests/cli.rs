@@ -400,10 +400,40 @@ fn incremental_reindex_follows_the_working_tree() {
         BTreeSet::from([
             "graph.python.bin".to_string(),
             "graph.ruby.bin".to_string(),
-            "graph.rust.bin".to_string(),
-            "index.json".to_string()
+            "graph.rust.bin".to_string()
         ])
     );
+    let manifest =
+        duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
+            .unwrap();
+    let incremental_state = manifest
+        .query_arrow("SELECT state FROM _orbit_incremental_state")
+        .unwrap();
+    assert_eq!(
+        incremental_state
+            .iter()
+            .map(|batch| batch.num_rows())
+            .sum::<usize>(),
+        1
+    );
+
+    let rust_snapshot = state_dir
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join("graph.rust.bin");
+    std::fs::remove_file(&rust_snapshot).unwrap();
+    let before = names(definitions);
+    let failed = orbit_cmd()
+        .args(["reindex", repo.to_str().unwrap(), "--ff=inc"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert_eq!(names(definitions), before);
 
     let out = orbit_cmd()
         .args(["reindex", repo.to_str().unwrap()])
