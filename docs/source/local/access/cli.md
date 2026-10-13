@@ -95,6 +95,8 @@ Other indexed commits remain available.
 orbit schema
 ```
 
+GitLab Orbit selects the database files automatically, so you do not need to locate or attach them.
+
 Pass table names as positional arguments to scope the output:
 
 ```shell
@@ -105,7 +107,7 @@ orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Read a specific revision database. Defaults to the indexed revision databases. |
+| `--db` | Override the DuckDB file path. Omit to use the local graph managed by GitLab Orbit. |
 
 ## Run SQL against the local graph
 

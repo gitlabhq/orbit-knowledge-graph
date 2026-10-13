@@ -131,7 +131,7 @@ glab orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Read a specific revision database. Defaults to all indexed revision databases. |
+| `--db` | Override the DuckDB file path. Omit to use the local graph managed by GitLab Orbit. |
 
 ## Run as an MCP server
 
