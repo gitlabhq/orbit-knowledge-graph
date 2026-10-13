@@ -1,5 +1,6 @@
 use super::super::repository::service::test_utils::build_tar_gz;
 use super::*;
+use code_graph::v2::error::{AbortPhase, FileSkip};
 use orbit_utils::vfs::Decision;
 
 use super::super::{
@@ -91,6 +92,8 @@ fn collected_rows(
 struct Timings {
     languages: Vec<(String, u64)>,
     slowest_paths: Vec<String>,
+    errors: usize,
+    skipped: Vec<(String, FileSkip)>,
 }
 
 async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Limits) -> Timings {
@@ -112,9 +115,17 @@ async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Li
         .map(|file| file.path.clone())
         .collect();
     slowest_paths.sort();
+    let mut skipped: Vec<_> = report
+        .skipped
+        .iter()
+        .map(|file| (file.path.clone(), file.kind))
+        .collect();
+    skipped.sort_by(|a, b| a.0.cmp(&b.0));
     Timings {
         languages,
         slowest_paths,
+        errors: report.errors.len(),
+        skipped,
     }
 }
 
@@ -158,8 +169,32 @@ async fn language_timings_exclude_files_killed_by_the_parse_budget() {
         ..code_graph_incremental::Limits::UNLIMITED
     };
     let timings = timings_for(files, limits).await;
+    assert_eq!(timings.errors, 0);
+    assert_eq!(
+        timings.skipped,
+        [
+            ("a.js".to_owned(), FileSkip::Timeout(AbortPhase::Parse)),
+            ("b.js".to_owned(), FileSkip::Timeout(AbortPhase::Parse)),
+        ]
+    );
     assert!(timings.languages.is_empty());
     assert!(timings.slowest_paths.is_empty());
+}
+
+#[tokio::test]
+async fn language_timings_keep_files_killed_by_the_resolve_budget() {
+    let files: &[(&str, &[u8])] = &[
+        ("root/a.js", b"function a() {}\n"),
+        ("root/b.js", b"function b() {}\n"),
+    ];
+    let limits = code_graph_incremental::Limits {
+        file_resolve_ms: 0,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert_eq!(timings.errors, 0);
+    assert_eq!(timings.languages, [("javascript".to_owned(), 2)]);
+    assert_eq!(timings.slowest_paths, ["a.js", "b.js"]);
 }
 
 #[tokio::test]
