@@ -518,6 +518,7 @@ impl SetupFlags {
         all: bool,
         index: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
+        skill_tree: std::collections::BTreeMap<String, Vec<u8>>,
     ) -> commands::setup::Options {
         commands::setup::Options {
             agents,
@@ -527,6 +528,7 @@ impl SetupFlags {
             verbose: self.verbose,
             index,
             components,
+            skill_tree,
         }
     }
 
@@ -576,6 +578,14 @@ enum Commands {
         /// Do not index the current repository after configuring.
         #[arg(long)]
         no_index: bool,
+
+        /// What to install as the `orbit` skill. `wrapper` loads the real
+        /// skill when the agent reads it. `full` writes the skill tree now,
+        /// for agents that cannot run commands at that point; it needs the
+        /// instance for the current content and falls back to the embedded
+        /// skill when the instance does not answer.
+        #[arg(long, value_enum, default_value_t)]
+        skill: commands::setup::SkillKind,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -886,10 +896,12 @@ async fn dispatch(
             mcp,
             skip,
             no_index,
+            skill,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, !no_index, components);
+            let skill_tree = commands::setup::skill_tree(skill, &components, flags.dry_run).await?;
+            let options = flags.to_options(agents, all, !no_index, components, skill_tree);
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::install(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {
@@ -903,7 +915,13 @@ async fn dispatch(
             Ok(())
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(agents, false, false, Default::default());
+            let options = flags.to_options(
+                agents,
+                false,
+                false,
+                Default::default(),
+                Default::default(),
+            );
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {

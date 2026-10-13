@@ -173,6 +173,14 @@ pub(super) enum McpFormat {
 pub(super) struct SkillDirs {
     pub(super) dir: ScopedPath,
     pub(super) link: Option<ScopedPath>,
+    pub(super) permissions: Option<SkillPermissions>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SkillPermissions {
+    pub(super) file: ScopedPath,
+    pub(super) rules: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

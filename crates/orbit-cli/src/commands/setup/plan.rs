@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -10,6 +10,7 @@ use super::{Component, Options, Target};
 pub(super) struct Selection {
     pub(super) agents: Vec<Agent>,
     pub(super) components: BTreeSet<Component>,
+    pub(super) skill_tree: BTreeMap<String, Vec<u8>>,
 }
 
 impl Selection {
@@ -27,6 +28,7 @@ impl Selection {
         Ok(Selection {
             agents,
             components: options.components.clone(),
+            skill_tree: options.skill_tree.clone(),
         })
     }
 
@@ -44,7 +46,11 @@ impl Selection {
         } else {
             agents_named(&options.agents)?
         };
-        Ok(Selection { agents, components })
+        Ok(Selection {
+            agents,
+            components,
+            skill_tree: BTreeMap::new(),
+        })
     }
 
     pub(super) fn selected_agent_names(&self) -> Vec<String> {
