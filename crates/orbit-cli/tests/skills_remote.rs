@@ -430,7 +430,7 @@ fn invalid_gitlab_url_warns_and_lists_the_embedded_skill() {
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stderr(&output).contains("GITLAB_URL must be an absolute https URL"));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("orbit"));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("orbit — "));
 }
 
 #[test]
