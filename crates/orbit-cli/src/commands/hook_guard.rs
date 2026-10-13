@@ -103,7 +103,7 @@ fn local_graph_exists() -> bool {
             None => return false,
         },
     };
-    root.join("graph.duckdb").is_file()
+    root.join("local/manifest.duckdb").is_file()
 }
 
 /// The enclosing git work tree, found without running git.

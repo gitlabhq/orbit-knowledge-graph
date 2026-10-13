@@ -70,14 +70,10 @@ impl DuckDbClient {
         Ok(Self { conn })
     }
 
-    #[cfg(test)]
-    pub(crate) fn open_in_memory() -> Result<Self> {
+    pub fn open_in_memory() -> Result<Self> {
         Self::open_once(Path::new(":memory:"), duckdb::AccessMode::ReadWrite)
     }
 
-    /// The DDL is typically generated from the ontology via
-    /// `generate_local_tables` + `emit_duckdb_create_table`, with the
-    /// manifest DDL appended via the `external_ddl` parameter.
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
         self.conn
             .execute_batch(ddl)
@@ -123,45 +119,11 @@ impl DuckDbClient {
         Ok(batches)
     }
 
-    /// In local mode each DB file is one project, so a full truncate is the
-    /// correct reset before re-indexing. The manifest table is preserved.
     pub fn delete_all_data(&self, tables: &[&str]) -> Result<()> {
         for table in tables {
             self.conn
                 .execute(&format!("DELETE FROM {table}"), params![])?;
         }
-        Ok(())
-    }
-
-    /// Delete data for a specific project across all tables.
-    /// Node tables are scoped by `project_id`; the edge table is scoped
-    /// by source_id matching any node ID for this project.
-    /// Edges are deleted first while node IDs are still queryable.
-    pub fn delete_project(
-        &self,
-        project_id: i64,
-        node_tables: &[String],
-        edge_table: &str,
-    ) -> Result<()> {
-        let subqueries: Vec<String> = node_tables
-            .iter()
-            .map(|t| format!("SELECT id FROM {t} WHERE project_id = ?1"))
-            .collect();
-        if !subqueries.is_empty() {
-            let union = subqueries.join(" UNION ");
-            self.conn.execute(
-                &format!("DELETE FROM {edge_table} WHERE source_id IN ({union})"),
-                params![project_id],
-            )?;
-        }
-
-        for table in node_tables {
-            self.conn.execute(
-                &format!("DELETE FROM {table} WHERE project_id = ?1"),
-                params![project_id],
-            )?;
-        }
-
         Ok(())
     }
 

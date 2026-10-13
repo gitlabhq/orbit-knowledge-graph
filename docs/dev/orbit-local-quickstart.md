@@ -79,7 +79,7 @@ resulting DuckDB graph with SQL:
 ./target/release/orbit sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
 ```
 
-The graph is written to `~/.gitlab/orbit/graph.duckdb`. `orbit schema` lists every
+Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit schema` lists every
 table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
 query DSL documented under `docs/source/remote/` applies to Orbit Remote.
 
