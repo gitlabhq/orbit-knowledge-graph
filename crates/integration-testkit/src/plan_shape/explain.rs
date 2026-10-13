@@ -746,6 +746,7 @@ fn relation(value: &TableRef) -> Tree {
             final_,
             ..
         } => scan(table, alias, *final_),
+        TableRef::Cte { name, alias } => scan(name, alias, false),
         TableRef::Join {
             join_type,
             left,
