@@ -1,8 +1,6 @@
 description: FK star retains relationship filters
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr","filters":{"source_id":999999}}]}
   gql: |
     MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest)
     WHERE r.source_id = 999999

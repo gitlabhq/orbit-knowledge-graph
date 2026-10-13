@@ -49,8 +49,6 @@ cases:
   - name: negation_admin_leaf
     description: A NOT leaf that keeps its NOT (a list) cannot inspect an administrator-only field
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"is_admin":{"in":[true]}}}],"limit":30}
       gql: |
         MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
     expect: { compile_error: administrator }
@@ -92,8 +90,6 @@ cases:
     description: |
       A NOT on the far node of a traversal reads the current node row. The caller's traversal_path filter runs inside the scan before the pick and the NOT runs on the picked row.
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
       gql: |
         MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
         WHERE NOT g.name CONTAINS 'secret'
@@ -112,8 +108,6 @@ cases:
         org_id: 1
         paths: [1/100/]
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1001],"not":{"name":"x"},"columns":["name"]}],"limit":30}
       gql: |
         MATCH (p:Project) WHERE p.id IN [1001] AND NOT p.name = 'x' RETURN p.name
     expect:
@@ -128,8 +122,6 @@ cases:
         org_id: 1
         paths: [1/100/]
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1999],"not":{"name":"x"},"columns":["name"]}],"limit":30}
       gql: |
         MATCH (p:Project) WHERE p.id IN [1999] AND NOT p.name = 'x' RETURN p.name
     expect:
@@ -216,8 +208,6 @@ cases:
         org_id: 1
         paths: [1/100/]
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"state":"blocked"},"columns":["state"]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}
       gql: |
         MATCH (u:User {id: 1})-[:MEMBER_OF]->(n)
         WHERE NOT u.state = 'blocked'
@@ -240,8 +230,6 @@ cases:
         org_id: 1
         paths: [1/100/]
     query:
-      json: |
-        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
       gql: |
         MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
         WHERE g.id IN [100, 101, 102] AND NOT g.visibility_level = 'private'

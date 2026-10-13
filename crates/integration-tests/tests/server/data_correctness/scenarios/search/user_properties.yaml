@@ -1,14 +1,6 @@
 description: User search returns correct properties and ordering
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username", "name", "state", "user_type"]}],
-      "order_by": "u.id",
-      "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.name, u.state, u.user_type ORDER BY u.id LIMIT 10
 

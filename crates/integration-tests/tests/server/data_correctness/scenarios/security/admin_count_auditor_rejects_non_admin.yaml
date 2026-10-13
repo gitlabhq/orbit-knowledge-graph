@@ -1,18 +1,6 @@
 description: Non-admin COUNT aggregation on is_auditor rejects at compile
 
 query:
-  json: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
-        {"id": "u", "entity": "User", "columns": ["username"]}
-      ],
-      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-      "group_by": ["g"],
-      "aggregations": [{"count": "u.is_auditor", "as": "auditor_count"}],
-      "limit": 10
-    }
   gql: |
     MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, count(u.is_auditor) AS auditor_count LIMIT 10
 

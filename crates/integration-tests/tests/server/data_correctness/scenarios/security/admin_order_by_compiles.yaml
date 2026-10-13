@@ -4,13 +4,6 @@ config:
   security: admin
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
-      "order_by": "-u.is_admin",
-      "limit": 10
-    }
   gql: |
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin ORDER BY u.is_admin DESC LIMIT 10
 

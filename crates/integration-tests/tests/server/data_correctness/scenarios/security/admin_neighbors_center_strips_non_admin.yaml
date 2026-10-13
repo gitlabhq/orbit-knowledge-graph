@@ -1,13 +1,6 @@
 description: Non-admin neighbors dynamic wildcard strips admin-only fields from center node
 
 query:
-  json: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
-      "options": {"dynamic_columns": "*"}
-    }
   gql: |
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, properties(n)
 

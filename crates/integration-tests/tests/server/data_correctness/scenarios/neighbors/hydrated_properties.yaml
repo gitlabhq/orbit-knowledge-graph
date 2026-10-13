@@ -4,12 +4,6 @@ cases:
     config:
       redaction: { allow: { user: [2], group: [100] }, deny: { user: [3] } }
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [2, 3]}],
-          "neighbors": {"direction": "outgoing"}
-        }
       gql: |
         MATCH (u:User)-->(n) WHERE u.id IN [2, 3] RETURN u, n
     expect:
@@ -27,12 +21,6 @@ cases:
   - name: code_entities_by_own_id
     description: Code entity neighbors are hydrated by their own id, not by their project id
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "d", "entity": "Definition", "node_ids": [12000]}],
-          "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]}
-        }
       gql: |
         MATCH (d:Definition {id: 12000})-[:CALLS]->(n) RETURN d, n
     expect:
@@ -49,13 +37,6 @@ cases:
   - name: null_properties_dropped
     description: Hydration leaves out properties whose value is null
     query:
-      json: |
-        {
-          "query_type": "neighbors",
-          "nodes": [{"id": "u", "entity": "User", "node_ids": [3]}],
-          "neighbors": {"direction": "outgoing", "rel_types": ["APPROVED"]},
-          "options": {"dynamic_columns": "*"}
-        }
       gql: |
         MATCH (u:User {id: 3})-[:APPROVED]->(n) RETURN u, properties(n)
     expect:

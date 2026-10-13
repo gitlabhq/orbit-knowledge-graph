@@ -9,12 +9,12 @@ use crate::proto::execute_query_message::Content;
 use clickhouse_client::ArrowClickHouseClient;
 use orbit_billing::{BillingObserver, BillingTracker};
 use orbit_server_config::AnalyticsConfig;
+use query_engine::compiler::Frontend;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use ontology::introspection::SchemaResponse;
-use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
@@ -120,7 +120,7 @@ impl QueryPipelineService {
 
         let mut ctx = QueryPipelineContext {
             frontend: query.frontend,
-            query_json: query.text,
+            query: query.text,
             compiled: None,
             ontology: Arc::clone(&schema.ontology),
             security_context: None,

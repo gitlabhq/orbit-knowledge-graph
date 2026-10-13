@@ -10,7 +10,7 @@ use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
 use super::registry::{CommandCatalogEntry, ToolDefinition};
-use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
+use super::schema::query_dsl_version;
 use super::{CommandRegistry, ToolRegistry};
 
 #[derive(Debug, Error)]
@@ -45,9 +45,6 @@ impl OutputFormat {
 pub(crate) enum AgentCommand {
     GraphSchema {
         expand_nodes: Vec<String>,
-        format: OutputFormat,
-    },
-    QueryLanguage {
         format: OutputFormat,
     },
     ResponseFormat {
@@ -169,7 +166,6 @@ impl ToolService {
                     format,
                 })
             }
-            "get_query_dsl" => Ok(AgentCommand::QueryLanguage { format }),
             "get_response_format" => Ok(AgentCommand::ResponseFormat { format }),
             _ => Err(ExecutorError::NotFound(command_name.to_string())),
         }
@@ -214,19 +210,7 @@ impl ToolService {
         })
     }
 
-    /// TOON-encoded condensed query DSL grammar (issue #553).
-    pub fn build_query_dsl_toon() -> Result<String, ExecutorError> {
-        let version = Self::build_query_dsl_version();
-        let schema = condensed_query_schema().map_err(ExecutorError::InvalidArguments)?;
-        Ok(format!("QueryDSL v{version}:\n{schema}"))
-    }
-
-    /// Full query DSL JSON Schema as a JSON string (verbatim from disk).
-    pub fn build_query_dsl_raw() -> &'static str {
-        raw_query_schema()
-    }
-
-    /// Semver string for the query DSL grammar. Matches `config/QUERY_DSL_VERSION`.
+    /// Semver string for the accepted query language. Matches `query_dsl` in `config/versions.yaml`.
     pub fn build_query_dsl_version() -> String {
         query_dsl_version()
     }
@@ -255,27 +239,6 @@ impl ToolService {
                     .map_err(|error| ExecutorError::InvalidArguments(error.to_string()))
             }
         }
-    }
-
-    pub(crate) fn render_query_language(format: OutputFormat) -> Result<Value, ExecutorError> {
-        let result = match format {
-            OutputFormat::Llm => json!(Self::build_query_dsl_toon()?),
-            OutputFormat::Raw => {
-                let mut schema: Value =
-                    serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
-                        ExecutorError::InvalidArguments(format!("Failed to parse DSL schema: {e}"))
-                    })?;
-                if let Value::Object(ref mut object) = schema {
-                    object.insert(
-                        "version".to_string(),
-                        Value::String(Self::build_query_dsl_version()),
-                    );
-                }
-                schema
-            }
-        };
-
-        Ok(result)
     }
 
     pub(crate) fn render_response_format(format: OutputFormat) -> Result<Value, ExecutorError> {

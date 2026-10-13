@@ -1,12 +1,6 @@
 description: Wildcard columns returns all ontology fields but excludes internal columns
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
-      "limit": 10
-    }
   gql: |
     MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10
 

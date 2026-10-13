@@ -7,8 +7,6 @@ cases:
   - name: min_text_rejected
     description: MIN rejects a text property
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[9001]}],"aggregations":[{"min":"w.description","as":"v"}]}
       gql: |
         MATCH (w:WorkItem {id: 9001}) RETURN min(w.description) AS v
     expect:
@@ -17,8 +15,6 @@ cases:
   - name: grouped_max_text_rejected
     description: A node-grouped MAX rejects a text property
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"w","entity":"WorkItem"}],"relationships":[{"type":"IN_PROJECT","from":"w","to":"p"}],"group_by":["p"],"aggregations":[{"max":"w.title","as":"v"}]}
       gql: |
         MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN p, max(w.title) AS v
     expect:
@@ -58,8 +54,6 @@ cases:
   - name: categorical_group_keys_compile
     description: Grouping still accepts enums, low-selectivity strings, and truncated timestamps
     query:
-      json: |
-        {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"group_by":["mr.state","mr.merge_status",{"key":"mr.created_at","truncate":"month"}],"aggregations":[{"count":"mr","as":"n"}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) RETURN mr.state AS state, mr.merge_status AS merge_status, count(mr) AS n
     expect:

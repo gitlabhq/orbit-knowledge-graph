@@ -1,22 +1,6 @@
 name: Property filters distinguish requirements from SQL functions
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "filters": {
-        "name": [
-          {"contains": "orbit"},
-          {"starts_with": "git"},
-          {"ends_with": "lab"},
-          {"token_match": "graph"},
-          {"all_tokens": "graph query"},
-          {"any_tokens": "code data"},
-          {"is_not_null": true}
-        ],
-        "description": {"is_null": true}
-      }}]
-    }
   gql: |
     MATCH (p:Project)
     WHERE p.name CONTAINS 'orbit' AND p.name STARTS WITH 'git' AND p.name ENDS WITH 'lab'
