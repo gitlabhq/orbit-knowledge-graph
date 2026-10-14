@@ -12,6 +12,8 @@ use crate::{Env, Envelope, Error, Limits, LoadError};
 use arrow::record_batch::RecordBatch;
 use rustc_hash::FxHashSet;
 
+pub const WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 pub struct Options {
     pub limits: Limits,
     pub worker_threads: usize,
@@ -147,7 +149,7 @@ pub fn repository<E: std::fmt::Display>(
                             run.check()?;
                             let pool = rayon::ThreadPoolBuilder::new()
                                 .num_threads(family_threads)
-                                .stack_size(8 * 1024 * 1024)
+                                .stack_size(WORKER_STACK_BYTES)
                                 .build()
                                 .map_err(|error| LoadError::new(error.to_string()))?;
                             pool.install(|| {

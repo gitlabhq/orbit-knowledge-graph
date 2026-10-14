@@ -61,6 +61,14 @@ fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
 }
 
 pub fn run_incremental_suite(yaml: &str) {
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(templates::WORKER_STACK_BYTES)
+        .build()
+        .expect("worker pool")
+        .install(|| index_and_check(yaml));
+}
+
+fn index_and_check(yaml: &str) {
     let Some(suite) = load_suite(yaml) else {
         return;
     };
