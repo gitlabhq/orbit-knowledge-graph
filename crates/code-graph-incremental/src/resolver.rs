@@ -1067,8 +1067,6 @@ enum Via {
     Covered,
 }
 
-/// Groups the requests of each `pkg/*` import whose targets are a whole
-/// package, so one union of the package's names serves every importer.
 fn package_imports(
     trees: &[Tree],
     reqs: &[ImportReq],
@@ -1132,8 +1130,6 @@ fn package_imports(
     (via, packages)
 }
 
-/// The names of every file in a package in request order, each with its
-/// distinct locations in the order a pass over the files meets them.
 fn package_exports(files: &[u32], visible: &VisibleMap) -> PackageExports {
     let mut union = PackageExports::default();
     for &fi in files {
@@ -2138,17 +2134,6 @@ mod alias_tests {
 mod remap_tests {
     use super::*;
 
-    #[test]
-    fn a_panic_while_resolving_releases_the_name() {
-        let key = (0, 7);
-        let panicked = std::panic::catch_unwind(|| {
-            let _resolving = Resolving::enter(key);
-            panic!("resolution failed");
-        });
-        assert!(panicked.is_err());
-        assert!(Resolving::enter(key).is_some());
-    }
-
     /// `a` sees a name from `b`, `c` sees a name from `a`. Dropping `b`
     /// must report `a` and leave `c` alone, however the name got there.
     #[test]
@@ -2168,5 +2153,21 @@ mod remap_tests {
 
         assert_eq!(lost, FxHashSet::from_iter([0]));
         assert_eq!(resolver.visible[1].get(&name), Some(&Loc::new(0, 0)));
+    }
+}
+
+#[cfg(test)]
+mod resolving_tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_while_resolving_releases_the_name() {
+        let key = (0, 7);
+        let panicked = std::panic::catch_unwind(|| {
+            let _resolving = Resolving::enter(key);
+            panic!("resolution failed");
+        });
+        assert!(panicked.is_err());
+        assert!(Resolving::enter(key).is_some());
     }
 }
