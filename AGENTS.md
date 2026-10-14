@@ -21,12 +21,10 @@ Use mise for all tasks.
 `docs-locale/` is generated. Never read, edit, or reference it.
 
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
-Commits title and keep it there through review. Editing the title starts no
-pipeline, and the merge ref keeps the old title until a push with a new SHA.
+Commits title and keep it there through review.
 
-When ready for CI, remove `[skip ci]` from the title, then run
-`git commit --amend --no-edit --allow-empty` and push with `--force-with-lease`.
-Check that the new MR head pipeline is not skipped.
+When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
+Editing the title alone starts no pipeline.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
