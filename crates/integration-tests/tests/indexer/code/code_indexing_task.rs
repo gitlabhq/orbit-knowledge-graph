@@ -48,6 +48,7 @@ async fn incremental_flag_indexes_archives_and_replaces_stale_definitions() {
         ("IN_PROJECT", "Branch", "Project", 1),
         ("CONTAINS", "Project", "Branch", 1),
         ("CONTAINS", "Branch", "Directory", 2),
+        ("CONTAINS", "Branch", "File", 2),
         ("ON_BRANCH", "File", "Branch", 6),
     ] {
         assert_edge_count_for_traversal_path(
@@ -1274,7 +1275,7 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
 }
 
 #[tokio::test]
-async fn stale_rows_in_the_shared_edge_table_are_cleaned_on_reindex() {
+async fn stale_rows_in_the_code_edge_table_are_cleaned_on_reindex() {
     let project_id: i64 = 22;
     let traversal_path = "1/22/";
 
@@ -1305,7 +1306,14 @@ async fn stale_rows_in_the_shared_edge_table_are_cleaned_on_reindex() {
     .await;
 
     let directory_id = first_active_directory_id(&clickhouse, project_id).await;
-    insert_stale_canary_edge(&clickhouse, traversal_path, directory_id).await;
+    insert_stale_canary_edge(
+        &clickhouse,
+        traversal_path,
+        project_id,
+        "main",
+        directory_id,
+    )
+    .await;
     assert_eq!(count_canary_edges(&clickhouse, directory_id).await, 1);
 
     mock.replace_archive(
@@ -1325,7 +1333,7 @@ async fn stale_rows_in_the_shared_edge_table_are_cleaned_on_reindex() {
     assert_eq!(
         count_canary_edges(&clickhouse, directory_id).await,
         0,
-        "the reindex must tombstone the stale shared edge so a _deleted = false FINAL \
+        "the reindex must tombstone the stale code edge so a _deleted = false FINAL \
          read no longer returns it"
     );
 }
@@ -1412,7 +1420,9 @@ async fn edges_from_directories_that_no_longer_exist(
     clickhouse: &integration_testkit::TestContext,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
+    let edge_table = ontology
+        .edge_table_for_variant("CONTAINS", "Directory", "Directory")
+        .unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \
@@ -1453,18 +1463,19 @@ async fn first_active_directory_id(
 async fn insert_stale_canary_edge(
     clickhouse: &integration_testkit::TestContext,
     traversal_path: &str,
+    project_id: i64,
+    branch: &str,
     source_id: i64,
 ) {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
-    // The shared edge table carries no project column, so the cleanup resolves
-    // ownership through the code node tables. A canary sourced from anything
-    // other than a real directory id would fall outside the predicate.
+    let edge_table = ontology
+        .edge_table_for_variant("CONTAINS", "Directory", "File")
+        .unwrap();
     let sql = format!(
         "INSERT INTO {edge_table} \
-         (traversal_path, source_id, source_kind, relationship_kind, \
+         (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, \
           target_id, target_kind, _version) \
-         VALUES ('{traversal_path}', {source_id}, 'Directory', 'CONTAINS', \
+         VALUES ('{traversal_path}', {project_id}, '{branch}', {source_id}, 'Directory', 'CONTAINS', \
                  {CANARY_TARGET_ID}, 'File', '2020-01-01 00:00:00.000000')"
     );
     clickhouse.execute(&sql).await;
@@ -1475,7 +1486,9 @@ async fn count_canary_edges(
     source_id: i64,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
+    let edge_table = ontology
+        .edge_table_for_variant("CONTAINS", "Directory", "File")
+        .unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT target_id FROM {edge_table} FINAL \
@@ -1727,7 +1740,9 @@ async fn assert_contains_edge_between_directory_and_file(
     file_path: &str,
 ) {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
+    let edge_table = ontology
+        .edge_table_for_variant("CONTAINS", "Directory", "File")
+        .unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT e.source_id FROM {edge_table} AS e FINAL \

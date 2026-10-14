@@ -284,36 +284,6 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
     );
 }
 
-#[tokio::test]
-async fn dispatcher_rejects_split_routes_before_publishing_archive() {
-    let context = TestContext::new().await;
-    let (_, catalog) = context.connect_catalog().await;
-    let mut sources = embedded_sources();
-    let mut calls: serde_json::Value =
-        orbit_utils::yaml::from_str(&sources["edges/calls.yaml"]).unwrap();
-    calls["variants"][0]["table"] = serde_json::json!("gl_edge");
-    sources.insert(
-        "edges/calls.yaml".into(),
-        orbit_utils::yaml::to_string(&calls).unwrap(),
-    );
-    let archive = OntologyArchive::from_sources(*SCHEMA_VERSION, &sources).unwrap();
-    let result = indexer::run_dispatcher(
-        &context.config,
-        &archive,
-        serving_flag(),
-        CancellationToken::new(),
-    )
-    .await;
-    assert!(
-        matches!(result, Err(DispatcherError::Ontology(ontology::OntologyError::Validation(message)))
-        if message.contains("relationship 'CALLS' has split table routes"))
-    );
-    assert!(matches!(
-        catalog.load(*SCHEMA_VERSION).await,
-        Err(CatalogError::Missing(_))
-    ));
-}
-
 struct TestContext {
     server: ContainerAsync<Nats>,
     config: DispatcherConfig,

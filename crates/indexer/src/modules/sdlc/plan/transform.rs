@@ -81,10 +81,19 @@ enum EdgeKind {
     },
 }
 
+#[derive(Clone)]
 enum EdgeFilter {
     IsNotNull(String),
     ArrayNotEmpty(String),
-    TypeIn { column: String, types: Vec<String> },
+    TypeIn {
+        column: String,
+        types: Vec<String>,
+    },
+    VariantIn {
+        source_kind: String,
+        target_kind: String,
+        variants: Vec<(String, String)>,
+    },
 }
 
 impl TransformDeclaration {
@@ -134,7 +143,7 @@ fn build_node_transform(
     }];
 
     for mapping in &transform_declaration.edges {
-        transforms.push(fk_edge_transform(
+        transforms.extend(fk_edge_transform(
             mapping,
             &transform_declaration.node_name,
             namespaced,
@@ -156,14 +165,14 @@ fn edge_transform(
         EdgeFilter::IsNotNull(mapping.source.field.clone()),
         EdgeFilter::IsNotNull(mapping.target.field.clone()),
     ];
-    Ok(TransformSpec::DataFusion(vec![edge_transformation(
+    Ok(TransformSpec::DataFusion(edge_transformations(
         relationship_kind,
         mapping,
         scope == EtlScope::Namespaced,
         filters,
         denormalized,
         ontology,
-    )?]))
+    )?))
 }
 
 fn fk_edge_transform(
@@ -171,7 +180,7 @@ fn fk_edge_transform(
     node_name: &str,
     namespaced: bool,
     ontology: &Ontology,
-) -> Result<Transformation, ontology::OntologyError> {
+) -> Result<Vec<Transformation>, ontology::OntologyError> {
     let mut filters = Vec::new();
     for node_ref in [&mapping.source, &mapping.target] {
         if node_ref.field == DEFAULT_PRIMARY_KEY {
@@ -184,7 +193,7 @@ fn fk_edge_transform(
         });
     }
     let denormalized = fk_denormalized_columns(mapping, node_name, ontology);
-    edge_transformation(
+    edge_transformations(
         &mapping.label,
         mapping,
         namespaced,
@@ -194,14 +203,14 @@ fn fk_edge_transform(
     )
 }
 
-fn edge_transformation(
+fn edge_transformations(
     relationship_kind: &str,
     mapping: &EdgeMapping,
     namespaced: bool,
     mut filters: Vec<EdgeFilter>,
     denormalized: Vec<DenormalizedColumnProjection>,
     ontology: &Ontology,
-) -> Result<Transformation, ontology::OntologyError> {
+) -> Result<Vec<Transformation>, ontology::OntologyError> {
     let (source_kind, source_filter) = resolve_node_ref_kind(&mapping.source, || {
         ontology.get_edge_source_types(relationship_kind)
     });
@@ -211,30 +220,59 @@ fn edge_transformation(
     filters.extend(source_filter);
     filters.extend(target_filter);
 
-    let table = ontology.edge_table_for_relationship(relationship_kind)?;
-    let meta = edge_table_metadata(table, ontology);
-    let sql = build_edge_transform_sql(
-        &edge_id_sql(&resolve_edge_id(
-            &mapping.source,
-            mapping.array_field.as_deref(),
-        )),
-        &edge_kind_sql(&source_kind),
-        relationship_kind,
-        &edge_id_sql(&resolve_edge_id(
-            &mapping.target,
-            mapping.array_field.as_deref(),
-        )),
-        &edge_kind_sql(&target_kind),
-        namespaced,
-        &denormalized,
-        &filters,
-        &meta.sort_key,
-    );
-    Ok(Transformation {
-        sql,
-        destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
-        dict_encode_columns: meta.dict_columns,
-    })
+    let source_kind_sql = edge_kind_sql(&source_kind);
+    let target_kind_sql = edge_kind_sql(&target_kind);
+    let routes = ontology.edge_routes_for_mapping(mapping);
+    if routes.is_empty() {
+        return Err(ontology::OntologyError::Validation(format!(
+            "pipeline mapping materializes no declared '{relationship_kind}' variant"
+        )));
+    }
+
+    let mut variants_by_table: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
+    for route in &routes {
+        variants_by_table
+            .entry(&route.destination_table)
+            .or_default()
+            .push((route.source_kind.clone(), route.target_kind.clone()));
+    }
+    let split_route = variants_by_table.len() > 1;
+
+    variants_by_table
+        .into_iter()
+        .map(|(table, variants)| {
+            let mut filters = filters.clone();
+            if split_route {
+                filters.push(EdgeFilter::VariantIn {
+                    source_kind: source_kind_sql.clone(),
+                    target_kind: target_kind_sql.clone(),
+                    variants,
+                });
+            }
+            let meta = edge_table_metadata(table, ontology);
+            Ok(Transformation {
+                sql: build_edge_transform_sql(
+                    &edge_id_sql(&resolve_edge_id(
+                        &mapping.source,
+                        mapping.array_field.as_deref(),
+                    )),
+                    &source_kind_sql,
+                    relationship_kind,
+                    &edge_id_sql(&resolve_edge_id(
+                        &mapping.target,
+                        mapping.array_field.as_deref(),
+                    )),
+                    &target_kind_sql,
+                    namespaced,
+                    &denormalized,
+                    &filters,
+                    &meta.sort_key,
+                ),
+                destination_table: prefixed_table_name(table, *SCHEMA_VERSION),
+                dict_encode_columns: meta.dict_columns,
+            })
+        })
+        .collect()
 }
 
 fn standalone_edge_denormalized_columns(
@@ -477,6 +515,20 @@ fn edge_filter_sql(filter: &EdgeFilter) -> String {
                 .join(", ");
             format!("{column} IN ({types_list})")
         }
+        EdgeFilter::VariantIn {
+            source_kind,
+            target_kind,
+            variants,
+        } => format!(
+            "({})",
+            variants
+                .iter()
+                .map(|(source, target)| {
+                    format!("({source_kind} = '{source}' AND {target_kind} = '{target}')")
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        ),
     }
 }
 
@@ -726,15 +778,17 @@ mod tests {
 
     #[test]
     fn fk_edge_transform_outgoing_literal() {
-        let mapping = literal_mapping("id", "Group", "owner_id", "User", "owns");
+        let mapping = literal_mapping("owner_id", "User", "id", "Group", "OWNER");
         let sql = fk_edge_transform(&mapping, "Group", true, &test_ontology())
+            .unwrap()
+            .pop()
             .unwrap()
             .sql;
 
-        assert!(sql.contains("id AS source_id"));
-        assert!(sql.contains("'Group' AS source_kind"));
-        assert!(sql.contains("owner_id AS target_id"));
-        assert!(sql.contains("'User' AS target_kind"));
+        assert!(sql.contains("owner_id AS source_id"));
+        assert!(sql.contains("'User' AS source_kind"));
+        assert!(sql.contains("id AS target_id"));
+        assert!(sql.contains("'Group' AS target_kind"));
         assert!(sql.contains("(owner_id IS NOT NULL)"));
     }
 
@@ -767,6 +821,8 @@ mod tests {
 
         let sql = fk_edge_transform(&edge, "Note", true, &test_ontology())
             .unwrap()
+            .pop()
+            .unwrap()
             .sql;
         assert!(
             sql.contains("WHEN noteable_type = 'Issue' THEN 'WorkItem'"),
@@ -790,11 +846,13 @@ mod tests {
                 property_inputs: indexmap::IndexMap::new(),
                 enrich: false,
             },
-            label: "assigned".to_string(),
+            label: "ASSIGNED".to_string(),
             array_field: Some("user_id".to_string()),
             mutable: false,
         };
         let sql = fk_edge_transform(&edge, "MergeRequest", true, &test_ontology())
+            .unwrap()
+            .pop()
             .unwrap()
             .sql;
         assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");

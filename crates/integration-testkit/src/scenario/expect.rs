@@ -52,14 +52,11 @@ async fn check_nodes(ctx: &TestContext, table: &str, expect: &NodeExpect, locati
 
 async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
     let kind = &expect.kind;
-    let table = edge_table(kind);
+    let (from, to) = expect_endpoint_kinds(expect, &format!("{location}: {kind} edges"));
+    let table = edge_table(kind, from, to);
     let mut conditions = vec![format!("relationship_kind = '{kind}'")];
-    if let Some(from) = &expect.from {
-        conditions.push(format!("source_kind = '{from}'"));
-    }
-    if let Some(to) = &expect.to {
-        conditions.push(format!("target_kind = '{to}'"));
-    }
+    conditions.push(format!("source_kind = '{from}'"));
+    conditions.push(format!("target_kind = '{to}'"));
     let batches = ctx
         .query(&format!(
             "SELECT * FROM {table} FINAL WHERE {}",
@@ -94,23 +91,21 @@ async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
     }
 
     if !expect.source_tags.is_empty() {
-        let (from, to) = tag_endpoint_kinds(expect, &edge_location);
         let expected = tag_pairs(&expect.source_tags);
         let expected_refs = tag_pair_refs(&expected);
         assert_edge_tags_by_source(ctx, kind, from, to, "source_tags", &expected_refs).await;
     }
     if !expect.target_tags.is_empty() {
-        let (from, to) = tag_endpoint_kinds(expect, &edge_location);
         let expected = tag_pairs(&expect.target_tags);
         let expected_refs = tag_pair_refs(&expected);
         assert_edge_tags_by_target(ctx, kind, from, to, "target_tags", &expected_refs).await;
     }
 }
 
-fn tag_endpoint_kinds<'a>(expect: &'a EdgeExpect, edge_location: &str) -> (&'a str, &'a str) {
+fn expect_endpoint_kinds<'a>(expect: &'a EdgeExpect, edge_location: &str) -> (&'a str, &'a str) {
     match (&expect.from, &expect.to) {
         (Some(from), Some(to)) => (from.as_str(), to.as_str()),
-        _ => panic!("{edge_location}: source_tags/target_tags require both from: and to:"),
+        _ => panic!("{edge_location}: edge expectations require both from: and to:"),
     }
 }
 

@@ -280,10 +280,7 @@ mod tests {
             local.backend().entity(definition).unwrap().table,
             "gl_definition"
         );
-        assert_eq!(
-            remote.backend().relationship_table(contains),
-            Some("gl_edge")
-        );
+        assert_eq!(remote.backend().relationship_table(contains), None);
         assert_eq!(
             local.backend().relationship_table(contains),
             Some("gl_edge")

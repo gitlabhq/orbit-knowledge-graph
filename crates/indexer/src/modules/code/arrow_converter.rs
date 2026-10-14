@@ -700,12 +700,7 @@ pub(super) fn route_graph(
 
         // Cloned so the routing borrow detaches from `data.edges` and the
         // single-table path can move the batch out instead of copying it.
-        let rel_col = data
-            .edges
-            .column_by_name("relationship_kind")
-            .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?
-            .clone();
-        let routing = EdgeRouting::resolve(&rel_col, table_names)?;
+        let routing = EdgeRouting::resolve(&data.edges, table_names)?;
 
         // Columns that only exist on gl_code_edge. Sub-batches going
         // to other edge tables (gl_edge) must have them stripped.
@@ -742,91 +737,67 @@ pub(super) fn route_graph(
     Ok(result)
 }
 
-/// Destination table per edge row. `relationship_kind` is `LowCardinality`, so
-/// mapping the dictionary once beats a Utf8 cast plus a hash lookup per row.
-enum EdgeRouting<'a> {
-    Dictionary {
-        keys: &'a [i32],
-        by_key: Vec<&'a str>,
-    },
-    /// The column was not dictionary-encoded after all.
-    PerRow(Vec<&'a str>),
-}
+struct EdgeRouting<'a>(Vec<&'a str>);
 
 impl<'a> EdgeRouting<'a> {
     fn resolve(
-        rel_col: &'a arrow::array::ArrayRef,
+        edges: &RecordBatch,
         table_names: &'a super::config::CodeTableNames,
     ) -> Result<Self, SinkError> {
         use arrow::array::{Array, AsArray};
         use arrow::datatypes::Int32Type;
 
-        // Nulls cannot occur today, but the dictionary path reads the raw key
-        // buffer, where a null position would index `by_key` out of bounds.
-        if rel_col.null_count() > 0 {
-            return Err(SinkError(
-                "relationship_kind contains nulls, which edge routing cannot resolve".into(),
-            ));
-        }
+        let strings = ["relationship_kind", "source_kind", "target_kind"]
+            .map(|name| {
+                let column = edges
+                    .column_by_name(name)
+                    .ok_or_else(|| SinkError(format!("edges batch missing {name} column")))?;
+                if column.null_count() > 0 {
+                    return Err(SinkError(format!(
+                        "{name} contains nulls, which edge routing cannot resolve"
+                    )));
+                }
+                let dictionary = column
+                    .as_dictionary_opt::<Int32Type>()
+                    .ok_or_else(|| SinkError(format!("{name} is not dictionary encoded")))?;
+                let values = dictionary.values().as_string_opt::<i32>().ok_or_else(|| {
+                    SinkError(format!("{name} dictionary values are not strings"))
+                })?;
+                Ok((dictionary.keys().values(), values))
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, SinkError>>()?;
 
-        if let Some(dict) = rel_col.as_dictionary_opt::<Int32Type>() {
-            let values = dict.values().as_string_opt::<i32>().ok_or_else(|| {
-                SinkError("relationship_kind dictionary values are not strings".into())
-            })?;
-            let by_key = (0..values.len())
-                .map(|i| table_names.edge_table_for(values.value(i)))
-                .collect();
-            return Ok(Self::Dictionary {
-                keys: dict.keys().values(),
-                by_key,
-            });
+        let [relationship, source, target] = strings.as_slice() else {
+            return Err(SinkError("edge route columns did not resolve".into()));
+        };
+        let mut tables = Vec::with_capacity(edges.num_rows());
+        for row in 0..edges.num_rows() {
+            let relationship_kind = relationship.1.value(relationship.0[row] as usize);
+            let source_kind = source.1.value(source.0[row] as usize);
+            let target_kind = target.1.value(target.0[row] as usize);
+            tables.push(
+                table_names
+                    .edge_table_for(relationship_kind, source_kind, target_kind)
+                    .map_err(|error| SinkError(error.to_string()))?,
+            );
         }
-
-        let plain = rel_col.as_string_opt::<i32>().ok_or_else(|| {
-            SinkError("relationship_kind is neither a dictionary nor a string column".into())
-        })?;
-        Ok(Self::PerRow(
-            (0..plain.len())
-                .map(|i| table_names.edge_table_for(plain.value(i)))
-                .collect(),
-        ))
+        Ok(Self(tables))
     }
 
     /// `Some` when every row routes to the same table.
     fn single_table(&self) -> Option<&'a str> {
-        let mut tables = match self {
-            Self::Dictionary { keys, by_key } => {
-                // A dictionary can carry values no row references, so the
-                // distinct set has to come from the keys actually present.
-                let mut seen: Vec<&str> = Vec::new();
-                for &k in *keys {
-                    let table = by_key[k as usize];
-                    if !seen.contains(&table) {
-                        seen.push(table);
-                    }
-                }
-                seen
+        let mut tables: Vec<&str> = Vec::new();
+        for &table in &self.0 {
+            if !tables.contains(&table) {
+                tables.push(table);
             }
-            Self::PerRow(tables) => {
-                let mut seen: Vec<&str> = Vec::new();
-                for &table in tables {
-                    if !seen.contains(&table) {
-                        seen.push(table);
-                    }
-                }
-                seen
-            }
-        };
+        }
         (tables.len() == 1).then(|| tables.pop().expect("length checked"))
     }
 
     fn tables_by_row(&self) -> Box<dyn Iterator<Item = &'a str> + '_> {
-        match self {
-            Self::Dictionary { keys, by_key } => {
-                Box::new(keys.iter().map(move |&k| by_key[k as usize]))
-            }
-            Self::PerRow(tables) => Box::new(tables.iter().copied()),
-        }
+        Box::new(self.0.iter().copied())
     }
 }
 

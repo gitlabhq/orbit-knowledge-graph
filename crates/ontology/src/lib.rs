@@ -105,6 +105,7 @@ impl fmt::Display for OntologyError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTableConfig {
+    pub domains: BTreeSet<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
     pub storage: EdgeTableStorage,
@@ -183,6 +184,7 @@ impl Ontology {
             .map(|s| (*s).to_string())
             .collect();
         let default_config = EdgeTableConfig {
+            domains: BTreeSet::new(),
             sort_key: default_sort_key,
             columns: Vec::new(),
             storage: EdgeTableStorage::default(),
@@ -333,6 +335,7 @@ impl Ontology {
         self.edge_table_configs.insert(
             name,
             EdgeTableConfig {
+                domains: BTreeSet::new(),
                 sort_key,
                 columns: Vec::new(),
                 storage: EdgeTableStorage::default(),
@@ -914,6 +917,33 @@ impl Ontology {
             .get(relationship_kind)?
             .iter()
             .find(|edge| edge.source_kind == source_kind && edge.target_kind == target_kind)
+    }
+
+    pub fn edge_table_for_variant(
+        &self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Result<&str, OntologyError> {
+        self.edge_route(relationship_kind, source_kind, target_kind)
+            .map(|edge| edge.destination_table.as_str())
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "relationship '{relationship_kind}' has no {source_kind} -> {target_kind} variant"
+                ))
+            })
+    }
+
+    pub fn edge_routes_for_mapping(&self, mapping: &EdgeMapping) -> Vec<&EdgeEntity> {
+        self.edges
+            .get(&mapping.label)
+            .into_iter()
+            .flatten()
+            .filter(|edge| {
+                node_ref_matches(&mapping.source, &edge.source_kind)
+                    && node_ref_matches(&mapping.target, &edge.target_kind)
+            })
+            .collect()
     }
 
     pub fn edge_tables_for_relationship(&self, relationship_kind: &str) -> BTreeSet<&str> {
@@ -1726,6 +1756,13 @@ impl Ontology {
     }
 }
 
+fn node_ref_matches(node_ref: &NodeRef, node_kind: &str) -> bool {
+    match &node_ref.kind {
+        NodeRefKind::Literal(literal) => literal == node_kind,
+        NodeRefKind::Derived { .. } => true,
+    }
+}
+
 impl fmt::Display for Ontology {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -1984,6 +2021,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn edge_routes_use_domain_defaults_before_global_default() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+
+        for (source, target, table) in [
+            ("Group", "Project", "gl_edge"),
+            ("Project", "Branch", "gl_edge"),
+            ("Branch", "Directory", "gl_code_edge"),
+            ("Branch", "File", "gl_code_edge"),
+            ("Directory", "Directory", "gl_code_edge"),
+            ("Directory", "File", "gl_code_edge"),
+        ] {
+            assert_eq!(
+                ontology
+                    .edge_table_for_variant("CONTAINS", source, target)
+                    .unwrap(),
+                table
+            );
+        }
+    }
+
+    #[test]
+    fn variant_table_overrides_domain_route() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/variant_routes"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            ontology
+                .edge_table_for_variant("CALLS", "Definition", "Definition")
+                .unwrap(),
+            "gl_code_edge"
+        );
+        assert_eq!(
+            ontology
+                .edge_table_for_variant("CALLS", "File", "Definition")
+                .unwrap(),
+            "gl_edge"
+        );
     }
 
     #[test]

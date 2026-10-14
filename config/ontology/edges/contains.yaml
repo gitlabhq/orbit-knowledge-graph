@@ -31,6 +31,11 @@ variants:
     scope: same_namespace
     description: "Branch contains root directory."
 
+  - from_node: { type: Branch, id: id }
+    to_node: { type: File, id: id }
+    scope: same_namespace
+    description: "Branch contains root file."
+
   - from_node: { type: Directory, id: id }
     to_node: { type: Directory, id: id }
     scope: same_namespace

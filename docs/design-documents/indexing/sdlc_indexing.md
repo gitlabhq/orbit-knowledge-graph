@@ -107,7 +107,7 @@ The data is transformed from ClickHouse to a graph-like format using the followi
   - Core attributes relevant to that entity type
   - Metadata fields (created_at, updated_at, deleted_at for soft deletes)
 
-- **Edges**: Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each edge YAML can set a `table:` field to route that relationship type to a dedicated table. `settings.edge_tables` in `schema.yaml` defines the available tables and their storage layout. Each edge table contains:
+- **Edges**: Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each transform resolves the relationship kind and both endpoint kinds to one ontology variant. A table can claim node domains. Edge-level and variant-level `table:` values override domain routing. `settings.edge_tables` in `schema.yaml` defines the tables and their storage layout. Each edge table contains:
   - Traversal path (namespace scoping)
   - Source node identifier and kind
   - Relationship kind

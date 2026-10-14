@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 use crate::OntologyError;
 use crate::entities::{EdgeEntity, EdgeVariantScope};
@@ -48,19 +49,33 @@ impl EdgeYaml {
         &self,
         relationship_kind: String,
         default_table: &str,
+        node_domains: &BTreeMap<String, String>,
+        domain_tables: &BTreeMap<String, String>,
     ) -> Vec<EdgeEntity> {
-        let table = self.table.as_deref().unwrap_or(default_table);
         self.variants
             .iter()
-            .map(|v| EdgeEntity {
-                relationship_kind: relationship_kind.clone(),
-                source: v.from_node.id.clone(),
-                source_kind: v.from_node.node_type.clone(),
-                target: v.to_node.id.clone(),
-                target_kind: v.to_node.node_type.clone(),
-                destination_table: v.table.as_deref().unwrap_or(table).to_string(),
-                fk_column: v.fk_column.clone(),
-                scope: v.scope,
+            .map(|variant| {
+                let domain_table = node_domains
+                    .get(&variant.from_node.node_type)
+                    .filter(|domain| node_domains.get(&variant.to_node.node_type) == Some(*domain))
+                    .and_then(|domain| domain_tables.get(domain));
+                let destination_table = variant
+                    .table
+                    .as_ref()
+                    .or(self.table.as_ref())
+                    .or(domain_table)
+                    .map_or_else(|| default_table.to_string(), Clone::clone);
+
+                EdgeEntity {
+                    relationship_kind: relationship_kind.clone(),
+                    source: variant.from_node.id.clone(),
+                    source_kind: variant.from_node.node_type.clone(),
+                    target: variant.to_node.id.clone(),
+                    target_kind: variant.to_node.node_type.clone(),
+                    destination_table,
+                    fk_column: variant.fk_column.clone(),
+                    scope: variant.scope,
+                }
             })
             .collect()
     }
