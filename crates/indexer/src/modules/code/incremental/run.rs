@@ -153,7 +153,7 @@ pub(in crate::modules::code) fn run(
             .into_iter()
             .map(|killed| {
                 let phase = match killed.label {
-                    "tree-sitter" | "depth" => AbortPhase::Parse,
+                    "tree-sitter" | "depth" | "stack" => AbortPhase::Parse,
                     "rewrite" => AbortPhase::Walk,
                     "link" | "edges" => AbortPhase::Ssa,
                     _ => AbortPhase::Sentinel,

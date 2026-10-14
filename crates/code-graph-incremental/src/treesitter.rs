@@ -410,12 +410,16 @@ pub fn parse_with_sentinel(
         c.parser.reset();
         let mut stopped = None;
         let mut guard = parse_guard();
-        let mut progress = |state: &tree_sitter::ParseState| match sentinel.check() {
-            Ok(()) => guard(state.current_byte_offset()),
-            Err(error) => {
-                stopped = Some(error);
-                ControlFlow::Break(())
-            }
+        let mut progress = |state: &tree_sitter::ParseState| {
+            let stop = match sentinel.check() {
+                Ok(()) => match guard(state.current_byte_offset()) {
+                    ControlFlow::Continue(()) => return ControlFlow::Continue(()),
+                    ControlFlow::Break(reason) => guard_stop(reason, label),
+                },
+                Err(error) => error,
+            };
+            stopped = Some(stop);
+            ControlFlow::Break(())
         };
         let mut input =
             |offset: usize, _: tree_sitter::Point| source.as_bytes().get(offset..).unwrap_or(&[]);
@@ -447,11 +451,11 @@ fn guard_stop(label: &'static str, path: &str) -> Killed {
 const MAX_STALL: u64 = 100_000;
 const STACK_RED_ZONE: usize = 256 * 1024;
 
-fn parse_guard() -> impl FnMut(usize) -> ControlFlow<()> {
+fn parse_guard() -> impl FnMut(usize) -> ControlFlow<&'static str> {
     let (mut last_offset, mut stalled) = (usize::MAX, 0);
     move |offset| {
         if stacker::remaining_stack().is_some_and(|left| left < STACK_RED_ZONE) {
-            return ControlFlow::Break(());
+            return ControlFlow::Break("stack");
         }
         if offset != last_offset {
             (last_offset, stalled) = (offset, 0);
@@ -459,7 +463,7 @@ fn parse_guard() -> impl FnMut(usize) -> ControlFlow<()> {
         }
         stalled += 1;
         match stalled > MAX_STALL {
-            true => ControlFlow::Break(()),
+            true => ControlFlow::Break("tree-sitter"),
             false => ControlFlow::Continue(()),
         }
     }
@@ -480,6 +484,18 @@ mod tests {
         assert!((0..MAX_STALL).all(|_| guard(0).is_continue()));
         assert!(guard(0).is_break());
         assert!(guard(1).is_continue());
+    }
+
+    #[test]
+    fn a_parse_near_the_end_of_the_stack_stops_as_a_stack_skip() {
+        let source = "def f(x):\n    return x\n".repeat(2_000);
+        let killed = std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(move || parse(&source, SupportLang::Python, &Lang::default(), "main.py").err())
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(killed.map(|killed| killed.label), Some("stack"));
     }
 
     #[test]

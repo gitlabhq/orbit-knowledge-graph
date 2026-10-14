@@ -444,6 +444,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 _ if skipped.contains_key(path) => match skipped[path] {
                     "tree-sitter" => "skip_timeout_parse",
                     "depth" => "skip_deeply_nested",
+                    "stack" => "skip_stack_limit",
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
                     "edges" => "skip_too_many_edges",
