@@ -13,9 +13,12 @@
 
 grpc_bind_address: "0.0.0.0:50054"
 
+# consumer_name matches the Helm chart. Native mode and Caproni edit mode run the same binary and
+# so share one versioned JetStream work-queue stream, which allows one consumer per filter subject;
+# a different name here would make the two paths reject each other's consumers for an hour.
 nats:
   url: "nats://127.0.0.1:4222"
-  consumer_name: "gkg-indexer-dev"
+  consumer_name: "gkg-indexer"
 
 datalake:
   database: "gitlab_main"

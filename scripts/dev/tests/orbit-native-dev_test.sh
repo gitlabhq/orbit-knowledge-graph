@@ -81,5 +81,11 @@ kc() { echo "k3d-caproni"; }
 check "cluster name from k3d context" "caproni" "$(cluster_name)"
 check "cluster name override" "mine" "$(CAPRONI_CLUSTER_NAME=mine cluster_name)"
 
+# consumer_name_matches_chart: both local paths run the same binary, so they share one versioned
+# JetStream work-queue stream, and a work-queue stream allows one consumer per filter subject.
+# The committed dev.yaml must use the chart's consumer name so native mode and edit mode reuse
+# the same durable consumers instead of rejecting each other.
+check "dev.yaml consumer name matches the chart" "gkg-indexer" "$(yq '.nats.consumer_name' "$HERE/../../../config/dev.yaml")"
+
 if [[ "$failures" -gt 0 ]]; then printf '\n%d check(s) failed\n' "$failures"; exit 1; fi
 printf '\nall checks passed\n'
