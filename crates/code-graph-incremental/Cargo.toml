@@ -10,6 +10,9 @@ ignored = ["pest"] # used by pest_derive-generated code
 [lints]
 workspace = true
 
+[features]
+pretty-print = []
+
 [dependencies]
 arrow = { workspace = true }
 cpu-time = { workspace = true }
@@ -58,5 +61,6 @@ orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
 
 [dev-dependencies]
+termtree = "1.0"
 tempfile = { workspace = true }
 zstd = "0.13"

@@ -1440,6 +1440,7 @@ dependencies = [
  "stacker",
  "strum 0.28.0",
  "tempfile",
+ "termtree",
  "toml",
  "tree-sitter",
  "tree-sitter-bash",
@@ -9560,6 +9561,12 @@ dependencies = [
  "rustix 1.1.4",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "termtree"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4d1330fe7f7f872cd05165130b10602d667b205fd85be09be2814b115d4ced9"
 
 [[package]]
 name = "testcontainers"
