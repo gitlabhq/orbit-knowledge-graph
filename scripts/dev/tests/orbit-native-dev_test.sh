@@ -56,6 +56,24 @@ check "slice service label" "gkg-webserver" "$(yq '.metadata.labels."kubernetes.
 # host_ip honours the override without touching the cluster.
 check "host ip override" "10.0.0.9" "$(ORBIT_DEV_HOST_IP=10.0.0.9 host_ip)"
 
+# malformed_local_overlay_fails: a yq failure must return non-zero, not a header-only overlay.
+printf 'graph: [unclosed\n' >"$TMP/bad.local.yaml"
+LOCAL_OVERLAY="$TMP/bad.local.yaml"
+rc=0; write_mode_overlay dispatch-indexing >/dev/null 2>&1 || rc=$?
+check "malformed local overlay fails" "1" "$rc"
+check "no partial overlay left behind" "no" "$([[ -f "$TMP/dispatch-indexing.yaml" ]] && echo yes || echo no)"
+LOCAL_OVERLAY="$TMP/absent.yaml"
+
+# forward_killed_on_failure: dev:setup's own port-forward must not outlive a failing command.
+CLICKHOUSE_LOCAL_PORT=18123
+FORWARD_WAIT_SECONDS=1
+kc() { sleep 300; }
+rc=0; with_clickhouse_forward false >/dev/null 2>&1 || rc=$?
+check "forward wrapper propagates failure" "1" "$([[ "$rc" -ne 0 ]] && echo 1 || echo 0)"
+sleep 1
+check "forward process killed" "0" "$(pgrep -f 'sleep 300' | wc -l | tr -d ' ')"
+CLICKHOUSE_LOCAL_PORT=8123
+
 # cluster_name follows the kube context Caproni hands out, so directory-hash profiles work.
 kc() { echo "colima-caproni-gitlab-caproni-9fd39f"; }
 check "cluster name from colima context" "caproni-gitlab-caproni-9fd39f" "$(cluster_name)"
