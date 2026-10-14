@@ -667,12 +667,18 @@ mod tests {
         }
     }
 
-    #[test]
-    fn display_stops_when_the_run_is_cancelled() {
+    fn cancelled_inside(
+        phase: &'static str,
+        lang: crate::treesitter::SupportLang,
+        files: &[(String, String)],
+    ) -> Result<(), Error> {
         let repo = tempfile::tempdir().unwrap();
-        std::fs::write(repo.path().join("main.py"), "def f():\n    pass\n").unwrap();
-        let env =
-            Env::with_limits(crate::treesitter::SupportLang::Python, Limits::UNLIMITED).unwrap();
+        for (path, content) in files {
+            let path = repo.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
         let repository = Arc::new(
             Vfs::load(
                 Directory(repo.path()),
@@ -684,13 +690,36 @@ mod tests {
         );
         let checks = Arc::new(AtomicUsize::new(0));
         let counted = checks.clone();
-        let mut context = Context::new(&env, repository).observe(ArmOn("display", checks));
+        let mut context = Context::new(&env, repository).observe(ArmOn(phase, checks));
         context.run = context.run.with_cancellation(Arc::new(move || {
             counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= 2
         }));
+        templates::index(context)
+            .and_then(|graph| graph.then(Display))
+            .map(|_| ())
+    }
 
-        let displayed = templates::index(context).and_then(|graph| graph.then(Display));
-
+    #[test]
+    fn display_stops_when_the_run_is_cancelled() {
+        let files = [("main.py".to_string(), "def f():\n    pass\n".to_string())];
+        let displayed = cancelled_inside("display", crate::treesitter::SupportLang::Python, &files);
         assert!(matches!(displayed, Err(Error::Killed(killed)) if killed.cancelled));
+    }
+
+    #[test]
+    fn cross_file_resolution_stops_when_the_run_is_cancelled() {
+        let files: Vec<_> = (0..600)
+            .map(|file| {
+                let classes: String = (0..30)
+                    .map(|n| format!("public class C{file}_{n} {{}}\n"))
+                    .collect();
+                (
+                    format!("Big/F{file}.cs"),
+                    format!("namespace Big;\n{classes}"),
+                )
+            })
+            .collect();
+        let resolved = cancelled_inside("resolve", crate::treesitter::SupportLang::CSharp, &files);
+        assert!(matches!(resolved, Err(Error::Killed(killed)) if killed.cancelled));
     }
 }
