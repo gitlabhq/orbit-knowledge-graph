@@ -131,6 +131,10 @@ description = "Run unit tests (--lib, plus the xtask and orbit binaries; no inte
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
+[tasks."test:scripts"]
+run = "for t in scripts/dev/tests/*_test.sh; do bash \"$t\"; done"
+description = "Run the shell tests for the local development scripts (no cluster needed)"
+
 [tasks."test:plan-shape"]
 run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
 description = "Check logical input and selected physical plans against YAML fixtures"
