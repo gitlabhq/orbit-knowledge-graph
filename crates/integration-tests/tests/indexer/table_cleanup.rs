@@ -2,14 +2,11 @@ use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
-use orbit_observability::resilience::CircuitBreakers;
 
 fn build_cleanup_task(context: &TestContext) -> TableCleanup {
     let ontology = ontology::Ontology::load_embedded().unwrap();
     TableCleanup::new(
-        context
-            .config
-            .build_client(&CircuitBreakers::default().graph),
+        context.config.build_client("graph"),
         &ontology,
         ScheduledTaskMetrics::new(),
         orbit_server_config::AppConfig::embedded_defaults()

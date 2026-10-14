@@ -1,4 +1,3 @@
-use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -91,12 +90,12 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
         .await
         .unwrap();
     let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-        ctx.config.build_client(&CircuitBreakers::default().graph),
+        ctx.config.build_client("graph"),
     )));
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let dispatcher = NamespaceDispatcher::new(
         services.nats,
-        ctx.config.build_client(&CircuitBreakers::default().graph),
+        ctx.config.build_client("graph"),
         checkpoint_store,
         ScheduledTaskMetrics::new(),
         orbit_server_config::AppConfig::embedded_defaults()
@@ -141,8 +140,8 @@ async fn dispatch_enabled_namespace_cdc(
         .unwrap();
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
-        ctx.config.build_client(&CircuitBreakers::default().graph),
-        ctx.config.build_client(&CircuitBreakers::default().graph),
+        ctx.config.build_client("graph"),
+        ctx.config.build_client("graph"),
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
         orbit_server_config::AppConfig::embedded_defaults()
@@ -154,7 +153,7 @@ async fn dispatch_enabled_namespace_cdc(
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),
         backfill,
-        ctx.config.build_client(&CircuitBreakers::default().graph),
+        ctx.config.build_client("graph"),
     );
     let events: Vec<LogicalReplicationEvents> = cdc.iter().map(replication_event).collect();
 

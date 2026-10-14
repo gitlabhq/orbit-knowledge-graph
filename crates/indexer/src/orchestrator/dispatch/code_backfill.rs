@@ -362,7 +362,7 @@ mod tests {
             None,
             empty,
             empty,
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
+            "graph",
         );
         let datalake = ArrowClickHouseClient::new(
             "http://localhost:0",
@@ -371,7 +371,7 @@ mod tests {
             None,
             empty,
             empty,
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
+            "graph",
         );
         CodeBackfill::new(
             nats,

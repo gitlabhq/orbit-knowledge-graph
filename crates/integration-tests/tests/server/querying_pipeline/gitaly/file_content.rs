@@ -1,4 +1,3 @@
-use orbit_observability::resilience::CircuitBreakers;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -99,14 +98,11 @@ async fn mock_gitlab_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = GitlabClient::new(
-        orbit_server_config::GitlabClientConfiguration {
-            base_url: format!("http://{addr}"),
-            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-            resolve_host: None,
-        },
-        &CircuitBreakers::default().gitlab,
-    )
+    let client = GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
+        base_url: format!("http://{addr}"),
+        signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+        resolve_host: None,
+    })
     .unwrap();
 
     MockServer {
@@ -343,14 +339,11 @@ async fn gitlab_error_returns_none_gracefully() {
     });
 
     let client = Arc::new(
-        GitlabClient::new(
-            orbit_server_config::GitlabClientConfiguration {
-                base_url: format!("http://{addr}"),
-                signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-                resolve_host: None,
-            },
-            &CircuitBreakers::default().gitlab,
-        )
+        GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
+            base_url: format!("http://{addr}"),
+            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: None,
+        })
         .unwrap(),
     );
 

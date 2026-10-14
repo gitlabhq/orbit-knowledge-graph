@@ -5,7 +5,6 @@
 //! code indexing tasks for **all** enabled namespaces, not only for
 //! newly-enabled ones arriving via CDC events.
 
-use orbit_observability::resilience::CircuitBreakers;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -372,10 +371,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     let backfill = CodeBackfill::new(
         context.scheduler_services.nats.clone(),
         context.clickhouse.create_client(),
-        context
-            .clickhouse
-            .config
-            .build_client(&CircuitBreakers::default().graph),
+        context.clickhouse.config.build_client("graph"),
         ScheduledTaskMetrics::new(),
         campaign,
         orbit_server_config::AppConfig::embedded_defaults()
@@ -451,10 +447,7 @@ async fn backfill_dispatches_only_projects_that_are_due() {
     let backfill = CodeBackfill::new(
         context.scheduler_services.nats.clone(),
         context.clickhouse.create_client(),
-        context
-            .clickhouse
-            .config
-            .build_client(&CircuitBreakers::default().graph),
+        context.clickhouse.config.build_client("graph"),
         ScheduledTaskMetrics::new(),
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         orbit_server_config::AppConfig::embedded_defaults()
@@ -693,13 +686,7 @@ async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
 
     let archive = embedded_archive(*SCHEMA_VERSION);
     let shutdown = CancellationToken::new();
-    let dispatcher = indexer::run_dispatcher(
-        &config,
-        orbit_observability::resilience::CircuitBreakers::default(),
-        &archive,
-        serving_flag(),
-        shutdown.clone(),
-    );
+    let dispatcher = indexer::run_dispatcher(&config, &archive, serving_flag(), shutdown.clone());
     tokio::pin!(dispatcher);
     let migration_started = tokio::select! {
         result = &mut dispatcher => panic!("dispatcher exited before migration: {result:?}"),
@@ -749,7 +736,6 @@ async fn dispatcher_rejects_unbundled_missing_active_archive_before_migration() 
         Duration::from_secs(10),
         indexer::run_dispatcher(
             &dispatcher_config(&context),
-            orbit_observability::resilience::CircuitBreakers::default(),
             &archive,
             serving_flag(),
             CancellationToken::new(),
@@ -794,7 +780,6 @@ async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
         Duration::from_secs(10),
         indexer::run_dispatcher(
             &dispatcher_config(&context),
-            orbit_observability::resilience::CircuitBreakers::default(),
             &archive,
             serving_flag(),
             CancellationToken::new(),

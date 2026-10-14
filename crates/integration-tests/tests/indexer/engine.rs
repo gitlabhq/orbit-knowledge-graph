@@ -1,6 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
-use orbit_observability::resilience::CircuitBreakers;
+use clickhouse_client::ClickHouseConfigurationExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -204,7 +204,7 @@ impl TestContext {
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
-                &CircuitBreakers::default().graph,
+                "graph",
             );
 
             match client.execute("SELECT 1").await {
@@ -235,25 +235,22 @@ impl TestContext {
     }
 
     fn create_writer(&self) -> Arc<ClickHouseWriter> {
-        Arc::new(
-            ClickHouseWriter::new(
-                ClickHouseConfiguration {
-                    database: DATABASE.to_string(),
-                    url: self.clickhouse_endpoint.clone(),
-                    username: USERNAME.to_string(),
-                    password: Some(PASSWORD.to_string()),
-                    session_settings: std::collections::HashMap::new(),
-                    replicated: false,
-                    insert_settings: std::collections::HashMap::new(),
-                    profiling: orbit_server_config::AppConfig::embedded_defaults()
-                        .graph
-                        .profiling,
-                },
-                &orbit_observability::resilience::CircuitBreakers::default().graph,
-                Arc::new(EngineMetrics::default()),
-            )
-            .expect("failed to create writer"),
-        )
+        Arc::new(ClickHouseWriter::new(
+            ClickHouseConfiguration {
+                database: DATABASE.to_string(),
+                url: self.clickhouse_endpoint.clone(),
+                username: USERNAME.to_string(),
+                password: Some(PASSWORD.to_string()),
+                session_settings: std::collections::HashMap::new(),
+                replicated: false,
+                insert_settings: std::collections::HashMap::new(),
+                profiling: orbit_server_config::AppConfig::embedded_defaults()
+                    .graph
+                    .profiling,
+            }
+            .build_client("graph"),
+            Arc::new(EngineMetrics::default()),
+        ))
     }
 
     async fn publish_event(&self, broker: &NatsBroker, id: i32, name: &str) {
@@ -276,7 +273,7 @@ impl TestContext {
             Some(PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            &CircuitBreakers::default().graph,
+            "graph",
         );
 
         let batches = client

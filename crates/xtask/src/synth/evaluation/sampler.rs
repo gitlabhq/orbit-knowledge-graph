@@ -263,7 +263,7 @@ mod tests {
             None,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
+            "graph",
         );
         let sampler = ParameterSampler::new(client, 100);
         assert_eq!(sampler.sample_size, 100);

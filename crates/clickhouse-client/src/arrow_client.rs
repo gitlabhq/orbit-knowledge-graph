@@ -8,10 +8,11 @@ use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
-use circuit_breaker::CircuitBreaker;
+use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
@@ -98,7 +99,7 @@ impl ArrowClickHouseClient {
         password: Option<&str>,
         session_settings: &std::collections::HashMap<String, String>,
         insert_settings: &std::collections::HashMap<String, String>,
-        circuit_breaker: &CircuitBreaker,
+        service: &'static str,
     ) -> Self {
         let mut client = Client::default()
             .with_url(url)
@@ -126,8 +127,18 @@ impl ArrowClickHouseClient {
             insert_settings: insert_settings.clone(),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
-            circuit_breaker: circuit_breaker.clone(),
+            circuit_breaker: CircuitBreaker::new(
+                service,
+                CircuitConfig::default(),
+                Arc::new(MetricsObserver::new()),
+            ),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
     }
 
     pub fn with_replicated(mut self, replicated: bool) -> Self {
@@ -702,7 +713,7 @@ mod tests {
             None,
             &session_settings,
             &insert_settings,
-            &circuit_breaker(5),
+            "test",
         )
     }
 
@@ -859,8 +870,9 @@ mod tests {
             None,
             &HashMap::new(),
             &HashMap::new(),
-            breaker,
+            "test",
         )
+        .with_circuit_breaker(breaker.clone())
     }
 
     fn one_row_batch() -> RecordBatch {
@@ -941,6 +953,20 @@ mod tests {
                 "{name} returned {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn clones_share_one_circuit() {
+        let client = unreachable_client(&circuit_breaker(1));
+        let clone = client.clone();
+
+        let _ = client.execute("SELECT 1").await;
+
+        let err = clone.execute("SELECT 1").await.unwrap_err();
+        assert!(
+            matches!(err, ClickHouseError::CircuitOpen { .. }),
+            "got {err}"
+        );
     }
 
     #[test]

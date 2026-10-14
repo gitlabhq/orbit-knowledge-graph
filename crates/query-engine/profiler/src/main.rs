@@ -395,7 +395,7 @@ async fn main() -> Result<()> {
         cli.ch_password.as_deref(),
         &custom_settings,
         &std::collections::HashMap::new(),
-        &orbit_observability::resilience::CircuitBreakers::default().graph,
+        "graph",
     ));
 
     let profiling_config = ProfilingConfig {

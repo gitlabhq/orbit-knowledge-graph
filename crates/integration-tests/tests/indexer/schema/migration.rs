@@ -1,4 +1,3 @@
-use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1139,14 +1138,10 @@ impl MigrationScenario {
         let table_names =
             CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-            self.ctx
-                .config
-                .build_client(&CircuitBreakers::default().graph),
+            self.ctx.config.build_client("graph"),
         )));
         CodeStaleSweep::new(
-            self.ctx
-                .config
-                .build_client(&CircuitBreakers::default().graph),
+            self.ctx.config.build_client("graph"),
             &table_names,
             store,
             10,

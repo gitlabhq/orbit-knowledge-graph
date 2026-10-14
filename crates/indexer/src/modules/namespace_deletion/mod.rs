@@ -10,11 +10,10 @@ pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use std::sync::Arc;
 
 use crate::IndexerConfig;
-use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::clickhouse::ClickHouseClients;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{NAMESPACE_DELETION_TOPIC, NamespaceDeletionRequest};
 use crate::types::Event;
-use orbit_observability::resilience::CircuitBreakers;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 
 const NAMESPACE_DELETION_CONCURRENCY_GROUP: &str =
@@ -33,11 +32,11 @@ pub fn namespace_deletion_topic_policy() -> SubscriptionConfig {
 pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
-    breakers: &CircuitBreakers,
+    clients: &ClickHouseClients,
     ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
-    let graph_client = Arc::new(config.graph.build_client(&breakers.graph));
-    let datalake_client = Arc::new(config.datalake.build_client(&breakers.datalake));
+    let graph_client = Arc::new(clients.graph.clone());
+    let datalake_client = Arc::new(clients.datalake.clone());
 
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake_client,

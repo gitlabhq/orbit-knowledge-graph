@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use circuit_breaker::CircuitBreaker;
 use orbit_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
@@ -14,11 +13,11 @@ const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
 ];
 
 pub trait ClickHouseConfigurationExt {
-    fn build_client(&self, circuit_breaker: &CircuitBreaker) -> ArrowClickHouseClient;
+    fn build_client(&self, service: &'static str) -> ArrowClickHouseClient;
 }
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
-    fn build_client(&self, circuit_breaker: &CircuitBreaker) -> ArrowClickHouseClient {
+    fn build_client(&self, service: &'static str) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
@@ -26,7 +25,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             self.password.as_deref(),
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
-            circuit_breaker,
+            service,
         )
         .with_replicated(self.replicated)
     }
@@ -54,6 +53,7 @@ fn build_session_settings_with_quorum_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ClickHouseError;
     use orbit_server_config::{AppConfig, ConfigurationError};
 
     #[test]
@@ -235,17 +235,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_built_with_a_circuit_breaker_reports_failures_to_it() {
+    async fn built_client_opens_its_circuit_after_repeated_network_failures() {
         let config = ClickHouseConfiguration {
             url: crate::testing::UNREACHABLE_URL.to_string(),
             ..AppConfig::embedded_defaults().graph
         };
-        let breaker = crate::testing::circuit_breaker(1);
+        let client = config.build_client("graph");
 
-        let client = config.build_client(&breaker);
-        let _ = client.execute("SELECT 1").await;
+        for _ in 0..circuit_breaker::CircuitConfig::default().failure_threshold {
+            let err = client.execute("SELECT 1").await.unwrap_err();
+            assert!(
+                !matches!(err, ClickHouseError::CircuitOpen { .. }),
+                "got {err}"
+            );
+        }
 
-        assert!(!breaker.is_available());
+        let err = client.execute("SELECT 1").await.unwrap_err();
+        assert!(
+            matches!(err, ClickHouseError::CircuitOpen { .. }),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -255,7 +264,7 @@ mod tests {
             ..AppConfig::embedded_defaults().graph
         };
 
-        let client = config.build_client(&crate::testing::circuit_breaker(5));
+        let client = config.build_client("graph");
         assert!(client.has_quorum_writes());
         assert!(client.is_replicated());
     }
@@ -283,7 +292,7 @@ mod tests {
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
-        let client = config.build_client(&crate::testing::circuit_breaker(5));
+        let client = config.build_client("graph");
         let err = client.execute("SELECT 1").await.unwrap_err();
         let msg = err.to_string();
 

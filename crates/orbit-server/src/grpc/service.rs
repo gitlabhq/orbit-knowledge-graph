@@ -1009,7 +1009,6 @@ mod tests {
     use crate::proto::orbit_service_server::{OrbitService, OrbitServiceServer};
     use clickhouse_client::ClickHouseConfigurationExt;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-    use orbit_observability::resilience::CircuitBreakers;
     use orbit_server_config::ClickHouseConfiguration;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::metadata::MetadataValue;
@@ -1027,7 +1026,7 @@ mod tests {
     }
 
     fn test_client() -> ArrowClickHouseClient {
-        test_config().build_client(&CircuitBreakers::default().graph)
+        test_config().build_client("graph")
     }
 
     fn test_service() -> OrbitServiceImpl {
@@ -1038,7 +1037,7 @@ mod tests {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
-            clickhouse.build_client(&CircuitBreakers::default().graph),
+            clickhouse.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),

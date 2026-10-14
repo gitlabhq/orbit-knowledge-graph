@@ -1,4 +1,3 @@
-use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -65,20 +64,16 @@ async fn build_fan_out(
     subscription: Subscription,
 ) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(
-            ctx.config.clone(),
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
-            Arc::new(EngineMetrics::default()),
-        )
-        .expect("writer"),
-    );
+    let writer = Arc::new(ClickHouseWriter::new(
+        ctx.config.clone().build_client("graph"),
+        Arc::new(EngineMetrics::default()),
+    ));
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
-        &orbit_observability::resilience::CircuitBreakers::default(),
+        &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
         &ontology,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
@@ -114,14 +109,10 @@ pub async fn entity_handler_with_partitions(
     partitions: u32,
 ) -> Arc<dyn Handler> {
     let config: IndexerConfig = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(
-            ctx.config.clone(),
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
-            Arc::new(EngineMetrics::default()),
-        )
-        .expect("writer"),
-    );
+    let writer = Arc::new(ClickHouseWriter::new(
+        ctx.config.clone().build_client("graph"),
+        Arc::new(EngineMetrics::default()),
+    ));
     let ontology = ontology::Ontology::load_embedded()
         .expect("ontology must load")
         .with_partition_count(entity_name, partitions);
@@ -129,7 +120,7 @@ pub async fn entity_handler_with_partitions(
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
-        &orbit_observability::resilience::CircuitBreakers::default(),
+        &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
         &ontology,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
@@ -176,10 +167,10 @@ pub fn stale_edge_task(
 ) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
-        Arc::new(ctx.config.build_client(&CircuitBreakers::default().graph)),
+        Arc::new(ctx.config.build_client("graph")),
     ));
     indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
-        ctx.config.build_client(&CircuitBreakers::default().graph),
+        ctx.config.build_client("graph"),
         &ontology,
         checkpoint_store,
         indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),

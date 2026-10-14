@@ -10,7 +10,6 @@ use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_migrations::version::SCHEMA_VERSION;
-use orbit_observability::resilience::CircuitBreakers;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::SnowplowAnalyticsTracker;
 use orbit_server::auth::JwtValidator;
@@ -86,12 +85,11 @@ async fn main() -> anyhow::Result<()> {
 
     info!(mode = ?args.mode, aws_lc_fips = aws_lc_version, "starting");
 
-    let breakers = CircuitBreakers::new();
     let shutdown = CancellationToken::new();
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
     let result = match args.mode {
-        Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config, &breakers).await,
+        Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
         Mode::DispatchIndexing => {
             config.schema.validate()?;
             let archive = ontology::archive::OntologyArchive::from_bytes(
@@ -99,27 +97,27 @@ async fn main() -> anyhow::Result<()> {
                 include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
             )?;
 
-            let graph = config.graph.build_client(&breakers.graph);
+            let graph = config.graph.build_client("graph");
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, breakers, &archive, serving, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config, &breakers, internal_tls)
+        Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
             .await
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, breakers, ontology, serving, shutdown)
+            indexer::run(&indexer_config, ontology, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, breakers, active_schema, serving, shutdown.clone()).await
+            run_webserver(&config, active_schema, serving, shutdown.clone()).await
         }
     };
 
@@ -131,7 +129,6 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run_webserver(
     config: &AppConfig,
-    breakers: CircuitBreakers,
     active_schema: Arc<ActiveSchema>,
     serving: Arc<AtomicBool>,
     shutdown: CancellationToken,
@@ -154,13 +151,14 @@ async fn run_webserver(
         )
     })?;
     let gitlab_client = Arc::new(
-        gitlab_client::GitlabClient::new(gitlab_client_config, &breakers.gitlab)
+        gitlab_client::GitlabClient::new(gitlab_client_config)
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
+    let graph = config.graph.build_client("graph");
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
-        Some(config.graph.build_client(&breakers.graph)),
+        Some(graph.clone()),
         Some(gitlab_client.clone()),
     )
     .into_arc();
@@ -185,7 +183,7 @@ async fn run_webserver(
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
     ActiveSchema::spawn(
         &active_schema,
-        Arc::new(config.graph.build_client(&breakers.graph)),
+        Arc::new(graph.clone()),
         archive,
         catalog,
         config,
@@ -202,7 +200,7 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         validator,
         active_schema,
-        config.graph.build_client(&breakers.graph),
+        graph,
         cluster_health,
         tls_config,
         config.grpc.clone(),

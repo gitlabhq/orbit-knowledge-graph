@@ -15,7 +15,6 @@ workspace = true
 clickhouse-client = { path = "../../clickhouse-client" }
 compiler = { path = "../compiler" }
 formatters = { path = "../formatters" }
-orbit-observability = { workspace = true }
 orbit-server = { path = "../../orbit-server" }
 orbit-server-config = { path = "../../orbit-server-config" }
 orbit-utils = { path = "../../utils" }

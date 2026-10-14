@@ -1,4 +1,3 @@
-use orbit_observability::resilience::CircuitBreakers;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -704,11 +703,7 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
     )
     .await;
 
-    let graph_client = Arc::new(
-        clickhouse
-            .config
-            .build_client(&CircuitBreakers::default().graph),
-    );
+    let graph_client = Arc::new(clickhouse.config.build_client("graph"));
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
     let cleaner = ClickHouseStaleDataCleaner::new(graph_client, &table_names);
@@ -1547,17 +1542,14 @@ async fn insert_stale_canary_file(
 }
 
 fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
-    Arc::new(
-        indexer::clickhouse::ClickHouseWriter::new(
-            orbit_server_config::ClickHouseConfiguration {
-                url: "http://127.0.0.1:1".into(),
-                ..orbit_server_config::AppConfig::embedded_defaults().graph
-            },
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
-            Arc::new(indexer::metrics::EngineMetrics::new()),
-        )
-        .expect("config is valid"),
-    )
+    Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+        orbit_server_config::ClickHouseConfiguration {
+            url: "http://127.0.0.1:1".into(),
+            ..orbit_server_config::AppConfig::embedded_defaults().graph
+        }
+        .build_client("graph"),
+        Arc::new(indexer::metrics::EngineMetrics::new()),
+    ))
 }
 
 async fn latest_checkpoint_task_id(

@@ -1,13 +1,15 @@
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use circuit_breaker::CircuitBreaker;
+use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use futures::{Stream, StreamExt};
 use jsonwebtoken::dangerous::insecure_decode;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use orbit_observability::resilience::MetricsObserver;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -72,18 +74,25 @@ pub struct GitlabClient {
 }
 
 impl GitlabClient {
-    pub fn new(
-        config: GitlabClientConfiguration,
-        circuit_breaker: &CircuitBreaker,
-    ) -> Result<Self, GitlabClientError> {
+    pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
         let signing_key = BASE64.decode(&config.signing_key)?;
         let http = Self::build_http_client(&config)?;
         Ok(Self {
             http,
             base_url: config.base_url,
             signing_key,
-            circuit_breaker: circuit_breaker.clone(),
+            circuit_breaker: CircuitBreaker::new(
+                "gitlab",
+                CircuitConfig::default(),
+                Arc::new(MetricsObserver::new()),
+            ),
         })
+    }
+
+    #[cfg(test)]
+    fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
     }
 
     fn build_http_client(
@@ -571,11 +580,8 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let client = GitlabClient::new(
-            config_with_resolve(&format!("http://{addr}"), None),
-            &circuit_breaker(5),
-        )
-        .unwrap();
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
         let _stream = client.download_archive(7, "abc123").await.unwrap();
 
         assert_eq!(*seen.lock().unwrap(), "ref=abc123&include_lfs_blobs=false");
@@ -615,11 +621,8 @@ mod tests {
             let addr = listener.local_addr().unwrap();
             tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-            let client = GitlabClient::new(
-                config_with_resolve(&format!("http://{addr}"), None),
-                &circuit_breaker(5),
-            )
-            .unwrap();
+            let client =
+                GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
             let result = client.cloud_connector_token().await.unwrap();
 
             assert_eq!(result.token, expected_token);
@@ -628,7 +631,9 @@ mod tests {
     }
 
     fn client_with_breaker(base_url: &str, breaker: &CircuitBreaker) -> GitlabClient {
-        GitlabClient::new(config_with_resolve(base_url, None), breaker).unwrap()
+        GitlabClient::new(config_with_resolve(base_url, None))
+            .unwrap()
+            .with_circuit_breaker(breaker.clone())
     }
 
     type RequestCall = for<'a> fn(&'a GitlabClient) -> BoxFuture<'a, Result<(), GitlabClientError>>;

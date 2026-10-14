@@ -1,6 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
-use orbit_observability::resilience::CircuitBreakers;
+use clickhouse_client::ClickHouseConfigurationExt;
 use std::sync::Arc;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -38,11 +38,9 @@ impl TestContext {
         setup_database(&host, port).await;
         let config = create_config(&host, port);
         let writer = ClickHouseWriter::new(
-            config,
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
+            config.build_client("graph"),
             Arc::new(EngineMetrics::default()),
-        )
-        .expect("failed to create writer");
+        );
 
         Self {
             _container: container,
@@ -60,7 +58,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            &CircuitBreakers::default().graph,
+            "graph",
         )
     }
 
@@ -119,7 +117,7 @@ async fn setup_database(host: &str, port: u16) {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            &CircuitBreakers::default().graph,
+            "graph",
         );
 
         match client.execute("SELECT 1").await {
@@ -337,11 +335,9 @@ async fn connection_failure_returns_error() {
     };
 
     let writer = ClickHouseWriter::new(
-        config,
-        &orbit_observability::resilience::CircuitBreakers::default().graph,
+        config.build_client("graph"),
         Arc::new(EngineMetrics::default()),
-    )
-    .expect("failed to create writer");
+    );
 
     let result = writer
         .write(

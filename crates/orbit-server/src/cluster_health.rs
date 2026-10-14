@@ -396,14 +396,11 @@ mod tests {
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         Arc::new(
-            GitlabClient::new(
-                GitlabClientConfiguration {
-                    base_url: format!("http://{addr}"),
-                    signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-                    resolve_host: None,
-                },
-                &orbit_observability::resilience::CircuitBreakers::default().gitlab,
-            )
+            GitlabClient::new(GitlabClientConfiguration {
+                base_url: format!("http://{addr}"),
+                signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+                resolve_host: None,
+            })
             .unwrap(),
         )
     }

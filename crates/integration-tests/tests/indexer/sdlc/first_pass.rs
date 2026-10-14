@@ -1,4 +1,3 @@
-use orbit_observability::resilience::CircuitBreakers;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -48,9 +47,7 @@ async fn insert_checkpoint_row(
 }
 
 fn checkpoint_store(ctx: &TestContext) -> ClickHouseCheckpointStore {
-    ClickHouseCheckpointStore::new(Arc::new(
-        ctx.config.build_client(&CircuitBreakers::default().graph),
-    ))
+    ClickHouseCheckpointStore::new(Arc::new(ctx.config.build_client("graph")))
 }
 
 pub async fn stale_page_write_after_completion_keeps_indexed_at(ctx: &TestContext) {

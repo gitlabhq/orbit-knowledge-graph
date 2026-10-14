@@ -302,7 +302,7 @@ mod tests {
             None,
             &Default::default(),
             &Default::default(),
-            &orbit_observability::resilience::CircuitBreakers::default().graph,
+            "graph",
         );
         let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(
             graph.clone(),

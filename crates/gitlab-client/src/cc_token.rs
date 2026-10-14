@@ -484,9 +484,7 @@ mod tests {
     async fn caches_a_token_fetched_through_a_real_gitlab_client() {
         let cc_token = jwt_with_exp(now() + 3_600 * 24);
         let (config, hits) = spawn_token_route(cc_token.clone()).await;
-        let cache = CloudConnectorTokenCache::new(Arc::new(
-            GitlabClient::new(config, &crate::testing::circuit_breaker(5)).unwrap(),
-        ));
+        let cache = CloudConnectorTokenCache::new(Arc::new(GitlabClient::new(config).unwrap()));
 
         assert_eq!(cache.token().await.unwrap(), cc_token);
         assert_eq!(cache.token().await.unwrap(), cc_token);
@@ -497,9 +495,7 @@ mod tests {
     async fn a_near_expiry_token_from_rails_is_not_refetched_per_call() {
         let cc_token = jwt_with_exp(now() + 10);
         let (config, hits) = spawn_token_route(cc_token.clone()).await;
-        let cache = CloudConnectorTokenCache::new(Arc::new(
-            GitlabClient::new(config, &crate::testing::circuit_breaker(5)).unwrap(),
-        ));
+        let cache = CloudConnectorTokenCache::new(Arc::new(GitlabClient::new(config).unwrap()));
 
         for _ in 0..20 {
             assert_eq!(cache.token().await.unwrap(), cc_token);
