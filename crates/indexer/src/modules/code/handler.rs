@@ -7,7 +7,6 @@ use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
-use super::CODE_TASK_MAX_ATTEMPTS;
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
@@ -403,9 +402,9 @@ impl CodeIndexingTaskHandler {
                 )))
             }
             Err(IndexError::Overloaded(detail)) => {
-                // Redeliveries are 60s apart, so counting each one would use up
-                // MAX_CODE_ATTEMPTS in one dispatch and skip CODE_RETRY_AFTER.
-                if attempt < CODE_TASK_MAX_ATTEMPTS {
+                // Redeliveries share one dispatch, so counting each one would use up
+                // MAX_CODE_ATTEMPTS and skip CODE_RETRY_AFTER.
+                if attempt > 1 {
                     checkpoint.refund_attempt();
                     if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
                         warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
@@ -858,14 +857,20 @@ mod tests {
                 retry_after_secs: None,
             },
         ];
-        // A redelivery is refunded; only the last delivery counts toward the dispatcher cap.
-        for (overload, attempt, expected_attempts) in overloads
+        // Only the first delivery counts toward the dispatcher cap, whatever max_attempts is.
+        for (overload, attempt) in overloads
             .into_iter()
-            .flat_map(|overload| [(overload, 1, 0), (overload, CODE_TASK_MAX_ATTEMPTS, 1)])
+            .flat_map(|overload| [(overload, 1), (overload, 2), (overload, 9)])
         {
             let ctx = TestContext::new();
             ctx.mock_repo
                 .set_download_error(123, RepositoryServiceError::GitlabApi(overload()));
+            if attempt > 1 {
+                let mut first_delivery =
+                    CodeCheckpoint::new(TraversalPath::new_unchecked("1/123/"), 123, "main");
+                first_delivery.start_attempt();
+                ctx.mock_checkpoints.save(&first_delivery).await.unwrap();
+            }
 
             let mut envelope = TestContext::make_request_with_sha(7, 123, "main", None);
             envelope.attempt = attempt;
@@ -883,7 +888,7 @@ mod tests {
                 .expect("start-of-attempt checkpoint is saved");
             assert!(checkpoint.indexed_at.is_none(), "must not be indexed-empty");
             assert_eq!(checkpoint.last_task_id, 0);
-            assert_eq!(checkpoint.attempts, expected_attempts, "delivery {attempt}");
+            assert_eq!(checkpoint.attempts, 1, "delivery {attempt}");
         }
     }
 
