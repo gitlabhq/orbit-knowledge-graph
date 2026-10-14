@@ -1,5 +1,5 @@
 name: expand_merge_request
-description: "Immediate neighborhood of merge requests for entity context expansion. Includes project, author, assignees, reviewers, approvers, merger, labels, milestone, head pipeline, latest diff, and the work items it closes. Notes and mentions are excluded."
+description: "Immediate neighborhood of merge requests for entity context expansion. Includes project, author, assignees, reviewers, approvers, merger, labels, milestone, head pipeline, and the work items it closes. Notes, mentions, and diffs are excluded because the 10 relationship type cap leaves no room, and diff files are two hops away. The result is cut at limit in no guaranteed order, because a neighbors query can only order by a property of the center node, not by edge type or neighbor, so a large neighborhood can drop any neighbor; clients must check pagination.truncated."
 parameters:
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }

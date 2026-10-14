@@ -1,5 +1,5 @@
 name: expand_work_item
-description: "Immediate neighborhood of work items for entity context expansion. Includes project or group, author, assignees, labels, milestone, closing merge requests, related work items, and child work items. Notes and mentions are excluded."
+description: "Immediate neighborhood of work items for entity context expansion. Includes project or group, author, assignees, labels, milestone, closing merge requests, related work items, and parent and child work items. Notes and mentions are excluded. The result is cut at limit in no guaranteed order, because a neighbors query can only order by a property of the center node, not by edge type or neighbor, so a large neighborhood can drop any neighbor; clients must check pagination.truncated."
 parameters:
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
