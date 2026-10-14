@@ -1362,20 +1362,31 @@ thread_local! {
     static RESOLVING: std::cell::RefCell<FxHashSet<(u32, u32)>> = Default::default();
 }
 
-fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
-    let key = (c.fi(), c.index());
-    if !RESOLVING.with_borrow_mut(|resolving| resolving.insert(key)) {
-        return None;
+struct Resolving((u32, u32));
+
+impl Resolving {
+    fn enter(key: (u32, u32)) -> Option<Self> {
+        RESOLVING
+            .with_borrow_mut(|resolving| resolving.insert(key))
+            .then_some(Self(key))
     }
-    let resolved = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
+}
+
+impl Drop for Resolving {
+    fn drop(&mut self) {
+        RESOLVING.with_borrow_mut(|resolving| resolving.remove(&self.0));
+    }
+}
+
+fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
+    let _resolving = Resolving::enter((c.fi(), c.index()))?;
+    stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
         chain(ctx, c, &|r| {
             resolve_reference(ctx, r)
                 .or_else(|| enclosing_alias(ctx, r))
                 .or_else(|| visible_type(ctx, r.fi(), r.sym()))
         })
-    });
-    RESOLVING.with_borrow_mut(|resolving| resolving.remove(&key));
-    resolved
+    })
 }
 
 fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<Cursor<'a>> {
@@ -1986,6 +1997,17 @@ mod alias_tests {
 #[cfg(test)]
 mod remap_tests {
     use super::*;
+
+    #[test]
+    fn a_panic_while_resolving_releases_the_name() {
+        let key = (0, 7);
+        let panicked = std::panic::catch_unwind(|| {
+            let _resolving = Resolving::enter(key);
+            panic!("resolution failed");
+        });
+        assert!(panicked.is_err());
+        assert!(Resolving::enter(key).is_some());
+    }
 
     /// `a` sees a name from `b`, `c` sees a name from `a`. Dropping `b`
     /// must report `a` and leave `c` alone, however the name got there.
