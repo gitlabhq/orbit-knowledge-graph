@@ -4,8 +4,12 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+default = ["arrow"]
+arrow = ["dep:arrow"]
+
 [dependencies]
-arrow = { workspace = true }
+arrow = { workspace = true, optional = true }
 chrono = { workspace = true }
 dunce = { workspace = true }
 enum-as-inner = { workspace = true }

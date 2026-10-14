@@ -16,7 +16,8 @@ semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 syn = { workspace = true, optional = true }
-orbit-utils = { path = "../utils" }
+# orbit-cli's build script depends on this crate, so Arrow would compile a second time for the host.
+orbit-utils = { path = "../utils", default-features = false }
 
 [dev-dependencies]
 tempfile = { workspace = true }
