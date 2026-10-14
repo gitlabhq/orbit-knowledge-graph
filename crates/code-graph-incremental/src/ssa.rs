@@ -27,7 +27,6 @@ pub enum Value {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
 struct PhiNode {
     block: BlockId,
     variable: u32,
@@ -61,11 +60,14 @@ pub struct SsaEngine {
     blocks: Vec<Block>,
     phis: Vec<PhiNode>,
     users: Vec<SmallVec<[PhiId; 2]>>,
+    replaced: Vec<Option<Value>>,
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     frames: Vec<Frame>,
     written: FxHashSet<u32>,
     unsealed: usize,
+    #[cfg(test)]
+    work: usize,
 }
 
 impl SsaEngine {
@@ -74,9 +76,12 @@ impl SsaEngine {
             blocks: Vec::with_capacity(32),
             phis: Vec::with_capacity(8),
             users: Vec::with_capacity(8),
+            replaced: Vec::with_capacity(8),
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
             frames: Vec::new(),
+            #[cfg(test)]
+            work: Default::default(),
             written: FxHashSet::default(),
             unsealed: 0,
         }
@@ -344,6 +349,7 @@ impl SsaEngine {
             witnesses: [None, None],
         });
         self.users.push(SmallVec::new());
+        self.replaced.push(None);
         id
     }
 
@@ -357,6 +363,7 @@ impl SsaEngine {
     }
 
     fn add_operand(&mut self, phi_id: PhiId, val: Value) {
+        let val = self.forward(&val);
         if val != Value::Phi(phi_id) {
             let phi = &mut self.phis[phi_id.0 as usize];
             if phi.witnesses[0].is_none() {
@@ -382,6 +389,10 @@ impl SsaEngine {
     }
 
     fn remove_if_trivial(&mut self, phi_id: PhiId, pending: &mut SmallVec<[PhiId; 8]>) -> Value {
+        #[cfg(test)]
+        {
+            self.work += 1;
+        }
         let w = &self.phis[phi_id.0 as usize].witnesses;
         if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
             && w0 != w1
@@ -404,6 +415,7 @@ impl SsaEngine {
         }
 
         let replacement = same.unwrap_or(Value::Opaque);
+        self.replaced[phi_id.0 as usize] = Some(replacement.clone());
 
         let variable = self.phis[phi_id.0 as usize].variable;
         let block = self.phis[phi_id.0 as usize].block;
@@ -416,7 +428,9 @@ impl SsaEngine {
         let phi_val = Value::Phi(phi_id);
         let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
         phi_users.retain(|user| {
-            *user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
+            *user != phi_id
+                && self.replaced[user.0 as usize].is_none()
+                && self.phis[user.0 as usize].operands.contains(&phi_val)
         });
         phi_users.sort_unstable_by_key(|user| user.0);
         phi_users.dedup();
@@ -544,7 +558,29 @@ impl SsaEngine {
         }
     }
 
-    pub(crate) fn resolve_value(&self, value: &Value) -> Vec<Value> {
+    fn forward(&mut self, value: &Value) -> Value {
+        let mut end = value.clone();
+        while let Value::Phi(phi) = end
+            && let Some(next) = &self.replaced[phi.0 as usize]
+        {
+            #[cfg(test)]
+            {
+                self.work += 1;
+            }
+            end = next.clone();
+        }
+        let mut cur = value.clone();
+        while let Value::Phi(phi) = cur
+            && let Some(next) = self.replaced[phi.0 as usize].as_mut()
+            && *next != end
+        {
+            cur = std::mem::replace(next, end.clone());
+        }
+        end
+    }
+
+    pub(crate) fn resolve_value(&mut self, value: &Value) -> Vec<Value> {
+        let value = &self.forward(value);
         if !matches!(value, Value::Phi(_)) {
             return match value {
                 Value::Undefined | Value::Marker => vec![],
@@ -865,8 +901,8 @@ mod tests {
                 _ => {}
             }
         }
-        let mut ops = Vec::new();
-        let mut unsealed: Vec<usize> = (0..n).collect();
+        let mut ops: Vec<Op> = [0].into_iter().chain(spine..n).map(Op::Seal).collect();
+        let mut unsealed: Vec<usize> = (1..spine).collect();
         for _ in 0..3 * n {
             match next(&mut state) % 4 {
                 0 => ops.push(Op::Write(
@@ -887,13 +923,7 @@ mod tests {
         (preds, ops)
     }
 
-    type Replay = (
-        Vec<Vec<Value>>,
-        Vec<PhiNode>,
-        Vec<SmallVec<[PhiId; 2]>>,
-        FxHashMap<u32, FxHashMap<BlockId, Value>>,
-        FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
-    );
+    type Replay = (Vec<Vec<Value>>, FxHashMap<BlockId, FxHashMap<u32, PhiId>>);
 
     fn replay(preds: &[Vec<usize>], ops: &[Op], oracle: bool) -> Replay {
         let mut ssa = SsaEngine::new();
@@ -930,13 +960,7 @@ mod tests {
                 reads.push(read(&mut ssa, variable, id));
             }
         }
-        (
-            reads,
-            ssa.phis,
-            ssa.users,
-            ssa.current_def,
-            ssa.incomplete_phis,
-        )
+        (reads, ssa.incomplete_phis)
     }
 
     #[test]
@@ -1011,6 +1035,34 @@ mod tests {
         }
         ssa.write_variable(1, elsewhere, Value::LocalDef(0));
         assert_eq!(ssa.read_variable(1, a), vec![Value::Opaque]);
+    }
+
+    fn nested_loops(levels: usize) -> usize {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable(1, entry, Value::LocalDef(0));
+        let (mut headers, mut reads) = (Vec::new(), Vec::new());
+        let mut block = entry;
+        for _ in 0..levels {
+            let (header, body) = ssa.begin_loop(block);
+            headers.push(header);
+            reads.push(ssa.read_variable_internal(1, body));
+            block = body;
+        }
+        for header in headers.into_iter().rev() {
+            block = ssa.finish_loop(header, block);
+        }
+        for read in &reads {
+            assert_eq!(ssa.resolve_value(read), vec![Value::LocalDef(0)]);
+        }
+        ssa.work
+    }
+
+    #[test]
+    fn nested_loops_resolve_in_linear_work() {
+        let (small, large) = (nested_loops(1_000), nested_loops(4_000));
+        assert!(large <= 5 * small, "{small} -> {large}");
     }
 
     #[test]
