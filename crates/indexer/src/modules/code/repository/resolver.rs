@@ -25,7 +25,7 @@ pub enum ResolveError {
         detail: String,
     },
 
-    /// A 5xx or 429 says nothing about the repository, so it is never a checkpoint.
+    /// A 429, 502, 503 or 504 says nothing about the repository, so it is never a checkpoint.
     #[error("archive endpoint overloaded: {0}")]
     Overloaded(String),
 
@@ -43,6 +43,8 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
+    /// HTTP 500: Rails raises it for a repository that does not exist, until it returns 404.
+    ServerError,
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
     EmptyArchive,
@@ -54,6 +56,7 @@ impl EmptyRepositoryReason {
     pub fn as_metric_label(self) -> &'static str {
         match self {
             EmptyRepositoryReason::NotFound => "not_found",
+            EmptyRepositoryReason::ServerError => "server_error",
             EmptyRepositoryReason::EmptyArchive => "empty_archive",
             EmptyRepositoryReason::RepositoryTooLarge => "repository_too_large",
         }
@@ -64,7 +67,9 @@ impl EmptyRepositoryReason {
     pub fn is_permanent(self) -> bool {
         match self {
             EmptyRepositoryReason::RepositoryTooLarge => true,
-            EmptyRepositoryReason::NotFound | EmptyRepositoryReason::EmptyArchive => false,
+            EmptyRepositoryReason::NotFound
+            | EmptyRepositoryReason::ServerError
+            | EmptyRepositoryReason::EmptyArchive => false,
         }
     }
 }
@@ -86,17 +91,33 @@ fn classify_download_error(
             EmptyRepositoryReason::NotFound,
             format!("project {id} not found (404)"),
         )),
+        RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+            project_id,
+            status,
+        }) if !is_overload_status(*status) => Some((
+            EmptyRepositoryReason::ServerError,
+            format!(
+                "archive endpoint returned {status} for project {project_id} (repository likely missing)"
+            ),
+        )),
         _ => None,
     }
 }
 
-/// Gitaly's `ResourceExhausted` surfaces as a Workhorse 500, so a 5xx counts as overload.
+/// Gateway errors from Workhorse or its proxy are transient. A plain 500 is not
+/// listed: Rails raises it for a missing repository.
+fn is_overload_status(status: u16) -> bool {
+    matches!(status, 502..=504)
+}
+
+/// Workhorse answers 429 for Gitaly's `ResourceExhausted`, and 502-504 for
+/// transient proxy failures.
 fn overload_detail(err: &RepositoryServiceError) -> Option<String> {
     match err {
         RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
             project_id,
             status,
-        }) => Some(format!("{status} for project {project_id}")),
+        }) if is_overload_status(*status) => Some(format!("{status} for project {project_id}")),
         RepositoryServiceError::GitlabApi(rate_limited @ GitlabClientError::RateLimited { .. }) => {
             Some(rate_limited.to_string())
         }
@@ -244,6 +265,7 @@ mod tests {
         assert!(EmptyRepositoryReason::RepositoryTooLarge.is_permanent());
         for reason in [
             EmptyRepositoryReason::NotFound,
+            EmptyRepositoryReason::ServerError,
             EmptyRepositoryReason::EmptyArchive,
         ] {
             assert!(!reason.is_permanent());
@@ -565,13 +587,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_maps_archive_500_to_empty_repository() {
+        let service = ScriptedRepositoryService::with_download_error(|| {
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::ServerError {
+                project_id: 42,
+                status: 500,
+            })
+        });
+        let (_dir, resolver) = create_resolver(service);
+
+        let err = resolver.resolve(42, "main", None).await.unwrap_err();
+
+        match err {
+            ResolveError::EmptyRepository { reason, detail } => {
+                assert_eq!(reason, EmptyRepositoryReason::ServerError);
+                assert!(detail.contains("500"), "detail was {detail}");
+            }
+            other => panic!("expected EmptyRepository, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn resolve_maps_archive_overload_statuses_to_overloaded_without_retrying() {
         use gitlab_client::GitlabClientError;
 
         let overloads: [fn() -> GitlabClientError; 3] = [
             || GitlabClientError::ServerError {
                 project_id: 42,
-                status: 500,
+                status: 502,
             },
             || GitlabClientError::ServerError {
                 project_id: 42,

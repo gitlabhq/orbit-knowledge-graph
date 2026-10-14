@@ -850,7 +850,7 @@ mod tests {
         let overloads: [fn() -> GitlabClientError; 2] = [
             || GitlabClientError::ServerError {
                 project_id: 123,
-                status: 500,
+                status: 502,
             },
             || GitlabClientError::RateLimited {
                 project_id: 123,

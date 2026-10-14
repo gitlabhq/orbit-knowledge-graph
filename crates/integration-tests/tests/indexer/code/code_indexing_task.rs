@@ -1112,11 +1112,11 @@ async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // One dispatch is up to `max_attempts` (5) deliveries. Gitaly ResourceExhausted reaches
-    // the indexer as a 500; a rate limit as a 429.
+    // One dispatch is up to `max_attempts` (5) deliveries. Workhorse answers 429 for Gitaly
+    // ResourceExhausted and 502 for a transient proxy failure.
     for delivery in 1..=5 {
         let status = if delivery % 2 == 1 {
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            axum::http::StatusCode::BAD_GATEWAY
         } else {
             axum::http::StatusCode::TOO_MANY_REQUESTS
         };
