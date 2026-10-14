@@ -12,8 +12,6 @@ use crate::commands::setup::spec::{self, Agent};
 use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_files};
 
 const MANIFEST: &str = "SKILL.md";
-/// Written into every directory this component installs. Content cannot identify it, because the
-/// full skill depends on the instance.
 const MARKER_FILE: &str = ".orbit-managed";
 const MARKER_CONTENTS: &str =
     "Installed by `orbit setup`; `orbit uninstall` removes this directory.\n";
