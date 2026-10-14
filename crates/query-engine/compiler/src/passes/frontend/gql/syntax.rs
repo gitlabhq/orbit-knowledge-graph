@@ -289,6 +289,29 @@ impl QueryParser {
     }
 
     #[alias(predicate)]
+    fn TypePredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let (variable, op, value) = match_nodes!(input.into_children();
+            [RelationshipType(variable), operator(op)] => (variable, op, None),
+            [RelationshipType(variable), operator(op), value(value)] => (variable, op, Some(value)),
+            [RelationshipType(variable), operator(op), PropertyExpression(_)] => (variable, op, None),
+            [RelationshipType(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+        );
+        Ok(BooleanExpression::Leaf(Predicate::RelationshipType {
+            span,
+            variable,
+            op,
+            value,
+        }))
+    }
+
+    fn RelationshipType(input: Node) -> Result<Name> {
+        Ok(match_nodes!(input.into_children();
+            [Variable(variable)] => variable,
+        ))
+    }
+
+    #[alias(predicate)]
     fn FunctionPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let call = input.children().next().ok_or_else(|| mismatch(&input))?;
         Err(unsupported_function(&call))
@@ -393,10 +416,12 @@ impl QueryParser {
     }
 
     fn ProjectionExpression(input: Node) -> Result<Expression> {
+        let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [Aggregate(expression)] => expression,
             [DateTrunc(expression)] => expression,
             [AllProperties(expression)] => expression,
+            [RelationshipType(variable)] => Expression::RelationshipType { span, variable },
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [NodeProjection(expression)] => expression,
             [PropertyExpression(property)] => Expression::Property(property),
@@ -487,17 +512,23 @@ impl QueryParser {
         Ok(match_nodes!(input.into_children();
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [FunctionCall(_), SortDirection(_)] => unreachable!("FunctionCall always errors"),
+            [RelationshipType(variable)] => Sort {
+                span, key: SortKey::RelationshipType(variable), direction: OrderDirection::Asc,
+            },
             [PropertyExpression(property)] => Sort {
-                span, key: Target::Property(property), direction: OrderDirection::Asc,
+                span, key: SortKey::Property(property), direction: OrderDirection::Asc,
             },
             [Variable(variable)] => Sort {
-                span, key: Target::Variable(variable), direction: OrderDirection::Asc,
+                span, key: SortKey::Variable(variable), direction: OrderDirection::Asc,
+            },
+            [RelationshipType(variable), SortDirection(direction)] => Sort {
+                span, key: SortKey::RelationshipType(variable), direction,
             },
             [PropertyExpression(property), SortDirection(direction)] => Sort {
-                span, key: Target::Property(property), direction,
+                span, key: SortKey::Property(property), direction,
             },
             [Variable(variable), SortDirection(direction)] => Sort {
-                span, key: Target::Variable(variable), direction,
+                span, key: SortKey::Variable(variable), direction,
             },
         ))
     }
@@ -647,12 +678,12 @@ fn unsupported_function(call: &Node) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
-            "match a typed relationship such as -[r:CLOSES]->; each edge type is listed under @edges in the response"
+            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
         "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
         | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",
         _ => {
-            "RETURN supports count, sum, avg, min, max, date_trunc, and properties; WHERE supports token_match, all_tokens, and any_tokens"
+            "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }
     };
     call.error(format!("function {name}() is not supported: {hint}"))

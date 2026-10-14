@@ -37,7 +37,27 @@ impl Lowering {
     }
 
     fn condition(&self, predicate: Predicate<'_>) -> Result<Condition> {
-        let Predicate::Comparison(comparison) = predicate;
+        let comparison = match predicate {
+            Predicate::Comparison(comparison) => comparison,
+            Predicate::RelationshipType {
+                span,
+                variable,
+                op,
+                value,
+            } => {
+                let index = self.relationship_index(span, &variable)?;
+                self.one_hop(span, &variable)?;
+                return Ok(Condition {
+                    target: PredicateTarget::Relationship(index),
+                    property: Condition::RELATIONSHIP_TYPE.into(),
+                    filter: InputFilter {
+                        op: Some(op),
+                        value,
+                        rhs_column: None,
+                    },
+                });
+            }
+        };
         let Comparison {
             span,
             property,

@@ -13,7 +13,7 @@ use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
     SecurityContext,
 };
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
@@ -311,7 +311,7 @@ async fn run_frontend(
         return;
     }
 
-    let resp = execute_pipeline(
+    let output = execute_output(
         ctx,
         frontend,
         &compiled,
@@ -320,6 +320,10 @@ async fn run_frontend(
         redaction,
     )
     .await;
+    if frontend == Frontend::Gql {
+        assert_gql_table(&output, expect, label);
+    }
+    let resp = GraphFormatter.format(&output);
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
@@ -607,6 +611,30 @@ async fn execute_pipeline(
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> serde_json::Value {
+    GraphFormatter.format(
+        &execute_output(
+            ctx,
+            frontend,
+            compiled,
+            (data_model, ontology),
+            security,
+            redaction,
+        )
+        .await,
+    )
+}
+
+async fn execute_output(
+    ctx: &TestContext,
+    frontend: Frontend,
+    compiled: &Arc<CompiledQueryContext>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+) -> PipelineOutput {
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -644,7 +672,7 @@ async fn execute_pipeline(
         .await
         .expect("hydration should succeed");
 
-    format_output(
+    pipeline_output(
         compiled,
         hydration_output.query_result,
         hydration_output.redacted_count,
@@ -653,19 +681,19 @@ async fn execute_pipeline(
     )
 }
 
-fn format_output(
+fn pipeline_output(
     compiled: &Arc<CompiledQueryContext>,
     mut query_result: QueryResult,
     redacted_count: usize,
     result_context: ResultContext,
     sql: String,
-) -> serde_json::Value {
+) -> PipelineOutput {
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
         &compiled.pagination,
     ));
-    GraphFormatter.format(&PipelineOutput {
+    PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count,
         query_type: compiled.query_type.to_string(),
@@ -675,13 +703,34 @@ fn format_output(
         result_context,
         execution_log: vec![],
         pagination,
-    })
+    }
 }
 
 fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(response).expect("response should deserialize");
     apply_expect(&ResponseView::for_query(input, response), expect, label);
+}
+
+fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
+    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
+        return;
+    }
+    let (header, rows) = GqlFormatter.table(output);
+    if !expect.gql_column_names.is_empty() {
+        assert_eq!(
+            header, expect.gql_column_names,
+            "{label}: gql column names mismatch"
+        );
+    }
+    for (name, values) in &expect.gql_columns {
+        let index = header
+            .iter()
+            .position(|column| column == name)
+            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
+        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
+        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
+    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {

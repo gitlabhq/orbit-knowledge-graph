@@ -629,7 +629,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 self.check_relationship_filters(input, i, prop, filters)?;
             }
         }
-        for condition in input.conditions() {
+        for condition in input.conditions().filter(|c| !c.is_relationship_type()) {
             let filters = std::slice::from_ref(&condition.filter);
             match &condition.target {
                 PredicateTarget::Node(alias) => {

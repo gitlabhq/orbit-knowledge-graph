@@ -95,6 +95,12 @@ pub(super) struct Range<'i> {
 
 pub(super) enum Predicate<'i> {
     Comparison(Box<Comparison<'i>>),
+    RelationshipType {
+        span: Span<'i>,
+        variable: Name<'i>,
+        op: FilterOp,
+        value: Option<Value>,
+    },
 }
 
 pub(super) struct Comparison<'i> {
@@ -132,6 +138,10 @@ pub(super) enum Expression<'i> {
         span: Span<'i>,
         variable: Name<'i>,
     },
+    RelationshipType {
+        span: Span<'i>,
+        variable: Name<'i>,
+    },
     Node {
         span: Span<'i>,
         variable: Name<'i>,
@@ -157,6 +167,12 @@ pub(super) enum AggregateFunction {
 
 pub(super) struct Sort<'i> {
     pub span: Span<'i>,
-    pub key: Target<'i>,
+    pub key: SortKey<'i>,
     pub direction: OrderDirection,
+}
+
+pub(super) enum SortKey<'i> {
+    Property(Property<'i>),
+    Variable(Name<'i>),
+    RelationshipType(Name<'i>),
 }
