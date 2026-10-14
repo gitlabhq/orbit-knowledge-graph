@@ -446,6 +446,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                     "depth" => "skip_deeply_nested",
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
+                    "edges" => "skip_too_many_edges",
                     _ => "skip_timeout_sentinel",
                 }
                 .into(),

@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::smallvec;
@@ -15,7 +16,23 @@ use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
+type WildcardImports = Rc<Vec<u32>>;
+
 const MAX_FIELD_COPIES: usize = 4_096;
+const MAX_FILE_EDGES: usize = 2_000_000;
+
+fn edge_limit(edges: &[Edge], path: &str) -> Result<(), Killed> {
+    if edges.len() <= MAX_FILE_EDGES {
+        return Ok(());
+    }
+    Err(Killed {
+        cancelled: false,
+        label: "edges",
+        path: path.to_string(),
+        elapsed: std::time::Duration::ZERO,
+        budget: std::time::Duration::ZERO,
+    })
+}
 
 enum WorkItem {
     Visit(u32),
@@ -76,7 +93,7 @@ struct Fold<'t> {
     members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
-    wildcards: Vec<u32>,
+    wildcards: WildcardImports,
     tags: ReservedTags,
     config: &'t LinkConfig,
     syms: &'t crate::intern::Interner,
@@ -90,7 +107,7 @@ struct Fold<'t> {
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
-    pending_calls: Vec<(Value, u32, u32, Vec<u32>)>,
+    pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, FxHashMap<u32, u32>)>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
@@ -108,14 +125,21 @@ impl<'t> Fold<'t> {
             if self.killed.is_some() {
                 return;
             }
-            if let Err(k) = self.run.check().and_then(|()| self.file.check()) {
+            if let Err(k) = self
+                .run
+                .check()
+                .and_then(|()| self.file.check())
+                .and_then(|()| edge_limit(&self.edges, &self.tree.label))
+            {
                 self.killed = Some(k);
                 return;
             }
             match item {
                 WorkItem::ExitScope { wildcards, block } => {
                     self.scopes.pop();
-                    self.wildcards.truncate(wildcards);
+                    if self.wildcards.len() > wildcards {
+                        Rc::make_mut(&mut self.wildcards).truncate(wildcards);
+                    }
                     if let Some(block) = block {
                         self.def_stack.pop();
                         self.cur = block;
@@ -324,8 +348,9 @@ impl<'t> Fold<'t> {
             {
                 continue;
             }
-            self.wildcards
-                .extend((local == self.wildcard).then_some(n.index()));
+            if local == self.wildcard {
+                Rc::make_mut(&mut self.wildcards).push(n.index());
+            }
             let binding = self.declare_binding(n, local);
             self.ssa
                 .write_variable(binding, self.cur, Value::ImportRef(n.index()));
@@ -529,11 +554,8 @@ impl<'t> Fold<'t> {
             });
         if let Some(value) = value {
             let fallback =
-                if callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar) {
-                    self.wildcards.clone()
-                } else {
-                    Vec::new()
-                };
+                (callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar))
+                    .then(|| Rc::clone(&self.wildcards));
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -1223,7 +1245,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         members: RefCell::default(),
         ivars: RefCell::default(),
         supertypes: FxHashMap::default(),
-        wildcards: Vec::new(),
+        wildcards: Rc::default(),
         tags,
         config,
         syms: &lang.syms,
@@ -1254,11 +1276,19 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
     f.ssa.remove_redundant_phi_sccs();
 
     for (value, from, site, fallback) in std::mem::take(&mut f.pending_calls) {
-        f.run.check().and_then(|()| f.file.check())?;
+        f.run
+            .check()
+            .and_then(|()| f.file.check())
+            .and_then(|()| edge_limit(&f.edges, &tree.label))?;
         let first = f.edges.len();
         let mut targets = f.ssa.resolve_value(&value);
         if targets.is_empty() {
-            targets.extend(fallback.into_iter().map(Value::ImportRef));
+            targets.extend(
+                fallback
+                    .iter()
+                    .flat_map(|w| w.iter())
+                    .map(|&w| Value::ImportRef(w)),
+            );
         }
         f.emit_targets(&targets, from);
         for edge in &mut f.edges[first..] {

@@ -281,6 +281,24 @@ async fn a_read_inside_deeply_nested_loops_links_inside_the_budget() {
 }
 
 #[tokio::test]
+async fn a_file_with_more_edges_than_the_limit_is_skipped() {
+    let functions: String = (0..2_000)
+        .map(|i| format!("function a{i}() {{}}\n"))
+        .collect();
+    let assigns: String = (0..2_000)
+        .map(|i| format!("if (c) {{ f = a{i}; }}\n"))
+        .collect();
+    let calls = "f();\n".repeat(2_000);
+    let wide = format!("{functions}function m(c) {{\nlet f = a0;\n{assigns}{calls}}}\n");
+    let files: &[(&str, &[u8])] = &[
+        ("root/wide.js", wide.as_bytes()),
+        ("root/flat.js", b"function flat() {}\n"),
+    ];
+    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert_eq!(timings.skipped_paths, ["wide.js"]);
+}
+
+#[tokio::test]
 async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     let files: &[(&str, &[u8])] = &[
         ("root/a.js", b"function a() {}\n"),

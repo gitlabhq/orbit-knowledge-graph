@@ -155,7 +155,7 @@ pub(in crate::modules::code) fn run(
                 let phase = match killed.label {
                     "tree-sitter" | "depth" => AbortPhase::Parse,
                     "rewrite" => AbortPhase::Walk,
-                    "link" => AbortPhase::Ssa,
+                    "link" | "edges" => AbortPhase::Ssa,
                     _ => AbortPhase::Sentinel,
                 };
                 SkippedFile {
