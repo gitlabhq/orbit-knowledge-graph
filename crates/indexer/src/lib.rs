@@ -244,6 +244,10 @@ pub async fn run_dispatcher(
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
+    let candidate = archive
+        .load_ontology()
+        .map_err(orbit_migrations::catalog::CatalogError::from)?;
+    let code_tables = modules::code::config::CodeTableNames::from_ontology(&candidate)?;
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
 
     let services = orchestrator::scheduled::connect(&config.nats).await?;
@@ -378,8 +382,7 @@ pub async fn run_dispatcher(
             backfill.clone(),
             CodeStaleSweep::new(
                 clients.graph.clone(),
-                &modules::code::config::CodeTableNames::from_ontology(&ontology)
-                    .expect("code tables must resolve from the archived ontology"),
+                &code_tables,
                 checkpoint_store.clone(),
                 config.schedule.tasks.code_backfill.stale_sweeps_per_tick,
             ),

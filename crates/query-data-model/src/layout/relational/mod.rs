@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 pub mod mapping;
+pub mod materialized;
+pub use mapping::VariantRoute;
 pub use mapping::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
     ForeignKey, PathColumn, PropertyRealization, RelationalMapping, RelationshipRoute,
     TraversalPathLookup,
 };
+pub use materialized::{MaterializedJoin, MaterializedNode, MaterializedRelationship};
 use std::fmt::Debug;
 
 pub trait RelationalBackend: Debug + Clone {

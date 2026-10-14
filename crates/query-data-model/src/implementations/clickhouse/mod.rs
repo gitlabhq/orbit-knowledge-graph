@@ -8,6 +8,8 @@ use crate::{
     DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
     PropertyRealization, RelationalMapping, RelationshipId, TraversalPathLookup,
 };
+use crate::{MaterializedJoin, RelationshipVariantId, VariantRoute};
+use layout::ReorderedCopy;
 
 #[derive(Debug, Clone)]
 pub struct TableLayout {
@@ -21,6 +23,10 @@ pub struct TableLayout {
 }
 
 impl TableLayout {
+    pub fn replacement_identity(&self) -> &[String] {
+        &self.sort_key
+    }
+
     fn from_storage(
         table: &layout::Table,
         entity: Option<EntityId>,
@@ -62,7 +68,9 @@ pub struct ClickHouseBindings {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
     relationships: Vec<Option<String>>,
-    variants: Vec<Option<ForeignKey>>,
+    variant_routes: Vec<Option<VariantRoute>>,
+    materialized_joins: Vec<MaterializedJoin>,
+    reordered_layouts: Vec<ReorderedCopy>,
     property_facts: Vec<PropertyBackendFacts>,
     tables: HashMap<String, TableLayout>,
     denormalized: DenormalizedCatalog,
@@ -70,6 +78,15 @@ pub struct ClickHouseBindings {
 }
 
 impl ClickHouseBindings {
+    pub fn variant_route(&self, id: RelationshipVariantId) -> Option<&VariantRoute> {
+        self.variant_routes.get(id.index())?.as_ref()
+    }
+    pub fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &self.materialized_joins
+    }
+    pub fn reordered_layouts(&self) -> &[ReorderedCopy] {
+        &self.reordered_layouts
+    }
     pub fn entity(&self, id: EntityId) -> Option<&EntityLayout> {
         self.entities.get(id.index())?.as_ref()
     }
@@ -118,6 +135,19 @@ impl ClickHouseBindings {
 }
 
 impl RelationalMapping for ClickHouseBindings {
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
+        self.variant_route(variant)
+    }
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.reordered_layouts
+            .iter()
+            .filter(|copy| copy.source == table)
+            .map(|copy| copy.table.as_str())
+            .collect()
+    }
+    fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &self.materialized_joins
+    }
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
@@ -199,7 +229,7 @@ impl RelationalMapping for ClickHouseBindings {
     ) -> Option<ForeignKey> {
         let mut foreign_keys = relationships.iter().map(|relationship| {
             let variant = graph.variant_id(*relationship, source, target)?;
-            *self.variants.get(variant.index())?
+            self.variant_route(variant)?.foreign_key
         });
         let first = foreign_keys.next()??;
         foreign_keys
