@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use clickhouse_client::ClickHouseConfigurationExt;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::auth::JwtValidator;
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -20,7 +21,7 @@ fn build_grpc_server(tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     GrpcServer::new(
         validator,
         ActiveSchema::pinned(ontology),
-        &clickhouse_config,
+        clickhouse_config.build_client("graph"),
         cluster_health,
         tls_config,
         orbit_server_config::AppConfig::embedded_defaults().grpc,

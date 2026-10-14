@@ -229,7 +229,7 @@ impl Cluster {
         let service = OrbitServiceImpl::new(
             Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
             active_schema.clone(),
-            &config.graph,
+            config.graph.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
             WAIT_LIMIT.as_secs(),
             Arc::new(config.analytics.clone()),
@@ -369,7 +369,7 @@ impl Cluster {
             .graph
             .session_settings
             .insert("readonly".into(), "1".into());
-        let client = Arc::new(config.graph.build_client());
+        let client = Arc::new(config.graph.build_client("graph"));
         let shutdown = CancellationToken::new();
         let active_schema = Arc::new(ActiveSchema::default());
         ActiveSchema::spawn(

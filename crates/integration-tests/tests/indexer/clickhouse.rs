@@ -1,5 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
+use clickhouse_client::ClickHouseConfigurationExt;
 use std::sync::Arc;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -36,8 +37,10 @@ impl TestContext {
         let (container, host, port) = start_clickhouse_container().await;
         setup_database(&host, port).await;
         let config = create_config(&host, port);
-        let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-            .expect("failed to create writer");
+        let writer = ClickHouseWriter::new(
+            config.build_client("graph"),
+            Arc::new(EngineMetrics::default()),
+        );
 
         Self {
             _container: container,
@@ -55,6 +58,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         )
     }
 
@@ -113,6 +117,7 @@ async fn setup_database(host: &str, port: u16) {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         );
 
         match client.execute("SELECT 1").await {
@@ -329,8 +334,10 @@ async fn connection_failure_returns_error() {
             .profiling,
     };
 
-    let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-        .expect("failed to create writer");
+    let writer = ClickHouseWriter::new(
+        config.build_client("graph"),
+        Arc::new(EngineMetrics::default()),
+    );
 
     let result = writer
         .write(

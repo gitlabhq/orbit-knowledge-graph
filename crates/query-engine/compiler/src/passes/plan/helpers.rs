@@ -19,51 +19,58 @@ pub fn ordered_filters(
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            let (metadata, in_sort_key) = match owner {
-                FilterOwner::Entity(entity) => {
-                    let table = model.query_backend().entity_table(entity);
-                    (
-                        model
-                            .property_for_entity_id(entity, property)
-                            .map(|property| (Some(property.id), Some(property.data_type))),
-                        table.is_some_and(|table| model.in_sort_key(table, property)),
-                    )
-                }
-                FilterOwner::Tables(tables) => {
-                    let data_type = tables.first().and_then(|first| {
-                        let data_type = model.table_column_type(first, property)?;
-                        tables[1..]
-                            .iter()
-                            .all(|table| {
-                                model.table_column_type(table, property) == Some(data_type)
-                            })
-                            .then_some(data_type)
-                    });
-                    (
-                        Some((None, data_type)),
-                        tables
-                            .iter()
-                            .all(|table| model.in_sort_key(table, property)),
-                    )
-                }
-            };
-            let (property_id, data_type) = metadata.unwrap_or_default();
-            filters.iter().map(move |filter| {
+            filters.iter().map(|filter| {
                 (
                     property.clone(),
-                    BoundFilter {
-                        filter: filter.clone(),
-                        property: property_id,
-                        data_type,
-                        selectivity: property_id
-                            .map(|property| model.property_selectivity(property))
-                            .unwrap_or_default(),
-                        in_sort_key,
-                    },
+                    bind_filter(property, filter.clone(), &owner, model),
                 )
             })
         })
         .collect()
+}
+
+pub fn bind_filter(
+    property: &str,
+    filter: InputFilter,
+    owner: &FilterOwner<'_>,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> BoundFilter {
+    let (metadata, in_sort_key) = match owner {
+        FilterOwner::Entity(entity) => {
+            let table = model.query_backend().entity_table(*entity);
+            (
+                model
+                    .property_for_entity_id(*entity, property)
+                    .map(|property| (Some(property.id), Some(property.data_type))),
+                table.is_some_and(|table| model.in_sort_key(table, property)),
+            )
+        }
+        FilterOwner::Tables(tables) => {
+            let data_type = tables.first().and_then(|first| {
+                let data_type = model.table_column_type(first, property)?;
+                tables[1..]
+                    .iter()
+                    .all(|table| model.table_column_type(table, property) == Some(data_type))
+                    .then_some(data_type)
+            });
+            (
+                Some((None, data_type)),
+                tables
+                    .iter()
+                    .all(|table| model.in_sort_key(table, property)),
+            )
+        }
+    };
+    let (property_id, data_type) = metadata.unwrap_or_default();
+    BoundFilter {
+        filter,
+        property: property_id,
+        data_type,
+        selectivity: property_id
+            .map(|property| model.property_selectivity(property))
+            .unwrap_or_default(),
+        in_sort_key,
+    }
 }
 
 pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {

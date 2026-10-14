@@ -66,6 +66,9 @@ pub enum IndexerError {
     #[error("Invalid engine configuration: {0}")]
     InvalidEngineConfig(#[from] EngineConfigError),
 
+    #[error("Invalid graph ClickHouse configuration: {0}")]
+    InvalidGraphConfig(#[from] orbit_server_config::ConfigurationError),
+
     #[error("Analytics tracker initialization failed: {0}")]
     Analytics(#[from] labkit_events::Error),
 }

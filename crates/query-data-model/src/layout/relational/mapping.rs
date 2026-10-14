@@ -82,6 +82,7 @@ pub struct DenormalizedProperty {
     pub edge_column: String,
     pub tag_key: String,
     pub variants: HashSet<(RelationshipId, EntityId, EntityId)>,
+    pub nullable: bool,
 }
 
 #[derive(Debug, Clone, Default)]

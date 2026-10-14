@@ -471,6 +471,7 @@ pub struct DenormalizedProperty {
     /// Values are stored as `"key:value"` tokens in the array.
     pub tag_key: String,
     pub enum_values: Option<BTreeMap<i64, String>>,
+    pub nullable: bool,
 }
 
 impl fmt::Display for EdgeEntity {

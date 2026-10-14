@@ -286,7 +286,26 @@ data_correctness/
         └── admin_aggregation_compiles.yaml
 ```
 
-Each YAML file contains one `QueryScenario` document.
+Each YAML file contains one `QueryScenario` document, or a `cases` list of them.
+In a `cases` file, every other top-level key is a default for each case. A case
+key replaces the default, and nested maps such as `config` merge key by key.
+A case reports failures as `<file>/<name>`, or `<file>/<index>` when it has no
+`name`.
+
+```yaml
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+cases:
+  - name: not_in
+    query:
+      gql: MATCH (u:User {id: 1}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 1 }
+  - name: admin_not_in
+    config: { security: admin_user }
+    query:
+      gql: MATCH (u:User {id: 2}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 0 }
+```
 
 A scenario can set `config.ontology_overlay` to a name under
 `config/seeds/overlays/`. The overlay changes the query catalog for that scenario.
@@ -311,6 +330,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
+| `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
 
 #### `config.security` — `SecurityOverride`
 
@@ -344,6 +364,8 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
+| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
+| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 **Aggregation:**
 
@@ -450,8 +472,8 @@ mise test:integration:data
 SCENARIO_FILTER=search mise test:integration:data
 ```
 
-The harness finds each scenario file. `SCENARIO_FILTER` keeps the files whose path
-contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
+The harness finds each scenario file and case. `SCENARIO_FILTER` keeps the cases whose
+name contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
 parses every file with no Docker.
 
 ### Example
