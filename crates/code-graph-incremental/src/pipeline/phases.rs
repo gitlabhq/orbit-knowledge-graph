@@ -571,6 +571,7 @@ impl Phase<Resolved> for Display {
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
+        let mut cut = Vec::new();
         state.trees = std::mem::take(&mut state.trees)
             .into_iter()
             .enumerate()
@@ -583,9 +584,22 @@ impl Phase<Resolved> for Display {
                     tree_index: fi as u32,
                     edges: &edges,
                 };
-                pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)
+                crate::dsl::rewrite::take_fqn_cut();
+                let tree = pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)?;
+                if crate::dsl::rewrite::take_fqn_cut() {
+                    cut.push(tree.label.clone());
+                }
+                Ok(tree)
             })
             .collect::<Result<_, Killed>>()?;
+        context.report.limited.extend(cut.iter().map(|path| {
+            Killed::limit(
+                "fqn",
+                path,
+                crate::dsl::rewrite::MAX_FQN_SEGMENTS + 1,
+                crate::dsl::rewrite::MAX_FQN_SEGMENTS,
+            )
+        }));
         Ok(Displayed { state })
     }
 }
