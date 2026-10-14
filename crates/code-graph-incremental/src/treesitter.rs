@@ -444,19 +444,18 @@ const PARSE_STACK_RESERVE: usize = 256 * 1024;
 
 fn depth_of(tree: &tree_sitter::Tree) -> usize {
     let mut cursor = tree.walk();
-    let mut deepest = 0;
+    let (mut depth, mut deepest) = (0, 0);
     loop {
-        deepest = deepest.max(cursor.depth() as usize);
-        if cursor.goto_first_child() || cursor.goto_next_sibling() {
+        if cursor.goto_first_child() {
+            depth += 1;
+            deepest = deepest.max(depth);
             continue;
         }
-        loop {
+        while !cursor.goto_next_sibling() {
             if !cursor.goto_parent() {
                 return deepest;
             }
-            if cursor.goto_next_sibling() {
-                break;
-            }
+            depth -= 1;
         }
     }
 }
@@ -516,6 +515,27 @@ mod tests {
             .unwrap();
         assert_eq!(killed.label, "stack");
         assert!(matches!(killed.stop, Some(Stop::Below { left, reserve }) if left < reserve));
+    }
+
+    #[test]
+    fn a_tree_far_past_the_depth_limit_stops_in_linear_time() {
+        let levels = 50_000;
+        let source = format!("{}{}", "{\n".repeat(levels), "}\n".repeat(levels));
+        let started = cpu_time::ThreadTime::now();
+        let killed = parse_with_sentinel(
+            &source,
+            SupportLang::JavaScript,
+            &Lang::default(),
+            "deep.js",
+            &crate::sentinel::Sentinel::disabled(),
+            10,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            matches!(killed.stop, Some(Stop::Reached { observed, cap: 10 }) if observed > levels)
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
