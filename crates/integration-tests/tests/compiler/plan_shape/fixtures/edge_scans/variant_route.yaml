@@ -10,7 +10,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Scan Table(gl_edge) AS e0)"]
+      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
       reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
     planned:

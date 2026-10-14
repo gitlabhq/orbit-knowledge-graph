@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
 mod materialized;
+
 use crate::VariantRoute;
 
 use super::{ClickHouseBindings, EntityLayout, TableLayout, layout::ClickHouse};
@@ -178,18 +180,30 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             let Some(relationship) = graph.relationship_id(&property.relationship_kind) else {
                 continue;
             };
+            let variants: HashSet<_> = graph
+                .relationship(relationship)
+                .variants
+                .iter()
+                .map(|variant| graph.variant(*variant))
+                .filter(|variant| match property.direction {
+                    ontology::DenormDirection::Source => variant.source == entity,
+                    ontology::DenormDirection::Target => variant.target == entity,
+                })
+                .map(|variant| (relationship, variant.source, variant.target))
+                .collect();
             denormalized
                 .entry(DenormalizedKey {
                     property: property_id,
                     direction,
                 })
                 .and_modify(|layout: &mut DenormalizedProperty| {
-                    layout.relationships.push(relationship)
+                    layout.variants.extend(&variants);
                 })
                 .or_insert_with(|| DenormalizedProperty {
                     edge_column: property.edge_column.clone(),
                     tag_key: property.tag_key.clone(),
-                    relationships: vec![relationship],
+                    variants,
+                    nullable: property.nullable,
                 });
         }
 

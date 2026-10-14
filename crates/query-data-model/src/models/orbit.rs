@@ -58,6 +58,11 @@ pub trait OrbitQueryModel {
         self.graph().property_named(entity, property)
     }
 
+    fn property_is_nullable(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| property.nullable)
+    }
+
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
         self.graph()
             .property_id(entity, property)
@@ -210,6 +215,10 @@ pub trait OrbitQueryModel {
             .filter_map(|entity| self.query_authorization().required_access_level(entity))
             .max()
             .unwrap_or(ontology::RequiredRole::Reporter.as_access_level())
+    }
+
+    fn table_path_columns(&self, table: &str) -> Option<&[crate::PathColumn]> {
+        self.query_backend().table_path_columns(table)
     }
 
     fn relationship_table(&self, relationship: &str) -> Option<&str> {

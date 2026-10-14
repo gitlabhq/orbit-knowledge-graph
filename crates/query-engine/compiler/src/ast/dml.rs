@@ -172,6 +172,10 @@ pub enum TableRef {
         final_: bool,
         relationship: Option<usize>,
     },
+    Cte {
+        name: String,
+        alias: String,
+    },
     Join {
         join_type: JoinType,
         left: Box<TableRef>,
@@ -179,9 +183,15 @@ pub enum TableRef {
         on: Expr,
     },
     /// Used for multi-hop traversals with unrolled joins.
-    Union { queries: Vec<Query>, alias: String },
+    Union {
+        queries: Vec<Query>,
+        alias: String,
+    },
     /// Used internally for deduplication of aggregation queries.
-    Subquery { query: Box<Query>, alias: String },
+    Subquery {
+        query: Box<Query>,
+        alias: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -284,9 +294,14 @@ pub struct Query {
 
 impl Query {
     pub fn selects_alias(&self, alias: &str) -> bool {
+        self.selected(alias).is_some()
+    }
+
+    pub fn selected(&self, alias: &str) -> Option<&Expr> {
         self.select
             .iter()
-            .any(|s| s.alias.as_deref() == Some(alias))
+            .find(|s| s.alias.as_deref() == Some(alias))
+            .map(|s| &s.expr)
     }
 }
 
@@ -522,6 +537,7 @@ impl TableRef {
     fn set_relationship(&mut self, index: usize) {
         match self {
             Self::Scan { relationship, .. } => *relationship = Some(index),
+            Self::Cte { .. } => {}
             Self::Subquery { query, .. } => query.from.set_relationship(index),
             Self::Union { queries, .. } => {
                 for query in queries {
@@ -550,6 +566,13 @@ impl TableRef {
             alias: alias.into(),
             final_: true,
             relationship: None,
+        }
+    }
+
+    pub fn cte(name: impl Into<String>, alias: impl Into<String>) -> Self {
+        TableRef::Cte {
+            name: name.into(),
+            alias: alias.into(),
         }
     }
 

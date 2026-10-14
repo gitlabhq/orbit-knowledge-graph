@@ -76,19 +76,16 @@ GitLab Orbit Local indexes the current working tree, including uncommitted sourc
 files not excluded by `.gitignore`. It does not enumerate or check out other Git
 branches.
 
-The graph is stored in `~/.gitlab/orbit/graph.duckdb` by default. Multiple checkout paths
-can share one database, with each canonical checkout path determining its project
-ID. Switching branches alone does not update the stored graph. Reindexing the same
-checkout replaces its previous graph in that database with the current working-tree
-contents. To retain graphs for multiple branches, index them from separate checkout
-or worktree paths.
+Each checkout revision has its own database under `~/.gitlab/orbit/local/revisions/`.
+Reindexing the same commit replaces its graph with the current working-tree contents.
+Other indexed commits remain available.
 
 | Flag | Purpose |
 |------|---------|
 | `--threads` | Worker thread count. `0` (default) auto-detects from CPU cores. |
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
-| `--db` | Override the DuckDB file path (default: `~/.gitlab/orbit/graph.duckdb`). |
+| `--db` | Write one checkout revision to a specific DuckDB file. A file cannot hold another revision. |
 
 ## Inspect the schema
 
@@ -97,6 +94,8 @@ or worktree paths.
 ```shell
 orbit schema
 ```
+
+GitLab Orbit selects the database files automatically, so you do not need to locate or attach them.
 
 Pass table names as positional arguments to scope the output:
 
@@ -108,7 +107,7 @@ orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB file path. Omit to use the local graph managed by GitLab Orbit. |
 
 ## Run SQL against the local graph
 
@@ -123,7 +122,9 @@ orbit sql --file query.sql
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
 | `-f`, `--file` | Read the SQL from a file. |
-| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
+| `--db` | Read a specific revision database. Defaults to all indexed revision databases. |
+| `--repo` | Query only the given checkout's current revision. |
+| `--all` | Query all indexed revision databases (the default). |
 
 ## List indexed repositories
 
@@ -134,17 +135,8 @@ orbit list
 orbit list -F json
 ```
 
-Each row reports the repository path, branch, commit, indexing status, when it
-was last indexed, and an error message when the status is `error`:
-
-```plaintext
-+------------------------+--------+------------+---------+---------------------+---------------+
-| repo_path              | branch | commit_sha | status  | last_indexed_at     | error_message |
-+------------------------+--------+------------+---------+---------------------+---------------+
-| /home/dev/workspace/kg | main   | 9606ae8... | indexed | 2026-05-18 10:14:02 |               |
-| /tmp/cli-test          | main   | 654f3a6... | indexed | 2026-05-18 10:13:55 |               |
-+------------------------+--------+------------+---------+---------------------+---------------+
-```
+Each row reports the repository path, branch, commit, database path, indexing status,
+last index time, and any error message.
 
 A repository whose indexing fails is recorded with `status = error` and a
 reason in `error_message`, so a failed or unindexable repository stays visible
@@ -153,7 +145,7 @@ here instead of silently disappearing.
 | Flag | Purpose |
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
-| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
+| `--db` | Read a specific manifest database. Defaults to `~/.gitlab/orbit/local/manifest.duckdb`. |
 
 If nothing has been indexed yet, `orbit list` exits `0`. The table view
 prints nothing; structured formats emit valid empty output (`[]` for `json`,
@@ -168,8 +160,8 @@ Expose the local graph to any MCP-compatible AI agent over stdio:
 orbit mcp serve
 ```
 
-It serves `run_sql`, `get_graph_schema`, and `index` against
-`~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
+It serves `run_sql`, `get_graph_schema`, and `index` against the revision databases
+under `~/.gitlab/orbit/local/`. See [Connect via MCP](mcp.md) for per-client config.
 
 ## Set up your AI agent
 
@@ -242,8 +234,20 @@ same instruction block, MCP entry, and hooks by hand.
 
 ## Storage
 
-The graph is stored at `~/.gitlab/orbit/graph.duckdb`. Multiple repositories share
-the same database. Delete the file to start over.
+Revision databases and a separate manifest are stored under `~/.gitlab/orbit/local/`.
+Graph files use `revisions/<project-id>/<commit-sha>.duckdb`.
+The `manifest.duckdb` file records their paths and status.
+The canonical checkout path determines the project ID.
+Reindexing replaces that commit's graph and preserves other revisions.
+Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root.
+
+Queries wait up to five seconds for busy revisions before returning an error.
+Workspace queries skip missing or incomplete revisions with a diagnostic.
+Explicit `--db` queries fail for those files.
+Tables combine by column name across revision schemas.
+
+If you used the earlier shared `graph.duckdb`, run `orbit index` to populate the new layout.
+The old file remains on disk.
 
 ## Configure the CLI
 

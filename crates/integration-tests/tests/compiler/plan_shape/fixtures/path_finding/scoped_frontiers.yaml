@@ -30,7 +30,7 @@ physical:
         - (CTE _path_scope_traversal_paths (Union ALL (_) (_)))
         - (Filter e1.traversal_path IN _path_scope_traversal_paths.traversal_path, e1.source_id IN _nf_a.id, ... (_))
         - (Filter e1.traversal_path IN _path_scope_traversal_paths.traversal_path, e1.target_id IN _nf_b.id, ... (_))
-        - (Join ON (f.end_id = b.end_id) AND (f.traversal_path = b.traversal_path) (_) (_))
+        - (Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) AND (f.traversal_path = b.traversal_path) (_) (_))
   duckdb:
     planned:
       expect:
@@ -39,4 +39,4 @@ physical:
       expect:
         - (CTE _ (_))
         - (Scan Table(gl_edge) ...)
-        - (Join ON (f.end_id = b.end_id) AND (f.traversal_path = b.traversal_path) (_) (_))
+        - (Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) AND (f.traversal_path = b.traversal_path) (_) (_))

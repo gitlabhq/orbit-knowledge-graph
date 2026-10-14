@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 
+#[path = "cli/revisions.rs"]
+mod revisions;
+
 use integration_testkit::cli::{
     create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
     orbit_index, orbit_sql, rows, rows_where, sorted_ids,
@@ -113,6 +116,48 @@ fn concurrent_readers() {
 }
 
 #[test]
+fn search_hook_recognizes_the_separate_manifest() {
+    use std::io::Write;
+
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let invoke = || {
+        let mut child = orbit_cmd()
+            .args(["hook-guard", "search"])
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .env("ORBIT_TELEMETRY_DISABLED", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        writeln!(
+            child.stdin.take().unwrap(),
+            "{}",
+            json!({
+                "cwd": repo.path,
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "hello"}
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        output.stdout
+    };
+    assert!(invoke().is_empty());
+    assert!(orbit_index(&repo.path, data_dir.path()));
+    assert!(!data_dir.path().join("graph.duckdb").exists());
+    let output: Value = serde_json::from_slice(&invoke()).unwrap();
+    assert_eq!(output["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    assert!(
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("orbit")
+    );
+}
+
+#[test]
 fn reader_during_writer() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -154,7 +199,10 @@ fn concurrent_writers() {
             ok += 1;
         }
     }
-    assert!(ok > 0, "at least one writer should succeed");
+    assert_eq!(
+        ok, 2,
+        "both writers should complete under the revision lock"
+    );
 
     let result = orbit_sql(FILES_SIMPLE, data_dir.path());
     assert!(!rows(&result).is_empty());
@@ -179,16 +227,19 @@ fn index_db_flag_writes_to_custom_path() {
     let repo = create_test_repo();
 
     let workspace_dir = tempfile::TempDir::new().unwrap();
-    let out = orbit_cmd()
-        .args([
-            "index",
-            repo.path.to_str().unwrap(),
-            "--db",
-            db_path.to_str().unwrap(),
-        ])
-        .env("ORBIT_DATA_DIR", workspace_dir.path())
-        .output()
-        .unwrap();
+    let index = || {
+        orbit_cmd()
+            .args([
+                "index",
+                repo.path.to_str().unwrap(),
+                "--db",
+                db_path.to_str().unwrap(),
+            ])
+            .env("ORBIT_DATA_DIR", workspace_dir.path())
+            .output()
+            .unwrap()
+    };
+    let out = index();
     assert!(
         out.status.success(),
         "index --db failed: {}",
@@ -210,6 +261,35 @@ fn index_db_flag_writes_to_custom_path() {
     assert!(result.status.success());
     let json: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(rows(&json).len(), 2);
+
+    git(
+        &repo.path,
+        &["commit", "--allow-empty", "-m", "new revision"],
+    );
+    let output = index();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
+    );
+    let client = duckdb_client::DuckDbClient::open(&db_path).unwrap();
+    client
+        .execute(
+            "UPDATE _orbit_meta SET value = 'outdated' WHERE key = 'local_ddl'",
+            &[],
+        )
+        .unwrap();
+    drop(client);
+    let before = std::fs::read(&db_path).unwrap();
+    let output = index();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("belongs to another checkout revision")
+    );
+    assert_eq!(
+        std::fs::read(&db_path).unwrap(),
+        before,
+        "ownership rejection must preserve an outdated database"
+    );
 }
 
 #[test]
@@ -505,7 +585,9 @@ fn a_busy_graph_is_reported_in_one_line() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let _writer = duckdb_client::DuckDbClient::open(&data_dir.path().join("graph.duckdb")).unwrap();
+    let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
+    let graph = std::path::Path::new(manifest[0]["database_path"].as_str().unwrap());
+    let _writer = duckdb_client::DuckDbClient::open(graph).unwrap();
     let (_, stderr, ok) = run_cmd(&["sql", "--all", "SELECT 1"], data_dir.path());
 
     assert!(!ok);
@@ -835,16 +917,41 @@ fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
     );
 }
 
+/// `orbit` with no credentials and no glab on PATH, so skills commands never
+/// reach a real login or instance.
+fn hermetic_skills_cmd(cache: &std::path::Path) -> std::process::Command {
+    let mut cmd = orbit_cmd();
+    for key in [
+        "ORBIT_API_BASE_URL",
+        "ORBIT_AUTH_HEADER_NAME",
+        "ORBIT_AUTH_HEADER_VALUE",
+        "GITLAB_TOKEN",
+        "GITLAB_URL",
+    ] {
+        cmd.env_remove(key);
+    }
+    cmd.env("PATH", "/nonexistent-orbit-test-path")
+        .env("XDG_CACHE_HOME", cache);
+    cmd
+}
+
 #[test]
 fn skills_lists_and_serves_local_content_without_remote_environment() {
-    let listing = orbit_cmd().arg("skills").output().unwrap();
+    let cache = tempfile::TempDir::new().unwrap();
+    let listing = hermetic_skills_cmd(cache.path())
+        .arg("skills")
+        .output()
+        .unwrap();
     assert!(listing.status.success());
-    assert!(listing.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&listing.stderr).trim(),
+        "warning: no GitLab credential found; using the embedded local skill"
+    );
     let listing = String::from_utf8(listing.stdout).unwrap();
     assert!(listing.starts_with("orbit — "));
     assert!(listing.contains("Orbit CLI"));
 
-    let manifest = orbit_cmd()
+    let manifest = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "orbit"])
         .output()
         .unwrap();
@@ -862,7 +969,7 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         "references/local/sql.md",
         "references/local/repo_map.md",
     ] {
-        let out = orbit_cmd()
+        let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
             .unwrap();
@@ -876,15 +983,15 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         );
     }
 
-    let canonical = orbit_cmd()
+    let canonical = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "orbit", "references/local/sql.md"])
         .output()
         .unwrap();
-    let named_alias = orbit_cmd()
+    let named_alias = hermetic_skills_cmd(cache.path())
         .args(["skills", "orbit", "references/local/sql.md"])
         .output()
         .unwrap();
-    let path_alias = orbit_cmd()
+    let path_alias = hermetic_skills_cmd(cache.path())
         .args(["skills", "references/local/sql.md"])
         .output()
         .unwrap();
@@ -898,10 +1005,13 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         "the discovery hint must be manifest-only, not appended to subfiles"
     );
 
-    let singular_alias = orbit_cmd().args(["skill", "SKILL.md"]).output().unwrap();
+    let singular_alias = hermetic_skills_cmd(cache.path())
+        .args(["skill", "SKILL.md"])
+        .output()
+        .unwrap();
     assert!(singular_alias.status.success());
 
-    let repo_map_ref = orbit_cmd()
+    let repo_map_ref = hermetic_skills_cmd(cache.path())
         .args(["skills", "references/local/repo_map.md"])
         .output()
         .unwrap()
@@ -935,7 +1045,8 @@ fn skills_help_presents_get_as_the_canonical_command() {
 
 #[test]
 fn skills_reject_unknown_names_and_paths() {
-    let unknown_name = orbit_cmd()
+    let cache = tempfile::TempDir::new().unwrap();
+    let unknown_name = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "unknown-name"])
         .output()
         .unwrap();
@@ -945,7 +1056,7 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(error.contains("unknown skill name") && error.contains("orbit"));
     assert!(error.contains("skills get <name> [path]"));
 
-    let path_as_name = orbit_cmd()
+    let path_as_name = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "references/local/sql.md"])
         .output()
         .unwrap();
@@ -962,7 +1073,7 @@ fn skills_reject_unknown_names_and_paths() {
         "/etc/passwd",
         "references/local/../../../secret",
     ] {
-        let out = orbit_cmd()
+        let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
             .unwrap();
@@ -1328,7 +1439,12 @@ fn repo_map_relative_orbit_data_dir() {
         "index with relative ORBIT_DATA_DIR failed: {}",
         String::from_utf8_lossy(&idx.stderr)
     );
-    assert!(caller_dir.path().join("orbit-data/graph.duckdb").exists());
+    assert!(
+        caller_dir
+            .path()
+            .join("orbit-data/local/manifest.duckdb")
+            .exists()
+    );
 
     let out = orbit_cmd()
         .args([

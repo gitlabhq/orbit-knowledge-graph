@@ -20,7 +20,7 @@ struct SkillAssets;
 
 static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::JsonDsl)
-        .expect("embedded Orbit skill passed full frontmatter and tree validation at build time")
+        .expect("embedded Orbit skill passed full frontmatter and tree validation in tests")
 });
 
 static GQL_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {

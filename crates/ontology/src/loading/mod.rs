@@ -453,6 +453,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                                 edge_column,
                                 tag_key: tag_key.clone(),
                                 enum_values: enum_values.clone(),
+                                nullable: field.nullable,
                             },
                         );
                     }
@@ -822,8 +823,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .collect();
     for join in ontology.denormalized_joins() {
         occupied.insert(join.table.clone());
-        occupied
-            .extend((0..join.tables.len()).map(|trigger| format!("{}__on_t{trigger}", join.table)));
     }
     let mut copy_names = std::collections::BTreeSet::new();
     for copy in schema.settings.reordered_tables {
@@ -1768,7 +1767,7 @@ mod tests {
     }
 
     #[test]
-    fn reordered_tables_use_configured_prefix_and_reserve_join_objects() {
+    fn reordered_tables_use_configured_prefix_and_reserve_join_tables() {
         use serde_json::json;
         let key = json!([
             "traversal_path",

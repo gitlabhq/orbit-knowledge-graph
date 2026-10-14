@@ -719,8 +719,8 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         "expected one gl_file scan per direction arm; got {gl_file_refs}\nSQL:\n{rendered}"
     );
     assert!(
-        rendered.contains("f.project_id AS project_id"),
-        "dedup subquery must surface redaction id column: {rendered}"
+        rendered.contains("f.project_id AS _orbit_f_id"),
+        "neighbors must project the redaction id without an alias clash: {rendered}"
     );
 }
 
@@ -1320,7 +1320,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User|Project) RETURN u",
         "MATCH (u IS User) RETURN u",
         "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
-        "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
@@ -1455,6 +1454,113 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn orbit_query_caps_reject_during_lowering() {
+    let nodes: Vec<String> = (0..4_000).map(|i| format!("(a{i})")).collect();
+    let properties: Vec<String> = (0..51).map(|i| format!("u.c{i}")).collect();
+    for (query, first_rejected, message) in [
+        (
+            format!("MATCH {} RETURN a0", nodes.join(",")),
+            "(a5)",
+            "a query declares at most 5 nodes",
+        ),
+        (
+            format!("MATCH (u:User) RETURN {}", properties.join(", ")),
+            "u.c50",
+            "a node projects at most 50 properties",
+        ),
+    ] {
+        let column = query.find(first_rejected).unwrap() + 1;
+        let expected = format!("line 1, column {column}: {message}");
+        let error = compiler::passes::frontend::gql::parse(&query).unwrap_err();
+        assert!(
+            matches!(&error, QueryError::Validation(m) if *m == expected),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn orbit_query_rejects_traversal_path_column_comparisons() {
+    let context = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
+    let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
+    assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
+}
+
+#[test]
+fn native_predicate_trees_are_bounded_before_planning() {
+    use compiler::input::{BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget};
+    let model =
+        query_data_model::ClickHouseDataModel::derive(crate::compiler::setup::embedded_ontology())
+            .unwrap();
+    let validator = compiler::passes::validate::Validator::new(&model);
+    let mut input =
+        compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let leaf = |target| {
+        BooleanExpression::Leaf(Condition {
+            target,
+            property: "id".into(),
+            filter: InputFilter {
+                op: Some(FilterOp::In),
+                value: Some(serde_json::json!([1])),
+                ..Default::default()
+            },
+        })
+    };
+    let mut deep = leaf(PredicateTarget::Node("u".into()));
+    for _ in 0..1024 {
+        deep = BooleanExpression::Not(Box::new(deep));
+    }
+    input.predicates = vec![deep];
+    let error = validator.check_shape(&input).unwrap_err();
+    assert!(
+        error.to_string().contains("must not nest deeper than 32"),
+        "{error}"
+    );
+    input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+        PredicateTarget::Relationship(7),
+    )))];
+    let error = validator.check_shape(&input).unwrap_err();
+    assert!(
+        error.to_string().contains("undefined relationship"),
+        "{error}"
+    );
+}
+
+#[test]
+fn native_conditions_need_a_column() {
+    use compiler::input::{BooleanExpression, InputFilter};
+    let base = compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let mut empty_group = base.clone();
+    empty_group.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
+        vec![],
+    )))];
+    let mut empty_property = base;
+    empty_property.nodes[0].filters.insert(
+        String::new(),
+        vec![InputFilter {
+            value: Some(serde_json::json!(1)),
+            ..Default::default()
+        }],
+    );
+    for input in [empty_group, empty_property] {
+        let error = compiler::compile_input(
+            input,
+            Default::default(),
+            &crate::compiler::setup::embedded_ontology(),
+            &test_ctx(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("every condition must compare a property"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

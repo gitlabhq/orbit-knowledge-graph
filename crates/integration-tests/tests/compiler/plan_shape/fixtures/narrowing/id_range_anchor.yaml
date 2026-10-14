@@ -9,6 +9,6 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter e0.source_id >= 1, e0.source_id <= 10, ... (_))", "(SemiJoin e1.source_id IN subquery (_) (Project ... (Filter e0p.source_id >= 1, e0p.source_id <= 10, ... (_))))"]
+      expect: ["(Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (_))", "(SemiJoin _orbit_edge_1.source_id IN subquery (_) (Project ... (Filter e0p.source_id >= 1, e0p.source_id <= 10, ... (_))))"]
     emitted:
-      expect: ["(Filter e0.source_id >= 1, e0.source_id <= 10, ... (_))", "(SemiJoin e1.source_id IN subquery (_) (_))"]
+      expect: ["(Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (_))", "(SemiJoin _orbit_edge_1.source_id IN subquery (_) (_))"]

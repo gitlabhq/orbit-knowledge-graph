@@ -50,10 +50,11 @@ tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
 omitted. The cache uses the operating system's user cache directory and keeps
 instance origins isolated.
 
-When the glab-provided Orbit API and authentication environment is absent or
-incomplete, the command serves the embedded local tree. It makes no network or
-credential-helper call. This makes the local guidance available in offline
-development builds:
+The command finds credentials like the other remote commands: the Orbit API
+variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
+`glab auth credential-helper`. Without a credential, it prints a warning on
+stderr and serves the embedded local tree. The local guidance therefore stays
+available in offline development builds:
 
 ```shell
 ./target/release/orbit skills
@@ -79,7 +80,7 @@ resulting DuckDB graph with SQL:
 ./target/release/orbit sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
 ```
 
-The graph is written to `~/.gitlab/orbit/graph.duckdb`. `orbit schema` lists every
+Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit schema` lists every
 table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
 query DSL documented under `docs/source/remote/` applies to Orbit Remote.
 

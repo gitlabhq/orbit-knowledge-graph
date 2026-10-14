@@ -19,10 +19,10 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter e0.target_id = 2, ... (_))
+        - (Filter _orbit_edge_0.target_id = 2, ... (_))
     emitted:
       expect:
-        - (Filter e0.target_id = 2, ... (_))
+        - (Filter _orbit_edge_0.target_id = 2, ... (_))
   duckdb:
     planned:
       expect:

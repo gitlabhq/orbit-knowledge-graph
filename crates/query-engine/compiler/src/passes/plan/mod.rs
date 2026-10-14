@@ -1,5 +1,6 @@
 pub mod aggregation;
 mod clickhouse;
+mod conditions;
 mod context;
 mod duckdb;
 pub mod edge_chain;
@@ -33,6 +34,17 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
+}
+
+impl BoundFilter {
+    pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
+        requirements::Predicate::Property {
+            column,
+            filter: self.filter.clone(),
+            data_type: self.data_type,
+            in_sort_key: self.in_sort_key,
+        }
+    }
 }
 
 pub struct Plan<T> {
@@ -73,18 +85,29 @@ pub fn denormalized_facts(
             [DenormalizedDirection::Source, DenormalizedDirection::Target]
                 .into_iter()
                 .flat_map(move |direction| {
-                    node.filters.keys().filter_map(move |property| {
-                        let property = model.graph().property_id(entity, property)?;
-                        let key = DenormalizedKey {
-                            property,
-                            direction,
-                        };
-                        model
-                            .denormalized()
-                            .property(key)
-                            .cloned()
-                            .map(|facts| (key, facts))
-                    })
+                    node.filters
+                        .keys()
+                        .map(String::as_str)
+                        .chain(
+                            input
+                                .conditions()
+                                .filter(|condition| {
+                                    condition.target == PredicateTarget::Node(node.id.clone())
+                                })
+                                .map(|condition| condition.property.as_str()),
+                        )
+                        .filter_map(move |property| {
+                            let property = model.graph().property_id(entity, property)?;
+                            let key = DenormalizedKey {
+                                property,
+                                direction,
+                            };
+                            model
+                                .denormalized()
+                                .property(key)
+                                .cloned()
+                                .map(|facts| (key, facts))
+                        })
                 })
         })
         .collect()
@@ -105,7 +128,8 @@ pub struct Neighbors {
     pub edge: EdgeTableConfig,
     pub has_non_denorm: bool,
     pub fused_table: Option<String>,
-    pub center_tp_lookup: Option<(String, String)>,
+    pub incoming_scope_preserving: Vec<String>,
+    pub incoming_cross_scope: Vec<String>,
 }
 
 pub struct Hydration {

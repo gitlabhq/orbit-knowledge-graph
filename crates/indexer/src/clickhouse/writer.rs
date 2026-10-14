@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::ClickHouseConfiguration;
+use clickhouse_client::ArrowClickHouseClient;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -23,9 +22,6 @@ pub enum WriteError {
 
     #[error("connection error: {0}")]
     Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
-
-    #[error("invalid configuration: {0}")]
-    InvalidConfiguration(String),
 }
 
 impl From<RetryExhausted> for WriteError {
@@ -53,28 +49,23 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
-    pub fn new(
-        configuration: ClickHouseConfiguration,
-        metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, WriteError> {
-        configuration
-            .validate()
-            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client();
-        Ok(Self {
+    pub fn new(client: ArrowClickHouseClient, metrics: Arc<EngineMetrics>) -> Self {
+        Self {
             client,
             metrics,
             noop: false,
-        })
+        }
     }
 
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
         Self {
             client: orbit_server_config::AppConfig::embedded_defaults()
                 .graph
-                .build_client(),
+                .build_client("graph"),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }

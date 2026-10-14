@@ -11,11 +11,11 @@ physical:
     planned:
       ctes:
         absent: true
-      expect: ["(Filter e0.source_id = 1, e0._deleted = false, ... (Scan Table(gl_code_edge) AS e0))"]
-      reject: ["(Deduplicate ... (_))", "(Scan Table(gl_definition) ...)"]
+      expect: ["(Filter _orbit_edge_0.source_id = 1, _orbit_edge_0._deleted = false, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"]
+      reject: ["(Scan Table(gl_definition) ...)"]
     emitted:
-      expect: ["(Filter e0.source_id = 1, e0._deleted = false, ... (Scan Table(gl_code_edge) AS e0))"]
-      reject: ["(Deduplicate ... (_))", "(Scan Table(gl_definition) ...)"]
+      expect: ["(Filter _orbit_edge_0.source_id = 1, _orbit_edge_0._deleted = false, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"]
+      reject: ["(Scan Table(gl_definition) ...)"]
   duckdb:
     planned:
       expect: ["(Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))", "(Join ON a.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS a)))"]

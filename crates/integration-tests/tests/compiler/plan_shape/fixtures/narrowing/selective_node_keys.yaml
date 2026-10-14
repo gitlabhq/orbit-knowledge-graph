@@ -24,7 +24,7 @@ physical:
         exact_order: [_filter_a]
       expect:
         - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy a.traversal_path, a.project_id, a.branch, a.id (Filter ... (Scan Table(gl_definition) AS a)))))
-        - (Filter e0.source_id IN _filter_a.id, ... (_))
+        - (Filter _orbit_edge_0.source_id IN _filter_a.id, ... (_))
     emitted:
       expect:
         - (CTE _filter_a (Deduplicate LimitBy 1 BY a.traversal_path, a.project_id, a.branch, a.id (_)))

@@ -43,7 +43,7 @@ cd /path/to/any/git/repo
 orbit index .
 ```
 
-Orbit parses the repository and writes graph rows to `~/.gitlab/orbit/graph.duckdb`.
+Orbit parses the repository and writes its revision graph under `~/.gitlab/orbit/local/revisions/`.
 The command prints a JSON summary similar to:
 
 ```json

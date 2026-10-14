@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.23.2
+version: 0.24.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -81,8 +81,8 @@ Gotchas:
   belongs to Orbit Remote.
 - `definition_type` values are capitalized. `WHERE definition_type='function'`
   returns zero rows.
-- The graph holds every indexed checkout. `sql` scopes to the current commit,
-  and `--all` spans them all. Re-index after you check out a different commit.
+- `sql` queries all indexed revisions by default. Use `--repo .` for the current
+  checkout revision, or `--db PATH` for one file. Index a commit before querying it.
 
 ## References
 

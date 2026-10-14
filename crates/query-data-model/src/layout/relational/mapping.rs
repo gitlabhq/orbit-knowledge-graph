@@ -48,6 +48,10 @@ pub struct RelationshipRoute<'a> {
 }
 
 impl RelationshipRoute<'_> {
+    pub fn variants(&self) -> impl Iterator<Item = &crate::RelationshipVariant> + '_ {
+        self.variants.iter().copied()
+    }
+
     pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
         self.variants.iter().map(|variant| variant.source)
     }
@@ -81,7 +85,8 @@ pub struct DenormalizedKey {
 pub struct DenormalizedProperty {
     pub edge_column: String,
     pub tag_key: String,
-    pub relationships: Vec<RelationshipId>,
+    pub variants: HashSet<(RelationshipId, EntityId, EntityId)>,
+    pub nullable: bool,
 }
 
 #[derive(Debug, Clone, Default)]

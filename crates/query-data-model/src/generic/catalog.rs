@@ -12,6 +12,7 @@ pub struct Property {
     pub entity: EntityId,
     pub name: String,
     pub data_type: DataType,
+    pub nullable: bool,
     pub enum_values: Option<BTreeMap<i64, String>>,
     pub enum_type: EnumType,
 }
@@ -100,6 +101,7 @@ impl GraphCatalog {
             entity,
             name,
             data_type,
+            nullable: false,
             enum_values: None,
             enum_type: EnumType::default(),
         });
@@ -186,6 +188,7 @@ impl GraphCatalog {
                     entity: entity_id,
                     name: field.name.clone(),
                     data_type: field.data_type,
+                    nullable: field.nullable,
                     enum_values: field.enum_values.clone(),
                     enum_type: field.enum_type,
                 });
@@ -199,6 +202,7 @@ impl GraphCatalog {
                     entity: entity_id,
                     name: "id".to_string(),
                     data_type: DataType::Int,
+                    nullable: false,
                     enum_values: None,
                     enum_type: EnumType::default(),
                 });

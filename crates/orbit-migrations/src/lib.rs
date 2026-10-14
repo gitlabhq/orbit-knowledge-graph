@@ -8,6 +8,7 @@ pub mod ledger;
 pub mod nats;
 pub mod schema;
 pub mod scope;
+pub mod snapshot_check;
 pub mod version;
 
 #[cfg(test)]

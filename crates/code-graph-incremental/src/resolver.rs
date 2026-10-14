@@ -58,7 +58,8 @@ pub struct ResolvedSourcePath {
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
-    /// Files whose cross-file pass overran its budget; their edges are absent.
+    /// Files, or the whole family, whose cross-file pass overran its budget;
+    /// the edges it had not resolved are absent.
     pub killed: Vec<Killed>,
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
     /// How long each file's cross-file pass took.
@@ -480,99 +481,28 @@ impl Resolver {
                 (resolve_file(&ctx, fi as usize), (fi, started.elapsed()))
             })
             .unzip();
-        run.check()?;
-        let (per_file, killed): (Vec<Vec<Edge>>, Vec<Killed>) =
+        let (per_file, mut killed): (Vec<Vec<Edge>>, Vec<Killed>) =
             outcomes.into_iter().partition_map(|r| match r {
                 Ok(v) => Either::Left(v),
                 Err(k) => Either::Right(k),
             });
-        let wave1: Vec<Edge> = self
-            .reqs
-            .par_iter()
-            .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
-            .flat_map(|req| resolve_one_import(&ctx, req))
-            .chain(per_file.into_par_iter().flatten())
-            .filter(|e| {
-                !(e.kind == EdgeKind::Calls
-                    && e.site
-                        .is_some_and(|s| ctx.corpus.jump(e.from_tree, s).has(C::Property))
-                    && ctx.corpus.follow(e).is_class())
-            })
-            .collect();
-        for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
-            ctx.extends_of.entry(e.from()).or_default().push(e.to());
-        }
-        cross_edges.extend(&wave1);
-        run.check()?;
-
-        // Wildcard references come from the linker and from wave 1's unbound
-        // names alike, so their uses resolve once both are known.
-        let mut referrers: FxHashMap<(u32, u32), FxHashSet<u32>> = FxHashMap::default();
-        for e in edges
+        let overrun = match expand(
+            &mut ctx,
+            &self.reqs,
+            dirty_fis,
+            edges,
+            per_file,
+            &mut cross_edges,
+        ) {
+            Err(k) if k.cancelled => return Err(k),
+            outcome => outcome.err(),
+        };
+        let mut seen: FxHashSet<_> = edges
             .iter()
-            .chain(&wave1)
-            .filter(|e| e.kind == EdgeKind::Imports)
-        {
-            let target = ctx.corpus.jump(e.to_tree, e.to_node);
-            if e.from_tree == e.to_tree
-                && wildcard_or_name(ctx.wildcard_sym, target) == ctx.wildcard_sym
-            {
-                referrers.entry(e.to()).or_default().insert(e.from_node);
-            }
-        }
-        let wildcard_edges: Vec<Edge> = self
-            .reqs
-            .par_iter()
-            .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
-            .flat_map_iter(|req| {
-                let import = ctx.corpus.jump(req.fi, req.node);
-                import
-                    .names()
-                    .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
-                    .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
-                    .flat_map(|(n, r)| wildcard_uses(&ctx, req, n, r))
-                    .collect::<Vec<_>>()
-            })
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .map(call_key)
             .collect();
-        cross_edges.extend(&wildcard_edges);
-        run.check()?;
-
-        let wave2: Vec<Edge> = ctx
-            .type_uses
-            .par_iter()
-            .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
-            .filter(|(producer, _)| {
-                producer.is(C::Binding) || external_of(&ctx, *producer).is_some()
-            })
-            .flat_map(|(producer, uses)| {
-                dispatch(&ctx, producer, producer_class(&ctx, producer), uses)
-            })
-            .collect();
-        cross_edges.extend(&wave2);
-
-        let mut seen = FxHashSet::default();
-        let mut wave: Vec<Edge> = edges
-            .iter()
-            .chain(&cross_edges)
-            .filter(|e| e.kind == EdgeKind::Calls && dirty_fis.contains(&e.from_tree))
-            .copied()
-            .collect();
-        let key = |e: &Edge| (e.from_tree, e.from_node, e.site, e.to_tree, e.to_node);
-        seen.extend(edges.iter().filter(|e| e.kind == EdgeKind::Calls).map(key));
-        cross_edges.retain(|e| e.kind != EdgeKind::Calls || seen.insert(key(e)));
-        let mut type_edges: Vec<Edge> = Vec::new();
-        while !wave.is_empty() {
-            run.check()?;
-            wave = wave
-                .par_iter()
-                .flat_map(|ce| resolve_type_edges(&ctx, ce))
-                .collect::<Vec<_>>()
-                .into_iter()
-                .filter(|e| seen.insert(key(e)))
-                .collect();
-            type_edges.extend(&wave);
-        }
-        cross_edges.extend(type_edges);
+        cross_edges.retain(|e| e.kind != EdgeKind::Calls || seen.insert(call_key(e)));
 
         let mut import_sites: FxHashSet<_> = edges
             .iter()
@@ -627,6 +557,11 @@ impl Resolver {
             }
         }
 
+        if let Some(overrun) = overrun {
+            killed.retain(|k| (k.label, &k.path) != (overrun.label, &overrun.path));
+            killed.push(overrun);
+            *self = Self::new(lang);
+        }
         Ok(ResolveResult {
             cross_edges,
             killed,
@@ -634,6 +569,106 @@ impl Resolver {
             file_timings,
         })
     }
+}
+
+fn call_key(e: &Edge) -> (u32, u32, Option<u32>, u32, u32) {
+    (e.from_tree, e.from_node, e.site, e.to_tree, e.to_node)
+}
+
+fn expand(
+    ctx: &mut ResolveCtx,
+    reqs: &[ImportReq],
+    dirty_fis: &FxHashSet<u32>,
+    edges: &[Edge],
+    per_file: Vec<Vec<Edge>>,
+    cross_edges: &mut Vec<Edge>,
+) -> Result<(), Killed> {
+    let deadline = ctx.run.check();
+    let wave1: Vec<Edge> = reqs
+        .par_iter()
+        .filter(|r| {
+            deadline.is_ok() && (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+        })
+        .flat_map(|req| resolve_one_import(ctx, req))
+        .chain(per_file.into_par_iter().flatten())
+        .filter(|e| {
+            !(e.kind == EdgeKind::Calls
+                && e.site
+                    .is_some_and(|s| ctx.corpus.jump(e.from_tree, s).has(C::Property))
+                && ctx.corpus.follow(e).is_class())
+        })
+        .collect();
+    for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
+        ctx.extends_of.entry(e.from()).or_default().push(e.to());
+    }
+    cross_edges.extend(&wave1);
+    deadline?;
+    ctx.run.check()?;
+
+    // Wildcard references come from the linker and from wave 1's unbound
+    // names alike, so their uses resolve once both are known.
+    let mut referrers: FxHashMap<(u32, u32), FxHashSet<u32>> = FxHashMap::default();
+    for e in edges
+        .iter()
+        .chain(&wave1)
+        .filter(|e| e.kind == EdgeKind::Imports)
+    {
+        let target = ctx.corpus.jump(e.to_tree, e.to_node);
+        if e.from_tree == e.to_tree
+            && wildcard_or_name(ctx.wildcard_sym, target) == ctx.wildcard_sym
+        {
+            referrers.entry(e.to()).or_default().insert(e.from_node);
+        }
+    }
+    let wildcard_edges: Vec<Edge> = reqs
+        .par_iter()
+        .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+        .flat_map_iter(|req| {
+            let import = ctx.corpus.jump(req.fi, req.node);
+            import
+                .names()
+                .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
+                .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
+                .flat_map(|(n, r)| wildcard_uses(ctx, req, n, r))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    cross_edges.extend(&wildcard_edges);
+    ctx.run.check()?;
+
+    let wave2: Vec<Edge> = ctx
+        .type_uses
+        .par_iter()
+        .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
+        .filter(|(producer, _)| producer.is(C::Binding) || external_of(ctx, *producer).is_some())
+        .flat_map(|(producer, uses)| dispatch(ctx, producer, producer_class(ctx, producer), uses))
+        .collect();
+    cross_edges.extend(&wave2);
+
+    let mut wave: Vec<Edge> = edges
+        .iter()
+        .chain(cross_edges.iter())
+        .filter(|e| e.kind == EdgeKind::Calls && dirty_fis.contains(&e.from_tree))
+        .copied()
+        .collect();
+    let mut seen: FxHashSet<_> = edges
+        .iter()
+        .chain(cross_edges.iter())
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .map(call_key)
+        .collect();
+    while !wave.is_empty() {
+        ctx.run.check()?;
+        wave = wave
+            .par_iter()
+            .flat_map(|ce| resolve_type_edges(ctx, ce))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|e| seen.insert(call_key(e)))
+            .collect();
+        cross_edges.extend(&wave);
+    }
+    Ok(())
 }
 
 struct ResolveCtx<'a> {
@@ -1616,7 +1651,7 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
 /// Cross-file edges for one file that the import pass cannot produce:
 /// inheritance, decorators, destructuring, and member calls on imported types.
 fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
-    let file = Sentinel::new("resolve", &ctx.trees[fi].label, ctx.file_resolve_ms);
+    let file = Sentinel::new("resolve", &ctx.trees[fi].label, ctx.file_resolve_ms).on_thread_cpu();
     let mut out = Vec::new();
     let root = ctx.corpus.jump(fi as u32, 0);
     let local = |n: Cursor| {

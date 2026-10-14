@@ -2,6 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
+mod database;
 mod descriptions;
 mod list;
 mod mcp;
@@ -57,7 +58,7 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Write this revision to a specific DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -158,7 +159,7 @@ struct GrepArgs {
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -347,8 +348,8 @@ fn context_target_help() -> String {
 fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
-         The current checkout's indexed commit scopes the tables, so queries need \
-         no project_id or commit_sha predicates. `{} schema` lists the tables.",
+         Queries include all indexed revisions by default. Use --repo to select \
+         a checkout or --db to select a database. `{} schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
@@ -363,7 +364,7 @@ struct ContextArgs {
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -384,16 +385,15 @@ struct SqlArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Checkout whose commit scopes the tables (default: current directory).
+    /// Query only this checkout's current revision.
     #[arg(long, value_name = "PATH", conflicts_with = "all")]
     repo: Option<PathBuf>,
 
-    /// Query every indexed repository and commit instead of the current
-    /// checkout.
+    /// Query every indexed repository and commit (the default).
     #[arg(long)]
     all: bool,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -401,7 +401,7 @@ struct SqlArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("get_graph_schema"))]
 struct SchemaArgs {
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -423,7 +423,7 @@ struct ListArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific manifest DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -447,7 +447,7 @@ struct RepoMapArgs {
     #[arg(long = "ext", value_name = "EXT")]
     extensions: Vec<String>,
 
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -836,9 +836,9 @@ async fn dispatch(
             file,
             format,
             repo,
-            all,
+            all: _,
             db,
-        }) => sql::run(query, file, format, db, repo, all),
+        }) => sql::run(query, file, format, db, repo),
         Commands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
         Commands::List(ListArgs { format, db }) => list::run(format, db),
         Commands::Mcp(McpArgs {
@@ -953,7 +953,7 @@ async fn dispatch(
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
-    let client = sql::open_graph(db)?;
+    let client = database::GraphReader::open(db)?;
 
     let batches = if tables.is_empty() {
         sql::query(&client, &sql::schema_introspection_sql())?
@@ -964,7 +964,8 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
              FROM information_schema.columns \
              WHERE table_schema = 'main' \
              AND table_name IN ({placeholders}) \
-             ORDER BY table_name, ordinal_position"
+             GROUP BY table_name, column_name, data_type \
+             ORDER BY table_name, min(ordinal_position)"
         );
         let params: Vec<serde_json::Value> = tables.iter().map(|t| serde_json::json!(t)).collect();
         let batches = client

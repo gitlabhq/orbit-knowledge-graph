@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
-use query_data_model::DuckDbDataModel;
+use query_data_model::{DuckDbDataModel, OrbitQueryModel};
 
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalSource};
@@ -21,7 +21,6 @@ pub fn plan(
         QueryType::Traversal | QueryType::Aggregation => traversal(context),
         QueryType::Neighbors => super::neighbors::plan_neighbors(context).map(|mut plan| {
             plan.operation.fused_table = None;
-            plan.operation.center_tp_lookup = None;
             QueryPlan::Neighbors(plan)
         }),
         QueryType::PathFinding => {
@@ -36,7 +35,17 @@ pub fn plan(
 fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryPlan> {
     let input = context.input;
     context.hops = super::edge_chain::build_hops(input, context.model)?;
-    context.nodes = super::edge_chain::build_node_plans(input, context.model);
+    let mut nodes = super::edge_chain::build_node_plans(input, context.model);
+    context.denormalized = super::denormalized_facts(input, context.model);
+    let placement = super::conditions::place_conditions(
+        input,
+        context.model,
+        &context.hops,
+        &nodes,
+        &context.denormalized,
+    )?;
+    context.bind_scan_conditions(&mut nodes, &placement)?;
+    context.nodes = nodes;
     let aggregate = context.aggregate();
     for node in context.nodes.values_mut() {
         node.hydration = HydrationStrategy::Join;
@@ -53,7 +62,10 @@ fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryP
             super::hops::multi_hop(hop, &alias, &context.nodes)
         } else {
             PhysicalSource::Scan {
-                table: hop.edge_table.clone(),
+                table: hop
+                    .single_edge_table()
+                    .unwrap_or_else(|| context.model.default_edge_table())
+                    .to_string(),
                 alias: alias.clone(),
                 final_: false,
                 relationship: Some(hop.input_index),
@@ -138,7 +150,9 @@ fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryP
         });
     }
     let execution = ExecutionPlan {
-        source: source.ok_or_else(|| QueryError::Lowering("query has no nodes".into()))?,
+        source: source
+            .ok_or_else(|| QueryError::Lowering("query has no nodes".into()))?
+            .filter(context.bind_join_conditions(&bindings, &placement)?),
         definitions: vec![],
         outputs,
         bindings,

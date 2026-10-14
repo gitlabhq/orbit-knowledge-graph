@@ -72,6 +72,14 @@ include:
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
   - local: .gitlab/ci/rails-contract.yml
+  # Uses `secrets`, which dev.gitlab.org rejects and fork MR pipelines can't use.
+  - local: .gitlab/ci/review-docs.yml
+    rules:
+      - if: '$CI_SERVER_URL != "https://gitlab.com" || $CI_PROJECT_PATH != "gitlab-org/orbit/knowledge-graph"'
+        when: never
+      - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_PATH != "gitlab-org/orbit/knowledge-graph"'
+        when: never
+      - when: always
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'
@@ -267,7 +275,7 @@ ontology-schema-validate:
     - .mr-and-main-rules
   needs: []
   script:
-    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 73728 || (echo "config/schemas/ontology.schema.json must stay at or below 72 KB" && exit 1)
+    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 65536 || (echo "config/schemas/ontology.schema.json must stay at or below 64 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
 named-query-schema-validate:
@@ -313,7 +321,6 @@ indexer-scenario-schema-validate:
   needs: []
   script:
     - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
-
 
 setup-schema-validate:
   stage: lint
@@ -1335,63 +1342,6 @@ release-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64@$(cat image-digests/arm64)"
 
 # Review stage
-
-.review-docs:
-  image: ruby:3.3-alpine3.23
-  extends:
-    - .canonical-mr-only-rules
-  stage: review
-  cache: {}
-  dependencies: []
-  before_script:
-  - gem install gitlab --no-doc
-  # We need to download the script rather than clone the repo since the
-  # review-docs-cleanup job will not be able to run when the branch gets
-  # deleted (when merging the MR).
-  - apk add --update openssl
-  - wget https://gitlab.com/gitlab-org/gitlab/-/raw/master/scripts/trigger-build.rb
-  - chmod 755 trigger-build.rb
-  secrets:
-    DOCS_PROJECT_API_TOKEN:
-      gitlab_secrets_manager:
-        name: DOCS_PROJECT_API_TOKEN
-        source: group/gitlab-org
-      file: false
-    DOCS_TRIGGER_TOKEN:
-      gitlab_secrets_manager:
-        name: DOCS_TRIGGER_TOKEN
-        source: group/gitlab-org
-      file: false
-  variables:
-    GIT_STRATEGY: none
-    DOCS_GITLAB_REPO_SUFFIX: orbit
-    # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
-    DOCS_BRANCH: main
-  when: manual
-
-# Trigger a docs build in docs-gitlab-com project
-# Useful to preview the docs changes live
-# https://docs.gitlab.com/development/documentation/review_apps/
-review-docs-deploy:
-  extends:
-  - .review-docs
-  environment:
-    name: review/mr-${CI_MERGE_REQUEST_IID}
-    url: https://docs.gitlab.com/upstream-review-mr-${DOCS_GITLAB_REPO_SUFFIX}-${CI_MERGE_REQUEST_IID}/${DOCS_GITLAB_REPO_SUFFIX}
-    auto_stop_in: 2 weeks
-    on_stop: review-docs-cleanup
-  script:
-  - ./trigger-build.rb docs deploy
-
-# Cleanup remote environment of docs-gitlab-com
-review-docs-cleanup:
-  extends:
-  - .review-docs
-  environment:
-    name: review/mr-${CI_MERGE_REQUEST_IID}
-    action: stop
-  script:
-  - ./trigger-build.rb docs cleanup
 
 # AI Review Stage
 #

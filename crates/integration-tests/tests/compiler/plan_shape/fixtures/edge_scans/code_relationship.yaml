@@ -20,8 +20,8 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Scan Table(gl_code_edge) AS e0)
-        - (Filter e0.source_id = 1, ... (_))
+        - (Scan Table(gl_code_edge) AS _orbit_edge_0)
+        - (Filter _orbit_edge_0.source_id = 1, ... (_))
   duckdb:
     planned:
       expect:

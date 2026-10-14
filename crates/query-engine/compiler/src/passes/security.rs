@@ -22,7 +22,6 @@
 
 use std::sync::OnceLock;
 
-use query_data_model::{GitLabPolicy, RelationalMapping};
 use regex::Regex;
 
 use serde_json::Value;
@@ -75,23 +74,9 @@ fn apply_to_query(
     let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let broad = match model.query_backend().table_path_columns(table) {
-                Some(columns) => Expr::and_all(columns.iter().map(|column| {
-                    let min_role = column
-                        .entity
-                        .and_then(|entity| {
-                            model.query_authorization().required_access_level(entity)
-                        })
-                        .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-                    let eligible = ctx.paths_at_least(min_role);
-                    Some(build_column_path_filter(alias, &column.name, &eligible))
-                }))
-                .unwrap_or_else(|| Expr::lit(false)),
-                None => build_path_filter(
-                    alias,
-                    &ctx.paths_at_least(model.table_minimum_access_level(table)),
-                ),
-            };
+            let min_role = model.table_minimum_access_level(table);
+            let eligible = ctx.paths_at_least(min_role);
+            let broad = build_path_filter(alias, &eligible);
             match ctx.scope_proofs.get(alias) {
                 Some(scope) if model.table_path_scopable(table) => {
                     Expr::and(broad, crate::scope::scope_predicate(scope, alias))
@@ -110,42 +95,40 @@ fn apply_to_query(
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
-    build_column_path_filter(alias, TRAVERSAL_PATH_COLUMN, paths)
-}
-
-fn build_column_path_filter(alias: &str, column: &str, paths: &[&TraversalPath]) -> Expr {
-    let starts_with = |path: &str| {
-        Expr::func(
-            Function::StartsWith,
-            vec![Expr::col(alias, column), Expr::string(path)],
-        )
-    };
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with(paths[0].as_str()),
+        1 => starts_with_expr(alias, paths[0].as_str()),
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
-                return starts_with(collapsed[0].as_str());
+                return starts_with_expr(alias, collapsed[0].as_str());
             }
-            collapsed
-                .iter()
-                .map(|path| starts_with(path.as_str()))
-                .reduce(|left, right| Expr::binary(crate::ast::Op::Or, left, right))
-                .unwrap_or_else(|| Expr::lit(false))
+            path_or_filter(alias, &collapsed)
         }
     }
 }
 
-#[cfg(test)]
-fn collect_node_aliases(
-    table_ref: &TableRef,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Vec<String> {
-    collect_aliased_tables(table_ref, model)
-        .into_iter()
-        .map(|(a, _)| a)
-        .collect()
+fn starts_with_expr(alias: &str, path: &str) -> Expr {
+    starts_with_value_expr(alias, Expr::string(path))
+}
+
+fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
+    Expr::func(
+        Function::StartsWith,
+        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
+    )
+}
+
+/// OR chain of `startsWith(alias.traversal_path, path)` for each path.
+///
+/// Each `startsWith` is visible to ClickHouse's PK index analyser, enabling
+/// granule pruning per path prefix. This matters inside `dedup_edge_scan`
+/// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
+/// namespace to only the user's authorized paths.
+fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
+    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
+    let first = iter.next().expect("paths is non-empty (caller checks)");
+    iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
 /// Collect `(alias, table)` pairs for every scan that should receive a
@@ -201,7 +184,10 @@ mod tests {
 
     fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        collect_node_aliases(table, model.as_ref())
+        collect_aliased_tables(table, model.as_ref())
+            .into_iter()
+            .map(|(alias, _)| alias)
+            .collect()
     }
 
     fn applies(table: &str, ontology: &Ontology) -> bool {
