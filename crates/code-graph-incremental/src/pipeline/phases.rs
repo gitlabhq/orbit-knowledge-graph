@@ -735,6 +735,54 @@ mod tests {
     }
 
     #[test]
+    fn a_namespace_imported_through_many_files_links_each_use_once() {
+        let (namespaces, per_namespace) = (10, 10);
+        let usings: String = (0..namespaces).map(|n| format!("using Ns{n};\n")).collect();
+        let calls: String = (0..namespaces).map(|n| format!(" new C{n}_0();")).collect();
+        let files: Vec<_> = (0..namespaces)
+            .flat_map(|n| (0..per_namespace).map(move |f| (n, f)))
+            .map(|(n, f)| {
+                (
+                    format!("Ns{n}/C{n}_{f}.cs"),
+                    format!(
+                        "{usings}namespace Ns{n} {{ class C{n}_{f} {{ void M() {{{calls} }} }} }}\n"
+                    ),
+                )
+            })
+            .collect();
+        let repo = tempfile::tempdir().unwrap();
+        for (path, content) in &files {
+            let path = repo.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let env =
+            Env::with_limits(crate::treesitter::SupportLang::CSharp, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let graph = templates::index(Context::new(&env, repository)).unwrap();
+        let (_, resolved) = graph.finish();
+        let mut keys: Vec<_> = resolved
+            .state
+            .edges
+            .iter()
+            .filter(|e| e.kind == crate::edge::EdgeKind::Imports && e.site.is_none())
+            .map(|e| (e.from(), e.to()))
+            .collect();
+        let edges = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(edges, keys.len());
+    }
+
+    #[test]
     fn display_stops_when_the_run_is_cancelled() {
         let files = [("main.py".to_string(), "def f():\n    pass\n".to_string())];
         let displayed =

@@ -605,18 +605,29 @@ fn expand(
         }
     }
     let wildcard_edges: Vec<Edge> = reqs
+        .chunk_by(|a, b| (a.fi, a.node) == (b.fi, b.node))
+        .collect::<Vec<_>>()
         .par_iter()
-        .filter(|r| {
-            (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
-                && ctx.run.check().is_ok()
-        })
-        .flat_map_iter(|req| {
-            let import = ctx.corpus.jump(req.fi, req.node);
-            import
-                .names()
-                .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
-                .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
-                .flat_map(|(n, r)| wildcard_uses(ctx, req, n, r))
+        .flat_map_iter(|imports| {
+            let mut emitted = FxHashSet::default();
+            imports
+                .iter()
+                .filter(|r| {
+                    (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+                        && ctx.run.check().is_ok()
+                })
+                .flat_map(|req| {
+                    let import = ctx.corpus.jump(req.fi, req.node);
+                    import
+                        .names()
+                        .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
+                        .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
+                        .flat_map(|(n, r)| wildcard_uses(ctx, req, n, r))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|e| {
+                    emitted.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution as u8))
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
