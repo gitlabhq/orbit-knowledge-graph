@@ -345,8 +345,6 @@ Use this to stop code indexing quickly, for example during an incident. It
 scales only the code indexer pool to zero. The SDLC indexer, webserver,
 dispatcher, and queries keep running. Queued tasks stay in NATS.
 
-Verified on a local cluster with KEDA 2.21 and chart 4c18ee7.
-
 ### Find the ScaledObject name
 
 The name depends on the Helm release and `nameOverride`. Dedicated renders
