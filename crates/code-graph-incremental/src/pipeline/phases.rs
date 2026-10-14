@@ -730,6 +730,8 @@ mod tests {
             &files,
             20_000,
         );
-        assert!(matches!(resolved, Err(Error::Killed(killed)) if killed.cancelled));
+        assert!(
+            matches!(resolved, Err(Error::Killed(killed)) if killed.cancelled && killed.label == "resolve")
+        );
     }
 }
