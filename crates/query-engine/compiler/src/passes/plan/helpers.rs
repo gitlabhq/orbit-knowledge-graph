@@ -6,7 +6,7 @@ use query_data_model::RelationalMapping;
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
-    Table(&'a str),
+    Tables(&'a [String]),
 }
 
 pub fn ordered_filters(
@@ -19,20 +19,35 @@ pub fn ordered_filters(
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            let (metadata, table) = match owner {
-                FilterOwner::Entity(entity) => (
-                    model
-                        .property_for_entity_id(entity, property)
-                        .map(|property| (Some(property.id), Some(property.data_type))),
-                    model.query_backend().entity_table(entity),
-                ),
-                FilterOwner::Table(table) => (
-                    Some((None, model.table_column_type(table, property))),
-                    Some(table),
-                ),
+            let (metadata, in_sort_key) = match owner {
+                FilterOwner::Entity(entity) => {
+                    let table = model.query_backend().entity_table(entity);
+                    (
+                        model
+                            .property_for_entity_id(entity, property)
+                            .map(|property| (Some(property.id), Some(property.data_type))),
+                        table.is_some_and(|table| model.in_sort_key(table, property)),
+                    )
+                }
+                FilterOwner::Tables(tables) => {
+                    let data_type = tables.first().and_then(|first| {
+                        let data_type = model.table_column_type(first, property)?;
+                        tables[1..]
+                            .iter()
+                            .all(|table| {
+                                model.table_column_type(table, property) == Some(data_type)
+                            })
+                            .then_some(data_type)
+                    });
+                    (
+                        Some((None, data_type)),
+                        tables
+                            .iter()
+                            .all(|table| model.in_sort_key(table, property)),
+                    )
+                }
             };
             let (property_id, data_type) = metadata.unwrap_or_default();
-            let in_sort_key = table.is_some_and(|table| model.in_sort_key(table, property));
             filters.iter().map(move |filter| {
                 (
                     property.clone(),

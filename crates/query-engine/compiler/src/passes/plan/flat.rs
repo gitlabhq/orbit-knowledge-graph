@@ -262,11 +262,15 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
     ) -> Result<PhysicalSource> {
         let hop = &self.facts.hops[index];
         let alias = hop.alias.clone();
-        let scan = |final_| super::hops::edge_source(hop, &alias, final_);
+        let scan = |final_| PhysicalSource::edge(hop, &alias, final_);
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
-        if !multi_hop && !dedup && self.facts.aggregate() {
-            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
+        if !multi_hop
+            && !dedup
+            && self.facts.aggregate()
+            && let Some(table) = hop.single_edge_table()
+        {
+            let sort_key = self.facts.latest_row_key(table)?;
             let mut predicates = self
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
@@ -284,10 +288,9 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 .cascade(hop, &alias, cascade)
         } else if dedup {
             let (start, end) = hop.direction.edge_columns();
-            let narrow_inside = self
-                .facts
-                .model
-                .table_sort_key(&hop.edge_table)
+            let narrow_inside = hop
+                .single_edge_table()
+                .and_then(|table| self.facts.model.table_sort_key(table))
                 .is_some_and(|keys| keys.iter().take(4).any(|key| key == start || key == end));
             let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {
@@ -306,7 +309,9 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 scoped.filter(outside).cascade(hop, &alias, cascade)
             }
         } else {
-            scan(false).filter(membership).cascade(hop, &alias, cascade)
+            scan(hop.edge_tables.len() > 1)
+                .filter(membership)
+                .cascade(hop, &alias, cascade)
         };
         let mut predicates = if multi_hop {
             Vec::new()

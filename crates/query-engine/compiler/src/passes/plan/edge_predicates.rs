@@ -57,7 +57,10 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         if !skip_deleted {
             predicates.push(live(alias));
         }
-        if let Some(columns) = self.model.table_columns(&hop.edge_table) {
+        if let Some(columns) = hop
+            .single_edge_table()
+            .and_then(|table| self.model.table_columns(table))
+        {
             let mut seen = HashSet::new();
             for node_alias in [&hop.from_node, &hop.to_node] {
                 if let Some(node) = self.nodes.get(node_alias) {

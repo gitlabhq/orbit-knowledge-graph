@@ -17,7 +17,6 @@ pub struct Hop {
     pub input_index: usize,
     pub rel_types: Vec<String>,
     pub relationships: Vec<query_data_model::RelationshipId>,
-    pub edge_table: String,
     pub edge_tables: Vec<String>,
     pub alias: String,
     pub from_node: String,
@@ -42,6 +41,15 @@ pub struct Hop {
     /// range. Set by the plan pass for interior single-hop edges in a
     /// multi-edge chain.
     pub cascade_anchor: bool,
+}
+
+impl Hop {
+    pub fn single_edge_table(&self) -> Option<&str> {
+        let [table] = self.edge_tables.as_slice() else {
+            return None;
+        };
+        Some(table)
+    }
 }
 
 pub struct JoinColumns {
@@ -301,11 +309,10 @@ where
                 "{}edge_{input_index}",
                 crate::constants::internal_column_prefix()
             );
-            let edge_tables = model.relationship_tables(&rel.types);
-            let edge_table = edge_tables
-                .first()
-                .cloned()
-                .unwrap_or_else(|| model.default_edge_table().to_string());
+            let mut edge_tables = model.relationship_tables(&rel.types);
+            if edge_tables.is_empty() {
+                edge_tables.push(model.default_edge_table().to_string());
+            }
             let from_entity = input
                 .nodes
                 .iter()
@@ -358,7 +365,7 @@ where
                 });
             let filters = super::helpers::ordered_filters(
                 &rel.filters,
-                super::helpers::FilterOwner::Table(&edge_table),
+                super::helpers::FilterOwner::Tables(&edge_tables),
                 model,
             );
             Hop {
@@ -369,7 +376,6 @@ where
                     .iter()
                     .filter_map(|kind| model.graph().relationship_id(kind))
                     .collect(),
-                edge_table,
                 edge_tables,
                 alias: edge_alias,
                 from_node: rel.from.clone(),
@@ -877,7 +883,6 @@ mod tests {
         Hop {
             rel_types: vec!["REL".to_string()],
             relationships: Vec::new(),
-            edge_table: "gl_edge".to_string(),
             edge_tables: vec!["gl_edge".to_string()],
             alias: "_orbit_edge_0".to_string(),
             from_node: from.to_string(),

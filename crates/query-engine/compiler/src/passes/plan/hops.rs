@@ -47,7 +47,7 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
         Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
-    let scan = |alias: &str| edge_source(hop, alias, true);
+    let scan = |alias: &str| PhysicalSource::edge(hop, alias, true);
     let mut predicate = vec![];
     if let Some(kind) = relationship_kinds("e1", &hop.rel_types) {
         predicate.push(kind);
@@ -112,38 +112,5 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
             Projection::col("e1", DELETED_COLUMN),
             Projection::col("e1", TRAVERSAL_PATH_COLUMN),
         ],
-    }
-}
-
-pub(super) fn edge_source(hop: &Hop, alias: &str, final_: bool) -> PhysicalSource {
-    if hop.edge_tables.len() <= 1 {
-        return PhysicalSource::Scan {
-            relationship: Some(hop.input_index),
-            table: hop.edge_table.clone(),
-            alias: alias.into(),
-            final_,
-        };
-    }
-    PhysicalSource::Union {
-        alias: alias.into(),
-        arms: hop
-            .edge_tables
-            .iter()
-            .map(|table| PhysicalPlan {
-                source: PhysicalSource::Scan {
-                    relationship: Some(hop.input_index),
-                    table: table.clone(),
-                    alias: format!("_{alias}"),
-                    final_,
-                },
-                outputs: EDGE_RESERVED_COLUMNS
-                    .iter()
-                    .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
-                    .chain([&DELETED_COLUMN])
-                    .map(|column| Projection::col(&format!("_{alias}"), column))
-                    .collect(),
-            })
-            .collect(),
-        relationship: hop.input_index,
     }
 }
