@@ -212,6 +212,30 @@ async fn language_timings_keep_files_killed_by_the_resolve_budget() {
 }
 
 #[tokio::test]
+async fn a_file_under_thousands_of_directories_is_indexed() {
+    let deep = format!("root/{}notes.txt", "d/".repeat(3_000));
+    let files: &[(&str, &[u8])] = &[(deep.as_str(), b"notes")];
+    let fixture = IndexFixture::new();
+    let batches = Arc::new(Mutex::new(Vec::new()));
+    let capture = batches.clone();
+    let sink = Arc::new(move |table: &str, batch: RecordBatch| {
+        capture.lock().unwrap().push((table.to_owned(), batch));
+        Ok(())
+    });
+    fixture.run(files, options(), sink).await.unwrap();
+    let batches = batches.lock().unwrap();
+    let paths: Vec<_> = collected_rows(&batches, &fixture.tables.file)
+        .iter()
+        .map(|row| row["path"].coerce::<String>().unwrap())
+        .collect();
+    assert_eq!(paths, [&deep["root/".len()..]]);
+    assert_eq!(
+        collected_rows(&batches, &fixture.tables.directory).len(),
+        3_001
+    );
+}
+
+#[tokio::test]
 async fn archive_indexes_multiple_families_into_server_batches() {
     let files: &[(&str, &[u8])] = &[
         ("root/src/main.py", b"from helper import greet\ngreet()\n"),
