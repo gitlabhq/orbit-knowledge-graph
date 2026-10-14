@@ -389,13 +389,16 @@ kubectl -n <ns> annotate scaledobject <name> autoscaling.keda.sh/paused-replicas
 
 ### Maximum pause length
 
-The defaults are a 1 h consumer inactivity threshold and a 4 h stream max age.
+The defaults are a 1 h consumer inactivity threshold and a 4 h stream max age
+(`stream_max_age_secs`). Stream max age counts from each message's publish time,
+not from the start of the pause. Tasks that were already queued when you paused
+can expire in under 4 h.
 
 | Pause length | Effect |
 |--------------|--------|
 | Under 1 h | Nothing changes. |
 | 1 h to 4 h | NATS may delete the idle consumer. Queued messages stay, and the indexer recreates the consumer on resume. |
-| Over 4 h | Queued tasks expire. |
+| Over 4 h | Queued tasks expire. Tasks queued before the pause expire 4 h after they were published, which can be sooner than 4 h after the pause started. |
 
 Set a reminder or alert for the 1 h mark. The consumer deletion and recreation
 path was verified only with a shortened 60 s threshold, not a real 1 h wait.
