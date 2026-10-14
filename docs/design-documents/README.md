@@ -173,7 +173,10 @@ heading layout: each file prints as a heading, then its matching lines as
 each enclosing indexed definition shows its kind, span, callers, and callees.
 Import lines show the symbols they import, and other code lines are marked as
 outside indexed definitions, as in Rust `#[cfg(test)]` modules. `-m` caps
-matches per file and `-M` replaces lines wider than its limit. A definition
+matches per file and `-M` replaces lines wider than its limit.
+A missing path searches tracked paths with the same last segment, ranked by
+shared segments. A scoped search with no matches widens one directory at a time
+until it finds matches, and a `»` line names the widened scope. A definition
 that a plain term names prints first with its source. With `-A`, `-B`, or `-C`,
 context lines print as `N-text` with `--` between blocks. Files edited since the
 indexed commit are marked and carry no definitions, because the graph describes
