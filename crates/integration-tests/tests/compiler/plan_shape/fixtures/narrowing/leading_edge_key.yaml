@@ -10,7 +10,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Bind e1 (Filter e1._deleted = false (SemiJoin e1.source_id IN subquery (Deduplicate Final (Scan Table(gl_edge) AS e1)) (_))))
+        - (Bind _orbit_edge_1 (Filter _orbit_edge_1._deleted = false (SemiJoin _orbit_edge_1.source_id IN subquery (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)) (_))))
     emitted:
       expect:
-        - (Bind e1 (Project * (Filter e1._deleted = false (SemiJoin e1.source_id IN subquery (Deduplicate Final (Scan Table(gl_edge) AS e1)) (_)))))
+        - (Bind _orbit_edge_1 (Project * (Filter _orbit_edge_1._deleted = false (SemiJoin _orbit_edge_1.source_id IN subquery (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)) (_)))))

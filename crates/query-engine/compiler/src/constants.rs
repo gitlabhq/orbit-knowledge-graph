@@ -88,6 +88,10 @@ pub(crate) const END_ID_COLUMN: &str = "end_id";
 
 pub(crate) const END_KIND_COLUMN: &str = "end_kind";
 
+pub(crate) const PATH_START_ID_COLUMN: &str = "path_start_id";
+
+pub(crate) const PATH_END_ID_COLUMN: &str = "path_end_id";
+
 pub(crate) const FORWARD_CTE: &str = "forward";
 
 pub(crate) const BACKWARD_CTE: &str = "backward";

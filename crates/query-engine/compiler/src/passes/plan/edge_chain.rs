@@ -18,7 +18,10 @@ pub struct Hop {
     pub input_index: usize,
     pub rel_types: Vec<String>,
     pub relationships: Vec<query_data_model::RelationshipId>,
-    pub edge_table: String,
+    pub edge_tables: Vec<String>,
+    pub alias: String,
+    pub source_entity: Option<query_data_model::EntityId>,
+    pub target_entity: Option<query_data_model::EntityId>,
     pub from_node: String,
     pub to_node: String,
     pub direction: Direction,
@@ -44,6 +47,13 @@ pub struct Hop {
 }
 
 impl Hop {
+    pub fn single_edge_table(&self) -> Option<&str> {
+        let [table] = self.edge_tables.as_slice() else {
+            return None;
+        };
+        Some(table)
+    }
+
     pub fn column_prefix(&self, index: usize) -> String {
         if self.max_hops > 1 {
             format!("hop_e{index}_")
@@ -245,6 +255,7 @@ where
                 &denormalized,
                 table_scans.contains(&node_plan.alias),
                 placement.joined_nodes.contains(&node_plan.alias),
+                model,
             );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
@@ -343,7 +354,14 @@ where
         .iter()
         .enumerate()
         .map(|(input_index, rel)| {
-            let edge_table = model.relationship_table_for_query(&rel.types).to_string();
+            let edge_alias = format!(
+                "{}edge_{input_index}",
+                crate::constants::internal_column_prefix()
+            );
+            let mut edge_tables = model.relationship_tables(&rel.types);
+            if edge_tables.is_empty() {
+                edge_tables.push(model.default_edge_table().to_string());
+            }
             let from_entity = input
                 .nodes
                 .iter()
@@ -354,6 +372,16 @@ where
                 .iter()
                 .find(|node| node.id == rel.to)
                 .and_then(|node| node.entity.as_deref());
+            let endpoint_entities = match rel.direction {
+                Direction::Outgoing | Direction::Both => (from_entity, to_entity),
+                Direction::Incoming => (to_entity, from_entity),
+            };
+            let source_entity = endpoint_entities
+                .0
+                .and_then(|entity| model.graph().entity_id(entity));
+            let target_entity = endpoint_entities
+                .1
+                .and_then(|entity| model.graph().entity_id(entity));
             let fk = from_entity
                 .zip(to_entity)
                 .and_then(|(from, to)| match rel.direction {
@@ -400,7 +428,7 @@ where
                 });
             let filters = super::helpers::ordered_filters(
                 &rel.filters,
-                super::helpers::FilterOwner::Table(&edge_table),
+                super::helpers::FilterOwner::Tables(&edge_tables),
                 model,
             );
             Hop {
@@ -411,7 +439,10 @@ where
                     .iter()
                     .filter_map(|kind| model.graph().relationship_id(kind))
                     .collect(),
-                edge_table,
+                edge_tables,
+                alias: edge_alias,
+                source_entity,
+                target_entity,
                 from_node: rel.from.clone(),
                 to_node: rel.to.clone(),
                 direction: rel.direction,
@@ -488,7 +519,12 @@ fn elide_hops(
                     .order_by
                     .as_ref()
                     .is_some_and(|order| order.node == fk.target_node);
-            if needs_role_scan || (np.node_ids.len() > 1 && needs_target_values) {
+            if needs_role_scan
+                || !np.filters.is_empty()
+                || np.id_range.is_some()
+                || hop.max_hops != 1
+                || (np.node_ids.len() > 1 && needs_target_values)
+            {
                 return None;
             }
             if np.selectivity == Selectivity::Pinned
@@ -559,6 +595,12 @@ fn elide_hops(
 }
 
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
+    if hops
+        .iter()
+        .any(|hop| hop.max_hops != 1 || !hop.filters.is_empty())
+    {
+        return None;
+    }
     let first_center = hops.first()?.fk.as_ref().map(|fk| &fk.fk_node)?;
     for hop in &hops[1..] {
         let center = hop.fk.as_ref().map(|fk| &fk.fk_node)?;
@@ -663,6 +705,7 @@ fn determine_hydration(
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     requires_table_scan: bool,
     is_predicate_target: bool,
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -673,10 +716,15 @@ fn determine_hydration(
         .group_by
         .iter()
         .any(|group| matches!(group, crate::input::InputGroupByKey::Property { node, .. } if node == alias));
-    let is_agg_property_target = input.aggregation.metrics.iter().any(|a| {
-        a.expr.node() == alias.as_str()
-            && a.expr.property().is_some()
-            && !matches!(a.expr.function(), AggFunction::Count)
+    let is_agg_property_target = input.aggregation.metrics.iter().any(|metric| {
+        metric.expr.node() == alias.as_str()
+            && metric.expr.property().is_some_and(|property| {
+                !matches!(metric.expr.function(), AggFunction::Count)
+                    || node_plan
+                        .entity
+                        .as_deref()
+                        .is_some_and(|entity| model.property_is_nullable(entity, property))
+            })
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
@@ -724,10 +772,12 @@ pub(super) fn denorm_hop<'a>(
                 } else {
                     DenormalizedDirection::Target
                 };
+                let source = hop.source_entity?;
+                let target = hop.target_entity?;
                 super::helpers::lowerable_denorm(filter, direction, denormalized).filter(|facts| {
-                    hop.relationships
-                        .iter()
-                        .any(|relationship| facts.relationships.contains(relationship))
+                    hop.relationships.iter().all(|relationship| {
+                        facts.variants.contains(&(*relationship, source, target))
+                    })
                 })
             })
             .map(|facts| (position, facts))
@@ -875,7 +925,10 @@ mod tests {
         Hop {
             rel_types: vec!["REL".to_string()],
             relationships: Vec::new(),
-            edge_table: "gl_edge".to_string(),
+            edge_tables: vec!["gl_edge".to_string()],
+            alias: "_orbit_edge_0".to_string(),
+            source_entity: None,
+            target_entity: None,
             from_node: from.to_string(),
             to_node: to.to_string(),
             direction: Direction::Outgoing,

@@ -165,6 +165,9 @@ fn infer_wildcard_relationship_kinds(
     };
 
     for rel in &mut input.relationships {
+        if rel.hops.max > 1 {
+            continue;
+        }
         let Some((from_entity, to_entity)) = entity_for
             .get(rel.from.as_str())
             .copied()

@@ -40,8 +40,8 @@ cases:
       RETURN p{.name}, count(mr) AS mrs LIMIT 10
   expect:
     sql_contains:
-    - "(e0.relationship_kind = 'IN_PROJECT')"
-    - "NOT ((e0.source_kind = 'User') AND has(e0.source_tags, 'state:opened'))"
+    - "(_orbit_edge_0.relationship_kind = 'IN_PROJECT')"
+    - "NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))"
     groups:
       p:
         entity: Project
@@ -60,7 +60,7 @@ cases:
       RETURN p{.name}, count(mr) AS mrs LIMIT 10
   expect:
     sql_contains:
-    - "NOT ((e0.source_kind = 'User') AND has(e0.source_tags, 'state:opened'))"
+    - "NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))"
     groups:
       p:
         entity: Project
@@ -473,5 +473,5 @@ cases:
       CONTAINS:
       - [100, 1000]
     sql_contains:
-    - "(e1.relationship_kind = 'MEMBER_OF')"
-    - "(NOT ((e1.source_id = 2) AND (g.visibility_level = 'public')))"
+    - "(_orbit_edge_0.relationship_kind = 'MEMBER_OF')"
+    - "(NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))"

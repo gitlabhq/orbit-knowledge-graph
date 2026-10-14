@@ -219,9 +219,9 @@ pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Ex
 /// columns common to all edge tables (the 6 reserved edge columns) so
 /// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
 /// don't cause a ClickHouse "UNION different number of columns" error.
-pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
+pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
-        return TableRef::scan(&tables[0], alias);
+        return TableRef::scan_final(&tables[0], alias);
     }
     let inner_alias = format!("_{alias}");
     let columns: Vec<_> = EDGE_RESERVED_COLUMNS
@@ -233,7 +233,7 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
         .iter()
         .map(|table| Query {
             select: columns.clone(),
-            from: TableRef::scan(table, &inner_alias),
+            from: TableRef::scan_final(table, &inner_alias),
             ..Default::default()
         })
         .collect();

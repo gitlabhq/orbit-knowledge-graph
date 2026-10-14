@@ -16,19 +16,19 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON e1.source_id = e2.target_id (Join ON e0.target_id = e1.target_id (_) (_)) (_))
-        - (SemiJoin e1.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
+        - (SemiJoin _orbit_edge_0.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
         - |
-          (SemiJoin e2.target_id IN subquery (_)
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
             (Project e1p.source_id AS source_id
               (SemiJoin e1p.target_id IN subquery (_)
                 (Project e0p.target_id AS target_id
                   (Filter e0p.target_id = 1, ... (_))))))
     emitted:
       expect:
-        - (Join ON e1.source_id = e2.target_id (Join ON e0.target_id = e1.target_id (_) (_)) (_))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
         - |
-          (SemiJoin e2.target_id IN subquery (_)
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
             (Project e1p.source_id AS source_id
               (SemiJoin e1p.target_id IN subquery (_)
                 (Project e0p.target_id AS target_id
@@ -36,9 +36,9 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON e1.source_id = e2.target_id (Join ON e0.target_id = e1.target_id (_) (_)) (_))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
         - |
-          (SemiJoin e2.target_id IN subquery (_)
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
             (Project e1p.source_id AS source_id
               (SemiJoin e1p.target_id IN subquery (_)
                 (Project e0p.target_id AS target_id

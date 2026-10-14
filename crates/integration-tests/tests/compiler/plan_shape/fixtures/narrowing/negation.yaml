@@ -65,4 +65,4 @@ cases:
         ctes:
           exact_order: [_filter_mr, _narrow_wi]
         expect:
-        - "(Filter NOT (((mr.state = 'merged') AND (e0.source_tags HAS ANY ['state:merged'])) AND (wi.title = 'x')) (_))"
+        - "(Filter NOT (((mr.state = 'merged') AND (_orbit_edge_0.source_tags HAS ANY ['state:merged'])) AND (wi.title = 'x')) (_))"
