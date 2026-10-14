@@ -529,3 +529,23 @@ fn emit_json_value(
         serde_json::Value::Null => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_under_many_directories_builds_on_a_small_stack() {
+        let path = format!("{}notes.txt", "d/".repeat(5_000));
+        let nodes = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                let lang = Lang::new();
+                ProjectTree::directory_tree(&lang, &[path.as_str()]).len()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(nodes, 5_002);
+    }
+}
