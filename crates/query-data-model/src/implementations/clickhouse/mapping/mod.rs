@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+mod materialized;
+use crate::VariantRoute;
 
 use super::{ClickHouseBindings, EntityLayout, TableLayout, layout::ClickHouse};
 use crate::implementations::derive_property_backend_facts;
@@ -103,7 +105,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
         }
 
         let mut relationships = vec![None; graph.relationships().count()];
-        let mut variants = vec![None; graph.variants().count()];
+        let mut variant_routes = vec![None; graph.variants().count()];
         for relationship in graph.relationships() {
             for edge in storage
                 .edge_routes()
@@ -145,12 +147,17 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                             .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
                     })
                 });
-                variants[variant_id.index()] = foreign_key;
+                variant_routes[variant_id.index()] = Some(VariantRoute {
+                    table: edge.table.clone(),
+                    foreign_key,
+                });
             }
             relationships[relationship.id.index()] = storage
-                .relationship_tables(&relationship.name)
-                .and_then(|tables| tables.first())
-                .cloned();
+                .edge_routes()
+                .iter()
+                .find(|route| route.relationship == relationship.name)
+                .map(|route| route.table.clone())
+                .or_else(|| Some(storage.metadata.default_edge_table.clone()));
         }
 
         let mut denormalized = HashMap::new();
@@ -233,11 +240,39 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             tables.insert(join.table.clone(), layout);
         }
 
+        let materialized_joins = storage
+            .joins()
+            .iter()
+            .map(|join| materialized::derive(join, graph))
+            .collect::<Result<Vec<_>, _>>()?;
+        for copy in storage.copies() {
+            let source =
+                tables
+                    .get(&copy.source)
+                    .ok_or_else(|| DataModelError::UnknownReference {
+                        kind: "copy source",
+                        name: copy.source.clone(),
+                    })?;
+            let physical = storage.require_table(&copy.table)?;
+            let layout = TableLayout::from_storage(
+                physical,
+                source.entity,
+                source.path_columns.clone(),
+                source.path_scopable
+                    && physical
+                        .sort_key
+                        .first()
+                        .is_some_and(|column| column == ontology::TRAVERSAL_PATH_COLUMN),
+            );
+            tables.insert(layout.name.clone(), layout);
+        }
         Ok(ClickHouseBindings {
+            materialized_joins,
+            reordered_layouts: storage.copies().to_vec(),
             default_edge_table: storage.metadata.default_edge_table.clone(),
             entities,
             relationships,
-            variants,
+            variant_routes,
             property_facts,
             tables,
             denormalized: DenormalizedCatalog::new(denormalized),

@@ -26,6 +26,8 @@ impl Sizing<'_> {
 
 #[derive(Debug, thiserror::Error)]
 pub(in crate::modules::sdlc) enum PlanError {
+    #[error(transparent)]
+    Ontology(#[from] ontology::OntologyError),
     #[error(
         "duplicate plan name '{0}': plan names are handler names and checkpoint keys and must be unique"
     )]
@@ -51,6 +53,7 @@ pub(in crate::modules::sdlc) fn build_plans(
     ontology: &Ontology,
     sizing: Sizing<'_>,
 ) -> Result<Plans, PlanError> {
+    ontology.validate_single_table_edge_routes()?;
     let mut plans = PlanSet::default();
 
     for node in ontology.nodes() {
@@ -226,6 +229,27 @@ mod tests {
 
     fn test_ontology() -> Ontology {
         Ontology::load_embedded().expect("should load ontology")
+    }
+
+    #[test]
+    fn rejects_split_relationship_routes() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/variant_routes"
+        ))
+        .unwrap();
+        let result = build_plans(
+            &ontology,
+            Sizing {
+                global_batch_size: 100,
+                namespaced_batch_size: 100,
+                overrides: &HashMap::new(),
+            },
+        );
+        assert!(
+            matches!(result, Err(PlanError::Ontology(ontology::OntologyError::Validation(message)))
+            if message.contains("relationship 'CALLS' has split table routes"))
+        );
     }
 
     fn plans(ontology: &Ontology, batch_size: u64) -> Plans {
