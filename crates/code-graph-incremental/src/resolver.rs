@@ -344,6 +344,7 @@ impl Resolver {
             self.wildcard_sym,
             self.tags,
             config.merge_same_named_types,
+            run,
         );
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
@@ -923,6 +924,7 @@ fn propagate_reexports(
     wildcard_sym: u32,
     tags: ReservedTags,
     merge_types: bool,
+    run: &Sentinel,
 ) -> FxHashSet<(u32, u32)> {
     let mut ambiguous: FxHashSet<(u32, u32)> = FxHashSet::default();
 
@@ -938,14 +940,20 @@ fn propagate_reexports(
             }
         }
     }
-    loop {
+    'propagate: loop {
+        if run.check().is_err() {
+            break;
+        }
         let mut new_exports = Vec::new();
         let mut export = |fi: usize, name, loc| {
             if !visible[fi].contains_key(&name) {
                 new_exports.push((fi, name, loc));
             }
         };
-        for req in reqs {
+        for (i, req) in reqs.iter().enumerate() {
+            if i % 100_000 == 0 && run.check().is_err() {
+                break 'propagate;
+            }
             let exports = req.exports(trees, visible);
             for c in trees[req.fi as usize].cursor(req.node).names() {
                 let ns = wildcard_or_name(wildcard_sym, c);

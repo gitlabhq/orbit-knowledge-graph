@@ -193,6 +193,42 @@ async fn a_deep_relative_import_stays_inside_the_rewrite_budget() {
     assert_eq!(timings.languages, [("python".to_owned(), 1)]);
 }
 
+fn one_package(files: usize, path: &str, header: &str, class: &str) -> Vec<(String, Vec<u8>)> {
+    (0..files)
+        .map(|file| {
+            let classes: String = (0..30)
+                .map(|n| class.replace("NAME", &format!("C{file}_{n}")))
+                .collect();
+            let path = format!("root/{}", path.replace("{}", &file.to_string()));
+            (path, format!("{header}\n{classes}").into_bytes())
+        })
+        .collect()
+}
+
+fn as_files(files: &[(String, Vec<u8>)]) -> Vec<(&str, &[u8])> {
+    files
+        .iter()
+        .map(|(path, body)| (path.as_str(), body.as_slice()))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_cross_file_budget_stops_package_reexports() {
+    let files = one_package(
+        200,
+        "Big/F{}.cs",
+        "namespace Big;",
+        "public class NAME {}\n",
+    );
+    let limits = code_graph_incremental::Limits {
+        cross_file_resolve_ms: 1,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(&as_files(&files), limits).await;
+    assert_eq!(timings.skipped_paths, [""]);
+    assert_eq!(timings.languages, [("csharp".to_owned(), 200)]);
+}
+
 #[tokio::test]
 async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     let files: &[(&str, &[u8])] = &[
