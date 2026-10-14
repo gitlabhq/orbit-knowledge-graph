@@ -13,7 +13,7 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::sql::{
-    dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
+    dedup_query, deleted_false, denorm_tag_expr, filter_to_expr, final_edge_table_scan,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
@@ -453,11 +453,7 @@ fn build_frontier_arm(
 
     let last = format!("e{depth}");
 
-    let edge_scan = |alias: &str| match edge_table_scan(opts.edge_tables, alias) {
-        TableRef::Scan { table, .. } => TableRef::scan_final(table, alias),
-        table => table,
-    };
-    let mut from = edge_scan("e1");
+    let mut from = final_edge_table_scan(opts.edge_tables, "e1");
     // Use specific first-hop filter if provided, otherwise fall back to
     // the general rel_type_filter so e1 isn't left unfiltered.
     let effective_first = if opts.first_hop_filter.is_some() {
@@ -469,7 +465,7 @@ fn build_frontier_arm(
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let edge_tbl = edge_scan(&curr);
+        let edge_tbl = final_edge_table_scan(opts.edge_tables, &curr);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
         join_cond = Expr::and(
             join_cond,
