@@ -66,10 +66,12 @@ impl IndexOutcome {
 enum Fetched {
     Repository(Repository),
     EmptyRepository,
+    Overloaded(String),
 }
 
 pub enum IndexError {
     BudgetExceeded { budget: Duration },
+    Overloaded(String),
     NoLane { waited: Duration },
     Failed(HandlerError),
 }
@@ -329,6 +331,7 @@ impl CodeIndexer {
         };
         let repository = match fetched.map_err(IndexError::Failed)? {
             Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
+            Fetched::Overloaded(detail) => return Err(IndexError::Overloaded(detail)),
             Fetched::Repository(repository) => repository,
         };
 
@@ -426,9 +429,7 @@ impl CodeIndexer {
             }
             Err(ResolveError::Overloaded(detail)) => {
                 self.metrics.record_stage_error("repository_fetch_overload");
-                return Err(HandlerError::Processing(format!(
-                    "archive endpoint overloaded ({detail}); retrying"
-                )));
+                return Ok(Fetched::Overloaded(detail));
             }
             Err(ResolveError::Other(err)) => {
                 self.metrics.record_stage_error("repository_fetch");

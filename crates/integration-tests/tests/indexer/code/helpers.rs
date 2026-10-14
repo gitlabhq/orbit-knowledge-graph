@@ -356,7 +356,10 @@ async fn handle_download_archive(
     }
     let projects = state.projects.lock();
     match projects.get(&project_id) {
-        Some(p) if p.archive_status.is_some() => p.archive_status.unwrap().into_response(),
+        Some(ProjectData {
+            archive_status: Some(status),
+            ..
+        }) => status.into_response(),
         Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),
         Some(p) => {
             let files: Vec<(&str, &str)> = p

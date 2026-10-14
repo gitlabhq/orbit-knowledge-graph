@@ -1112,21 +1112,30 @@ async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // Gitaly ResourceExhausted reaches the indexer as a 500; a rate limit as a 429.
-    for status in [
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        axum::http::StatusCode::TOO_MANY_REQUESTS,
-    ] {
+    // One dispatch is up to `max_attempts` (5) deliveries. Gitaly ResourceExhausted reaches
+    // the indexer as a 500; a rate limit as a 429.
+    for delivery in 1..=5 {
+        let status = if delivery % 2 == 1 {
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        } else {
+            axum::http::StatusCode::TOO_MANY_REQUESTS
+        };
         mock.set_archive_status(project_id, Some(status));
-        let envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+        let mut envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+        envelope.attempt = delivery;
         let result = handler.handle(handler_context(), envelope).await;
         assert!(
-            result.is_err(),
-            "{status} on a backfill task must nack for retry, got {result:?}"
+            matches!(&result, Err(indexer::handler::HandlerError::Processing(msg)) if msg.contains("overloaded")),
+            "{status} on a backfill task must nack as overload, got {result:?}"
         );
     }
 
-    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [2]);
+    let spent = attempts(&clickhouse, traversal_path, project_id).await;
+    assert_eq!(spent, [1], "a whole dispatch of overload costs one attempt");
+    assert!(
+        spent[0] < indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS,
+        "the dispatcher must still re-send the project after CODE_RETRY_AFTER"
+    );
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         None,

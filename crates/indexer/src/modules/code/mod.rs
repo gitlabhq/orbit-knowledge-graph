@@ -37,10 +37,13 @@ pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
 const CODE_CONCURRENCY_GROUP: &str = IndexerModule::Code.concurrency_group();
 
+/// Also read by the handler to tell the last delivery from a redelivery.
+const CODE_TASK_MAX_ATTEMPTS: u32 = 5;
+
 pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(CODE_CONCURRENCY_GROUP.to_string()),
-        max_attempts: Some(5),
+        max_attempts: Some(CODE_TASK_MAX_ATTEMPTS),
         retry_interval_secs: Some(60),
         dead_letter_on_exhaustion: Some(true),
         max_ack_pending: None,

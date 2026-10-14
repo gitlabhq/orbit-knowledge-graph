@@ -7,6 +7,7 @@ use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
+use super::CODE_TASK_MAX_ATTEMPTS;
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
@@ -399,6 +400,19 @@ impl CodeIndexingTaskHandler {
                 Err(HandlerError::Backpressure(format!(
                     "no indexing lane within {}s",
                     waited.as_secs()
+                )))
+            }
+            Err(IndexError::Overloaded(detail)) => {
+                // Redeliveries are 60s apart, so counting each one would use up
+                // MAX_CODE_ATTEMPTS in one dispatch and skip CODE_RETRY_AFTER.
+                if attempt < CODE_TASK_MAX_ATTEMPTS {
+                    checkpoint.refund_attempt();
+                    if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
+                        warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
+                    }
+                }
+                Err(HandlerError::Processing(format!(
+                    "archive endpoint overloaded ({detail}); retrying"
                 )))
             }
             Err(IndexError::Failed(e)) => Err(e),
@@ -830,7 +844,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_overload_without_commit_sha_nacks_and_never_checkpoints_empty() {
+    async fn archive_overload_nacks_and_never_checkpoints_empty() {
         use crate::modules::code::repository::RepositoryServiceError;
         use gitlab_client::GitlabClientError;
 
@@ -844,16 +858,21 @@ mod tests {
                 retry_after_secs: None,
             },
         ];
-        for overload in overloads {
+        // A redelivery is refunded; only the last delivery counts toward the dispatcher cap.
+        for (overload, attempt, expected_attempts) in overloads
+            .into_iter()
+            .flat_map(|overload| [(overload, 1, 0), (overload, CODE_TASK_MAX_ATTEMPTS, 1)])
+        {
             let ctx = TestContext::new();
             ctx.mock_repo
                 .set_download_error(123, RepositoryServiceError::GitlabApi(overload()));
 
-            let envelope = TestContext::make_request_with_sha(7, 123, "main", None);
+            let mut envelope = TestContext::make_request_with_sha(7, 123, "main", None);
+            envelope.attempt = attempt;
             let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
             assert!(
-                matches!(result, Err(HandlerError::Processing(_))),
+                matches!(&result, Err(HandlerError::Processing(msg)) if msg.contains("overloaded")),
                 "overload must be retried, got {result:?}"
             );
             let checkpoint = ctx
@@ -864,7 +883,7 @@ mod tests {
                 .expect("start-of-attempt checkpoint is saved");
             assert!(checkpoint.indexed_at.is_none(), "must not be indexed-empty");
             assert_eq!(checkpoint.last_task_id, 0);
-            assert_eq!(checkpoint.attempts, 1, "counts toward the dispatcher cap");
+            assert_eq!(checkpoint.attempts, expected_attempts, "delivery {attempt}");
         }
     }
 

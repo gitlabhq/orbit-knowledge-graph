@@ -75,10 +75,9 @@ impl std::fmt::Display for EmptyRepositoryReason {
     }
 }
 
-/// A 404 from the archive endpoint is terminal for tasks without a commit SHA:
 /// Workhorse maps Gitaly's not-found, invalid-argument and failed-precondition
-/// (deleted project, no repository, no refs) to it, and `project_info` cannot
-/// tell those apart.
+/// to 404. Backfill tasks resolve the branch through `project_info` first, so
+/// the project exists and a 404 means it has no repository or no refs.
 fn classify_download_error(
     err: &RepositoryServiceError,
 ) -> Option<(EmptyRepositoryReason, String)> {
@@ -589,7 +588,7 @@ mod tests {
             });
             let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-            // Overload must not depend on the task type: the old behaviour only dropped backfill tasks.
+            // Overload is retried whether or not the task carries a commit SHA.
             for commit_sha in [None, Some("abc123")] {
                 let err = resolver.resolve(42, "main", commit_sha).await.unwrap_err();
                 assert!(matches!(err, ResolveError::Overloaded(_)), "got {err:?}");
