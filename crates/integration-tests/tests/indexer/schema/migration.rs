@@ -1138,12 +1138,17 @@ impl MigrationScenario {
         let table_names =
             CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-            self.ctx.config.build_client(),
+            self.ctx.config.build_client("graph"),
         )));
-        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store, 10)
-            .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
-            .await
-            .expect("sweep failed");
+        CodeStaleSweep::new(
+            self.ctx.config.build_client("graph"),
+            &table_names,
+            store,
+            10,
+        )
+        .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
+        .await
+        .expect("sweep failed");
     }
 
     async fn live_edge_exists(&self, kind: &str, source_id: u64) -> bool {

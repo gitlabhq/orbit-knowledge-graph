@@ -116,8 +116,8 @@ async fn seed_namespace_as_deleted(context: &TestContext) {
 }
 
 async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontology) {
-    let graph = Arc::new(context.config.build_client());
-    let datalake = Arc::new(context.config.build_client());
+    let graph = Arc::new(context.config.build_client("graph"));
+    let datalake = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake, graph, ontology,
     ));
@@ -373,8 +373,8 @@ async fn seed_current_routes(context: &TestContext) {
 }
 
 async fn reconcile_root(context: &TestContext, ontology: &ontology::Ontology, root: &str) {
-    let graph = Arc::new(context.config.build_client());
-    let datalake = Arc::new(context.config.build_client());
+    let graph = Arc::new(context.config.build_client("graph"));
+    let datalake = Arc::new(context.config.build_client("graph"));
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake, graph, ontology,
     ));

@@ -68,7 +68,7 @@ impl CodeIndexingDeps {
         ontology: ontology::Ontology,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
-        let graph_client = Arc::new(clickhouse.config.build_client());
+        let graph_client = Arc::new(clickhouse.config.build_client("graph"));
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
@@ -97,13 +97,10 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-        let writer = Arc::new(
-            indexer::clickhouse::ClickHouseWriter::new(
-                clickhouse.config.clone(),
-                Arc::new(indexer::metrics::EngineMetrics::new()),
-            )
-            .expect("writer must build"),
-        );
+        let writer = Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+            clickhouse.config.clone().build_client("graph"),
+            Arc::new(indexer::metrics::EngineMetrics::new()),
+        ));
 
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
@@ -137,7 +134,7 @@ impl CodeIndexingDeps {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
-        let graph_client = Arc::new(self.clickhouse_config.build_client());
+        let graph_client = Arc::new(self.clickhouse_config.build_client("graph"));
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
