@@ -31,9 +31,9 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON e1.target_id = e3.source_id (_) (_))
+        - (Join ON _orbit_edge_1.target_id = _orbit_edge_3.source_id (_) (_))
         - |
-          (SemiJoin e3.source_id IN subquery (_)
+          (SemiJoin _orbit_edge_3.source_id IN subquery (_)
             (Project e1p.target_id AS target_id
               (SemiJoin e1p.source_id IN subquery
                 (Filter ... (Scan Table(gl_code_edge) AS e1p))
@@ -42,7 +42,7 @@ physical:
     emitted:
       expect:
         - |
-          (SemiJoin e3.source_id IN subquery (_)
+          (SemiJoin _orbit_edge_3.source_id IN subquery (_)
             (Project e1p.target_id AS target_id
               (SemiJoin e1p.source_id IN subquery
                 (Filter ... (Scan Table(gl_code_edge) AS e1p))
@@ -51,9 +51,9 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON e1.target_id = e3.source_id (_) (_))
+        - (Join ON _orbit_edge_1.target_id = _orbit_edge_3.source_id (_) (_))
         - |
-          (SemiJoin e3.source_id IN subquery (_)
+          (SemiJoin _orbit_edge_3.source_id IN subquery (_)
             (Project e1p.target_id AS target_id
               (SemiJoin e1p.source_id IN subquery (_)
                 (Project e0p.target_id AS target_id

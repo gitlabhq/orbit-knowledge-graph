@@ -57,6 +57,11 @@ pub trait OrbitQueryModel {
         self.graph().property_named(entity, property)
     }
 
+    fn property_is_nullable(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| property.nullable)
+    }
+
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
         self.graph()
             .property_id(entity, property)

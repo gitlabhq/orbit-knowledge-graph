@@ -13,5 +13,5 @@ physical:
     emitted:
       ctes:
         exact_order: [forward]
-      expect: ["(Filter e1.source_id = 1, ... (Scan Table(gl_edge) AS e1))"]
+      expect: ["(Filter e1.source_id = 1, ... (Deduplicate Final (Scan Table(gl_edge) AS e1)))"]
       reject: ["(Scan Table(gl_user) ...)", "(CTE backward (_))"]

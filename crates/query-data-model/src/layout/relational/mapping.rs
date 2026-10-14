@@ -49,18 +49,19 @@ pub struct RelationshipRoute<'a> {
 }
 
 impl RelationshipRoute<'_> {
-    pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+    pub fn variants(&self) -> impl Iterator<Item = &crate::RelationshipVariant> + '_ {
         self.relationship
             .variants
             .iter()
-            .map(|variant| self.graph.variant(*variant).source)
+            .map(|variant| self.graph.variant(*variant))
+    }
+
+    pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.variants().map(|variant| variant.source)
     }
 
     pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.relationship
-            .variants
-            .iter()
-            .map(|variant| self.graph.variant(*variant).target)
+        self.variants().map(|variant| variant.target)
     }
 
     pub fn has_source(&self, entity: EntityId) -> bool {
@@ -88,7 +89,7 @@ pub struct DenormalizedKey {
 pub struct DenormalizedProperty {
     pub edge_column: String,
     pub tag_key: String,
-    pub relationships: Vec<RelationshipId>,
+    pub variants: HashSet<(RelationshipId, EntityId, EntityId)>,
     pub nullable: bool,
 }
 

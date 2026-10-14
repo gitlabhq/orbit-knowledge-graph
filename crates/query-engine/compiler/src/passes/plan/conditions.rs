@@ -70,7 +70,7 @@ fn edge_tag(
         return None;
     }
     tag_filter(
-        &format!("e{position}"),
+        &hop.alias,
         &facts.edge_column,
         &facts.tag_key,
         &bound.filter,
@@ -97,16 +97,15 @@ fn bind_leaf(
             )
         }
         PredicateTarget::Relationship(index) => {
-            let (position, hop) = hops
+            let hop = hops
                 .iter()
-                .enumerate()
-                .find(|(_, hop)| hop.input_index == *index)
+                .find(|hop| hop.input_index == *index)
                 .ok_or_else(|| {
                     QueryError::PipelineInvariant("condition relationship has no edge scan".into())
                 })?;
             (
-                Column::new(format!("e{position}"), &condition.property),
-                FilterOwner::Table(&hop.edge_table),
+                Column::new(&hop.alias, &condition.property),
+                FilterOwner::Tables(&hop.edge_tables),
             )
         }
     };

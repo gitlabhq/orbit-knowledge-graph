@@ -293,7 +293,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::Neighbors,
                 format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] path_lookup={}",
+                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
                     operation.center,
                     match operation.direction {
                         compiler::input::Direction::Both => "both",
@@ -307,10 +307,8 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         .as_deref()
                         .unwrap_or_default()
                         .join(", "),
-                    operation.center_tp_lookup.as_ref().map_or_else(
-                        || "none".into(),
-                        |(table, column)| format!("{table}.{column}")
-                    )
+                    operation.incoming_scope_preserving.join(", "),
+                    operation.incoming_cross_scope.join(", ")
                 ),
                 vec![planned_node(&plan.nodes[&operation.center])],
             )
@@ -580,6 +578,11 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             "{} = {}",
             planned_column(column),
             text_literal(entity)
+        )],
+        Predicate::ColumnEq { left, right } => vec![format!(
+            "{} = {}",
+            planned_column(left),
+            planned_column(right)
         )],
         Predicate::RelationshipKinds { alias, kinds } => vec![membership(
             format!("{alias}.relationship_kind"),

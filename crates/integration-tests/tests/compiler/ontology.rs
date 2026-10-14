@@ -307,8 +307,8 @@ fn package_built_by_pipeline_traversal() {
     assert!(rendered.contains("gl_package"));
     assert!(rendered.contains("gl_edge"));
     assert!(rendered.contains("'BUILT_BY'"));
-    assert!(rendered.contains("(e0.source_kind = 'Package')"));
-    assert!(rendered.contains("(e0.target_kind = 'Pipeline')"));
+    assert!(rendered.contains("(_orbit_edge_0.source_kind = 'Package')"));
+    assert!(rendered.contains("(_orbit_edge_0.target_kind = 'Pipeline')"));
     assert!(rendered.contains("LIMIT 26"));
 }
 
@@ -550,7 +550,7 @@ fn multi_hop_aggregation() {
     let rendered = result.base.render();
 
     assert!(rendered.contains("UNION ALL"));
-    assert!(rendered.contains("e0"));
+    assert!(rendered.contains("_orbit_edge_0"));
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
 }
 
@@ -1546,7 +1546,7 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
         "pinned File node_id must appear in WHERE clause: {rendered}"
     );
     assert!(
-        rendered.contains("e0.source_id"),
+        rendered.contains("_orbit_edge_0.source_id"),
         "edge-centric filter must reference source_id: {rendered}"
     );
 }
