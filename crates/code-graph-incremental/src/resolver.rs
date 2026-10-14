@@ -586,11 +586,11 @@ fn expand(
     per_file: Vec<Vec<Edge>>,
     cross_edges: &mut Vec<Edge>,
 ) -> Result<(), Killed> {
-    let deadline = ctx.run.check();
     let wave1: Vec<Edge> = reqs
         .par_iter()
         .filter(|r| {
-            deadline.is_ok() && (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+            (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+                && ctx.run.check().is_ok()
         })
         .flat_map(|req| resolve_one_import(ctx, req))
         .chain(per_file.into_par_iter().flatten())
@@ -605,7 +605,6 @@ fn expand(
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
     cross_edges.extend(&wave1);
-    deadline?;
     ctx.run.check()?;
 
     // Wildcard references come from the linker and from wave 1's unbound
@@ -625,7 +624,10 @@ fn expand(
     }
     let wildcard_edges: Vec<Edge> = reqs
         .par_iter()
-        .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+        .filter(|r| {
+            (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+                && ctx.run.check().is_ok()
+        })
         .flat_map_iter(|req| {
             let import = ctx.corpus.jump(req.fi, req.node);
             import
@@ -643,10 +645,14 @@ fn expand(
         .type_uses
         .par_iter()
         .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
-        .filter(|(producer, _)| producer.is(C::Binding) || external_of(ctx, *producer).is_some())
+        .filter(|(producer, _)| {
+            (producer.is(C::Binding) || external_of(ctx, *producer).is_some())
+                && ctx.run.check().is_ok()
+        })
         .flat_map(|(producer, uses)| dispatch(ctx, producer, producer_class(ctx, producer), uses))
         .collect();
     cross_edges.extend(&wave2);
+    ctx.run.check()?;
 
     let mut wave: Vec<Edge> = edges
         .iter()
