@@ -44,15 +44,14 @@ Rails can now run the stream itself, behind the `orbit_query_in_rails` feature
 flag
 ([#1381](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1381),
 rollout in
-[gitlab#633423](https://gitlab.com/gitlab-org/gitlab/-/issues/633423)).
+[gitlab-org/gitlab#633423](https://gitlab.com/gitlab-org/gitlab/-/issues/633423)).
 Its runner marks the request as IO-bound. Once `max_io_threads` is configured,
 the request then does not hold a regular Puma thread. That setting defaults to
 0, and the deployment tasks in #1381 are open. The runner also redacts in
-process. The flag is a
-derisk flag and is off by default.
+process. The flag is a derisk flag and is off by default.
 
 This ADR does not amend or supersede ADR 008 or ADR 011. `expand` depends on
-#1381, which replaces ADR 008's premise for the query path once it rolls out.
+the #1381 rollout, which replaces ADR 008's premise for the query path once it rolls out.
 Both ADRs should be revisited when #1381 removes the Workhorse query path. ADR
 011's buffering concern is acceptable here because the expansion is one bounded
 named query.
@@ -82,8 +81,9 @@ are not billed.
 entry for the one token. Each entry carries the PostgreSQL summary and an
 `expansion` field. Because the expansion lives on the entity, several tokens
 later add entries and need no new field. `expansion` is `null` when expansion
-was not requested, the token was not found, or the type has no expansion query.
-Otherwise it is `{"result": ...}` with the deduplicated graph, or
+was not requested or the token was not found. Those two cases take precedence
+over every error. For a found token whose type has no shipped expansion query,
+`expansion` is `{"error": {"code": "expansion_unavailable"}}`. Otherwise it is `{"result": ...}` with the deduplicated graph, or
 `{"error": {"code": ...}}`. An expansion failure never fails the summaries.
 
 **Transport.** The expansion is an ordinary named query, so the contract does
@@ -100,7 +100,8 @@ needed. If #1381 slips, the fallback is Workhorse merge logic for a single
 stream. The contract stays the same.
 
 **Expansion query.** Orbit owns one named query per entity type, and each type
-must map to exactly one named query, composite if needed. The billing rule
+must map to exactly one named query, composite if needed. The per-type queries
+must ship in GKG before or with the Rails endpoint. The billing rule
 above depends on it. The query takes `node_ids` and returns a normal graph
 response. Rails keeps a static map from type to query name and sets `limit`
 as a constant, so clients cannot change it. Fresh typed facets, such as a head
@@ -159,6 +160,8 @@ explicit MCP tool and agent command are deferred.
   `invalid_token`. The prototype never merged, so 1.1.0 lets clients built
   against it detect the change.
 
+A found token:
+
 ```json
 {"version": "1.1.0",
  "entities": [
@@ -166,14 +169,18 @@ explicit MCP tool and agent command are deferred.
     "resolved_token": "WorkItem[196910643]",
     "type": "WorkItem", "id": 196910643, "found": true,
     "summary": {"...": "..."},
-    "expansion": {"result": {"nodes": ["..."], "edges": ["..."]}}},
+    "expansion": {"result": {"nodes": ["..."], "edges": ["..."]}}}]}
+```
+
+An unfound token:
+
+```json
+{"version": "1.1.0",
+ "entities": [
    {"token": "gitlab-org/gitlab#999999999",
     "type": null, "id": null, "found": false,
     "error": {"code": "not_found"}, "expansion": null}]}
 ```
-
-The second entry is an alternative response for an unfound token. A request
-returns only one entry.
 
 With `response_format: llm`, the response is `text/plain`: the Rails summary
 text, then one labeled graph section in TOON, or a one-line `error <code>`.
