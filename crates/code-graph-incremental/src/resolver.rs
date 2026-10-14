@@ -1691,9 +1691,10 @@ fn lub<'a>(
     for set in sets {
         common.retain(|t| set.as_ref().is_some_and(|a| a.contains(t)));
     }
+    let above: FxHashMap<_, _> = common.iter().map(|&u| (u, ancestors(u))).collect();
     let mut least = common
         .iter()
-        .filter(|t| !common.iter().any(|u| u != *t && ancestors(*u).contains(*t)));
+        .filter(|t| !common.iter().any(|u| u != *t && above[u].contains(*t)));
     let &(fi, n) = least.next()?;
     least.next().is_none().then(|| ctx.corpus.jump(fi, n))
 }
