@@ -14,6 +14,8 @@ use rustc_hash::FxHashSet;
 
 pub const WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
+pub type PhaseHook = Arc<dyn Fn(&str, &str, usize) + Send + Sync>;
+
 pub struct Options {
     pub limits: Limits,
     pub worker_threads: usize,
@@ -22,6 +24,19 @@ pub struct Options {
     pub batch_bytes: usize,
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
+    pub phase_started: PhaseHook,
+}
+
+struct PhaseStarted {
+    family: &'static str,
+    files: usize,
+    hook: PhaseHook,
+}
+
+impl crate::pipeline::Observer for PhaseStarted {
+    fn started(&mut self, phase: &str) {
+        (self.hook)(self.family, phase, self.files);
+    }
 }
 
 pub fn index<'e>(context: Context<'e>) -> Result<Pipeline<'e, Resolved>, Error> {
@@ -90,6 +105,7 @@ pub fn repository<E: std::fmt::Display>(
     let mut result = Report::default();
     if families.is_empty() {
         on_worker_pool("none", 1, || {
+            (options.phase_started)("none", "export", repository.usage().files);
             let lang = crate::intern::Lang::new();
             let trees: Vec<_> = repository
                 .files()
@@ -140,6 +156,7 @@ pub fn repository<E: std::fmt::Display>(
             for ((family, (language, file_count)), sender) in pending.by_ref().take(idle) {
                 running += 1;
                 let (run, repository, owns, emit) = (&run, &repository, &owns, &emit);
+                let phase_started = options.phase_started.clone();
                 let family_threads = if file_count <= options.small_family_files {
                     (worker_threads / 4).max(2).min(worker_threads)
                 } else {
@@ -151,7 +168,12 @@ pub fn repository<E: std::fmt::Display>(
                             let (report, batches) = {
                                 let mut env = Env::with_limits(language, limits)?;
                                 env.export_config = export_config.clone();
-                                let mut context = Context::new(&env, repository.clone());
+                                let mut context =
+                                    Context::new(&env, repository.clone()).observe(PhaseStarted {
+                                        family,
+                                        files: file_count,
+                                        hook: phase_started.clone(),
+                                    });
                                 context.run = run.clone();
                                 let (context, graph) = index(context)?.then(Display)?.finish();
                                 let mut report = context.report;
@@ -163,6 +185,7 @@ pub fn repository<E: std::fmt::Display>(
                                     &env.lang,
                                 )?;
                                 plan.batch_bytes = options.batch_bytes;
+                                phase_started(family, "export", file_count);
                                 let batches = crate::export::export(
                                     &graph.state.trees,
                                     &graph.state.edges,

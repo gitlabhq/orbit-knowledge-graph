@@ -692,6 +692,7 @@ fn options() -> Options {
         batch_bytes: orbit_arrow::BATCH_BYTES,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| {}),
+        phase_started: Arc::new(|_, _, _| {}),
     }
 }
 
@@ -825,4 +826,34 @@ async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
         .unwrap();
     assert!(report.errors.is_empty());
     assert_eq!(report.stats.files_parsed, 2);
+}
+
+#[tokio::test]
+async fn each_engine_phase_of_a_family_reports_its_start() {
+    let started = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = started.clone();
+    let mut options = options();
+    options.phase_started = Arc::new(move |family, phase, files| {
+        seen.lock()
+            .unwrap()
+            .push(format!("{family} {phase} {files}"));
+    });
+    let files: &[(&str, &[u8])] = &[
+        ("root/a.js", b"export function a() {}\n"),
+        ("root/b.js", b"import { a } from './a';\na();\n"),
+    ];
+    let sink = Arc::new(|_: &str, _: RecordBatch| Ok(()));
+    IndexFixture::new().run(files, options, sink).await.unwrap();
+    let started = started.lock().unwrap().clone();
+    assert_eq!(
+        started,
+        [
+            "js_ts prepare 2",
+            "js_ts parse+rewrite+canonicalize+link 2",
+            "js_ts insert 2",
+            "js_ts resolve 2",
+            "js_ts display 2",
+            "js_ts export 2",
+        ]
+    );
 }

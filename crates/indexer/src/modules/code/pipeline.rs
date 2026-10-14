@@ -682,6 +682,12 @@ impl CodeIndexer {
             batch_bytes: orbit_arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
+            phase_started: {
+                let span = span.clone();
+                Arc::new(move |family, phase, files| {
+                    info!(parent: &span, family, phase, files, "code-graph phase started");
+                })
+            },
         };
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| match repository {
