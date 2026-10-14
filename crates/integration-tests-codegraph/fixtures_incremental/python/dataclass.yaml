@@ -1,4 +1,5 @@
 name: "Python: class field annotations as Property definitions"
+
 fixtures:
   - path: main.py
     content: |

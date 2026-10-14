@@ -1,4 +1,5 @@
 name: "Java: generic type parameter stripping"
+
 fixtures:
   - path: com/example/UserService.java
     content: |

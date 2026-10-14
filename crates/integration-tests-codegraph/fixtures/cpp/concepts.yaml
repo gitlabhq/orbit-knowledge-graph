@@ -1,4 +1,5 @@
 name: "C++20: concept declarations"
+
 fixtures:
   - path: concepts.cpp
     content: |

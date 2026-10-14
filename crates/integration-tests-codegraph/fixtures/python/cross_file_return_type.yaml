@@ -1,4 +1,5 @@
 name: "Python: cross-file return type inference (Phase 3)"
+
 fixtures:
   - path: models.py
     content: |

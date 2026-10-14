@@ -1,4 +1,5 @@
 name: "Java v1 parity — Main.main resolution"
+
 fixtures:
   - path: com/example/app/Main.java
     content: |
@@ -29,6 +30,7 @@ fixtures:
           }
           public void await(Runnable fn) { fn.run(); }
       }
+
   - path: com/example/app/Foo.java
     content: |
       package com.example.app;
@@ -36,14 +38,17 @@ fixtures:
           public Executor executor = new Executor();
           public Bar bar() { return new Bar(); }
       }
+
   - path: com/example/app/Bar.java
     content: |
       package com.example.app;
       public class Bar { public void baz() {} }
+
   - path: com/example/app/Application.java
     content: |
       package com.example.app;
       public class Application { public void run() {} }
+
   - path: com/example/app/Executor.java
     content: |
       package com.example.app;
@@ -51,6 +56,7 @@ fixtures:
           public static void executeFn() {}
           public void execute(Runnable runnable) { runnable.run(); }
       }
+
   - path: com/example/app/Traceable.java
     content: |
       package com.example.app;
@@ -58,6 +64,7 @@ fixtures:
       @Retention(RetentionPolicy.RUNTIME)
       @Target({ElementType.METHOD, ElementType.TYPE})
       public @interface Traceable {}
+
   - path: com/example/app/EnumClass.java
     content: |
       package com.example.app;
@@ -66,6 +73,7 @@ fixtures:
           public void enumMethod1() {}
           public void enumMethod2() {}
       }
+
   - path: com/example/util/Outer.java
     content: |
       package com.example.util;
@@ -77,6 +85,7 @@ fixtures:
           public void outerMethod() {}
           public static Outer make() { return new Outer(); }
       }
+
   - path: com/example/helpers/Helpers.java
     content: |
       package com.example.helpers;

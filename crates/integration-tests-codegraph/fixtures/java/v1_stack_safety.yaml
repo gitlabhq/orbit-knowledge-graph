@@ -1,4 +1,5 @@
 name: "Java v1 parity — deep initializer chain stack safety"
+
 fixtures:
   - path: com/example/edgecases/DeepInitializerChain.java
     content: |

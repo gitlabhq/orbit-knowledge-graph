@@ -1,4 +1,5 @@
 description: Frontier intersection cannot join a group to a merge request with the same ID
+
 config:
   redaction:
     allow:
@@ -15,9 +16,11 @@ config:
     gl_edge:
       - { traversal_path: "1/100/99000/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99000, target_kind: Group }
       - { traversal_path: "1/100/99001/", source_id: 99000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 99001, target_kind: Project }
+
 query:
   gql: |
     MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|IN_PROJECT*1..2]->(target:Project {id: 99001})
     RETURN p
+
 expect:
   path_count: 0

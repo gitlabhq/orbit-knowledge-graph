@@ -1,21 +1,26 @@
 name: "Namespace misses differ from external and unknown values"
+
 fixtures:
   - path: dynamic.js
     content: |
       function privateHelper() {}
       module.exports = loadExports();
+
   - path: local.ts
     content: |
       export function existing() {}
       export const unknown = runtimeValue();
+
   - path: barrel.ts
     content: |
       export * from 'external-sdk';
+
   - path: renamed.ts
     content: |
       function implementation() {}
       export { implementation as renamed };
       export { implementation as default };
+
   - path: main.ts
     content: |
       import * as local from './local';
@@ -33,6 +38,7 @@ fixtures:
       export function dynamicExport() { dynamic.available(); }
       export function aliasExport() { alias(); }
       export function defaultExport() { renamedDefault(); }
+
 tests:
   - name: "external and unknown-valued targets retain fallback"
     query: |
@@ -45,6 +51,7 @@ tests:
       - { row: { caller: remote } }
       - { row: { caller: reexported } }
       - { row: { caller: dynamicExport } }
+
   - name: "known missing exports do not become external calls"
     # Deferred: suppressing fallback requires proof that the module's exports are complete.
     skip: true
@@ -54,6 +61,7 @@ tests:
       RETURN symbol.import_path
     assert:
       - { empty: true }
+
   - name: "existing members still resolve"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -61,10 +69,11 @@ tests:
       RETURN caller.name AS caller, target.name AS target, target.file_path AS file
     assert:
       - { row_count: 4 }
-      - { row: { caller: known, target: existing, file: 'local.ts' } }
-      - { row: { caller: localExport, target: implementation, file: 'renamed.ts' } }
-      - { row: { caller: aliasExport, target: implementation, file: 'renamed.ts' } }
-      - { row: { caller: defaultExport, target: implementation, file: 'renamed.ts' } }
+      - { row: { caller: known, target: existing, file: "local.ts" } }
+      - { row: { caller: localExport, target: implementation, file: "renamed.ts" } }
+      - { row: { caller: aliasExport, target: implementation, file: "renamed.ts" } }
+      - { row: { caller: defaultExport, target: implementation, file: "renamed.ts" } }
+
 steps:
   - name: add missing member after snapshot loading
     snapshot: true
@@ -83,6 +92,7 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { target: missing } }
+
   - name: remove the namespace target
     snapshot: true
     remove: [local.ts]
@@ -94,4 +104,4 @@ steps:
           RETURN symbol.import_path AS path
         assert:
           - { row_count: 1 }
-          - { row: { path: './local' } }
+          - { row: { path: "./local" } }

@@ -23,8 +23,8 @@ expect:
   node_count: 14
   referential_integrity: true
   edge_exists:
-    MEMBER_OF: [[1,100], [1,102], [2,100]]
-    CONTAINS: [[100,1000], [100,1002], [101,1001], [102,1004]]
+    MEMBER_OF: [[1, 100], [1, 102], [2, 100]]
+    CONTAINS: [[100, 1000], [100, 1002], [101, 1001], [102, 1004]]
   nodes:
     User:
       rows:

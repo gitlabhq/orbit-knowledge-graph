@@ -1,4 +1,5 @@
 name: "Rust: EXTENDS edges across files, modules, and crates"
+
 fixtures:
   # ─────────────────────────────────────────────────────────────────
   # Workspace root that wires two crates together. The first crate
@@ -23,16 +24,19 @@ fixtures:
       name = "zoo"
       version = "0.1.0"
       edition = "2021"
+
   - path: crates/zoo/src/lib.rs
     content: |
       pub mod traits;
       pub mod animals;
+
   - path: crates/zoo/src/traits.rs
     content: |
       // Supertrait lives here.
       pub trait Audible {}
       pub trait Mammal {}
       pub trait Carnivore: Mammal {}
+
   - path: crates/zoo/src/animals.rs
     content: |
       // Trait declared in a sibling module references a supertrait
@@ -67,6 +71,7 @@ fixtures:
 
       [dependencies]
       zoo = { workspace = true }
+
   - path: crates/zoo-impl/src/lib.rs
     content: |
       use zoo::traits::Audible;

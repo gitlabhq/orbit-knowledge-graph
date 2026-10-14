@@ -1,4 +1,5 @@
 name: "Python: nested class hierarchy"
+
 fixtures:
   - path: main.py
     content: |

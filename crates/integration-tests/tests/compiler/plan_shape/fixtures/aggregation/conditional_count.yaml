@@ -1,4 +1,5 @@
 name: Single-edge aggregation retains latest-row dedup and conditional counting
+
 query:
   json: |
     {
@@ -12,9 +13,11 @@ query:
     }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN count(b) AS n
+
 logical:
   expect:
     - (Aggregate COUNT(b) AS n (_))
+
 physical:
   clickhouse:
     planned:

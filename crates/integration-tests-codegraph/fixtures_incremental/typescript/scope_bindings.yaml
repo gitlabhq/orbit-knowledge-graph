@@ -1,4 +1,5 @@
 name: "TypeScript: lexical binding ownership"
+
 fixtures:
   - path: optional_parameter/main.ts
     content: |
@@ -7,6 +8,7 @@ fixtures:
       function run(first?: () => void) {
           first!();
       }
+
   - path: for_initializer/main.ts
     content: |
       function first() {}
@@ -15,6 +17,7 @@ fixtures:
           for (let first = () => {}; false;) {}
           first();
       }
+
   - path: for_binding/main.ts
     content: |
       function first() {}
@@ -24,6 +27,7 @@ fixtures:
               first();
           }
       }
+
   - path: let/main.ts
     content: |
       function first() {}
@@ -36,6 +40,7 @@ fixtures:
           }
           f();
       }
+
   - path: var/main.ts
     content: |
       function first() {}
@@ -48,6 +53,7 @@ fixtures:
           }
           f();
       }
+
   - path: parameter/main.ts
     content: |
       function first() {}
@@ -55,6 +61,7 @@ fixtures:
       function run(first: () => void) {
           first();
       }
+
   - path: temporal_dead_zone/main.ts
     content: |
       function first() {}
@@ -65,6 +72,7 @@ fixtures:
               let first = () => {};
           }
       }
+
   - path: var_redeclaration/main.ts
     content: |
       function first() {}
@@ -77,6 +85,7 @@ fixtures:
           }
           f();
       }
+
   - path: loop_source/main.ts
     content: |
       function first() {}
@@ -91,6 +100,7 @@ fixtures:
           }
           first();
       }
+
   - path: loop_var/main.ts
     content: |
       function first() {}
@@ -101,6 +111,7 @@ fixtures:
               f();
           }
       }
+
 tests:
   - name: "Unknown locals and loop values do not fall back to outer functions"
     query: |
@@ -109,6 +120,7 @@ tests:
       RETURN callee.name AS target
     assert:
       - { empty: true }
+
   - name: "Block and function ownership preserve the exact call targets"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

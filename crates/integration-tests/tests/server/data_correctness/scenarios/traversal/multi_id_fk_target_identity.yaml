@@ -28,7 +28,7 @@ expect:
   nodes:
     User:
       ids: [1]
-      filters: {username: alice}
+      filters: { username: alice }
     Group:
       ids: [100]
     MergeRequest:

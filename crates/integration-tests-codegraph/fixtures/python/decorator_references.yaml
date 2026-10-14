@@ -1,4 +1,5 @@
 name: "Python: decorator references"
+
 fixtures:
   - path: decorators.py
     content: |

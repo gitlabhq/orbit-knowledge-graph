@@ -1,4 +1,5 @@
 name: "Rust: overlapping field copies terminate"
+
 fixtures:
   - path: main.rs
     content: |
@@ -34,6 +35,7 @@ fixtures:
           (x.0)();
           (x.1)();
       }
+
 tests:
   - name: "Incomplete self-referential assignments do not prevent later calls"
     query: |
@@ -45,6 +47,7 @@ tests:
       - { row: { caller: self_reference, target: first } }
       - { row: { caller: mutual_reference, target: second } }
       - { row: { caller: copy_into_child, target: first } }
+
   - name: "Copying a nested tuple preserves both sibling values"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

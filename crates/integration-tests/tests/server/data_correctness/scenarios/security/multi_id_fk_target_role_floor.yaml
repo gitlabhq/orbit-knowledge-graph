@@ -1,11 +1,11 @@
 description: A multi-ID FK target retains its elevated-role scan in an ungrouped aggregation
 
 config:
-  security: {org_id: 1, paths: ["1/100/"], access_level: 20}
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
   extra_seed:
     gl_edge:
-      - {traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: []}
-      - {traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_FINDING, target_id: 90000, target_kind: VulnerabilityOccurrence, source_tags: [], target_tags: []}
+      - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_FINDING, target_id: 90000, target_kind: VulnerabilityOccurrence, source_tags: [], target_tags: [] }
 
 query:
   json: |
@@ -30,6 +30,6 @@ query:
 
 expect:
   row_count: 1
-  row_values: [{n: 0}]
+  row_values: [{ n: 0 }]
   sql_contains: ["HAS_FINDING", "gl_vulnerability_occurrence AS _role_f FINAL", "false"]
   skip_requirements: [node_ids]

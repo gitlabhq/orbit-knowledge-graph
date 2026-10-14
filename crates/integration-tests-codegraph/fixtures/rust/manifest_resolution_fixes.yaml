@@ -1,4 +1,5 @@
 name: "Rust: manifest resolution fixes (optional deps and exclude prefixes)"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -73,7 +74,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'vendor_stub::vendored' } }
+      - { row: { fqn: "vendor_stub::vendored" } }
 
   - name: "excluded vendor crate is not pulled into the outer workspace members"
     query: |

@@ -1,4 +1,5 @@
 name: "Rust: trait and callable resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -114,7 +115,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Method" } }
 
   - name: "trait UFCS call resolves to impl method"
     query: |
@@ -123,7 +124,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Method" } }
 
   - name: "associated function call resolves"
     query: |
@@ -132,7 +133,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
 
   - name: "tuple struct constructor resolves to struct definition"
     query: |
@@ -141,7 +142,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Struct' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Struct" } }
 
   - name: "enum variant constructor resolves to variant definition"
     query: |
@@ -150,7 +151,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Variant' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Variant" } }
 
   - name: "function-item alias call still resolves to original function"
     query: |
@@ -159,7 +160,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs" } }
 
   - name: "fn pointer coercion still resolves to original function"
     query: |
@@ -168,7 +169,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs" } }
 
   - name: "local alias chain preserves callable target"
     query: |
@@ -177,7 +178,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs" } }
 
   - name: "trait associated UFCS resolves to impl associated function"
     query: |
@@ -186,7 +187,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
 
   - name: "type alias associated call resolves to underlying impl"
     query: |
@@ -195,7 +196,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
 
   - name: "autoderef method call resolves through Deref target"
     query: |
@@ -204,4 +205,4 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
+      - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Method" } }

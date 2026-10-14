@@ -1,16 +1,20 @@
 name: C++ standard function names retain project bindings
+
 fixtures:
   - path: local.hpp
     content: |
       int printf(const char *text) { return 1; }
+
   - path: main.cpp
     content: |
       #include "local.hpp"
       int run() { return printf("local"); }
+
   - path: external.cpp
     content: |
       #include <cstdio>
       void external_call() { printf("standard"); }
+
 tests:
   - name: Local include resolves a standard-named function
     query: |
@@ -20,6 +24,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { file: local.hpp, name: printf } }
+
   - name: Standard calls do not become wildcard fallback calls
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)

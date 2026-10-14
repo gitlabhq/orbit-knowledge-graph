@@ -1,23 +1,25 @@
 cases:
-- name: not_empty_object_rejected
-  description: An empty JSON not object is rejected, so it never stands for a condition
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{}}],"limit":10}
-  expect: {compile_error: has less than 1 property at /nodes/0/not}
-- name: not_schema_error_no_echo
-  description: 'JSON schema errors under not and filters name the limit and the path, but not the rejected value: a wrong type, too many properties, an unknown operator, and a string that is too long.'
-  query:
-    json: |
-      {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "not": "private-type-literal"}, {"id": "wi", "entity": "WorkItem", "not": {"f0": "private-count-literal-0", "f1": "private-count-literal-1", "f2": "private-count-literal-2", "f3": "private-count-literal-3", "f4": "private-count-literal-4", "f5": "private-count-literal-5", "f6": "private-count-literal-6", "f7": "private-count-literal-7", "f8": "private-count-literal-8", "f9": "private-count-literal-9", "state": {"bogus": "private-oneof-literal"}, "title": {"contains": "private-long-literalxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}, "filters": {"state": {"bogus": "private-filter-literal"}}}], "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}], "limit": 30}
-  expect:
-    compile_error: has more than 10 properties at /nodes/1/not
-    compile_error_not_contains: [private-type-literal, private-count-literal, private-oneof-literal, private-long-literal, private-filter-literal]
-- name: not_unknown_property_rejected
-  description: A JSON not entry on a property the entity does not have is rejected like a filter
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"missing":"private-query-literal"}}],"limit":30}
-  expect:
-    compile_error: missing
-    compile_error_not_contains: [private-query-literal]
+  - name: not_empty_object_rejected
+    description: An empty JSON not object is rejected, so it never stands for a condition
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{}}],"limit":10}
+    expect: { compile_error: has less than 1 property at /nodes/0/not }
+
+  - name: not_schema_error_no_echo
+    description: "JSON schema errors under not and filters name the limit and the path, but not the rejected value: a wrong type, too many properties, an unknown operator, and a string that is too long."
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "not": "private-type-literal"}, {"id": "wi", "entity": "WorkItem", "not": {"f0": "private-count-literal-0", "f1": "private-count-literal-1", "f2": "private-count-literal-2", "f3": "private-count-literal-3", "f4": "private-count-literal-4", "f5": "private-count-literal-5", "f6": "private-count-literal-6", "f7": "private-count-literal-7", "f8": "private-count-literal-8", "f9": "private-count-literal-9", "state": {"bogus": "private-oneof-literal"}, "title": {"contains": "private-long-literalxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}, "filters": {"state": {"bogus": "private-filter-literal"}}}], "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}], "limit": 30}
+    expect:
+      compile_error: has more than 10 properties at /nodes/1/not
+      compile_error_not_contains: [private-type-literal, private-count-literal, private-oneof-literal, private-long-literal, private-filter-literal]
+
+  - name: not_unknown_property_rejected
+    description: A JSON not entry on a property the entity does not have is rejected like a filter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"missing":"private-query-literal"}}],"limit":30}
+    expect:
+      compile_error: missing
+      compile_error_not_contains: [private-query-literal]

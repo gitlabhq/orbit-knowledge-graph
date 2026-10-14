@@ -1,9 +1,11 @@
 name: "Rust: reindex across a manifest edit and a deleted module"
+
 fixtures:
   - path: Cargo.toml
     content: |
       [package]
       name = "app"
+
   - path: src/main.rs
     content: |
       mod util;
@@ -12,9 +14,11 @@ fixtures:
       fn main() {
           help();
       }
+
   - path: src/util.rs
     content: |
       pub fn help() {}
+
   - path: src/extra.rs
     content: |
       pub fn more() {}

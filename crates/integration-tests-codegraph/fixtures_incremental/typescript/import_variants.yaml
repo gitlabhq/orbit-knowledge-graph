@@ -1,5 +1,6 @@
 name: "TypeScript: import variants (named, default, namespace, aliased, type-only)"
 pipeline: js
+
 fixtures:
   - path: models.ts
     content: |
