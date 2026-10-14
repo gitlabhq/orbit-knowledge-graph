@@ -230,6 +230,23 @@ async fn the_cross_file_budget_stops_package_reexports() {
 }
 
 #[tokio::test]
+async fn cross_file_resolution_stops_at_the_name_limit() {
+    let files = one_package(
+        200,
+        "Big/F{}.cs",
+        "namespace Big;",
+        "public class NAME {}\n",
+    );
+    let limits = code_graph_incremental::Limits {
+        max_cross_file_names: 10_000,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(&as_files(&files), limits).await;
+    assert_eq!(timings.skipped_paths, [""]);
+    assert_eq!(timings.languages, [("csharp".to_owned(), 200)]);
+}
+
+#[tokio::test]
 async fn a_package_shared_by_many_files_resolves_inside_the_cross_file_budget() {
     let limits = code_graph_incremental::Limits {
         cross_file_resolve_ms: 60_000,
@@ -593,6 +610,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
     );
     assert_eq!(mapped.max_files, configured.max_files);
     assert_eq!(mapped.max_tree_depth, configured.max_tree_depth);
+    assert_eq!(mapped.max_cross_file_names, configured.max_cross_file_names);
 
     let unlimited = limits(&CodeIndexingPipelineConfig {
         max_files: 0,
@@ -602,6 +620,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         per_file_ssa_timeout_ms: 0,
         cross_file_resolve_timeout_ms: 0,
         max_tree_depth: 0,
+        max_cross_file_names: 0,
         ..configured
     });
     assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);

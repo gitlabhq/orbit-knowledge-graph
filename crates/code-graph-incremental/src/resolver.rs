@@ -338,7 +338,7 @@ impl Resolver {
         let (new_reqs, mut cross_edges) =
             gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
         self.reqs.extend(new_reqs);
-        let ambiguous = propagate_reexports(
+        let (ambiguous, too_many_names) = propagate_reexports(
             trees,
             &self.reqs,
             &mut self.visible,
@@ -346,6 +346,7 @@ impl Resolver {
             self.tags,
             config.merge_same_named_types,
             run,
+            env.limits.max_cross_file_names,
         );
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
@@ -497,7 +498,7 @@ impl Resolver {
             &mut cross_edges,
         ) {
             Err(k) if k.cancelled => return Err(k),
-            outcome => outcome.err(),
+            outcome => too_many_names.or(outcome.err()),
         };
         let mut seen: FxHashSet<_> = edges
             .iter()
@@ -918,6 +919,7 @@ fn gather_imports_for(
     (all_reqs, all_edges)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn propagate_reexports(
     trees: &[Tree],
     reqs: &[ImportReq],
@@ -926,8 +928,11 @@ fn propagate_reexports(
     tags: ReservedTags,
     merge_types: bool,
     run: &Sentinel,
-) -> FxHashSet<(u32, u32)> {
+    max_names: usize,
+) -> (FxHashSet<(u32, u32)>, Option<Killed>) {
     let mut ambiguous: FxHashSet<(u32, u32)> = FxHashSet::default();
+    let mut names: usize = visible.iter().map(FxHashMap::len).sum();
+    let mut too_many_names = None;
     let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), merge_types);
 
     let mut visible_from_directives = Vec::new();
@@ -950,6 +955,7 @@ fn propagate_reexports(
         let mut unions: Vec<Option<PackageExports>> = vec![None; packages.len()];
         let mut new_exports: indexmap::IndexMap<(usize, u32), Loc, rustc_hash::FxBuildHasher> =
             Default::default();
+        let added = std::cell::Cell::new(0);
         let mut export = |fi: usize, name, loc: Loc| {
             if visible[fi].contains_key(&name) {
                 return;
@@ -957,6 +963,7 @@ fn propagate_reexports(
             match new_exports.entry((fi, name)) {
                 indexmap::map::Entry::Vacant(entry) => {
                     entry.insert(loc);
+                    added.set(added.get() + 1);
                 }
                 indexmap::map::Entry::Occupied(entry) => {
                     let existing = *entry.get();
@@ -969,6 +976,16 @@ fn propagate_reexports(
         };
         for (i, req) in reqs.iter().enumerate() {
             if i % 100_000 == 0 && run.check().is_err() {
+                break 'propagate;
+            }
+            if max_names > 0 && names + added.get() > max_names {
+                too_many_names = Some(Killed {
+                    cancelled: false,
+                    label: "names",
+                    path: String::new(),
+                    elapsed: Duration::ZERO,
+                    budget: Duration::ZERO,
+                });
                 break 'propagate;
             }
             match via[i] {
@@ -1033,11 +1050,12 @@ fn propagate_reexports(
         if new_exports.is_empty() {
             break;
         }
+        names += new_exports.len();
         for ((fi, ns), loc) in new_exports {
             visible[fi].insert(ns, loc);
         }
     }
-    ambiguous
+    (ambiguous, too_many_names)
 }
 
 type PackageExports = indexmap::IndexMap<u32, SmallVec<[Loc; 1]>, rustc_hash::FxBuildHasher>;
