@@ -25,6 +25,13 @@ pub enum ResolveError {
         detail: String,
     },
 
+    /// The archive endpoint answered 5xx or 429. This says nothing about the
+    /// repository, so it is never a checkpoint: the task is retried through
+    /// redelivery, and once attempts run out the backfill dispatcher re-sends
+    /// the project after `CODE_RETRY_AFTER`.
+    #[error("archive endpoint overloaded: {0}")]
+    Overloaded(String),
+
     #[error(transparent)]
     Other(#[from] HandlerError),
 }
@@ -39,7 +46,6 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
-    ServerError,
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
     EmptyArchive,
@@ -51,7 +57,6 @@ impl EmptyRepositoryReason {
     pub fn as_metric_label(self) -> &'static str {
         match self {
             EmptyRepositoryReason::NotFound => "not_found",
-            EmptyRepositoryReason::ServerError => "server_error",
             EmptyRepositoryReason::EmptyArchive => "empty_archive",
             EmptyRepositoryReason::RepositoryTooLarge => "repository_too_large",
         }
@@ -62,9 +67,7 @@ impl EmptyRepositoryReason {
     pub fn is_permanent(self) -> bool {
         match self {
             EmptyRepositoryReason::RepositoryTooLarge => true,
-            EmptyRepositoryReason::NotFound
-            | EmptyRepositoryReason::ServerError
-            | EmptyRepositoryReason::EmptyArchive => false,
+            EmptyRepositoryReason::NotFound | EmptyRepositoryReason::EmptyArchive => false,
         }
     }
 }
@@ -75,6 +78,10 @@ impl std::fmt::Display for EmptyRepositoryReason {
     }
 }
 
+/// A 404 from the archive endpoint is terminal for tasks without a commit SHA:
+/// Workhorse maps Gitaly's not-found, invalid-argument and failed-precondition
+/// (deleted project, no repository, no refs) to it, and `project_info` cannot
+/// tell those apart. Overload statuses are handled by `overload_detail`.
 fn classify_download_error(
     err: &RepositoryServiceError,
 ) -> Option<(EmptyRepositoryReason, String)> {
@@ -83,15 +90,20 @@ fn classify_download_error(
             EmptyRepositoryReason::NotFound,
             format!("project {id} not found (404)"),
         )),
+        _ => None,
+    }
+}
+
+/// Gitaly's `ResourceExhausted` surfaces as a Workhorse 500, so 5xx counts as overload.
+fn overload_detail(err: &RepositoryServiceError) -> Option<String> {
+    match err {
         RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
             project_id,
             status,
-        }) => Some((
-            EmptyRepositoryReason::ServerError,
-            format!(
-                "archive endpoint returned {status} for project {project_id} (repository likely missing)"
-            ),
-        )),
+        }) => Some(format!("{status} for project {project_id}")),
+        RepositoryServiceError::GitlabApi(rate_limited @ GitlabClientError::RateLimited { .. }) => {
+            Some(rate_limited.to_string())
+        }
         _ => None,
     }
 }
@@ -178,6 +190,11 @@ impl RepositoryResolver {
                     if let Some((reason, detail)) = classify_download_error(&err) {
                         return Step::GiveUp(ResolveError::EmptyRepository { reason, detail });
                     }
+                    // Skip the local retries: they would hit an overloaded server three more times per delivery.
+                    if let Some(detail) = overload_detail(&err) {
+                        warn!(project_id, ref_name, error = %err, "archive endpoint overloaded");
+                        return Step::GiveUp(ResolveError::Overloaded(detail));
+                    }
                     warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
                     let e = HandlerError::Processing(format!("failed to download archive: {err}"));
                     return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
@@ -231,7 +248,6 @@ mod tests {
         assert!(EmptyRepositoryReason::RepositoryTooLarge.is_permanent());
         for reason in [
             EmptyRepositoryReason::NotFound,
-            EmptyRepositoryReason::ServerError,
             EmptyRepositoryReason::EmptyArchive,
         ] {
             assert!(!reason.is_permanent());
@@ -553,23 +569,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_maps_archive_5xx_to_empty_repository() {
-        let service = ScriptedRepositoryService::with_download_error(|| {
-            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::ServerError {
+    async fn resolve_maps_archive_overload_statuses_to_overloaded_without_retrying() {
+        use gitlab_client::GitlabClientError;
+
+        let overloads: [fn() -> GitlabClientError; 3] = [
+            || GitlabClientError::ServerError {
                 project_id: 42,
                 status: 500,
-            })
-        });
-        let (_dir, resolver) = create_resolver(service);
+            },
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 503,
+            },
+            || GitlabClientError::RateLimited {
+                project_id: 42,
+                retry_after_secs: Some(30),
+            },
+        ];
+        for overload in overloads {
+            let service = ScriptedRepositoryService::with_download_error(move || {
+                RepositoryServiceError::GitlabApi(overload())
+            });
+            let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-        let err = resolver.resolve(42, "main", None).await.unwrap_err();
-
-        match err {
-            ResolveError::EmptyRepository { reason, detail } => {
-                assert_eq!(reason, EmptyRepositoryReason::ServerError);
-                assert!(detail.contains("500"), "detail was {detail}");
+            // Without a commit SHA (backfill) and with one (CDC), the outcome is the same.
+            for commit_sha in [None, Some("abc123")] {
+                let err = resolver.resolve(42, "main", commit_sha).await.unwrap_err();
+                assert!(matches!(err, ResolveError::Overloaded(_)), "got {err:?}");
             }
-            other => panic!("expected EmptyRepository, got {other:?}"),
+            assert_eq!(service.download_count(), 2, "no local retries");
         }
     }
 

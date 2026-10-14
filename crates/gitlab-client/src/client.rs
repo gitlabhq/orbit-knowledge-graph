@@ -375,6 +375,14 @@ impl GitlabClient {
             StatusCode::OK => Ok(()),
             StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
             StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
+            StatusCode::TOO_MANY_REQUESTS => Err(GitlabClientError::RateLimited {
+                project_id,
+                retry_after_secs: response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.trim().parse().ok()),
+            }),
             _ if status.is_server_error() => Err(GitlabClientError::ServerError {
                 project_id,
                 status: status.as_u16(),
@@ -733,5 +741,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn archive_overload_statuses_are_distinct_errors() {
+        use axum::Router;
+        use axum::http::{HeaderMap, HeaderValue, StatusCode as AxumStatus, header::RETRY_AFTER};
+        use axum::routing::get;
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{id}/repository/archive",
+            get(
+                |axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                    match id {
+                        1 => (AxumStatus::INTERNAL_SERVER_ERROR, HeaderMap::new()),
+                        2 => {
+                            let mut headers = HeaderMap::new();
+                            headers.insert(RETRY_AFTER, HeaderValue::from_static("30"));
+                            (AxumStatus::TOO_MANY_REQUESTS, headers)
+                        }
+                        _ => (AxumStatus::TOO_MANY_REQUESTS, HeaderMap::new()),
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = client_with_breaker(&format!("http://{addr}"), &circuit_breaker(2));
+
+        let err = |result: Result<ByteStream, GitlabClientError>| result.err().unwrap();
+        assert!(matches!(
+            err(client.download_archive(1, "main").await),
+            GitlabClientError::ServerError { status: 500, .. }
+        ));
+        assert!(matches!(
+            err(client.download_archive(2, "main").await),
+            GitlabClientError::RateLimited {
+                retry_after_secs: Some(30),
+                ..
+            }
+        ));
+        assert!(matches!(
+            err(client.download_archive(3, "main").await),
+            GitlabClientError::RateLimited {
+                retry_after_secs: None,
+                ..
+            }
+        ));
     }
 }

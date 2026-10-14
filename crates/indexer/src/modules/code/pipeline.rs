@@ -424,6 +424,12 @@ impl CodeIndexer {
                     .record_error_stage(&self.metrics, "checkpoint")?;
                 return Ok(Fetched::EmptyRepository);
             }
+            Err(ResolveError::Overloaded(detail)) => {
+                self.metrics.record_stage_error("repository_fetch_overload");
+                return Err(HandlerError::Processing(format!(
+                    "archive endpoint overloaded ({detail}); retrying"
+                )));
+            }
             Err(ResolveError::Other(err)) => {
                 self.metrics.record_stage_error("repository_fetch");
                 return Err(err);

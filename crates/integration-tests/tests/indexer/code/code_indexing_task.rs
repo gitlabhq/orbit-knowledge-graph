@@ -1093,6 +1093,60 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
+async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
+    let project_id: i64 = 7;
+    let traversal_path = "1/7/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    // Gitaly ResourceExhausted reaches the indexer as a 500; a rate limit as a 429.
+    for status in [
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+    ] {
+        mock.set_archive_status(project_id, Some(status));
+        let envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+        let result = handler.handle(handler_context(), envelope).await;
+        assert!(
+            result.is_err(),
+            "{status} on a backfill task must nack for retry, got {result:?}"
+        );
+    }
+
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [2]);
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None,
+        "overload must not write an indexed-empty checkpoint"
+    );
+
+    mock.set_archive_status(project_id, None);
+    let envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the redelivered task indexes once the endpoint recovers");
+    deps.pipeline.flush().await.expect("flush");
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
+}
+
+#[tokio::test]
 async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";

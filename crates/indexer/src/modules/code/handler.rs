@@ -830,30 +830,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_error_without_commit_sha_sets_checkpoint_and_acks() {
+    async fn archive_overload_without_commit_sha_nacks_and_never_checkpoints_empty() {
         use crate::modules::code::repository::RepositoryServiceError;
         use gitlab_client::GitlabClientError;
 
-        let ctx = TestContext::new();
-        ctx.mock_repo.set_download_error(
-            123,
-            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+        let overloads: [fn() -> GitlabClientError; 2] = [
+            || GitlabClientError::ServerError {
                 project_id: 123,
                 status: 500,
-            }),
-        );
+            },
+            || GitlabClientError::RateLimited {
+                project_id: 123,
+                retry_after_secs: None,
+            },
+        ];
+        for overload in overloads {
+            let ctx = TestContext::new();
+            ctx.mock_repo
+                .set_download_error(123, RepositoryServiceError::GitlabApi(overload()));
 
-        let envelope = TestContext::make_request_with_sha(7, 123, "main", None);
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+            let envelope = TestContext::make_request_with_sha(7, 123, "main", None);
+            let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
-        assert!(result.is_ok());
-        let checkpoint = ctx
-            .mock_checkpoints
-            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
-            .await
-            .unwrap()
-            .expect("checkpoint should be set for missing repository");
-        assert_eq!(checkpoint.last_task_id, 7);
+            assert!(
+                matches!(result, Err(HandlerError::Processing(_))),
+                "overload must be retried, got {result:?}"
+            );
+            let checkpoint = ctx
+                .mock_checkpoints
+                .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+                .await
+                .unwrap()
+                .expect("start-of-attempt checkpoint is saved");
+            assert!(checkpoint.indexed_at.is_none(), "must not be indexed-empty");
+            assert_eq!(checkpoint.last_task_id, 0);
+            assert_eq!(checkpoint.attempts, 1, "counts toward the dispatcher cap");
+        }
     }
 
     #[tokio::test]

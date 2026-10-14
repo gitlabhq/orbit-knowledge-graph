@@ -202,6 +202,8 @@ struct ProjectData {
     /// projects that lack repository content.
     empty_archive_body: bool,
     slow_archive: bool,
+    /// When set, the archive endpoint answers with this status instead of an archive.
+    archive_status: Option<StatusCode>,
 }
 
 pub struct MockGitlabServer {
@@ -261,6 +263,7 @@ impl MockGitlabServer {
                 archive_files,
                 empty_archive_body: false,
                 slow_archive: false,
+                archive_status: None,
             },
         );
     }
@@ -277,6 +280,7 @@ impl MockGitlabServer {
                 )],
                 empty_archive_body: false,
                 slow_archive: true,
+                archive_status: None,
             },
         );
     }
@@ -292,8 +296,16 @@ impl MockGitlabServer {
                 archive_files: Vec::new(),
                 empty_archive_body: true,
                 slow_archive: false,
+                archive_status: None,
             },
         );
+    }
+
+    /// Make the archive endpoint answer with `status` (e.g. 500 or 429) until reset with `None`.
+    pub fn set_archive_status(&self, project_id: i64, status: Option<StatusCode>) {
+        if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
+            project.archive_status = status;
+        }
     }
 
     pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
@@ -346,6 +358,7 @@ async fn handle_download_archive(
     }
     let projects = state.projects.lock();
     match projects.get(&project_id) {
+        Some(p) if p.archive_status.is_some() => p.archive_status.unwrap().into_response(),
         Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),
         Some(p) => {
             let files: Vec<(&str, &str)> = p
