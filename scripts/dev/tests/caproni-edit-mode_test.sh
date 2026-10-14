@@ -30,7 +30,7 @@ check "overlay path" "$TMP/caproni-indexer-sdlc.yaml" "$overlay"
 check "probe port rewritten" "0.0.0.0:9395" "$(yq '.probe_server.bind_address' "$overlay")"
 check "other keys untouched" "gkg" "$(yq '.graph.database' "$overlay")"
 check "grpc bind untouched" "0.0.0.0:50054" "$(yq '.grpc_bind_address' "$overlay")"
-check "overlay is private" "600" "$(stat -f '%Lp' "$overlay" 2>/dev/null || stat -c '%a' "$overlay")"
+check "overlay is private" "600" "$(stat -c '%a' "$overlay" 2>/dev/null || stat -f '%Lp' "$overlay")"
 # The server refuses a config where metrics.prometheus.port disagrees with the probe
 # bind address, so the deprecated key must go when the port moves.
 check "deprecated prometheus port removed" "null" "$(yq '.metrics.prometheus.port' "$overlay")"
