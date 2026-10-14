@@ -16,10 +16,9 @@ query:
     MATCH (mr:MergeRequest {id: 99000, state: 'opened'})<-[:APPROVED]-(neighbor)
     RETURN neighbor
 expect:
-  skip_requirements: ["filter:state"]
   node_count: 2
   nodes:
-    MergeRequest: { ids: [99000] }
+    MergeRequest: { ids: [99000], filters: { state: opened } }
     User: { ids: [99002] }
   edges:
     APPROVED: [[99002, 99000]]

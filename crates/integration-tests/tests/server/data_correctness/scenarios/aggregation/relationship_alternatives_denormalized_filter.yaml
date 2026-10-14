@@ -6,9 +6,11 @@ config:
     gl_merge_request:
       - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, author_id: 99002, state: opened, title: authored }
       - { id: 99001, traversal_path: "1/100/1000/", project_id: 1000, state: opened, title: approved }
+      - { id: 99004, traversal_path: "1/100/1000/", project_id: 1000, author_id: 99002, state: merged, title: merged }
     gl_edge:
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99000, target_kind: MergeRequest, target_tags: ["state:opened"] }
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99001, target_kind: MergeRequest, target_tags: ["state:opened"] }
+      - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99004, target_kind: MergeRequest, target_tags: ["state:merged"] }
 query:
   gql: |
     MATCH (u:User {id: 99002})-[:AUTHORED|APPROVED]->(mr:MergeRequest {state: 'opened'})
