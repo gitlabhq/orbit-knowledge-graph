@@ -16,9 +16,18 @@ const NOTE: &str = "» ";
 /// A query that names a definition gets that definition's source first, so `head` keeps it.
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
 const LOOKUP_LINES: usize = 80;
-/// Matched lines are cut here, as rg does with `-M`, unless `-M` sets another limit.
-const LINE_CHARS: usize = 160;
 const EDITED_MARK: &str = " (edited since index)";
+/// Marks code matches that no indexed definition encloses, such as Rust `#[cfg(test)]`
+/// modules, so they do not read as part of the definition above.
+const OUTSIDE: &str = "outside indexed definitions";
+
+#[derive(PartialEq)]
+enum Scope<'a> {
+    Start,
+    Def(&'a Def),
+    Imports(usize),
+    Outside,
+}
 
 fn definition_note(def: &Def, connections: &Connections) -> String {
     let span = match def.end > def.start {
@@ -123,7 +132,9 @@ pub(super) fn render(
     }
     // rg's heading layout: each file's path once, then `line:text` for matches, `line-text` for
     // -A/-B/-C context, and `line-» Kind name:start-end ←callers →callees` before each enclosing
-    // definition, with `--` between separate groups and a blank line between files.
+    // definition, with `--` between separate groups and a blank line between files. Import lines
+    // get `line-» imports ...`, and code outside any indexed definition gets an `outside` line.
+    // Lines print in full: `head` truncates, and `-M` replaces lines wider than its limit.
     for (index, (file, list)) in rows.iter().enumerate() {
         if index > 0 {
             out.push('\n');
@@ -134,29 +145,45 @@ pub(super) fn render(
             ""
         };
         out.push_str(&format!("{file}{mark}\n"));
-        let mut current: Option<&Def> = None;
+        let code = is_code(file);
+        let mut scope = Scope::Start;
         let mut previous: Option<usize> = None;
         for hit in list {
+            let adjacent = previous.is_some_and(|line| hit.line == line + 1);
             if previous.is_some_and(|line| hit.line > line + 1)
                 && (options.before > 0 || options.after > 0)
             {
                 out.push_str("--\n");
             }
             previous = Some(hit.line);
-            if let Some(def) = hit.def.as_ref().filter(|def| current != Some(*def)) {
-                out.push_str(&format!(
-                    "{}-{NOTE}{}\n",
-                    def.start,
-                    definition_note(def, connections)
-                ));
-            }
-            current = hit.def.as_ref();
-            let text = match options.max_columns {
-                Some(max) if hit.text.len() > max => "[Omitted long line]".to_string(),
-                None if hit.text.chars().count() > LINE_CHARS => {
-                    format!("{}…", hit.text.chars().take(LINE_CHARS).collect::<String>())
+            let next = match (&hit.def, hit.imports.is_empty()) {
+                (Some(def), _) => Scope::Def(def),
+                (None, false) => Scope::Imports(hit.line),
+                (None, true) if scope == Scope::Start && !code => Scope::Start,
+                (None, true) => Scope::Outside,
+            };
+            if next != scope {
+                match &next {
+                    Scope::Def(def) => out.push_str(&format!(
+                        "{}-{NOTE}{}\n",
+                        def.start,
+                        definition_note(def, connections)
+                    )),
+                    Scope::Imports(_) => out.push_str(&format!(
+                        "{}-{NOTE}imports {}\n",
+                        hit.line,
+                        hit.imports.join(", ")
+                    )),
+                    Scope::Outside if !(matches!(scope, Scope::Imports(_)) && adjacent) => {
+                        out.push_str(&format!("{}-{NOTE}{OUTSIDE}\n", hit.line))
+                    }
+                    _ => {}
                 }
-                _ => hit.text.clone(),
+            }
+            scope = next;
+            let text = match options.max_columns.is_some_and(|max| hit.text.len() > max) {
+                true => "[Omitted long line]",
+                false => hit.text.as_str(),
             };
             let sep = if hit.context { '-' } else { ':' };
             out.push_str(&format!("{}{sep}{text}\n", hit.line));
@@ -251,46 +278,75 @@ mod tests {
             line,
             text,
             def,
+            imports: Vec::new(),
             context: false,
         }
     }
 
-    fn show(hits: &[Hit], terms: &[Term], output: Output, edited: &[&str]) -> String {
+    fn render_with(hits: &[Hit], terms: &[Term], options: &Options, edited: &[&str]) -> String {
         let edited = edited.iter().map(|f| f.to_string()).collect();
-        let options = Options {
-            output,
-            ..Options::default()
-        };
         render(
             "grep",
             hits,
             terms,
             &Connections::new(),
             &edited,
-            &options,
+            options,
             None,
         )
         .unwrap()
     }
 
+    fn show(hits: &[Hit], terms: &[Term], output: Output, edited: &[&str]) -> String {
+        let options = Options {
+            output,
+            ..Options::default()
+        };
+        render_with(hits, terms, &options, edited)
+    }
+
+    fn import(file: &str, line: usize, text: &str, label: &str) -> Hit {
+        let mut hit = hit(file, line, text, None);
+        hit.imports = vec![label.into()];
+        hit
+    }
+
     #[test]
-    fn rows_group_lines_under_definitions_with_defining_files_first() {
+    fn matches_print_under_file_headings_with_graph_lines() {
         let hits = [
             hit("data.json", 1, "\"go\": 0,", None),
-            hit("src/a.rs", 3, "go();", Some(("run", 1, 9))),
-            hit("src/a.rs", 4, "go();", Some(("run", 1, 9))),
+            import("src/a.rs", 1, "use go::{", "go (go::go) → src/go.rs:4"),
+            hit("src/a.rs", 2, "    go,", None),
+            hit("src/a.rs", 3, "go();", Some(("run", 3, 9))),
+            hit("src/a.rs", 4, "go();", Some(("run", 3, 9))),
+            hit("src/a.rs", 12, "go();", Some(("walk", 11, 14))),
+            hit("src/a.rs", 20, "go();", None),
+            import("src/a.rs", 30, "use go::stop;", "stop (go::stop)"),
+            hit("src/a.rs", 40, "go();", None),
             hit("src/b.rs", 2, "fn go() {}", None),
         ];
         let terms = [Term::parse("go"), Term::parse("nope")];
         assert_eq!(
             show(&hits, &terms, Output::Lines, &["src/b.rs"]),
-            "grep: 4 lines in 3 files (go 4, nope 0)
+            "grep: 10 lines in 3 files (go 10, nope 0)
 src/a.rs
-1-» Function run:1-9
+1-» imports go (go::go) → src/go.rs:4
+1:use go::{
+2:    go,
+3-» Function run:3-9
 3:go();
 4:go();
+11-» Function walk:11-14
+12:go();
+20-» outside indexed definitions
+20:go();
+30-» imports stop (go::stop)
+30:use go::stop;
+40-» outside indexed definitions
+40:go();
 
 src/b.rs (edited since index)
+2-» outside indexed definitions
 2:fn go() {}
 
 data.json
@@ -299,7 +355,20 @@ data.json
         );
         assert_eq!(
             show(&hits, &terms, Output::Count, &[]),
-            "src/a.rs:2\nsrc/b.rs:1\ndata.json:1\n"
+            "src/a.rs:8\nsrc/b.rs:1\ndata.json:1\n"
         );
+    }
+
+    #[test]
+    fn long_lines_print_in_full_unless_max_columns_is_set() {
+        let long = "x".repeat(400);
+        let hits = [hit("data.txt", 1, &long, None)];
+        let terms = [Term::parse("x")];
+        assert!(show(&hits, &terms, Output::Lines, &[]).ends_with(&format!("1:{long}\n")));
+        let options = Options {
+            max_columns: Some(100),
+            ..Options::default()
+        };
+        assert!(render_with(&hits, &terms, &options, &[]).ends_with("1:[Omitted long line]\n"));
     }
 }
