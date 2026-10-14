@@ -165,6 +165,7 @@ fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error
     use code_graph::v2::error::{AbortPhase, FileSkip};
     let kind = match killed.label {
         "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
+        "resolve" => FileSkip::ResolveTimeout,
         "names" => FileSkip::TooManyNames,
         "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
         "depth" => FileSkip::DeeplyNested,

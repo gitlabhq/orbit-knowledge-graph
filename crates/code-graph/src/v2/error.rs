@@ -115,6 +115,7 @@ pub enum FileSkip {
     TooManyFieldCopies,
     TooManyNames,
     CrossFileTimeout,
+    ResolveTimeout,
     Timeout(AbortPhase),
 }
 
@@ -132,6 +133,7 @@ impl FileSkip {
             Self::TooManyFieldCopies => "too_many_field_copies",
             Self::TooManyNames => "too_many_names",
             Self::CrossFileTimeout => "timeout_cross_file",
+            Self::ResolveTimeout => "timeout_resolve",
             Self::Timeout(AbortPhase::Parse) => "timeout_parse",
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
             Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",
