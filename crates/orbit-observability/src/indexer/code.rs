@@ -120,8 +120,13 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.files.skipped",
     "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
      Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, \
-     `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts \
-     `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`. \
+     `arrow_offset_overflow`, `unsafe_path`, `deeply_nested`, `stack_limit`, \
+     `too_many_edges`, per-phase CPU-budget timeouts `timeout_parse`, \
+     `timeout_walk`, `timeout_ssa`, `timeout_sentinel`, and the per-file resolve \
+     timeout `timeout_resolve`. Cross-file stops `too_many_names` and \
+     `timeout_cross_file` count once per language family per run, with an empty path. \
+     `too_many_field_copies` counts a file that stays in the graph with its \
+     field flows cut at the copy limit. \
      `language` comes from the file extension, `unknown` when none matches.",
     None,
     &[labels::REASON, labels::LANGUAGE],
