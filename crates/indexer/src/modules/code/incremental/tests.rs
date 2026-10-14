@@ -177,8 +177,8 @@ async fn language_timings_exclude_files_beyond_max_files() {
 async fn files_nested_past_the_default_depth_limit_are_skipped() {
     let nested = format!(
         "function nested(c) {{\n{}{}}}\n",
-        "if (c) {\n".repeat(2_000),
-        "}\n".repeat(2_000)
+        "if (c) {\n".repeat(5_000),
+        "}\n".repeat(5_000)
     );
     let files: &[(&str, &[u8])] = &[
         ("root/nested.js", nested.as_bytes()),
@@ -192,6 +192,27 @@ async fn files_nested_past_the_default_depth_limit_are_skipped() {
     assert_eq!(timings.skipped_paths, ["nested.js"]);
     assert_eq!(timings.skipped_reasons, ["deeply_nested"]);
     assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+}
+
+#[tokio::test]
+async fn a_long_or_pattern_is_indexed_under_the_default_depth_limit() {
+    let codes: Vec<_> = (0..2_000).map(|i| format!("Code.E{i}")).collect();
+    let source = format!(
+        "enum Code {{ {} }}\nclass Facts {{\n    static bool IsWarning(Code code) => code switch {{\n        {} => true,\n        _ => false,\n    }};\n}}\n",
+        (0..2_000)
+            .map(|i| format!("E{i}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        codes.join("\n            or ")
+    );
+    let files: &[(&str, &[u8])] = &[("root/Facts.cs", source.as_bytes())];
+    let limits = code_graph_incremental::Limits {
+        max_tree_depth: limits(&config()).max_tree_depth,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.languages, [("csharp".to_owned(), 1)]);
 }
 
 #[tokio::test]
