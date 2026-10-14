@@ -23,9 +23,8 @@ Use mise for all tasks.
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
 Commits title and keep it there through review.
 
-When ready for CI, remove `[skip ci]` from the title, then start a pipeline
-with `POST /projects/:id/merge_requests/:iid/pipelines`. Editing the title
-alone starts no pipeline. Check that the new MR pipeline is not skipped.
+When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
+Editing the title alone starts no pipeline.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
