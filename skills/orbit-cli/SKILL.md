@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.24.1
+version: 0.24.2
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -54,7 +54,8 @@ with regex characters match as regex. Output follows rg's heading layout: each
 file's path once, then `line:text` per match, in full. A `line-» Kind name:start-end
 ←callers →callees` line precedes the matches inside each definition, `line-» imports`
 names what an import line brings in, and `line-» outside indexed definitions` marks
-code no definition encloses. Pipe through `head` to bound output; `-m N` caps matches
+code no definition encloses. A path that does not exist searches tracked paths with the same last segment.
+A scoped search with no matches widens one directory at a time. A `»` line says what was searched. Pipe through `head` to bound output; `-m N` caps matches
 per file and `-M N` hides lines wider than N. Files that define
 a term come first, then code, tests, and config or docs. A definition the query names prints first with its source.
 The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.

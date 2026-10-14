@@ -1559,6 +1559,20 @@ fn grep_lists_matching_lines_with_their_definitions() {
         let (out, err, ok) = run_cmd(&[command, query, "--repo", repo_arg], dd);
         assert!(ok && out.contains(expected), "{query}: {err}\n{out}");
     }
+    let (out, err, ok) = run_cmd(&["grep", "open", "src/main.py", "--repo", repo_arg], dd);
+    assert!(
+        ok && out.contains("» 0 matching lines in src/main.py; showing matches in src\n")
+            && out.contains("src/utils.py\n"),
+        "{err}\n{out}"
+    );
+    let (out, err, ok) = run_cmd(
+        &["grep", "read_file", "lib/utils.py", "--repo", repo_arg],
+        dd,
+    );
+    assert!(
+        ok && out.contains("» lib/utils.py not found; searched src/utils.py\n"),
+        "{err}\n{out}"
+    );
     for missing in [
         "src.utils.read",
         "' OR true --",
