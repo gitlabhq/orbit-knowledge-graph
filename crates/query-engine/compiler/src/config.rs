@@ -140,12 +140,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [query_plan, query_config]
         }
         codegen {
-            reads_state: [node, input, pagination]
-            mutates: [result_ctx, query_config, hydration_plan, pagination, output]
+            reads_state: [pagination]
+            mutates: [node, input, result_ctx, query_config, hydration_plan, pagination, output]
         }
         duckdb_codegen {
-            reads_state: [node, input, pagination]
-            mutates: [result_ctx, hydration_plan, pagination, output]
+            reads_state: [pagination]
+            mutates: [node, input, result_ctx, hydration_plan, pagination, output]
         }
     }
 
@@ -408,8 +408,8 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
-    let node = require(ctx.node().clone(), "node")?;
-    check::check_ast(&node, ctx.security_ctx(), ctx.data_model())
+    let node = require(ctx.node().as_ref(), "node")?;
+    check::check_ast(node, ctx.security_ctx(), ctx.data_model())
 }
 
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
@@ -426,12 +426,12 @@ where
 }
 
 fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
-    let query_type: &str = input.query_type.into();
-    let mut config = settings::resolve(query_type);
+    let input = require(ctx.input().as_ref(), "input")?;
+    let query_type = input.query_type;
+    let mut config = settings::resolve(query_type.into());
 
-    let node = require(ctx.node().clone(), "node")?;
-    if let Node::Query(q) = &node {
+    let node = require(ctx.node().as_ref(), "node")?;
+    if let Node::Query(q) = node {
         let derived = &mut config.compiler_derived;
         derived.null_in_is_unknown = input.has_negation();
         visit_queries(q, &mut |query| {
@@ -455,7 +455,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.
-    if input.query_type == QueryType::PathFinding {
+    if query_type == QueryType::PathFinding {
         if config.max_execution_time.is_none()
             || config.max_execution_time > Some(PATHFINDING_MAX_EXECUTION_TIME)
         {
@@ -476,8 +476,8 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = require(ctx.node().clone(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
+    let node = require(ctx.take_node(), "node")?;
+    let input = require(ctx.take_input(), "input")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::codegen(&node, result_context, query_config)?;
     let query_type = input.query_type;
@@ -496,8 +496,8 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = require(ctx.node().clone(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
+    let node = require(ctx.take_node(), "node")?;
+    let input = require(ctx.take_input(), "input")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::duckdb::codegen(&node, result_context)?;
     let query_type = input.query_type;
