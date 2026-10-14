@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::intern::Lang;
-use crate::sentinel::Killed;
+use crate::sentinel::{Killed, Stop};
 use crate::tree::{Node, Tree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, strum::IntoStaticStr)]
@@ -413,9 +413,7 @@ pub fn parse_with_sentinel(
             let stop = match sentinel.check() {
                 Ok(()) => match guard(state.current_byte_offset()) {
                     ControlFlow::Continue(()) => return ControlFlow::Continue(()),
-                    ControlFlow::Break((reason, observed, cap)) => {
-                        Killed::limit(reason, label, observed, cap)
-                    }
+                    ControlFlow::Break((reason, stop)) => Killed::stopped(reason, label, stop),
                 },
                 Err(error) => error,
             };
@@ -428,12 +426,14 @@ pub fn parse_with_sentinel(
         let ts_tree = c
             .parser
             .parse_with_options(&mut input, None, Some(options))
-            .ok_or_else(|| stopped.unwrap_or_else(|| Killed::limit("tree-sitter", label, 0, 0)))?;
+            .ok_or_else(|| {
+                stopped.unwrap_or_else(|| Killed::stopped("tree-sitter", label, Stop::Failed))
+            })?;
         sentinel.check()?;
         let tree = from_tree_sitter(
             source, &ts_tree, lang, &c.kinds, &c.fields, label, max_depth,
         )
-        .ok_or_else(|| Killed::limit("depth", label, max_depth + 1, max_depth))?;
+        .ok_or_else(|| Killed::limit("depth", label, depth_of(&ts_tree), max_depth))?;
         sentinel.check()?;
         Ok(tree)
     })
@@ -442,11 +442,31 @@ pub fn parse_with_sentinel(
 const MAX_STALL: usize = 100_000;
 const PARSE_STACK_RESERVE: usize = 256 * 1024;
 
-fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, usize, usize)> {
+fn depth_of(tree: &tree_sitter::Tree) -> usize {
+    let mut cursor = tree.walk();
+    let mut deepest = 0;
+    loop {
+        deepest = deepest.max(cursor.depth() as usize);
+        if cursor.goto_first_child() || cursor.goto_next_sibling() {
+            continue;
+        }
+        loop {
+            if !cursor.goto_parent() {
+                return deepest;
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+}
+
+fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, Stop)> {
     let (mut last_offset, mut stalled) = (usize::MAX, 0);
     move |offset| {
         if let Some(left) = stacker::remaining_stack().filter(|&left| left < PARSE_STACK_RESERVE) {
-            return ControlFlow::Break(("stack", left, PARSE_STACK_RESERVE));
+            let reserve = PARSE_STACK_RESERVE;
+            return ControlFlow::Break(("stack", Stop::Below { left, reserve }));
         }
         if offset != last_offset {
             (last_offset, stalled) = (offset, 0);
@@ -454,7 +474,13 @@ fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, usize, usize
         }
         stalled += 1;
         match stalled > MAX_STALL {
-            true => ControlFlow::Break(("tree-sitter", stalled, MAX_STALL)),
+            true => ControlFlow::Break((
+                "tree-sitter",
+                Stop::Reached {
+                    observed: stalled,
+                    cap: MAX_STALL,
+                },
+            )),
             false => ControlFlow::Continue(()),
         }
     }
@@ -486,8 +512,26 @@ mod tests {
             .spawn(move || parse(&source, SupportLang::Python, &Lang::default(), "main.py").err())
             .unwrap()
             .join()
+            .unwrap()
             .unwrap();
-        assert_eq!(killed.map(|killed| killed.label), Some("stack"));
+        assert_eq!(killed.label, "stack");
+        assert!(matches!(killed.stop, Some(Stop::Below { left, reserve }) if left < reserve));
+    }
+
+    #[test]
+    fn a_tree_past_the_depth_limit_reports_its_real_depth() {
+        let source = format!("x = {}1{}\n", "[".repeat(50), "]".repeat(50));
+        let killed = parse_with_sentinel(
+            &source,
+            SupportLang::Python,
+            &Lang::default(),
+            "deep.py",
+            &crate::sentinel::Sentinel::disabled(),
+            10,
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(killed.stop, Some(Stop::Reached { observed, cap: 10 }) if observed > 50));
     }
 
     #[test]
