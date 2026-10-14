@@ -925,6 +925,8 @@ fn gather_imports_for(
     (all_reqs, all_edges)
 }
 
+const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
+
 #[allow(clippy::too_many_arguments)]
 fn propagate_reexports(
     trees: &[Tree],
@@ -981,7 +983,7 @@ fn propagate_reexports(
             }
         };
         for (i, req) in reqs.iter().enumerate() {
-            if i % 100_000 == 0 && run.check().is_err() {
+            if i % PROPAGATE_CHECK_INTERVAL == 0 && run.check().is_err() {
                 break 'propagate;
             }
             if max_names > 0 && names + added.get() > max_names {
