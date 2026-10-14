@@ -178,6 +178,22 @@ async fn files_nested_past_the_default_depth_limit_are_skipped() {
 }
 
 #[tokio::test]
+async fn a_deep_relative_import_stays_inside_the_rewrite_budget() {
+    let deep = format!(
+        "from {} import x\n\ndef f():\n    pass\n",
+        ".".repeat(60_000)
+    );
+    let files: &[(&str, &[u8])] = &[("root/main.py", deep.as_bytes())];
+    let limits = code_graph_incremental::Limits {
+        file_rewrite_ms: 2_000,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert_eq!(timings.skipped_paths, Vec::<String>::new());
+    assert_eq!(timings.languages, [("python".to_owned(), 1)]);
+}
+
+#[tokio::test]
 async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     let files: &[(&str, &[u8])] = &[
         ("root/a.js", b"function a() {}\n"),
