@@ -44,7 +44,7 @@ Rails can now run the stream itself, behind the `orbit_query_in_rails` feature
 flag
 ([#1381](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1381),
 rollout in
-[gitlab-org/gitlab#633423](https://gitlab.com/gitlab-org/gitlab/-/issues/633423)).
+[the GitLab rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/633423)).
 Its runner marks the request as IO-bound. Once `max_io_threads` is configured,
 the request then does not hold a regular Puma thread. That setting defaults to
 0, and the deployment tasks in #1381 are open. The runner also redacts in
