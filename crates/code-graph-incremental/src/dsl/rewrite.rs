@@ -251,23 +251,24 @@ pub fn apply_display(
     lang: &Lang,
     rules: &[Rewrite],
     edge_ctx: &EdgeCtx,
-) -> Tree<Compact> {
+    run: &Sentinel,
+) -> Result<Tree<Compact>, Killed> {
     if rules.iter().all(|rule| matches!(rule.out, Out::Tag(..))) {
         let mut tree = t;
-        let _ = apply_rewrites_inner(
+        apply_rewrites_inner(
             &mut tree,
             lang,
             rules,
             true,
             Some(edge_ctx),
-            &[],
+            &[run],
             |_, _, _, _, _, _| false,
-        );
-        tree
+        )?;
+        Ok(tree)
     } else {
         let mut tree: Tree = t.into();
-        let _ = apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[]);
-        tree.into()
+        apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[run])?;
+        Ok(tree.into())
     }
 }
 

@@ -562,15 +562,15 @@ impl Phase<Resolved> for Display {
             .map(|(fi, tree)| {
                 let rules = &env.rules_for(&tree.label).display_rules;
                 if rules.is_empty() {
-                    return tree;
+                    return Ok(tree);
                 }
                 let ctx = EdgeCtx {
                     tree_index: fi as u32,
                     edges: &edges,
                 };
-                pattern::apply_display(tree, &env.lang, rules, &ctx)
+                pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)
             })
-            .collect();
+            .collect::<Result<_, Killed>>()?;
         Ok(Displayed { state })
     }
 }
@@ -631,5 +631,65 @@ where
             })?;
         }
         Ok(Displayed { state })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::pipeline::Observer;
+    use crate::{Limits, templates};
+    use orbit_utils::vfs::{Decision, File, Pass, Vfs, sources::Directory};
+
+    struct KeepAll;
+
+    impl Pass for KeepAll {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Pending
+        }
+        fn content(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Keep(())
+        }
+    }
+
+    struct ArmOn(&'static str, Arc<AtomicUsize>);
+
+    impl Observer for ArmOn {
+        fn started(&mut self, phase: &str) {
+            if phase == self.0 {
+                self.1.store(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[test]
+    fn display_stops_when_the_run_is_cancelled() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::write(repo.path().join("main.py"), "def f():\n    pass\n").unwrap();
+        let env =
+            Env::with_limits(crate::treesitter::SupportLang::Python, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let checks = Arc::new(AtomicUsize::new(0));
+        let counted = checks.clone();
+        let mut context = Context::new(&env, repository).observe(ArmOn("display", checks));
+        context.run = context.run.with_cancellation(Arc::new(move || {
+            counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= 2
+        }));
+
+        let displayed = templates::index(context).and_then(|graph| graph.then(Display));
+
+        assert!(matches!(displayed, Err(Error::Killed(killed)) if killed.cancelled));
     }
 }
