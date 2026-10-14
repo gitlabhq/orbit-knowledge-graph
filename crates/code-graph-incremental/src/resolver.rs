@@ -927,6 +927,7 @@ fn propagate_reexports(
     run: &Sentinel,
 ) -> FxHashSet<(u32, u32)> {
     let mut ambiguous: FxHashSet<(u32, u32)> = FxHashSet::default();
+    let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), merge_types);
 
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
@@ -944,10 +945,23 @@ fn propagate_reexports(
         if run.check().is_err() {
             break;
         }
-        let mut new_exports = Vec::new();
-        let mut export = |fi: usize, name, loc| {
-            if !visible[fi].contains_key(&name) {
-                new_exports.push((fi, name, loc));
+        let mut new_exports: indexmap::IndexMap<(usize, u32), Loc, rustc_hash::FxBuildHasher> =
+            Default::default();
+        let mut export = |fi: usize, name, loc: Loc| {
+            if visible[fi].contains_key(&name) {
+                return;
+            }
+            match new_exports.entry((fi, name)) {
+                indexmap::map::Entry::Vacant(entry) => {
+                    entry.insert(loc);
+                }
+                indexmap::map::Entry::Occupied(entry) => {
+                    let existing = *entry.get();
+                    if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
+                        ambiguous
+                            .insert((u32::try_from(fi).expect("file index exceeds u32"), name));
+                    }
+                }
             }
         };
         for (i, req) in reqs.iter().enumerate() {
@@ -1002,14 +1016,7 @@ fn propagate_reexports(
         if new_exports.is_empty() {
             break;
         }
-        for (fi, ns, loc) in new_exports {
-            if let Some(&existing) = visible[fi].get(&ns) {
-                let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), merge_types);
-                if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
-                    ambiguous.insert((u32::try_from(fi).expect("file index exceeds u32"), ns));
-                }
-                continue;
-            }
+        for ((fi, ns), loc) in new_exports {
             visible[fi].insert(ns, loc);
         }
     }
