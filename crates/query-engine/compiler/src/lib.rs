@@ -1826,7 +1826,12 @@ mod tests {
                 r#""from":"a","to":"x","direction":"incoming""#,
                 "gl_edge",
             ),
-            ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
+            (
+                "Directory",
+                "File",
+                r#""from":"a","to":"x""#,
+                "gl_code_edge",
+            ),
             ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
             ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
         ];

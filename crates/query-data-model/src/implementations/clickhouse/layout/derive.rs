@@ -275,23 +275,35 @@ impl crate::Relational<ClickHouse> {
                 .entry(node.destination_table.clone())
                 .or_default()
                 .insert(node.name.clone());
+            for mapping in node
+                .pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+            {
+                for route in ontology.edge_routes_for_mapping(mapping) {
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(node.name.clone());
+                }
+            }
         }
-        for entity in ontology
-            .node_names()
-            .chain(
-                ontology
-                    .derived_entities()
-                    .map(|entity| entity.name.as_str()),
-            )
-            .chain(ontology.edge_names())
-        {
-            for kind in ontology.relationship_kinds_emitted_by(entity) {
-                for table in relationship_tables.get(&kind).into_iter().flatten() {
+        for derived in ontology.derived_entities() {
+            for kind in &derived.emits {
+                for table in relationship_tables.get(kind).into_iter().flatten() {
                     writers
                         .entry(table.clone())
                         .or_default()
-                        .insert(entity.to_string());
+                        .insert(derived.name.clone());
                 }
+            }
+        }
+        for kind in ontology.edge_names() {
+            for table in relationship_tables.get(kind).into_iter().flatten() {
+                writers
+                    .entry(table.clone())
+                    .or_default()
+                    .insert(kind.to_string());
             }
         }
         Ok(Self {

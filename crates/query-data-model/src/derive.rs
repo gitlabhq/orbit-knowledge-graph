@@ -91,6 +91,21 @@ mod tests {
     }
 
     #[test]
+    fn writer_catalog_tracks_exact_node_mapping_routes() {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let model = ClickHouseDataModel::derive(ontology).unwrap();
+
+        let code_writers = model.layout().schema().writers("gl_code_edge").unwrap();
+        assert!(code_writers.contains("CONTAINS"));
+        assert!(!code_writers.contains("Group"));
+        assert!(!code_writers.contains("Project"));
+
+        let default_writers = model.layout().schema().writers("gl_edge").unwrap();
+        assert!(default_writers.contains("Group"));
+        assert!(default_writers.contains("Project"));
+    }
+
+    #[test]
     fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         let model = ClickHouseDataModel::derive(overlay_ontology("denorm_approved")).unwrap();
         let storage = model.layout().schema();
