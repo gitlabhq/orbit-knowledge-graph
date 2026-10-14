@@ -2,6 +2,7 @@ use either::Either;
 use itertools::Itertools;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -941,10 +942,12 @@ fn propagate_reexports(
             }
         }
     }
+    let (via, packages) = package_imports(trees, reqs, wildcard_sym);
     'propagate: loop {
         if run.check().is_err() {
             break;
         }
+        let mut unions: Vec<Option<PackageExports>> = vec![None; packages.len()];
         let mut new_exports: indexmap::IndexMap<(usize, u32), Loc, rustc_hash::FxBuildHasher> =
             Default::default();
         let mut export = |fi: usize, name, loc: Loc| {
@@ -967,6 +970,20 @@ fn propagate_reexports(
         for (i, req) in reqs.iter().enumerate() {
             if i % 100_000 == 0 && run.check().is_err() {
                 break 'propagate;
+            }
+            match via[i] {
+                Via::Own => {}
+                Via::Package(package) => {
+                    let union = unions[package]
+                        .get_or_insert_with(|| package_exports(&packages[package], visible));
+                    for (&name, locs) in union.iter() {
+                        for &loc in locs {
+                            export(req.fi as usize, name, loc);
+                        }
+                    }
+                    continue;
+                }
+                Via::Covered => continue,
             }
             let exports = req.exports(trees, visible);
             for c in trees[req.fi as usize].cursor(req.node).names() {
@@ -1021,6 +1038,95 @@ fn propagate_reexports(
         }
     }
     ambiguous
+}
+
+type PackageExports = indexmap::IndexMap<u32, SmallVec<[Loc; 1]>, rustc_hash::FxBuildHasher>;
+
+#[derive(Clone, Copy)]
+enum Via {
+    Own,
+    Package(usize),
+    Covered,
+}
+
+/// Groups the requests of each `pkg/*` import whose targets are a whole
+/// package, so one union of the package's names serves every importer.
+fn package_imports(
+    trees: &[Tree],
+    reqs: &[ImportReq],
+    wildcard_sym: u32,
+) -> (Vec<Via>, Vec<Vec<u32>>) {
+    let wildcard_only = |req: &ImportReq| {
+        let mut names = trees[req.fi as usize].cursor(req.node).names();
+        let only = names.next().filter(|c| {
+            wildcard_or_name(wildcard_sym, *c) == wildcard_sym
+                && !(namespace_alias(wildcard_sym, *c).is_some()
+                    && c.ancestors().any(|node| node.is(C::ModuleExport)))
+        });
+        req.anchor == 0 && only.is_some() && names.next().is_none()
+    };
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    for (i, req) in reqs.iter().enumerate() {
+        if !wildcard_only(req) {
+            continue;
+        }
+        match groups.last_mut() {
+            Some(group)
+                if group.end == i
+                    && (reqs[group.start].fi, reqs[group.start].node) == (req.fi, req.node) =>
+            {
+                group.end = i + 1;
+            }
+            _ => groups.push(i..i + 1),
+        }
+    }
+    let mut members: FxHashMap<&str, Vec<u32>> = FxHashMap::default();
+    for group in &groups {
+        let path = reqs[group.start].target_path.as_str();
+        members
+            .entry(path)
+            .or_default()
+            .extend(reqs[group.clone()].iter().map(|r| r.target_fi));
+    }
+    for files in members.values_mut() {
+        files.sort_unstable();
+        files.dedup();
+    }
+    let mut via = vec![Via::Own; reqs.len()];
+    let mut ids: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut packages = Vec::new();
+    for group in groups {
+        let first = &reqs[group.start];
+        let package = &members[first.target_path.as_str()];
+        let targets = reqs[group.clone()].iter().map(|r| r.target_fi);
+        if !targets.eq(package.iter().copied().filter(|&f| f != first.fi)) {
+            continue;
+        }
+        let id = *ids.entry(first.target_path.as_str()).or_insert_with(|| {
+            packages.push(package.clone());
+            packages.len() - 1
+        });
+        via[group.start] = Via::Package(id);
+        for v in &mut via[group.start + 1..group.end] {
+            *v = Via::Covered;
+        }
+    }
+    (via, packages)
+}
+
+/// The names of every file in a package in request order, each with its
+/// distinct locations in the order a pass over the files meets them.
+fn package_exports(files: &[u32], visible: &VisibleMap) -> PackageExports {
+    let mut union = PackageExports::default();
+    for &fi in files {
+        for (&name, &loc) in &visible[fi as usize] {
+            let locs = union.entry(name).or_default();
+            if !locs.contains(&loc) {
+                locs.push(loc);
+            }
+        }
+    }
+    union
 }
 
 fn name_target(ctx: &ResolveCtx, req: &ImportReq, c: Cursor) -> Option<Loc> {

@@ -230,6 +230,24 @@ async fn the_cross_file_budget_stops_package_reexports() {
 }
 
 #[tokio::test]
+async fn a_package_shared_by_many_files_resolves_inside_the_cross_file_budget() {
+    let limits = code_graph_incremental::Limits {
+        cross_file_resolve_ms: 60_000,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    for (path, header, class) in [
+        ("Big/F{}.cs", "namespace Big;", "public class NAME {}\n"),
+        ("big/F{}.scala", "package big", "class NAME\n"),
+    ] {
+        let files = one_package(300, path, header, class);
+        let timings = timings_for(&as_files(&files), limits).await;
+        assert_eq!(timings.skipped_paths, Vec::<String>::new(), "{path}");
+        assert_eq!(timings.languages.len(), 1, "{path}");
+        assert_eq!(timings.languages[0].1, 300, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     let files: &[(&str, &[u8])] = &[
         ("root/a.js", b"function a() {}\n"),
