@@ -265,6 +265,22 @@ async fn a_package_shared_by_many_files_resolves_inside_the_cross_file_budget() 
 }
 
 #[tokio::test]
+async fn a_read_inside_deeply_nested_loops_links_inside_the_budget() {
+    let nested = format!(
+        "function t() {{}}\nfunction m() {{\n{}t();\n{}}}\n",
+        "while (true) {\n".repeat(2_000),
+        "}\n".repeat(2_000)
+    );
+    let files: &[(&str, &[u8])] = &[("root/loops.js", nested.as_bytes())];
+    let limits = code_graph_incremental::Limits {
+        file_link_ms: 5_000,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert_eq!(timings.skipped_paths, Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     let files: &[(&str, &[u8])] = &[
         ("root/a.js", b"function a() {}\n"),

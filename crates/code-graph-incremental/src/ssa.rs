@@ -45,6 +45,7 @@ struct Block {
 pub struct SsaEngine {
     blocks: Vec<Block>,
     phis: Vec<PhiNode>,
+    users: Vec<SmallVec<[PhiId; 2]>>,
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     read_depth: usize,
@@ -57,6 +58,7 @@ impl SsaEngine {
         Self {
             blocks: Vec::with_capacity(32),
             phis: Vec::with_capacity(8),
+            users: Vec::with_capacity(8),
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
             read_depth: 0,
@@ -258,6 +260,7 @@ impl SsaEngine {
             operands: SmallVec::new(),
             witnesses: [None, None],
         });
+        self.users.push(SmallVec::new());
         id
     }
 
@@ -273,6 +276,9 @@ impl SsaEngine {
                 } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val) {
                     phi.witnesses[1] = Some(val.clone());
                 }
+            }
+            if let Value::Phi(used) = val {
+                self.users[used.0 as usize].push(phi_id);
             }
             self.phis[phi_id.0 as usize].operands.push(val);
         }
@@ -311,17 +317,14 @@ impl SsaEngine {
             block_defs.insert(block, replacement.clone());
         }
 
-        let phi_users: Vec<PhiId> = self
-            .phis
-            .iter()
-            .enumerate()
-            .filter(|(i, phi)| {
-                *i != phi_id.0 as usize && phi.operands.contains(&Value::Phi(phi_id))
-            })
-            .map(|(i, _)| PhiId(u32::try_from(i).expect("phi index exceeds u32")))
-            .collect();
-
         let phi_val = Value::Phi(phi_id);
+        let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
+        phi_users.retain(|user| {
+            *user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
+        });
+        phi_users.sort_unstable_by_key(|user| user.0);
+        phi_users.dedup();
+
         for user_id in &phi_users {
             let user = &mut self.phis[user_id.0 as usize];
             for op in &mut user.operands {
@@ -329,6 +332,10 @@ impl SsaEngine {
                     *op = replacement.clone();
                 }
             }
+            if let Value::Phi(used) = replacement {
+                self.users[used.0 as usize].push(*user_id);
+            }
+            let user = &mut self.phis[user_id.0 as usize];
             for w in &mut user.witnesses {
                 if w.as_ref() == Some(&phi_val) {
                     *w = None;
@@ -421,10 +428,14 @@ impl SsaEngine {
                         block_defs.insert(block, replacement.clone());
                     }
                 }
-                for phi in &mut self.phis {
+                for (i, phi) in self.phis.iter_mut().enumerate() {
                     for op in &mut phi.operands {
                         if phi_vals.contains(op) {
                             *op = replacement.clone();
+                            if let Value::Phi(used) = replacement {
+                                self.users[used.0 as usize]
+                                    .push(PhiId(u32::try_from(i).expect("phi index exceeds u32")));
+                            }
                         }
                     }
                     for w in &mut phi.witnesses {
