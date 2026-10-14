@@ -202,7 +202,6 @@ struct ProjectData {
     /// projects that lack repository content.
     empty_archive_body: bool,
     slow_archive: bool,
-    /// When set, the archive endpoint answers with this status instead of an archive.
     archive_status: Option<StatusCode>,
 }
 
@@ -301,7 +300,6 @@ impl MockGitlabServer {
         );
     }
 
-    /// Make the archive endpoint answer with `status` (e.g. 500 or 429) until reset with `None`.
     pub fn set_archive_status(&self, project_id: i64, status: Option<StatusCode>) {
         if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
             project.archive_status = status;
