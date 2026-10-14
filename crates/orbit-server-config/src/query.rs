@@ -107,6 +107,7 @@ pub struct CompilerDerivedSettings {
     pub join_order_algorithm: Option<String>,
     pub optimize_move_to_prewhere_if_final: bool,
     pub use_index_for_in_with_subqueries_max_values: Option<u64>,
+    pub null_in_is_unknown: bool,
 }
 
 impl CompilerDerivedSettings {
@@ -130,6 +131,9 @@ impl CompilerDerivedSettings {
                 "use_index_for_in_with_subqueries_max_values".into(),
                 max.to_string(),
             ));
+        }
+        if self.null_in_is_unknown {
+            out.push(("transform_null_in".into(), "0".into()));
         }
         out
     }

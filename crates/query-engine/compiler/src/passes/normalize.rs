@@ -1,5 +1,5 @@
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Direction, Input, QueryType};
+use crate::input::{ColumnSelection, Direction, Input, InputFilter, PredicateTarget, QueryType};
 use ontology::EnumType;
 #[cfg(test)]
 use ontology::Ontology;
@@ -51,23 +51,26 @@ pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) 
         }
 
         for (column, filters) in &mut node.filters {
-            let Some(property) = model.property(entity, column) else {
-                continue;
-            };
-            // Only coerce int-based enums; string enums are already strings in the source
-            if property.enum_type != EnumType::Int {
-                continue;
-            }
-            let Some(enum_values) = property.enum_values.as_ref() else {
-                continue;
-            };
             for filter in filters {
-                let Some(value) = &filter.value else {
-                    continue;
-                };
-                filter.value = Some(coerce_value(value, enum_values));
+                coerce_filter(filter, model.property(entity, column));
             }
         }
+    }
+    let nodes = &input.nodes;
+    for root in &mut input.predicates {
+        root.visit_mut(&mut |predicate| {
+            if let PredicateTarget::Node(alias) = &predicate.target
+                && let Some(entity) = nodes
+                    .iter()
+                    .find(|node| node.id == *alias)
+                    .and_then(|node| node.entity.as_deref())
+            {
+                coerce_filter(
+                    &mut predicate.filter,
+                    model.property(entity, &predicate.property),
+                );
+            }
+        });
     }
     infer_wildcard_relationship_kinds(&mut input, model);
     Ok(input)
@@ -157,6 +160,16 @@ fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
             Value::Array(coerced)
         }
         _ => value.clone(),
+    }
+}
+
+fn coerce_filter(filter: &mut InputFilter, property: Option<&query_data_model::Property>) {
+    if let Some(property) = property
+        && property.enum_type == EnumType::Int
+        && let Some(enum_values) = &property.enum_values
+        && let Some(value) = &filter.value
+    {
+        filter.value = Some(coerce_value(value, enum_values));
     }
 }
 

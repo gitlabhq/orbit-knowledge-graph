@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
+use super::conditions::place_conditions;
 use super::context::PlanningContext;
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -65,6 +66,7 @@ pub struct NodePlan {
     pub selectivity: Selectivity,
     pub hydration: HydrationStrategy,
     pub filters: Vec<(String, BoundFilter)>,
+    pub predicates: Vec<super::requirements::Predicate>,
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
@@ -113,6 +115,7 @@ impl NodePlan {
                 super::helpers::FilterOwner::Entity(entity_id),
                 model,
             ),
+            predicates: Vec::new(),
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
@@ -126,6 +129,20 @@ impl NodePlan {
             fk_needs_join: false,
             emit_select: true,
         })
+    }
+
+    pub fn has_untagged_filter(
+        &self,
+        hops: &[Hop],
+        denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+    ) -> bool {
+        self.filters
+            .iter()
+            .any(|(_, filter)| denorm_hop(filter, &self.alias, hops, denormalized).is_none())
+    }
+
+    pub fn is_id_pinned_only(&self) -> bool {
+        !self.node_ids.is_empty() && self.filters.is_empty() && self.id_range.is_none()
     }
 
     pub fn uses_default_pk(&self) -> bool {
@@ -195,6 +212,9 @@ where
     let model = context.model;
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
+    let denormalized = super::denormalized_facts(input, model);
+    let placement = place_conditions(input, model, &hops, &nodes, &denormalized)?;
+    context.bind_scan_conditions(&mut nodes, &placement)?;
 
     let (mut hops, elided_fks) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input, model)
@@ -205,7 +225,6 @@ where
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
-    let denormalized = super::denormalized_facts(input, model);
 
     for node_plan in nodes.values_mut() {
         if use_fk_elision {
@@ -215,6 +234,7 @@ where
                 &hops,
                 &denormalized,
                 table_scans.contains(&node_plan.alias),
+                placement.joined_nodes.contains(&node_plan.alias),
             );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
@@ -224,7 +244,7 @@ where
     resolve_join_columns(&mut hops)?;
     resolve_cascade_anchors(&mut hops);
 
-    resolve_node_flags(&hops, &mut nodes, input);
+    resolve_node_flags(&hops, &mut nodes, input, &placement.joined_nodes);
 
     if input.query_type == QueryType::Aggregation {
         let group_by_nodes: HashSet<&str> =
@@ -241,7 +261,7 @@ where
     context.hops = hops;
     context.nodes = nodes;
     context.denormalized = denormalized;
-    let execution = if context.hops.is_empty() {
+    let mut execution = if context.hops.is_empty() {
         context.single_node()?
     } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&context, &center)?
@@ -250,6 +270,8 @@ where
     } else {
         super::flat::plan(&context)?
     };
+    let conditions = context.bind_join_conditions(&execution.bindings, &placement)?;
+    execution.source = execution.source.filter(conditions);
     if !context.hops.is_empty() {
         context.node_edge_mappings = execution
             .bindings
@@ -329,6 +351,10 @@ where
                         target_node,
                         referenced_column,
                     })
+                })
+                .filter(|_| {
+                    rel.filters.is_empty()
+                        && !input.references(&PredicateTarget::Relationship(input_index))
                 });
             let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
@@ -405,11 +431,10 @@ fn elide_hops(
                     })
                     .count()
                     > 1
-                || input.join_predicates.iter().any(|predicate| {
-                    [&predicate.lhs_node, &predicate.rhs_node]
-                        .into_iter()
-                        .any(|node| node == &hop.from_node || node == &hop.to_node)
-                })
+                || [&hop.from_node, &hop.to_node]
+                    .into_iter()
+                    .any(|node| input.references(&PredicateTarget::Node(node.clone())))
+                || input.references(&PredicateTarget::Relationship(hop.input_index))
             {
                 return None;
             }
@@ -607,6 +632,7 @@ fn determine_hydration(
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     requires_table_scan: bool,
+    is_predicate_target: bool,
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -623,32 +649,19 @@ fn determine_hydration(
             && !matches!(a.expr.function(), AggFunction::Count)
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
-    let is_join_predicate_target = input.join_predicates.iter().any(|predicate| {
-        [
-            (&predicate.lhs_node, &predicate.lhs_prop),
-            (&predicate.rhs_node, &predicate.rhs_prop),
-        ]
-        .into_iter()
-        .any(|(node, property)| node == alias && property != DEFAULT_PRIMARY_KEY)
-    });
 
     if is_group_by_node
         || is_group_by_property
         || is_agg_property_target
         || is_order_by_target
-        || is_join_predicate_target
+        || is_predicate_target
     {
         return HydrationStrategy::Join;
     }
 
     // Skip the node table only when every filter is carried by a hop's edge
     // tag; an uncovered filter stays on the node table so it isn't dropped.
-    let has_uncovered_filter = node_plan
-        .filters
-        .iter()
-        .any(|(_, filter)| !filter_covered_by_denorm(filter, alias, hops, denormalized));
-
-    if has_uncovered_filter {
+    if node_plan.has_untagged_filter(hops, denormalized) {
         HydrationStrategy::FilterOnly
     } else if requires_table_scan {
         HydrationStrategy::Join
@@ -659,36 +672,35 @@ fn determine_hydration(
 
 // Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag
 // push must agree on which hop carries a denorm.
-fn filter_covered_by_denorm(
+pub(super) fn denorm_hop<'a>(
     filter: &BoundFilter,
     alias: &str,
     hops: &[Hop],
-    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-) -> bool {
-    hops.iter().any(|hop| {
+    denormalized: &'a HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Option<(usize, &'a DenormalizedProperty)> {
+    hops.iter().enumerate().find_map(|(position, hop)| {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
-            return false;
+            return None;
         }
         let (start_col, end_col) = hop.direction.edge_columns();
         [(&hop.from_node, start_col), (&hop.to_node, end_col)]
             .iter()
-            .any(|(node, id_col)| {
+            .find_map(|(node, id_col)| {
                 if node.as_str() != alias {
-                    return false;
+                    return None;
                 }
                 let direction = if *id_col == SOURCE_ID_COLUMN {
                     DenormalizedDirection::Source
                 } else {
                     DenormalizedDirection::Target
                 };
-                super::helpers::lowerable_denorm(filter, direction, denormalized).is_some_and(
-                    |facts| {
-                        hop.relationships
-                            .iter()
-                            .any(|relationship| facts.relationships.contains(relationship))
-                    },
-                )
+                super::helpers::lowerable_denorm(filter, direction, denormalized).filter(|facts| {
+                    hop.relationships
+                        .iter()
+                        .any(|relationship| facts.relationships.contains(relationship))
+                })
             })
+            .map(|facts| (position, facts))
     })
 }
 
@@ -751,12 +763,19 @@ fn resolve_join_columns(hops: &mut [Hop]) -> Result<()> {
     Ok(())
 }
 
-fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
+fn resolve_node_flags(
+    hops: &[Hop],
+    nodes: &mut HashMap<String, NodePlan>,
+    input: &Input,
+    predicate_joins: &HashSet<String>,
+) {
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
+    let narrows =
+        |alias: &String| has_filter_only || input.has_negation() && predicate_joins.contains(alias);
 
-    if has_filter_only {
+    if nodes.keys().any(narrows) {
         let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
         for hop in hops {
             *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
@@ -764,7 +783,8 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         let needs: Vec<String> = nodes
             .values()
             .filter(|np| {
-                np.hydration == HydrationStrategy::Join
+                narrows(&np.alias)
+                    && np.hydration == HydrationStrategy::Join
                     && np.filters.is_empty()
                     && np.node_ids.is_empty()
                     && np.id_range.is_none()
@@ -808,6 +828,7 @@ mod tests {
             selectivity: Selectivity::Filtered,
             hydration: HydrationStrategy::Skip,
             filters: Vec::new(),
+            predicates: Vec::new(),
             node_ids: Vec::new(),
             id_range: None,
             has_traversal_path,

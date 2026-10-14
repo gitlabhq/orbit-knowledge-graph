@@ -1,11 +1,16 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
+};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
+
+mod predicates;
+pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
@@ -49,16 +54,7 @@ pub struct Input {
     #[serde(default)]
     pub options: QueryOptions,
     #[serde(skip)]
-    pub join_predicates: Vec<JoinPredicate>,
-}
-
-#[derive(Debug, Clone)]
-pub struct JoinPredicate {
-    pub lhs_node: String,
-    pub lhs_prop: String,
-    pub op: FilterOp,
-    pub rhs_node: String,
-    pub rhs_prop: String,
+    pub predicates: Vec<BooleanExpression<Condition>>,
 }
 
 impl Input {
@@ -90,7 +86,7 @@ impl Default for Input {
             cursor: None,
             order_by: None,
             options: QueryOptions::default(),
-            join_predicates: Vec::new(),
+            predicates: Vec::new(),
         }
     }
 }
@@ -148,6 +144,8 @@ pub struct InputNode {
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
+    #[serde(default, rename = "not", deserialize_with = "deserialize_filters")]
+    pub negated_filters: BTreeMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
@@ -166,6 +164,7 @@ impl Default for InputNode {
             entity: None,
             columns: None,
             filters: HashMap::new(),
+            negated_filters: BTreeMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
@@ -284,11 +283,10 @@ pub enum FilterOp {
     AnyTokens,
 }
 
-fn deserialize_filters<'de, D>(
-    deserializer: D,
-) -> Result<HashMap<String, Vec<InputFilter>>, D::Error>
+fn deserialize_filters<'de, D, C>(deserializer: D) -> Result<C, D::Error>
 where
     D: Deserializer<'de>,
+    C: FromIterator<(String, Vec<InputFilter>)>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
     raw.into_iter()
