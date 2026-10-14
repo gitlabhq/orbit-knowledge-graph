@@ -56,10 +56,15 @@ Pick **native mode** for indexing work where every task must hit your code, and 
 that needs `config/dev.local.yaml`. Pick **edit mode** for webserver and query work, where
 stolen traffic and rebuild-on-save make the loop shortest.
 
-Why the difference: Caproni scales the mirrored deployment to one replica, not zero, and
-open-source mirrord leaves the container running. Inbound traffic is stolen, so Rails hits
-your webserver, but a NATS pull consumer in the pod keeps pulling. Native mode scales the
-deployments to zero instead, which is why only it guarantees that your indexer did the work.
+Why the difference: for each reloader Caproni creates a `<deployment>-caproni` copy and
+scales the original to zero. mirrord targets the copy, whose container keeps running. Inbound
+traffic is stolen, so Rails hits your webserver, but a NATS pull consumer in the copy keeps
+pulling. Native mode scales the deployments to zero with no copy, which is why only it
+guarantees that your indexer did the work.
+
+Both paths run the binary from your checkout, so they share one versioned JetStream stream
+and, through `config/dev.yaml`, the chart's consumer name `gkg-indexer`. That is what lets
+you switch between them without leaving conflicting consumers behind.
 
 ## Edit mode
 
@@ -84,8 +89,11 @@ caproni run    # builds once, then starts the reloaders
 ```
 
 The first `caproni run` runs `mise install` and `cargo build` in your checkout before
-anything starts. After that each reloader runs `scripts/dev/caproni-edit-mode.sh`, which
-starts `cargo watch` on the matching `gkg-server` mode. mirrord serves `/app/config` and
+anything starts. Expect a further partial rebuild of a few minutes on that first start. The
+pod's environment variables reach cargo's build scripts through mirrord, so the TLS and HTTP
+crates compile again under a new fingerprint. Later starts and rebuilds take seconds. Each
+reloader runs `scripts/dev/caproni-edit-mode.sh`, which starts `cargo watch` on the matching
+`gkg-server` mode. mirrord serves `/app/config` and
 `/etc/secrets` from the pod, so the local binary runs with the pod's configuration. The
 wrapper changes one value: the probe server port, since all four pods bind the chart's
 single port and four host processes cannot share it. The webserver keeps 9394, the
@@ -211,6 +219,20 @@ Rails could not reach your webserver through the EndpointSlice. Confirm the webs
 connection (System Settings, Network, Firewall). If the host IP the script detected is
 wrong, set `ORBIT_DEV_HOST_IP` in `.env` to the address of your host on the cluster
 network and restart.
+
+**An indexer exits with `filtered consumer not unique on workqueue stream`:**
+
+A JetStream work-queue stream allows one consumer per filter subject. Another consumer with
+the same filters and a different name exists on the stream your binary uses, usually from a
+`config/dev.local.yaml` that overrides `nats.consumer_name`. Remove the override, or delete
+the stale consumer from the `nats-box` pod:
+
+```shell
+caproni kubectl -n gitlab-dev-stack exec deploy/gitlab-dev-stack-nats-box -- nats consumer ls -n <stream>
+caproni kubectl -n gitlab-dev-stack exec deploy/gitlab-dev-stack-nats-box -- nats consumer rm <stream> <consumer> -f
+```
+
+Idle consumers also expire on their own after an hour.
 
 **403 Forbidden on `/dashboard/orbit` but JWT auth works:**
 
