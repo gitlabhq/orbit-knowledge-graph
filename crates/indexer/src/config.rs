@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use orbit_server_config::{
     AnalyticsConfig, AppConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
     GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
@@ -16,7 +14,6 @@ pub struct IndexerConfig {
     pub engine: EngineConfiguration,
     pub gitlab: Option<GitlabClientConfiguration>,
     pub schedule: ScheduleConfig,
-    pub health_bind_address: SocketAddr,
     pub schema: SchemaConfig,
     pub analytics: AnalyticsConfig,
 }
@@ -30,7 +27,6 @@ impl From<&AppConfig> for IndexerConfig {
             engine: config.engine.clone(),
             gitlab: config.gitlab_client_config(),
             schedule: config.schedule.clone(),
-            health_bind_address: config.indexer_health_bind_address,
             schema: config.schema.clone(),
             analytics: config.analytics.clone(),
         }
@@ -50,9 +46,6 @@ pub enum IndexerError {
 
     #[error("Handler initialization failed: {0}")]
     HandlerInit(#[from] HandlerInitError),
-
-    #[error("Health server failed: {0}")]
-    Health(#[from] std::io::Error),
 
     #[error("Schema version error: {0}")]
     SchemaVersion(#[from] orbit_migrations::version::SchemaVersionError),
@@ -80,7 +73,6 @@ pub struct DispatcherConfig {
     pub datalake: ClickHouseConfiguration,
     pub schedule: ScheduleConfig,
     pub schema: SchemaConfig,
-    pub health_bind_address: SocketAddr,
 }
 
 impl From<&AppConfig> for DispatcherConfig {
@@ -91,7 +83,6 @@ impl From<&AppConfig> for DispatcherConfig {
             datalake: config.datalake.clone(),
             schedule: config.schedule.clone(),
             schema: config.schema.clone(),
-            health_bind_address: config.dispatcher_health_bind_address,
         }
     }
 }
@@ -116,7 +107,4 @@ pub enum DispatcherError {
 
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::DispatcherMigrationError),
-
-    #[error("health server failed: {0}")]
-    Health(#[from] std::io::Error),
 }

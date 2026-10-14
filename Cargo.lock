@@ -3933,7 +3933,6 @@ dependencies = [
  "arrow",
  "async-nats",
  "async-trait",
- "axum",
  "base64 0.22.1",
  "bytes",
  "chrono",
@@ -3974,7 +3973,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tower",
  "tracing",
  "uuid",
  "zstd",
@@ -4156,7 +4154,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "toon-format",
- "tower",
  "uuid",
 ]
 

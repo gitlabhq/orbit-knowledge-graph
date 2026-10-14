@@ -406,10 +406,6 @@ on different cycles. `crates/orbit-server/src/tls.rs` resolves the group once at
 FIPS provider is installed, so every listener negotiates inside the same validated module.
 Rotation needs a pod restart.
 
-The legacy `/live` and `/ready` listeners on the webserver HTTP port and the indexer and
-dispatcher health ports stay plaintext. They exist for charts that still probe them and go away
-once the chart probes the probe server.
-
 Kubelet probes over HTTPS do not verify the server certificate. That is a property of the
 Kubernetes probe implementation and is recorded as such in the SSP. The webserver to
 health-check hop does verify, against the OS trust store.

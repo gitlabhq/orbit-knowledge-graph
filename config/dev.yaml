@@ -7,9 +7,7 @@
 # stream name, JWT keys, ClickHouse password), the mode's Prometheus port, and the Git-ignored
 # config/dev.local.yaml (personal overrides, highest priority) into .dev/<mode>.yaml.
 
-bind_address: "127.0.0.1:8090"
 grpc_bind_address: "127.0.0.1:50054"
-indexer_health_bind_address: "127.0.0.1:4202"
 
 nats:
   url: "nats://127.0.0.1:4222"
