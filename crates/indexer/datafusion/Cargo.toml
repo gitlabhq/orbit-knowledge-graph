@@ -8,8 +8,8 @@ license = "LicenseRef-EE"
 arrow = { workspace = true }
 async-trait = { workspace = true }
 datafusion = { workspace = true }
-indexer = { path = "../indexer" }
-orbit-utils = { path = "../utils" }
+indexer = { path = ".." }
+orbit-utils = { path = "../../utils" }
 
 [lints]
 workspace = true

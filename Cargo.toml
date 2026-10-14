@@ -10,7 +10,7 @@ members = [
   "crates/code-graph-incremental",
   "crates/clickhouse-client",
   "crates/indexer",
-  "crates/indexer-datafusion",
+  "crates/indexer/datafusion",
   "crates/query-engine",
   "crates/query-engine/compiler",
   "crates/query-engine/types",
