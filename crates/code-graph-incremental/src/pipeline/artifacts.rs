@@ -8,6 +8,7 @@ use orbit_utils::vfs::Vfs;
 use rustc_hash::FxHashSet;
 
 use super::{SourceFile, State};
+use crate::sentinel::Killed;
 use crate::tree::{Compact, Edge, Tree};
 
 pub type Sources = Arc<Vfs<()>>;
@@ -59,6 +60,7 @@ pub struct Canonical(pub Tree<Compact>);
 pub struct LinkedFile {
     pub tree: Tree<Compact>,
     pub edges: Vec<Edge>,
+    pub limited: Option<Killed>,
 }
 
 pub struct DirtyGraph {

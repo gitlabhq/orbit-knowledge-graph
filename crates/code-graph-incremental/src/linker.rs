@@ -94,6 +94,7 @@ struct Fold<'t> {
     run: &'t Sentinel,
     file: Sentinel,
     killed: Option<Killed>,
+    limited: Option<Killed>,
     def_stack: Vec<u32>,
     chain_seen: FxHashSet<u32>,
     obj_seen: FxHashSet<u32>,
@@ -858,13 +859,10 @@ impl<'t> Fold<'t> {
         while let Some((target, sources)) = copies.pop() {
             copied += 1;
             if copied > MAX_FIELD_COPIES {
-                self.killed = Some(Killed::limit(
-                    "fields",
-                    &self.tree.label,
-                    copied,
-                    MAX_FIELD_COPIES,
-                ));
-                return;
+                self.limited.get_or_insert_with(|| {
+                    Killed::limit("fields", &self.tree.label, copied, MAX_FIELD_COPIES)
+                });
+                break;
             }
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
@@ -1225,7 +1223,7 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
+pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
     let (lang, config) = (&env.lang, &env.rules_for(&tree.label).config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
     let tags = ReservedTags::new(lang);
@@ -1252,6 +1250,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         run,
         file,
         killed: None,
+        limited: None,
         def_stack: Vec::new(),
         chain_seen: FxHashSet::default(),
         obj_seen: FxHashSet::default(),
@@ -1338,7 +1337,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
             edge.call_resolution = crate::tree::CallResolution::Reference;
         }
     }
-    Ok(f.edges)
+    Ok((f.edges, f.limited))
 }
 
 fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {

@@ -94,6 +94,7 @@ struct Timings {
     errors: usize,
     skipped_paths: Vec<String>,
     skipped_reasons: Vec<&'static str>,
+    limited_reasons: Vec<&'static str>,
 }
 
 async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Limits) -> Timings {
@@ -127,12 +128,19 @@ async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Li
         .map(|file| file.kind.as_metric_label())
         .collect();
     skipped_reasons.sort();
+    let mut limited_reasons: Vec<_> = report
+        .limited
+        .iter()
+        .map(|file| file.kind.as_metric_label())
+        .collect();
+    limited_reasons.sort();
     Timings {
         languages,
         slowest_paths,
         errors: report.errors.len(),
         skipped_paths,
         skipped_reasons,
+        limited_reasons,
     }
 }
 
@@ -292,7 +300,7 @@ async fn a_read_inside_deeply_nested_loops_links_inside_the_budget() {
 }
 
 #[tokio::test]
-async fn a_value_copied_into_its_own_fields_is_skipped_at_the_copy_limit() {
+async fn a_value_copied_into_its_own_fields_is_reported_at_the_copy_limit() {
     let copies = "a.x = a;\na.y = a;\n".repeat(40);
     let body = format!("fn target() {{}}\nfn self_fields(mut a: Node) {{\n{copies}target();\n}}\n");
     let files: &[(&str, &[u8])] = &[
@@ -300,8 +308,8 @@ async fn a_value_copied_into_its_own_fields_is_skipped_at_the_copy_limit() {
         ("root/src/flat.rs", b"fn flat() {}\n"),
     ];
     let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
-    assert_eq!(timings.skipped_paths, ["src/lib.rs"]);
-    assert_eq!(timings.skipped_reasons, ["too_many_field_copies"]);
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.limited_reasons, ["too_many_field_copies"]);
 }
 
 #[tokio::test]

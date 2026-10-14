@@ -193,6 +193,7 @@ pub fn repository<E: std::fmt::Display>(
                 }
             };
             result.skipped.extend(report.skipped);
+            result.limited.extend(report.limited);
             result.unread_files.extend(report.unread_files);
             result.files.extend(report.files);
             result.phases.extend(report.phases);

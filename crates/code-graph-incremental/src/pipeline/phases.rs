@@ -381,8 +381,12 @@ impl ItemPhase<Canonical> for Link {
         run: &Sentinel,
         Canonical(tree): Canonical,
     ) -> Result<LinkedFile, Killed> {
-        let edges = linker::link(&tree, env, run)?;
-        Ok(LinkedFile { tree, edges })
+        let (edges, limited) = linker::link(&tree, env, run)?;
+        Ok(LinkedFile {
+            tree,
+            edges,
+            limited,
+        })
     }
 }
 
@@ -411,6 +415,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
+            context.report.limited.extend(file.limited);
             state.trees.push(file.tree);
             state.edges.extend(file.edges.into_iter().map(|mut e| {
                 e.from_tree = fi;
@@ -448,7 +453,6 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
                     "edges" => "skip_too_many_edges",
-                    "fields" => "skip_too_many_field_copies",
                     _ => "skip_timeout_sentinel",
                 }
                 .into(),

@@ -199,6 +199,7 @@ pub(super) struct IndexingReport {
     pub stats: code_graph::v2::pipeline::PipelineStats,
     pub errors: Vec<code_graph::v2::pipeline::PipelineError>,
     pub skipped: Vec<code_graph::v2::error::SkippedFile>,
+    pub limited: Vec<code_graph::v2::error::SkippedFile>,
     pub faults: Vec<code_graph::v2::error::FaultedFile>,
 }
 
@@ -208,6 +209,7 @@ impl From<code_graph::v2::PipelineResult> for IndexingReport {
             stats: result.stats,
             errors: result.errors,
             skipped: result.skipped,
+            limited: Vec::new(),
             faults: result.faults,
         }
     }
@@ -809,6 +811,19 @@ impl CodeIndexer {
                     "file skipped during code indexing"
                 );
             }
+        }
+
+        for limited in &result.limited {
+            self.metrics
+                .record_file_skipped(limited.kind.as_metric_label(), &limited.path);
+            warn!(
+                project_id = request.project_id,
+                branch = %request.branch,
+                path = %limited.path,
+                reason = limited.kind.as_metric_label(),
+                detail = %limited.detail,
+                "file reached a limit during code indexing and was indexed in part"
+            );
         }
 
         for fault in &result.faults {

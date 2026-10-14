@@ -21,9 +21,7 @@ pub(in crate::modules::code) fn run(
     tables: Arc<CodeTableNames>,
     on_batch: Arc<OnBatch>,
 ) -> Result<IndexingReport, SinkError> {
-    use code_graph::v2::error::{
-        AbortPhase, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile,
-    };
+    use code_graph::v2::error::{CodeGraphError, FaultedFile, FileFault};
     use code_graph::v2::pipeline::{PhaseTimings, PipelineStats};
     let started = std::time::Instant::now();
     let stats = PipelineStats {
@@ -136,6 +134,7 @@ pub(in crate::modules::code) fn run(
                 stats,
                 errors,
                 skipped: Vec::new(),
+                limited: Vec::new(),
                 faults: Vec::new(),
             });
         }
@@ -148,29 +147,8 @@ pub(in crate::modules::code) fn run(
     Ok(IndexingReport {
         stats,
         errors: Vec::new(),
-        skipped: report
-            .skipped
-            .into_iter()
-            .map(|killed| {
-                let kind = match killed.label {
-                    "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
-                    "names" => FileSkip::TooManyNames,
-                    "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
-                    "depth" => FileSkip::DeeplyNested,
-                    "stack" => FileSkip::StackLimit,
-                    "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
-                    "link" => FileSkip::Timeout(AbortPhase::Ssa),
-                    "edges" => FileSkip::TooManyEdges,
-                    "fields" => FileSkip::TooManyFieldCopies,
-                    _ => FileSkip::Timeout(AbortPhase::Sentinel),
-                };
-                SkippedFile {
-                    detail: killed.to_string(),
-                    path: killed.path,
-                    kind,
-                }
-            })
-            .collect(),
+        skipped: report.skipped.into_iter().map(skipped_file).collect(),
+        limited: report.limited.into_iter().map(skipped_file).collect(),
         faults: report
             .unread_files
             .into_iter()
@@ -181,6 +159,27 @@ pub(in crate::modules::code) fn run(
             })
             .collect(),
     })
+}
+
+fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error::SkippedFile {
+    use code_graph::v2::error::{AbortPhase, FileSkip};
+    let kind = match killed.label {
+        "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
+        "names" => FileSkip::TooManyNames,
+        "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
+        "depth" => FileSkip::DeeplyNested,
+        "stack" => FileSkip::StackLimit,
+        "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
+        "link" => FileSkip::Timeout(AbortPhase::Ssa),
+        "edges" => FileSkip::TooManyEdges,
+        "fields" => FileSkip::TooManyFieldCopies,
+        _ => FileSkip::Timeout(AbortPhase::Sentinel),
+    };
+    code_graph::v2::error::SkippedFile {
+        detail: killed.to_string(),
+        path: killed.path,
+        kind,
+    }
 }
 
 const SLOWEST_FILES: usize = 100;
