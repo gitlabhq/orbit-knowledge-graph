@@ -224,7 +224,7 @@ fn as_files(files: &[(String, Vec<u8>)]) -> Vec<(&str, &[u8])> {
 #[tokio::test]
 async fn the_cross_file_budget_stops_package_reexports() {
     let files = one_package(
-        200,
+        600,
         "Big/F{}.cs",
         "namespace Big;",
         "public class NAME {}\n",
@@ -235,7 +235,7 @@ async fn the_cross_file_budget_stops_package_reexports() {
     };
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
-    assert_eq!(timings.languages, [("csharp".to_owned(), 200)]);
+    assert_eq!(timings.languages, [("csharp".to_owned(), 600)]);
 }
 
 #[tokio::test]
