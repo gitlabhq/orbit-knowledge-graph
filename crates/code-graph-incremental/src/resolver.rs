@@ -1358,12 +1358,22 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
     Some(ctx.corpus.jump(loc.fi, loc.node))
 }
 
+thread_local! {
+    static RESOLVING: std::cell::RefCell<FxHashSet<(u32, u32)>> = Default::default();
+}
+
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
-    chain(ctx, c, &|r| {
+    let key = (c.fi(), c.index());
+    if !RESOLVING.with_borrow_mut(|resolving| resolving.insert(key)) {
+        return None;
+    }
+    let resolved = chain(ctx, c, &|r| {
         resolve_reference(ctx, r)
             .or_else(|| enclosing_alias(ctx, r))
             .or_else(|| visible_type(ctx, r.fi(), r.sym()))
-    })
+    });
+    RESOLVING.with_borrow_mut(|resolving| resolving.remove(&key));
+    resolved
 }
 
 fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<Cursor<'a>> {

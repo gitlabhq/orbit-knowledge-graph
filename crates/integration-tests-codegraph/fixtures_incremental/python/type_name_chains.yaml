@@ -1,0 +1,19 @@
+name: "Python: annotations that name each other stop resolving"
+fixtures:
+  - path: main.py
+    content: |
+      def target():
+          pass
+
+      def mutual(a: b, b: a):
+          a.go()
+          target()
+tests:
+  - name: "a function with mutually annotated parameters still links its calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'mutual'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: target, file: main.py } }
