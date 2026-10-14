@@ -36,7 +36,6 @@ pub trait BlockTransform: Send + Sync {
 pub(in crate::modules::sdlc) type TransformFactory =
     Box<dyn Fn(&Plan) -> Arc<dyn BlockTransform> + Send + Sync>;
 
-/// Builds the SQL projection for a `data_fusion` plan from its name and transformations.
 pub type SqlTransformFactory =
     Arc<dyn Fn(String, Vec<Transformation>) -> Arc<dyn BlockTransform> + Send + Sync>;
 
