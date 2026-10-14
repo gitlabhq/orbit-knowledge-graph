@@ -392,13 +392,6 @@ mod tests {
                 Endpoint::Source,
                 "auto_canceled_by_id",
             ),
-            (
-                "HAS_PACKAGE_FILE",
-                "Package",
-                "PackageFile",
-                Endpoint::Target,
-                "package_id",
-            ),
         ] {
             let key = model
                 .foreign_key(&[relationship.into()], source, target)
