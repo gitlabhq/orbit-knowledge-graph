@@ -858,7 +858,13 @@ impl<'t> Fold<'t> {
         while let Some((target, sources)) = copies.pop() {
             copied += 1;
             if copied > MAX_FIELD_COPIES {
-                break;
+                self.killed = Some(Killed::limit(
+                    "fields",
+                    &self.tree.label,
+                    copied,
+                    MAX_FIELD_COPIES,
+                ));
+                return;
             }
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);

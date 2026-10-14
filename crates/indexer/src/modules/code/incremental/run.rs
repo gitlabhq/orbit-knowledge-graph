@@ -161,6 +161,7 @@ pub(in crate::modules::code) fn run(
                     "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
                     "link" => FileSkip::Timeout(AbortPhase::Ssa),
                     "edges" => FileSkip::TooManyEdges,
+                    "fields" => FileSkip::TooManyFieldCopies,
                     _ => FileSkip::Timeout(AbortPhase::Sentinel),
                 };
                 SkippedFile {

@@ -292,6 +292,19 @@ async fn a_read_inside_deeply_nested_loops_links_inside_the_budget() {
 }
 
 #[tokio::test]
+async fn a_value_copied_into_its_own_fields_is_skipped_at_the_copy_limit() {
+    let copies = "a.x = a;\na.y = a;\n".repeat(40);
+    let body = format!("fn target() {{}}\nfn self_fields(mut a: Node) {{\n{copies}target();\n}}\n");
+    let files: &[(&str, &[u8])] = &[
+        ("root/src/lib.rs", body.as_bytes()),
+        ("root/src/flat.rs", b"fn flat() {}\n"),
+    ];
+    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert_eq!(timings.skipped_paths, ["src/lib.rs"]);
+    assert_eq!(timings.skipped_reasons, ["too_many_field_copies"]);
+}
+
+#[tokio::test]
 async fn a_file_with_more_edges_than_the_limit_is_skipped() {
     let functions: String = (0..2_000)
         .map(|i| format!("function a{i}() {{}}\n"))

@@ -448,6 +448,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
                     "edges" => "skip_too_many_edges",
+                    "fields" => "skip_too_many_field_copies",
                     _ => "skip_timeout_sentinel",
                 }
                 .into(),
