@@ -11,7 +11,7 @@ from unittest.mock import patch
 import yaml
 
 import yaml_lint
-from yaml_lint import check_spacing, missing_gaps
+from yaml_lint import check_spacing, main, missing_gaps
 
 CRAMPED = """\
 name: suite
@@ -74,15 +74,26 @@ class SpacingTest(unittest.TestCase):
 
 
     def test_fix_refuses_a_change_to_the_value(self):
-        for text in ("a: |+\n  x\nb:\n  - c\n", 'z: "\u2028"\nl:\n  - c: |\n      one\n      two\n  - c: |\n      three\n      four\n'):
-            with tempfile.TemporaryDirectory() as tmp, patch.object(yaml_lint, "ROOT", Path(tmp)):
-                path = Path(tmp) / "suite.yaml"
-                path.write_text(text)
-                self.assertNotEqual(check_spacing(path, fix=True), [])
-                self.assertEqual(path.read_text(), text)
+        text = "a: |+\n  x\nb:\n  - c\n"
+        with tempfile.TemporaryDirectory() as tmp, patch.object(yaml_lint, "ROOT", Path(tmp)):
+            path = Path(tmp) / "suite.yaml"
+            path.write_text(text)
+            self.assertNotEqual(check_spacing(path, fix=True), [])
+            self.assertEqual(path.read_text(), text)
+
+    def test_unicode_line_separators_keep_line_numbers(self):
+        self.assertEqual(gaps('z: "\u2028"\nl:\n  - c: |\n      one\n      two\n  - c: |\n      three\n'), [1, 5])
 
     def test_trailing_comments_do_not_make_an_entry_long(self):
         self.assertEqual(gaps("tags:\n  - a\n  - b\n  # note\nother: x\n"), [4])
+
+
+    def test_dash_first_items_get_the_blank_line_above_the_dash(self):
+        self.assertEqual(gaps("l:\n  - name: a\n    q: 1\n  - # b\n    name: b\n    q: 2\n  -\n    name: c\n"), [3, 6])
+
+    def test_a_missing_suite_folder_fails_the_full_run(self):
+        with patch.object(yaml_lint, "SUITES", (yaml_lint.ROOT / "no-such-suite",)):
+            self.assertEqual(main([]), 1)
 
 
 if __name__ == "__main__":

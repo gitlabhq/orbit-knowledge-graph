@@ -19,6 +19,8 @@ Exit codes: 0 clean, 1 findings.
 from __future__ import annotations
 
 import argparse
+import bisect
+import itertools
 import json
 import subprocess
 import sys
@@ -54,14 +56,25 @@ def run_prettier(files: list[Path], fix: bool) -> bool:
     return all([subprocess.run([*command, *batch], cwd=ROOT).returncode == 0 for batch in batches])
 
 
-def sibling_groups(root: yaml.Node, line_count: int) -> list[list[int]]:
+def dash_line(lines: list[str], line: int) -> int:
+    while not lines[line].lstrip().startswith("-"):
+        line -= 1
+    return line
+
+
+def sibling_groups(root: yaml.Node, lines: list[str]) -> list[list[int]]:
     if not isinstance(root, yaml.MappingNode):
         return []
-    keys = [key.start_mark.line for key, _ in root.value]
-    groups = [keys + [line_count]]
-    for (_, value), end in zip(root.value, keys[1:] + [line_count]):
+    line_ends = list(itertools.accumulate(len(line) + 1 for line in lines))
+
+    def line_of(node: yaml.Node) -> int:
+        return bisect.bisect_right(line_ends, node.start_mark.index)
+
+    keys = [line_of(key) for key, _ in root.value]
+    groups = [keys + [len(lines)]]
+    for (_, value), end in zip(root.value, keys[1:] + [len(lines)]):
         if isinstance(value, yaml.SequenceNode) and not value.flow_style:
-            groups.append([item.start_mark.line for item in value.value] + [end])
+            groups.append([dash_line(lines, line_of(item)) for item in value.value] + [end])
     return groups
 
 
@@ -85,7 +98,7 @@ def spans_lines(lines: list[str], start: int, end: int) -> bool:
 
 def missing_gaps(lines: list[str], root: yaml.Node) -> list[int]:
     gaps = []
-    for bounds in sibling_groups(root, len(lines)):
+    for bounds in sibling_groups(root, lines):
         entries = list(zip(bounds, bounds[1:]))
         for previous, (start, end) in zip(entries, entries[1:]):
             anchor = comment_start(lines, start)
@@ -115,15 +128,22 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--fix", action="store_true")
     parser.add_argument("files", nargs="*")
     args = parser.parse_args(argv)
+    missing = [str(suite.relative_to(ROOT)) for suite in SUITES if not suite.is_dir()]
+    if missing and not args.files:
+        print("Missing suite folders:", *missing, file=sys.stderr)
+        return 1
     files = suite_files(args.files)
     if not files:
         return 0
+    fix_hint = "Run `mise run lint:yaml:fix` to fix the layout."
     if not run_prettier(files, args.fix):
+        if not args.fix:
+            print(fix_hint, file=sys.stderr)
         return 1
     findings = [finding for path in files for finding in check_spacing(path, args.fix)]
     if not findings:
         return 0
-    hint = "A fix here would change a value. Add these blank lines by hand." if args.fix else "Run `mise run lint:yaml:fix` to fix the layout."
+    hint = "A fix here would change a value. Add these blank lines by hand." if args.fix else fix_hint
     print(*findings, hint, sep="\n", file=sys.stderr)
     return 1
 
