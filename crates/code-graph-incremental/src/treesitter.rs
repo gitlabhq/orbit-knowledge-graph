@@ -417,7 +417,8 @@ pub fn parse_with_sentinel(
                 ControlFlow::Break(())
             }
         };
-        let mut input = |offset: usize, _: tree_sitter::Point| &source.as_bytes()[offset..];
+        let mut input =
+            |offset: usize, _: tree_sitter::Point| source.as_bytes().get(offset..).unwrap_or(&[]);
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let ts_tree = c
             .parser
