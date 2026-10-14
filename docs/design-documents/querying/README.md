@@ -53,6 +53,8 @@ The remote manifest uses line-oriented HTML placeholders to show where the local
 
 Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. The 14 YAML definitions under `config/named_queries/` carry JSON Query DSL and GQL spellings of the same graph shape.
 
+The `expand_merge_request` and `expand_work_item` queries return the immediate neighborhood of a node for entity context expansion. A merge request's notes, mentions, and diffs are left out, because the neighbors query allows 10 relationship types and diff files are two hops away. A neighbors query can order only by a property of the center node, so the cut at `limit` has no set order. Clients check `pagination.truncated`.
+
 The `named-queries` crate validates and embeds both spellings. JSON templates use `$binding` for trusted caller values and `$param` for client values. GQL templates use `binding`, `param`, `identifier`, and `integer` lookup functions. Each parameter has one JSON Schema and one example shared by both spellings.
 
 Rails sends `QUERY_TYPE_NAMED` with a separate language selected by the per-user `orbit_gql_queries` flag. Both languages use the same JSON envelope: `{"name": ..., "parameters": {...}}`. The server renders the selected spelling and compiles it with the matching frontend. Authentication, quota, redaction, and response formatting are the same for both modes.
