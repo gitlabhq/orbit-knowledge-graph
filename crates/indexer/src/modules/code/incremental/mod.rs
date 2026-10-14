@@ -53,6 +53,7 @@ pub(super) async fn load(
     let limits = Limits {
         file_bytes: to_cap(config.max_file_size_bytes),
         total_bytes: to_cap(config.max_total_bytes),
+        files: (config.max_repository_files > 0).then_some(config.max_repository_files),
         resident_bytes: Some(config.source_memory_budget_bytes),
         ..Limits::default()
     };
@@ -77,7 +78,7 @@ pub(super) async fn load(
     .map_err(|error| RepositoryCacheError::Archive(error.to_string()))?;
     result.map(Arc::new).map_err(|error| match error {
         SourceError::Empty => RepositoryCacheError::EmptyArchive,
-        SourceError::Cap(cap) if cap.metric == LimitKind::TotalBytes => {
+        SourceError::Cap(cap) if matches!(cap.metric, LimitKind::TotalBytes | LimitKind::Files) => {
             RepositoryCacheError::RepositoryTooLarge
         }
         other => RepositoryCacheError::Archive(other.to_string()),

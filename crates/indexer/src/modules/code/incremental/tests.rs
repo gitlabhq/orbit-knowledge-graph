@@ -723,3 +723,21 @@ async fn loading_distinguishes_empty_archives_and_total_byte_limits() {
         Err(RepositoryCacheError::RepositoryTooLarge)
     ));
 }
+
+#[tokio::test]
+async fn loading_rejects_repositories_with_more_files_than_the_limit() {
+    let mut config = config();
+    config.max_repository_files = 3;
+    let files: &[(&str, &[u8])] = &[
+        ("root/a.txt", b""),
+        ("root/b.txt", b""),
+        ("root/c.txt", b""),
+        ("root/d.txt", b""),
+    ];
+    assert!(matches!(
+        load(stream(build_tar_gz(files)), &config).await,
+        Err(RepositoryCacheError::RepositoryTooLarge)
+    ));
+    config.max_repository_files = 4;
+    assert!(load(stream(build_tar_gz(files)), &config).await.is_ok());
+}
