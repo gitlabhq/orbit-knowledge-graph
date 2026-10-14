@@ -53,6 +53,8 @@ fn workset(
         })
         .map(|file| file.path.to_string())
         .collect();
+    let cap = context.env.limits.max_manifest_bytes;
+    let mut manifest_bytes = 0u64;
     for file in repository.files().filter(|file| file.keeps()) {
         context.run.check()?;
         let path = file.path.as_ref();
@@ -64,6 +66,13 @@ fn workset(
             .iter()
             .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
         {
+            manifest_bytes = manifest_bytes.saturating_add(file.size);
+            if cap > 0 && manifest_bytes > cap {
+                let (observed, cap) = (manifest_bytes as usize, cap as usize);
+                let limited = Killed::limit("manifests", path, observed, cap);
+                context.report.limited.push(limited);
+                continue;
+            }
             match read(repository, path) {
                 Ok(content) => state.configs.push(SourceFile {
                     path: path.into(),

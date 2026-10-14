@@ -266,6 +266,10 @@ pub struct CodeIndexingPipelineConfig {
     /// Names that cross-file resolution may make visible across all files of
     /// one language family before it stops as an overrun. 0 = no limit.
     pub max_cross_file_names: usize,
+    /// Manifest bytes (package.json, Cargo.toml, and the like) that one language
+    /// family reads for resolution. A manifest past the limit is not read, keeps
+    /// its File row, and is counted as too_many_manifest_bytes. 0 = no limit.
+    pub max_manifest_bytes: u64,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how

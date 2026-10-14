@@ -41,6 +41,7 @@ pub(super) fn limits(config: &CodeIndexingPipelineConfig) -> code_graph_incremen
         cross_file_resolve_ms: budget(config.cross_file_resolve_timeout_ms),
         max_tree_depth: config.max_tree_depth,
         max_cross_file_names: config.max_cross_file_names,
+        max_manifest_bytes: config.max_manifest_bytes,
         ..code_graph_incremental::Limits::UNLIMITED
     }
 }

@@ -630,6 +630,12 @@
           "format": "uint",
           "minimum": 0
         },
+        "max_manifest_bytes": {
+          "description": "Manifest bytes (package.json, Cargo.toml, and the like) that one language\nfamily reads for resolution. A manifest past the limit is not read, keeps\nits File row, and is counted as too_many_manifest_bytes. 0 = no limit.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "job_timeout_secs": {
           "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.",
           "type": "integer",
@@ -720,6 +726,7 @@
         "cross_file_resolve_timeout_ms",
         "max_tree_depth",
         "max_cross_file_names",
+        "max_manifest_bytes",
         "job_timeout_secs",
         "fetch_concurrency",
         "write_channel_capacity",

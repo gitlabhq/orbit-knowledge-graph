@@ -719,6 +719,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
     assert_eq!(mapped.max_files, configured.max_files);
     assert_eq!(mapped.max_tree_depth, configured.max_tree_depth);
     assert_eq!(mapped.max_cross_file_names, configured.max_cross_file_names);
+    assert_eq!(mapped.max_manifest_bytes, configured.max_manifest_bytes);
 
     let unlimited = limits(&CodeIndexingPipelineConfig {
         max_files: 0,
@@ -729,6 +730,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         cross_file_resolve_timeout_ms: 0,
         max_tree_depth: 0,
         max_cross_file_names: 0,
+        max_manifest_bytes: 0,
         ..configured
     });
     assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);
@@ -856,4 +858,23 @@ async fn each_engine_phase_of_a_family_reports_its_start() {
             "js_ts export 2",
         ]
     );
+}
+
+#[tokio::test]
+async fn manifests_past_the_byte_limit_are_reported_and_not_read() {
+    let manifest = br#"{ "name": "pkg", "dependencies": { "left-pad": "^1.0.0" } }"#;
+    let files: &[(&str, &[u8])] = &[
+        ("root/a/package.json", manifest),
+        ("root/b/package.json", manifest),
+        ("root/c/package.json", manifest),
+        ("root/a/index.js", b"export function a() {}\n"),
+    ];
+    let limits = code_graph_incremental::Limits {
+        max_manifest_bytes: 2 * manifest.len() as u64,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.limited_reasons, ["too_many_manifest_bytes"]);
+    assert_eq!(timings.errors, 0);
 }

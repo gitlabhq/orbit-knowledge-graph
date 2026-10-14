@@ -132,6 +132,7 @@ engine:
         cross_file_resolve_timeout_ms: 180000
         max_tree_depth: 4096
         max_cross_file_names: 40000000
+        max_manifest_bytes: 67108864
         job_timeout_secs: 1500
         fetch_concurrency: 10
         write_channel_capacity: 8
