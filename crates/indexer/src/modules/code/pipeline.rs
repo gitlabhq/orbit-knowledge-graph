@@ -685,7 +685,7 @@ impl CodeIndexer {
             phase_started: {
                 let span = span.clone();
                 Arc::new(move |family, phase, files| {
-                    info!(parent: &span, family, phase, files, "code-graph phase started");
+                    span.in_scope(|| info!(family, phase, files, "code-graph phase started"));
                 })
             },
         };
