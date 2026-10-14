@@ -795,7 +795,7 @@ fn spawn_probe_server(active_schema: Arc<ActiveSchema>) -> String {
 }
 
 async fn probe(base_url: &str, path: &str) -> StatusCode {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    super::tls_fixtures::init_crypto_provider();
     reqwest::get(format!("{base_url}{path}"))
         .await
         .unwrap()

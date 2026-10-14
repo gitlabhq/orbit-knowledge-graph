@@ -408,7 +408,7 @@ pub async fn run_dispatcher(
         Box::new(max_deliveries_reconciler),
     ];
 
-    orchestrator::launch(triggers, shutdown.clone())
+    orchestrator::launch(triggers, shutdown)
         .await
         .map_err(DispatcherError::from)
 }

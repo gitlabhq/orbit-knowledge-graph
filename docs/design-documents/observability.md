@@ -280,7 +280,7 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 Every service serves `/-/liveness` and `/-/readiness` on the probe server port (default 9394), the
 same port that serves `/-/metrics`. These pod-level probes report local serving state only.
 Liveness confirms that the process can answer HTTP. Readiness keeps a pod out of rotation until its
-schema gate has cleared. The HealthCheck service's `/health`
+startup and schema checks pass. The HealthCheck service's `/health`
 endpoint reports ClickHouse and Kubernetes Deployment and StatefulSet health; NATS queue depth is
 reported separately by `/queue-depth`. GitLab is not checked by the HealthCheck service.
 
