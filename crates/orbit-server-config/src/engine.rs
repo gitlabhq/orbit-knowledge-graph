@@ -231,7 +231,7 @@ pub struct CodeIndexingPipelineConfig {
     /// per-repo disk so fetch/index concurrency can rise without exhausting the
     /// pod volume. 0 = no limit.
     pub max_total_bytes: u64,
-    /// Archive entries above which a repository is skipped entirely, as for
+    /// Archive file entries above which a repository is skipped entirely, as for
     /// `max_total_bytes`. 0 = no limit.
     pub max_repository_files: usize,
     pub source_memory_budget_bytes: u64,

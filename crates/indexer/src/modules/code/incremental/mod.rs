@@ -49,11 +49,13 @@ pub(super) async fn load(
     stream: ByteStream,
     config: &CodeIndexingPipelineConfig,
 ) -> Result<Repository, RepositoryCacheError> {
-    let to_cap = |value| (value > 0).then_some(value);
+    fn to_cap<T: Default + PartialOrd>(value: T) -> Option<T> {
+        (value > T::default()).then_some(value)
+    }
     let limits = Limits {
         file_bytes: to_cap(config.max_file_size_bytes),
         total_bytes: to_cap(config.max_total_bytes),
-        files: (config.max_repository_files > 0).then_some(config.max_repository_files),
+        files: to_cap(config.max_repository_files),
         resident_bytes: Some(config.source_memory_budget_bytes),
         ..Limits::default()
     };
