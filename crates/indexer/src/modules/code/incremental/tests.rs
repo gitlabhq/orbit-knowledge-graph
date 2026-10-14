@@ -93,6 +93,7 @@ struct Timings {
     slowest_paths: Vec<String>,
     errors: usize,
     skipped_paths: Vec<String>,
+    skipped_reasons: Vec<&'static str>,
 }
 
 async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Limits) -> Timings {
@@ -120,11 +121,18 @@ async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Li
         .map(|file| file.path.clone())
         .collect();
     skipped_paths.sort();
+    let mut skipped_reasons: Vec<_> = report
+        .skipped
+        .iter()
+        .map(|file| file.kind.as_metric_label())
+        .collect();
+    skipped_reasons.sort();
     Timings {
         languages,
         slowest_paths,
         errors: report.errors.len(),
         skipped_paths,
+        skipped_reasons,
     }
 }
 
@@ -174,6 +182,7 @@ async fn files_nested_past_the_default_depth_limit_are_skipped() {
     };
     let timings = timings_for(files, limits).await;
     assert_eq!(timings.skipped_paths, ["nested.js"]);
+    assert_eq!(timings.skipped_reasons, ["deeply_nested"]);
     assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
 }
 
@@ -296,6 +305,7 @@ async fn a_file_with_more_edges_than_the_limit_is_skipped() {
     ];
     let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
     assert_eq!(timings.skipped_paths, ["wide.js"]);
+    assert_eq!(timings.skipped_reasons, ["too_many_edges"]);
 }
 
 #[tokio::test]

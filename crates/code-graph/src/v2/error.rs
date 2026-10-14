@@ -109,6 +109,9 @@ pub enum FileSkip {
     ParserOversize,
     ArrowOffsetOverflow,
     UnsafePath,
+    DeeplyNested,
+    StackLimit,
+    TooManyEdges,
     Timeout(AbortPhase),
 }
 
@@ -120,6 +123,9 @@ impl FileSkip {
             Self::ParserOversize => "parser_oversize",
             Self::ArrowOffsetOverflow => "arrow_offset_overflow",
             Self::UnsafePath => "unsafe_path",
+            Self::DeeplyNested => "deeply_nested",
+            Self::StackLimit => "stack_limit",
+            Self::TooManyEdges => "too_many_edges",
             Self::Timeout(AbortPhase::Parse) => "timeout_parse",
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
             Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",

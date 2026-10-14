@@ -152,16 +152,19 @@ pub(in crate::modules::code) fn run(
             .skipped
             .into_iter()
             .map(|killed| {
-                let phase = match killed.label {
-                    "tree-sitter" | "depth" | "stack" => AbortPhase::Parse,
-                    "rewrite" => AbortPhase::Walk,
-                    "link" | "edges" => AbortPhase::Ssa,
-                    _ => AbortPhase::Sentinel,
+                let kind = match killed.label {
+                    "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
+                    "depth" => FileSkip::DeeplyNested,
+                    "stack" => FileSkip::StackLimit,
+                    "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
+                    "link" => FileSkip::Timeout(AbortPhase::Ssa),
+                    "edges" => FileSkip::TooManyEdges,
+                    _ => FileSkip::Timeout(AbortPhase::Sentinel),
                 };
                 SkippedFile {
                     detail: killed.to_string(),
                     path: killed.path,
-                    kind: FileSkip::Timeout(phase),
+                    kind,
                 }
             })
             .collect(),
