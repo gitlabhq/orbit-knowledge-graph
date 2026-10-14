@@ -258,7 +258,7 @@ Graph files use `revisions/<project-id>/<commit-sha>.duckdb`.
 The `manifest.duckdb` file records their paths and status.
 The canonical checkout path determines the project ID.
 Reindexing replaces that commit's graph and preserves other revisions.
-Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads `$ORBIT_DATA_DIR/settings.json` too.
+Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads and writes `$ORBIT_DATA_DIR/settings.json` too.
 
 Queries wait up to five seconds for busy revisions before returning an error.
 Workspace queries skip missing or incomplete revisions with a diagnostic.
