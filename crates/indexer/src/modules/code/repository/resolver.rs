@@ -43,7 +43,7 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
-    /// HTTP 500: Rails raises it for a repository that does not exist, until it returns 404.
+    /// HTTP 500 or another non-gateway 5xx: Rails raises 500 for a repository that does not exist, until it returns 404.
     ServerError,
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
@@ -110,8 +110,8 @@ fn is_overload_status(status: u16) -> bool {
     matches!(status, 502..=504)
 }
 
-/// Workhorse answers 429 for Gitaly's `ResourceExhausted`, and 502-504 for
-/// transient proxy failures.
+/// Workhorse answers 429 for Gitaly's `ResourceExhausted` once
+/// gitlab-org/gitlab!262112 ships, and 502-504 for transient proxy failures.
 fn overload_detail(err: &RepositoryServiceError) -> Option<String> {
     match err {
         RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
@@ -611,7 +611,7 @@ mod tests {
     async fn resolve_maps_archive_overload_statuses_to_overloaded_without_retrying() {
         use gitlab_client::GitlabClientError;
 
-        let overloads: [fn() -> GitlabClientError; 3] = [
+        let overloads: [fn() -> GitlabClientError; 4] = [
             || GitlabClientError::ServerError {
                 project_id: 42,
                 status: 502,
@@ -619,6 +619,10 @@ mod tests {
             || GitlabClientError::ServerError {
                 project_id: 42,
                 status: 503,
+            },
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 504,
             },
             || GitlabClientError::RateLimited {
                 project_id: 42,

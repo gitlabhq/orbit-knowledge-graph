@@ -843,6 +843,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_error_without_commit_sha_sets_checkpoint_and_acks() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+                project_id: 123,
+                status: 500,
+            }),
+        );
+
+        let envelope = TestContext::make_request_with_sha(7, 123, "main", None);
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok());
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("checkpoint should be set for missing repository");
+        assert_eq!(checkpoint.last_task_id, 7);
+    }
+
+    #[tokio::test]
     async fn archive_overload_nacks_and_never_checkpoints_empty() {
         use crate::modules::code::repository::RepositoryServiceError;
         use gitlab_client::GitlabClientError;

@@ -1112,8 +1112,8 @@ async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // One dispatch is up to `max_attempts` (5) deliveries. Workhorse answers 429 for Gitaly
-    // ResourceExhausted and 502 for a transient proxy failure.
+    // One dispatch is up to `max_attempts` (5) deliveries. A 429 is a rate limit (Workhorse's
+    // answer to Gitaly ResourceExhausted once gitlab-org/gitlab!262112 ships); 502 is a proxy failure.
     for delivery in 1..=5 {
         let status = if delivery % 2 == 1 {
             axum::http::StatusCode::BAD_GATEWAY

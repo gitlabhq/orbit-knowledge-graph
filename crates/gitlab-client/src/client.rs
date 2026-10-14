@@ -789,5 +789,10 @@ mod tests {
                 ..
             }
         ));
+        // Threshold is 2: a third 429 must not hit an open breaker.
+        assert!(matches!(
+            err(client.download_archive(3, "main").await),
+            GitlabClientError::RateLimited { .. }
+        ));
     }
 }
