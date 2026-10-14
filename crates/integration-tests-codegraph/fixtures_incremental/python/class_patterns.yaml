@@ -1,4 +1,5 @@
 name: "Python: class instantiation and method patterns"
+
 fixtures:
   - path: main.py
     content: |

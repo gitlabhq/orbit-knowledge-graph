@@ -1,4 +1,5 @@
 name: Ruby literal dispatch preserves receivers and evaluated arguments
+
 fixtures:
   - path: dispatch.rb
     content: |
@@ -38,6 +39,7 @@ fixtures:
           send(name, argument) { block_body }
         end
       end
+
 tests:
   - name: Implicit and self dispatch retain their argument calls
     query: |
@@ -46,10 +48,11 @@ tests:
       RETURN caller.name AS caller, target.fqn AS target
     assert:
       - { row_count: 4 }
-      - { row: { caller: implicit, target: 'Caller::save' } }
-      - { row: { caller: implicit, target: 'Caller::argument' } }
-      - { row: { caller: self_call, target: 'Caller::save' } }
-      - { row: { caller: self_call, target: 'Caller::argument' } }
+      - { row: { caller: implicit, target: "Caller::save" } }
+      - { row: { caller: implicit, target: "Caller::argument" } }
+      - { row: { caller: self_call, target: "Caller::save" } }
+      - { row: { caller: self_call, target: "Caller::argument" } }
+
   - name: Explicit dispatch uses the receiver rather than the enclosing class
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -57,7 +60,8 @@ tests:
       RETURN target.fqn AS target
     assert:
       - { row_count: 3 }
-      - { column_values: { field: target, values: [Target, 'Target::save', 'Caller::argument'] } }
+      - { column_values: { field: target, values: [Target, "Target::save", "Caller::argument"] } }
+
   - name: Dynamic dispatch does not use later arguments or partial strings as names
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -65,6 +69,7 @@ tests:
       RETURN target.fqn
     assert:
       - { empty: true }
+
   - name: Dispatch on a constructor result keeps receiver and argument calls
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -72,7 +77,8 @@ tests:
       RETURN target.fqn AS target
     assert:
       - { row_count: 4 }
-      - { column_values: { field: target, values: [Target, 'Target::save', 'Caller::argument', 'Caller::block_body'] } }
+      - { column_values: { field: target, values: [Target, "Target::save", "Caller::argument", "Caller::block_body"] } }
+
   - name: Dispatch preserves block bodies
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -80,7 +86,8 @@ tests:
       RETURN target.fqn AS target
     assert:
       - { row_count: 2 }
-      - { column_values: { field: target, values: ['Caller::save', 'Caller::argument'] } }
+      - { column_values: { field: target, values: ["Caller::save", "Caller::argument"] } }
+
   - name: Nonliteral dispatch preserves the original call and evaluated arguments
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -88,7 +95,8 @@ tests:
       RETURN target.fqn AS target
     assert:
       - { row_count: 3 }
-      - { column_values: { field: target, values: ['CustomDispatch::send', 'CustomDispatch::argument', 'CustomDispatch::block_body'] } }
+      - { column_values: { field: target, values: ["CustomDispatch::send", "CustomDispatch::argument", "CustomDispatch::block_body"] } }
+
 steps:
   - name: Replace literal dispatch with dynamic dispatch after snapshot loading
     snapshot: true
@@ -113,4 +121,4 @@ steps:
           RETURN target.fqn AS target
         assert:
           - { row_count: 2 }
-          - { column_values: { field: target, values: [Target, 'Caller::argument'] } }
+          - { column_values: { field: target, values: [Target, "Caller::argument"] } }

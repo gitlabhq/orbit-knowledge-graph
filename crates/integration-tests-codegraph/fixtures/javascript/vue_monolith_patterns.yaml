@@ -1,5 +1,6 @@
 name: "Vue monolith patterns"
 pipeline: js
+
 fixtures:
   - path: webpack.config.js
     content: |
@@ -14,6 +15,7 @@ fixtures:
           },
         },
       };
+
   - path: app/assets/javascripts/tracking.js
     content: |
       export function track(action, label) {
@@ -27,16 +29,19 @@ fixtures:
       };
 
       export default Tracking;
+
   - path: app/assets/javascripts/sentry.js
     content: |
       export function captureException(error) {
         return error;
       }
+
   - path: app/assets/javascripts/lib/utils/common_utils.js
     content: |
       export function parseBoolean(value) {
         return value === 'true';
       }
+
   - path: app/assets/javascripts/gitlab_version_check/constants.js
     content: |
       export const TRACKING_ACTIONS = {
@@ -53,6 +58,7 @@ fixtures:
         SUCCESS: 'success',
         WARNING: 'warning',
       };
+
   - path: app/assets/javascripts/gitlab_version_check/utils.js
     content: |
       export const buildKey = (currentVersion) => `${currentVersion}-dismissed`;
@@ -64,6 +70,7 @@ fixtures:
       export const setHideAlertModalCookie = (currentVersion) => {
         return buildKey(currentVersion);
       };
+
   - path: app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue
     content: |
       <script>
@@ -99,6 +106,7 @@ fixtures:
       <template>
         <div />
       </template>
+
   - path: app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue
     content: |
       <script>
@@ -128,10 +136,12 @@ fixtures:
       <template>
         <div />
       </template>
+
   - path: app/assets/javascripts/gitlab_version_check/components/index.js
     content: |
       export { default as GitlabVersionCheckBadge } from './gitlab_version_check_badge.vue';
       export { default as SecurityPatchUpgradeAlertModal } from './security_patch_upgrade_alert_modal.vue';
+
   - path: app/assets/javascripts/gitlab_version_check/index.js
     content: |
       import { parseBoolean } from '~/lib/utils/common_utils';
@@ -144,6 +154,7 @@ fixtures:
         parseBoolean(el.dataset.actionable);
         return [GitlabVersionCheckBadge, SecurityPatchUpgradeAlertModal];
       }
+
   - path: app/assets/javascripts/gitlab_version_check/actions.js
     content: |
       import { track } from '~/tracking';
@@ -157,11 +168,13 @@ fixtures:
         setHideAlertModalCookie(currentVersion);
         return track('click_button', currentVersion);
       }
+
   - path: ee/app/assets/javascripts/oncall_schedules/utils.js
     content: |
       export function buildSchedulePath(value) {
         return `schedule:${value}`;
       }
+
   - path: app/assets/javascripts/oncall_schedules/index.js
     content: |
       import * as Sentry from '~/sentry';
@@ -171,6 +184,7 @@ fixtures:
         Sentry.captureException(error);
         return buildSchedulePath(error);
       }
+
   - path: ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue
     content: |
       <script lang="ts">

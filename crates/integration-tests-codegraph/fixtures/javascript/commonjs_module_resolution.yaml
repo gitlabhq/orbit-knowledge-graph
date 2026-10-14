@@ -1,9 +1,11 @@
 name: "JavaScript CommonJS module resolution"
 pipeline: js
+
 fixtures:
   - path: named/util.js
     content: |
       exports.helper = function helper() {};
+
   - path: named/main.js
     content: |
       const { helper } = require('./util');
@@ -15,6 +17,7 @@ fixtures:
   - path: namespace/util.js
     content: |
       exports.helper = function helper() {};
+
   - path: namespace/main.js
     content: |
       const util = require('./util');
@@ -28,6 +31,7 @@ fixtures:
       exports.resolve = function resolve() {
         return "ok";
       };
+
   - path: alias/main.js
     content: |
       const { resolve: presolve } = require('./util');
@@ -43,6 +47,7 @@ fixtures:
       }
 
       module.exports = main;
+
   - path: default/main.js
     content: |
       const runMain = require('./util');
@@ -65,6 +70,7 @@ fixtures:
         helper,
         normalize,
       };
+
   - path: object/main.js
     content: |
       const util = require('./util');
@@ -80,6 +86,7 @@ fixtures:
       }
 
       module.exports = main;
+
   - path: alias_chain/main.js
     content: |
       const runMain = require('./util');
@@ -95,6 +102,7 @@ fixtures:
       exports.trimValue = function trimValue(value) {
         return value.trim();
       };
+
   - path: no_false_call/main.js
     content: |
       const { HTTP_STATUS_OK, trimValue } = require('./util');
@@ -112,6 +120,7 @@ fixtures:
       exports.default = function defaultHelper(value) {
         return value.trim();
       };
+
   - path: interop/main.js
     content: |
       const util = require('./util');
@@ -144,17 +153,20 @@ fixtures:
         firstTrack();
         secondTrack();
       }
+
   - path: external/module_level.js
     content: |
       const { init } = require('external-sdk');
 
       init();
+
   - path: external/module_level_globals.js
     content: |
       const { init } = require('external-sdk');
 
       console.log("ready");
       JSON.parse("{}");
+
   - path: external/imported_reference_only.js
     content: |
       const { track } = require('external-tracker');
@@ -162,6 +174,7 @@ fixtures:
       function reportReference() {
         return track;
       }
+
   - path: external/shadowed.js
     content: |
       const { track } = require('external-tracker');
@@ -170,6 +183,7 @@ fixtures:
         const track = () => "local";
         return track();
       }
+
   - path: external/globals.js
     content: |
       const { track } = require('external-tracker');
@@ -178,6 +192,7 @@ fixtures:
         console.log("ready");
         return JSON.parse("{}");
       }
+
   - path: side_effect/main.js
     content: |
       require('external-polyfill');

@@ -1,4 +1,5 @@
 name: "C#: a throw expression is bottom and does not take part in the join"
+
 fixtures:
   - path: A.cs
     content: |
@@ -6,6 +7,7 @@ fixtures:
       {
           public class A { public void N() {} }
       }
+
   - path: Use.cs
     content: |
       namespace Bottom

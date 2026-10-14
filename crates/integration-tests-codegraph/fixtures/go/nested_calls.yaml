@@ -1,4 +1,5 @@
 name: "Go: nested and recursive calls"
+
 fixtures:
   - path: nested.go
     content: |

@@ -1,4 +1,5 @@
 name: "C#: a local shadows a method for a simple name"
+
 fixtures:
   - path: R.cs
     content: |
@@ -27,6 +28,7 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { empty: true }
+
   - name: "Log() without a local calls the method"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

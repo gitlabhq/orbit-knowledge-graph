@@ -1,7 +1,9 @@
 # JSON preserves incoming directions; branch_incoming_gql.yaml tests the equivalent GQL query's normalized plan.
 name: JSON incoming branches join and cascade through the shared physical target
+
 missing_frontends:
   gql: branch_incoming_gql.yaml checks the same query after GQL arrow normalization and hop reordering.
+
 query:
   json: |
     {
@@ -18,11 +20,13 @@ query:
         {"type": "CALLS", "from": "a", "to": "d", "direction": "incoming"}
       ]
     }
+
 logical:
   expect:
     - (EdgeScan CALLS b->a AS e0)
     - (EdgeScan CALLS c->b AS e1)
     - (EdgeScan CALLS d->a AS e2)
+
 physical:
   clickhouse:
     planned:

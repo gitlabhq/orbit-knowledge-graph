@@ -1,4 +1,5 @@
 name: Review Java implicit type coverage
+
 fixtures:
   - path: Main.java
     content: |
@@ -6,6 +7,7 @@ fixtures:
       class Main {
         void run() { throw new SecurityException(); }
       }
+
 tests:
   - name: Implicit java.lang constructor does not bind unrelated wildcard
     query: |

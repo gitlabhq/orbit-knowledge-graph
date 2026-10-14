@@ -1,11 +1,14 @@
 name: Incoming denormalized sets filter the physical target tags
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming"}]}
   gql: |
     MATCH (a:Definition)<-[:CALLS]-(b:Definition) WHERE a.definition_type IN ['function', 'method'] RETURN a, b
+
 logical:
   expect: ["(EdgeScan CALLS b->a AS e0)"]
+
 physical:
   clickhouse:
     planned:

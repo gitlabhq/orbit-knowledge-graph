@@ -1,4 +1,5 @@
 name: "Python: lambda assignment and call"
+
 fixtures:
   - path: main.py
     content: |

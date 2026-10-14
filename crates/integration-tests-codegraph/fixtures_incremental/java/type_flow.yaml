@@ -1,4 +1,5 @@
 name: "Java: type-flow chain resolution"
+
 fixtures:
   - path: UserService.java
     content: |
@@ -188,6 +189,7 @@ fixtures:
               d.fetch();
           }
       }
+
   - path: ChainIsolation.java
     content: |
       class FirstResult {
@@ -223,7 +225,6 @@ fixtures:
                   .next().next().next().next().next().next().finish();
           }
       }
-
 
 tests:
   - name: "typed local: svc.query() resolves to UserService.query"
@@ -400,7 +401,7 @@ tests:
           RETURN callee.fqn AS target
         assert:
           - { row_count: 3 }
-          - { match: { field: target, pattern: 'com.example*' } }
+          - { match: { field: target, pattern: "com.example*" } }
 
   - name: "Same-name factories keep separate return types"
     query: |
@@ -409,7 +410,7 @@ tests:
       RETURN callee.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { target: 'FirstResult.finish' } }
+      - { row: { target: "FirstResult.finish" } }
 
   - name: "Reassignment replaces the producer call in SSA"
     query: |
@@ -418,7 +419,7 @@ tests:
       RETURN callee.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { target: 'SecondResult.finish' } }
+      - { row: { target: "SecondResult.finish" } }
 
   - name: "Twelve receiver calls reach the final method"
     query: |
@@ -427,4 +428,4 @@ tests:
       RETURN callee.name AS target
     assert:
       - { row_count: 13 }
-      - { row: { target: 'finish' } }
+      - { row: { target: "finish" } }

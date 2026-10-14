@@ -11,6 +11,7 @@
 # stays reachable as a Calls edge even when the child file is missing or
 # malformed. The Quad/Square fixtures below pin that fallback.
 name: "Java 17: sealed interfaces and permitted classes"
+
 fixtures:
   - path: com/example/shapes/Shape.java
     content: |

@@ -1,11 +1,14 @@
 name: FK stars plan target candidates before the narrowed center
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"},"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","node_ids":[1000,1001],"columns":["name"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"p.name"}
   gql: |
     MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id IN [1000, 1001] RETURN u.username, mr.title, p.name ORDER BY p.name
+
 logical:
   expect: ["(Sort p.name (_))"]
+
 physical:
   clickhouse:
     planned:

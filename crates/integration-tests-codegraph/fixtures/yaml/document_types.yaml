@@ -39,15 +39,18 @@ fixtures:
       not-an-include:
         include: /ignored.yml
         script: [true]
+
   - path: .gitlab/ci/release.yml
     content: |
       release:
         stage: test
         script: [true]
+
   - path: .gitlab-ci-versions.yml
     content: |
       versions:
         script: [true]
+
   - path: ci/quoted.gitlab-ci.yml
     content: |
       "build:linux":
@@ -55,6 +58,7 @@ fixtures:
       stages: test
       ---
       { flow-job: { script: y } }
+
   - path: config/default.yaml
     content: |
       billing:
@@ -64,10 +68,12 @@ fixtures:
         retries: 2
       job:
         <<: *base
+
   - path: config/MyChart.yaml
     content: |
       dependencies:
         - name: redis
+
   - path: apps/gkg.yaml
     content: |
       apiVersion: argoproj.io/v1alpha1
@@ -81,6 +87,7 @@ fixtures:
             targetRevision: v1.2.3
           - repoURL: https://charts.bitnami.com/bitnami
             chart: redis
+
   - path: apps/plain.yaml
     content: |
       apiVersion: apps/v1
@@ -90,6 +97,7 @@ fixtures:
       spec:
         source:
           repoURL: https://example.com/not-argo.git
+
   - path: chart/Chart.yaml
     content: |
       apiVersion: v2
@@ -99,6 +107,7 @@ fixtures:
         - name: redis
           version: ~17.0.0
           repository: https://charts.bitnami.com/bitnami
+
   - path: chart/values.yaml
     content: |
       image:
@@ -107,9 +116,11 @@ fixtures:
         env:
           - name: RUST_LOG
           - name: RUST_BACKTRACE
+
   - path: chart/values-deep.yaml
     content: |
       {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {a: {x: 1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}
+
   - path: docker-compose.yml
     content: |
       services:

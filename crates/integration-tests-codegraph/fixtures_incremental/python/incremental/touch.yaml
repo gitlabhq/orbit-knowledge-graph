@@ -1,4 +1,5 @@
 name: "Python: reindexing an unchanged file changes nothing"
+
 fixtures:
   - path: app.py
     content: |

@@ -1,12 +1,15 @@
 name: "Python: relative import resolution"
+
 fixtures:
   - path: mypackage/__init__.py
     content: ""
+
   - path: mypackage/models.py
     content: |
       class User:
           def save(self):
               pass
+
   - path: mypackage/services.py
     content: |
       from .models import User

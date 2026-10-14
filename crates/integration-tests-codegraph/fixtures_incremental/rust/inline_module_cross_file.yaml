@@ -1,9 +1,11 @@
 name: "Rust: imports from an inline module in another file"
+
 fixtures:
   - path: Cargo.toml
     content: |
       [package]
       name = "probe"
+
   - path: src/lib.rs
     content: |
       pub mod usage;
@@ -12,10 +14,12 @@ fixtures:
           impl Service { pub fn ping(&self) {} }
           pub fn helper() {}
       }
+
   - path: src/usage.rs
     content: |
       use crate::dep::{Service, helper};
       pub fn run() { let s = Service; s.ping(); helper(); }
+
 tests:
   - name: "cross-file inline module"
     query: |

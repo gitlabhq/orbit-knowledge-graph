@@ -1,4 +1,5 @@
 name: "Go: multiple struct embedding"
+
 fixtures:
   - path: multi_embed.go
     content: |

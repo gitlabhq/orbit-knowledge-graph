@@ -1,4 +1,5 @@
 name: "Rust: closures are not extracted as Definition nodes"
+
 # Intentional limitation, not a bug: ra_ap_hir 0.0.328 does not expose the
 # body-source-map lookup needed to recover a closure's AST node, so closures
 # (and raw fn pointers / `impl Fn*` receivers) have no stable definition site.

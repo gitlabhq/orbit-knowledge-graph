@@ -24,6 +24,7 @@ fixtures:
         type    = string
         default = "10.0.0.0/16"
       }
+
   - path: locals.tf
     content: |
       locals {
@@ -33,12 +34,14 @@ fixtures:
           Region    = var.region
         }
       }
+
   - path: data.tf
     content: |
       data "aws_ami" "ubuntu" {
         most_recent = true
         owners      = ["099720109477"]
       }
+
   - path: network.tf
     content: |
       resource "aws_vpc" "main" {
@@ -50,6 +53,7 @@ fixtures:
         vpc_id     = aws_vpc.main.id
         cidr_block = "10.0.1.0/24"
       }
+
   - path: main.tf
     content: |
       resource "aws_instance" "web" {

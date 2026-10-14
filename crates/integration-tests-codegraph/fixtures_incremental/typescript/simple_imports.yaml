@@ -1,5 +1,6 @@
 name: "TypeScript: simple imports and cross-file resolution"
 pipeline: js
+
 fixtures:
   - path: models.ts
     content: |

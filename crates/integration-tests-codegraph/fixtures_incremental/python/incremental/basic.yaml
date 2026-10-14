@@ -1,4 +1,5 @@
 name: "Python: incremental indexing"
+
 fixtures:
   - path: main.py
     content: |
@@ -18,7 +19,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'utils.helper' } }
+      - { row: { fqn: "utils.helper" } }
 
   - name: "initial state: two files"
     query: |
@@ -34,7 +35,7 @@ tests:
       RETURN d.fqn AS fqn, d.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'utils.helper', file: 'utils.py' } }
+      - { row: { fqn: "utils.helper", file: "utils.py" } }
 
 steps:
   - name: "retain linked nodes through display, reload, and display again"
@@ -47,7 +48,7 @@ steps:
           RETURN d.fqn AS fqn, d.file_path AS file
         assert:
           - { row_count: 1 }
-          - { row: { fqn: 'utils.helper', file: 'utils.py' } }
+          - { row: { fqn: "utils.helper", file: "utils.py" } }
       - name: "retained files survive the storage round trip"
         query: |
           MATCH (f:File)
@@ -73,7 +74,7 @@ steps:
           RETURN d.fqn AS fqn
         assert:
           - { row_count: 1 }
-          - { row: { fqn: 'utils.helper' } }
+          - { row: { fqn: "utils.helper" } }
 
       - name: "extra is now a definition"
         query: |
@@ -82,7 +83,7 @@ steps:
           RETURN d.fqn AS fqn
         assert:
           - { row_count: 1 }
-          - { row: { fqn: 'utils.extra' } }
+          - { row: { fqn: "utils.extra" } }
 
       - name: "still two files"
         query: |
@@ -112,7 +113,7 @@ steps:
           RETURN d.fqn AS fqn
         assert:
           - { row_count: 1 }
-          - { row: { fqn: 'utils.extra' } }
+          - { row: { fqn: "utils.extra" } }
 
   - name: "remove utils.py"
     remove:

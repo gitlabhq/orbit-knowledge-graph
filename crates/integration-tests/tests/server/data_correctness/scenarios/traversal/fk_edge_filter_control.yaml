@@ -1,8 +1,10 @@
 description: FK-backed AUTHORED traversal returns its direct relationship without a contradictory edge filter
+
 query:
   gql: |
     MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
     RETURN u.id, mr.id
+
 expect:
   node_count: 3
   nodes:

@@ -1,4 +1,5 @@
 name: Property filters distinguish requirements from SQL functions
+
 query:
   json: |
     {
@@ -22,9 +23,11 @@ query:
       AND token_match(p.name, 'graph') AND all_tokens(p.name, 'graph query') AND any_tokens(p.name, 'code data')
       AND p.name IS NOT NULL AND p.description IS NULL
     RETURN p.name
+
 logical:
   expect:
     - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL (_))
+
 physical:
   clickhouse:
     planned:

@@ -1,4 +1,5 @@
 name: "Rust: edge collection bug fixes (compound assign, record expr, macro depth)"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -48,7 +49,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Counter::add_assign' } }
+      - { row: { fqn: "Counter::add_assign" } }
 
   - name: "record expression construction creates edge to the struct"
     query: |
@@ -57,7 +58,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Foo' } }
+      - { row: { fqn: "Foo" } }
 
   - name: "recursive macro expansion terminates without hanging"
     query: |
@@ -66,4 +67,4 @@ tests:
       RETURN caller.name AS name
     assert:
       - { row_count: 1 }
-      - { row: { name: 'trigger_recursive_macro' } }
+      - { row: { name: "trigger_recursive_macro" } }

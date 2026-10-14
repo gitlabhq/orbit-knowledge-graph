@@ -1,4 +1,5 @@
 name: "Java: intra-file resolution"
+
 fixtures:
   - path: com/example/App.java
     content: |

@@ -1,4 +1,5 @@
 name: "Python: comprehensive definition extraction"
+
 fixtures:
   - path: main.py
     content: |

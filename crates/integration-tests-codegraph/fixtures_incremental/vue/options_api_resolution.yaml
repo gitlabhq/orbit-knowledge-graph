@@ -1,5 +1,6 @@
 name: "Vue Options API resolution"
 pipeline: js
+
 fixtures:
   - path: config/webpack.config.js
     content: |

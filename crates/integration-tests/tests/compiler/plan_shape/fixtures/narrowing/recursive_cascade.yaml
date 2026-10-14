@@ -1,4 +1,5 @@
 name: Selective flat chain retains current-row scans and a dependent cascade anchor
+
 query:
   json: |
     {
@@ -18,11 +19,13 @@ query:
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(d:Definition)
     RETURN a.id, b.id, c.id, d.id
+
 logical:
   expect:
     - (Filter a.id IN [1] (NodeScan Definition AS a))
     - (EdgeScan CALLS a->b AS e0)
     - (EdgeScan CALLS b->c AS e1)
+
 physical:
   clickhouse:
     planned:

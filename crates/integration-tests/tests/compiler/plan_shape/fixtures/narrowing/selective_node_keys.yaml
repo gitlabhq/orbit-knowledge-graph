@@ -1,4 +1,5 @@
 name: Selective joined nodes plan narrowing keys before lowering
+
 query:
   json: |
     {
@@ -13,10 +14,12 @@ query:
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)
     RETURN a.id, b.id ORDER BY a.id
+
 logical:
   expect:
     - (Filter a.id IN [1] (NodeScan Definition AS a))
     - (Sort a.id (_))
+
 physical:
   clickhouse:
     planned:

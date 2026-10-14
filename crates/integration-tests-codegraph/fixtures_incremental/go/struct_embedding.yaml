@@ -1,4 +1,5 @@
 name: "Go: struct embedding (promoted methods)"
+
 fixtures:
   - path: main.go
     content: |

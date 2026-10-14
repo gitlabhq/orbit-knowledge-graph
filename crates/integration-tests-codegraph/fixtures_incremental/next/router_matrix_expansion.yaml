@@ -1,5 +1,6 @@
 name: "Next.js router matrix expansion"
 pipeline: js
+
 fixtures:
   - path: jsconfig.json
     content: |
@@ -193,12 +194,13 @@ tests:
       RETURN file.path AS file, d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 6 }
-      - { row: { file: 'src/app/loading.tsx', name: Loading, type: Function } }
-      - { row: { file: 'src/app/error.tsx', name: ErrorBoundary, type: Function } }
-      - { row: { file: 'src/app/not-found.tsx', name: NotFound, type: Function } }
-      - { row: { file: 'src/app/template.tsx', name: Template, type: Function } }
-      - { row: { file: 'src/app/default.tsx', name: SlotDefault, type: Function } }
-      - { row: { file: 'src/app/@modal/(.)login/page.tsx', name: LoginModal, type: Function } }
+      - { row: { file: "src/app/loading.tsx", name: Loading, type: Function } }
+      - { row: { file: "src/app/error.tsx", name: ErrorBoundary, type: Function } }
+      - { row: { file: "src/app/not-found.tsx", name: NotFound, type: Function } }
+      - { row: { file: "src/app/template.tsx", name: Template, type: Function } }
+      - { row: { file: "src/app/default.tsx", name: SlotDefault, type: Function } }
+      - { row: { file: "src/app/@modal/(.)login/page.tsx", name: LoginModal, type: Function } }
+
   - name: Next app router special path shapes are preserved in the file catalog
     query: |
       MATCH (file:File)
@@ -277,6 +279,7 @@ tests:
       - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "updateItem" } }
       - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "savePost" } }
       - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: "*", import_type: "NamespaceImport", target: "Nav" } }
+
   - name: Next namespace imports retain their binding alongside component calls
     query: |
       MATCH (i:ImportedSymbol)
@@ -284,7 +287,8 @@ tests:
       RETURN i.import_path AS path, i.identifier_name AS name, i.import_type AS type, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
-      - { row: { path: components, name: '*', type: NamespaceImport, alias: Components } }
+      - { row: { path: components, name: "*", type: NamespaceImport, alias: Components } }
+
   - name: Optional catch-all namespace access calls exactly the original component
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -292,7 +296,7 @@ tests:
       RETURN target.name AS name, target.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { name: Nav, file: 'src/components/Nav.tsx' } }
+      - { row: { name: Nav, file: "src/components/Nav.tsx" } }
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
     query: |

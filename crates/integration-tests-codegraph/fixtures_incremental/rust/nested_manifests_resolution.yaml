@@ -1,4 +1,5 @@
 name: "Rust: nested manifests without a root Cargo.toml"
+
 fixtures:
   - path: libs/shared/Cargo.toml
     content: |
@@ -39,7 +40,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { src: 'services/app/src/main.rs', tgt: 'libs/shared/src/lib.rs', fqn: 'shared_lib::helper' } }
+      - { row: { src: "services/app/src/main.rs", tgt: "libs/shared/src/lib.rs", fqn: "shared_lib::helper" } }
 
   - name: "nested manifest local crate keeps its crate-qualified FQN"
     query: |
@@ -48,4 +49,4 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'service_app::boot' } }
+      - { row: { fqn: "service_app::boot" } }
