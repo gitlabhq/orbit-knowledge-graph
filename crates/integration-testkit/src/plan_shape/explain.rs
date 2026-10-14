@@ -275,7 +275,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::Neighbors,
                 format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped={}",
+                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
                     operation.center,
                     match operation.direction {
                         compiler::input::Direction::Both => "both",
@@ -289,7 +289,8 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         .as_deref()
                         .unwrap_or_default()
                         .join(", "),
-                    operation.incoming_scope_preserving
+                    operation.incoming_scope_preserving.join(", "),
+                    operation.incoming_cross_scope.join(", ")
                 ),
                 vec![planned_node(&plan.nodes[&operation.center])],
             )

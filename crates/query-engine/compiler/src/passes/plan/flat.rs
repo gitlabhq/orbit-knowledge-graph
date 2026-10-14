@@ -309,9 +309,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 scoped.filter(outside).cascade(hop, &alias, cascade)
             }
         } else {
-            scan(hop.edge_tables.len() > 1)
-                .filter(membership)
-                .cascade(hop, &alias, cascade)
+            scan(true).filter(membership).cascade(hop, &alias, cascade)
         };
         let mut predicates = if multi_hop {
             Vec::new()

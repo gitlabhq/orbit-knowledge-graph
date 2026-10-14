@@ -62,19 +62,44 @@ where
     };
     let outgoing_relationships = relationship_ids(true);
     let incoming_relationships = relationship_ids(false);
-    let incoming_scope_preserving = relationships.iter().all(|relationship| {
-        model.relationship_route(relationship).is_some_and(|route| {
-            route.variants().all(|variant| {
-                model
-                    .variant_scope(
-                        relationship,
-                        &model.graph().entity(variant.source).name,
-                        &model.graph().entity(variant.target).name,
-                    )
-                    .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+    let incoming_kinds: Vec<_> = relationships
+        .iter()
+        .filter(|relationship| {
+            model
+                .relationship_route(relationship)
+                .is_some_and(|route| route.has_target(center_entity_id))
+        })
+        .copied()
+        .collect();
+    let incoming_scope_preserving: Vec<_> = incoming_kinds
+        .iter()
+        .filter(|relationship| {
+            model.relationship_route(relationship).is_some_and(|route| {
+                route
+                    .variants()
+                    .filter(|variant| variant.target == center_entity_id)
+                    .all(|variant| {
+                        model
+                            .variant_scope(
+                                relationship,
+                                &model.graph().entity(variant.source).name,
+                                &model.graph().entity(variant.target).name,
+                            )
+                            .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                    })
             })
         })
-    });
+        .map(|relationship| relationship.to_string())
+        .collect();
+    let incoming_cross_scope = incoming_kinds
+        .into_iter()
+        .filter(|relationship| {
+            !incoming_scope_preserving
+                .iter()
+                .any(|kind| kind == relationship)
+        })
+        .map(str::to_string)
+        .collect();
     let covered = |filter: &super::BoundFilter,
                    direction: query_data_model::DenormalizedDirection,
                    relationships: &[query_data_model::RelationshipId]| {
@@ -159,5 +184,6 @@ where
         has_non_denorm,
         fused_table,
         incoming_scope_preserving,
+        incoming_cross_scope,
     }))
 }
