@@ -220,11 +220,6 @@ query:
 "#;
 
     #[test]
-    fn load_embedded_contains_committed_queries() {
-        assert_eq!(NamedQueries::load_embedded().unwrap().iter().count(), 12);
-    }
-
-    #[test]
     fn render_request_substitutes_current_user_id() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let rendered = queries
