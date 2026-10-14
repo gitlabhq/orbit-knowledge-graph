@@ -43,7 +43,8 @@ RETURN projections
 Every query needs at least one node bounded by an ID or a literal property
 filter. Examples are `{id: 278964}`, `{full_path: 'gitlab-org/gitlab'}`, and a
 `WHERE` comparison with a literal value. `LIMIT` does not count, so
-`MATCH (p:Project) RETURN p LIMIT 5` rejects. A neighbors query needs a bounded
+`MATCH (p:Project) RETURN p LIMIT 5` rejects, and so does a node bounded only by
+`NOT` over a list, text match, or group. A neighbors query needs a bounded
 center node, and a shortest path needs both endpoints bounded.
 
 ## Predicates
@@ -55,7 +56,8 @@ Relationship patterns do not count. Existing list-size limits still apply.
 If the query exceeds the limit, remove redundant conditions or simplify it.
 Adding another MATCH clause does not reset the count.
 
-`WHERE` combines predicates with `AND`. Supported forms:
+`WHERE` combines predicates with `AND` and `NOT`, grouped with parentheses.
+Write `NOT x.state IN [...]`, not `x.state NOT IN [...]`. Supported forms:
 
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`.
 - Lists: `x.state IN ['opened', 'merged']`.
@@ -113,7 +115,7 @@ window is incomplete. Do not report the returned rows as a complete list.
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
-subqueries, `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions,
+subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
 Other function calls, such as `type(r)` or `collect(x)`, reject with an error
 that names the function. For relationship types, match a typed relationship
@@ -266,7 +268,7 @@ column. Common causes:
 - `-[AUTHORED]->` instead of `-[:AUTHORED]->`. Without the colon the name is a variable.
 - A relationship type that does not connect the two labels, or points the other way. The error names the valid direction.
 - A node label repeated with a different label, or with inline properties twice.
-- Unsupported syntax: `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
+- Unsupported syntax: `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
 - `PAGE ... AFTER` with a cursor from a different query. The cursor binds to the query text.
 
 Fix: check node and relationship names with `CALL db.schema('Node')`.

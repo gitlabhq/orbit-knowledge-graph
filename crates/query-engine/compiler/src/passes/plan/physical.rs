@@ -22,6 +22,14 @@ pub struct BindingSource {
 }
 
 impl BindingSource {
+    pub(super) fn column(&self, property: &str) -> Option<Column> {
+        if property == DEFAULT_PRIMARY_KEY {
+            Some(Column::new(&self.alias, &self.column))
+        } else {
+            self.joined.then(|| Column::new(&self.node, property))
+        }
+    }
+
     pub(super) fn table(alias: &str) -> Self {
         Self {
             node: alias.into(),

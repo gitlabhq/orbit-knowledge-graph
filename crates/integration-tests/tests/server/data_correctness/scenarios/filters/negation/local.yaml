@@ -1,0 +1,160 @@
+config:
+  duckdb: true
+  extra_seed:
+    gl_definition:
+    - {id: 9701, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: 'negation::alice', name: alice, definition_type: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5}
+    - {id: 9702, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: 'negation::bob', name: bob, definition_type: blocked, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5}
+    - {id: 9703, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: 'negation::carol', name: carol, definition_type: active, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5}
+    - {id: 9704, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: 'negation::dave', name: dave, definition_type: blocked, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5}
+    - {id: 9710, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: 'negation::first', name: first, definition_type: target, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5}
+    - {id: 9720, traversal_path: 1/100/1000/, project_id: 1000, branch: main, commit_sha: abc123, file_path: src/negation.rs, fqn: 'negation::second', name: second, definition_type: target, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 5}
+    gl_code_edge:
+    - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 9701, source_kind: Definition, relationship_kind: CALLS, target_id: 9710, target_kind: Definition}
+    - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 9702, source_kind: Definition, relationship_kind: CALLS, target_id: 9720, target_kind: Definition}
+    - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 9703, source_kind: Definition, relationship_kind: CALLS, target_id: 9710, target_kind: Definition}
+    - {traversal_path: 1/100/1000/, project_id: 1000, branch: main, source_id: 9704, source_kind: Definition, relationship_kind: CALLS, target_id: 9720, target_kind: Definition}
+    gl_edge:
+    - {traversal_path: 1/100/1000/, source_id: 9701, source_kind: Definition, relationship_kind: CALLS, target_id: 9710, target_kind: Definition}
+    - {traversal_path: 1/100/1000/, source_id: 9702, source_kind: Definition, relationship_kind: CALLS, target_id: 9720, target_kind: Definition}
+    - {traversal_path: 1/100/1000/, source_id: 9703, source_kind: Definition, relationship_kind: CALLS, target_id: 9710, target_kind: Definition}
+    - {traversal_path: 1/100/1000/, source_id: 9704, source_kind: Definition, relationship_kind: CALLS, target_id: 9720, target_kind: Definition}
+cases:
+- name: aggregation_node_edge_group
+  description: An aggregation over a NOT group across a node and its relationship counts three calls on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)-[e:CALLS]->(p:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name IN ['alice'] AND e.target_id = 9710)
+      RETURN count(u) AS total
+  expect:
+    row_count: 1
+    row_values:
+    - {total: 3}
+- name: and_not_complement
+  description: AND with a complemented NOT keeps only the active alice on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND u.name = 'alice' AND NOT u.definition_type = 'blocked'
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 1
+    nodes:
+      Definition:
+        ids: [9701]
+        absent: [9702, 9703, 9704]
+        filters: {name: alice, definition_type: active}
+- name: cross_node_group
+  description: A NOT group across two nodes removes the alice call to first on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)-[e:CALLS]->(p:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND p.name = 'first')
+      RETURN u.name, p.name LIMIT 20
+  expect:
+    node_count: 5
+    nodes:
+      Definition:
+        ids: [9702, 9703, 9704, 9710, 9720]
+    edges:
+      CALLS:
+      - [9702, 9720]
+      - [9703, 9710]
+      - [9704, 9720]
+- name: double_not
+  description: NOT NOT cancels on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT NOT u.name = 'alice'
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 1
+    nodes:
+      Definition:
+        ids: [9701]
+        absent: [9702, 9703, 9704]
+        filters: {name: alice}
+- name: nested_not_groups
+  description: Nested NOT groups evaluate inside out on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND NOT (u.id = 9702 AND u.definition_type = 'active'))
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 3
+    nodes:
+      Definition:
+        ids: [9702, 9703, 9704]
+        absent: [9701]
+- name: node_edge_group
+  description: A NOT group across a node and its relationship removes the alice call on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)-[e:CALLS]->(p:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name IN ['alice'] AND e.target_id = 9710)
+      RETURN u.name, p.name LIMIT 20
+  expect:
+    node_count: 5
+    nodes:
+      Definition:
+        ids: [9702, 9703, 9704, 9710, 9720]
+    edges:
+      CALLS:
+      - [9702, 9720]
+      - [9703, 9710]
+      - [9704, 9720]
+- name: not_group
+  description: NOT over a group removes only the row where both conditions hold on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT (u.name = 'alice' AND u.definition_type = 'active')
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 3
+    nodes:
+      Definition:
+        ids: [9702, 9703, 9704]
+        absent: [9701]
+- name: not_in_list
+  description: NOT IN removes the listed names on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.name IN ['alice', 'bob']
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 2
+    nodes:
+      Definition:
+        ids: [9703, 9704]
+        absent: [9701, 9702]
+- name: not_precedes_and
+  description: NOT binds before AND on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.name = 'alice' AND u.definition_type = 'active'
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 1
+    nodes:
+      Definition:
+        ids: [9703]
+        absent: [9701, 9702, 9704]
+        filters: {name: carol, definition_type: active}
+- name: not_range
+  description: NOT over a range keeps the smaller IDs on ClickHouse and DuckDB
+  query:
+    gql: |
+      MATCH (u:Definition)
+      WHERE u.id >= 9701 AND u.id <= 9704 AND NOT u.id >= 9703
+      RETURN u.name, u.definition_type LIMIT 10
+  expect:
+    node_count: 2
+    nodes:
+      Definition:
+        ids: [9701, 9702]
+        absent: [9703, 9704]

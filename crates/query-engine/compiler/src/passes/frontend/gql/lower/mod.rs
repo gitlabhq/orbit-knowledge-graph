@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::input::{
     Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
-    PropertyRef, QueryType,
+    PredicateTarget, PropertyRef, QueryType,
 };
 use crate::passes::cursor;
 use crate::query_limits::MAX_NODES_CAP;
@@ -23,9 +23,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
         aliases: HashMap::new(),
     };
     lowering.pattern(query.pattern)?;
-    for predicate in query.predicates {
-        lowering.predicate(predicate)?;
-    }
+    lowering.predicates(query.predicates)?;
     lowering.promote_ids()?;
     lowering.classify()?;
     lowering.project(query.projections)?;
@@ -253,6 +251,7 @@ impl Lowering {
             if edge.direction != Direction::Outgoing
                 || edge.hops.min != 1
                 || !edge.filters.is_empty()
+                || self.input.references(&PredicateTarget::Relationship(0))
             {
                 return Err(QueryError::Validation("path finding supports outgoing paths starting at one hop, without relationship predicates".into()));
             }
@@ -273,6 +272,10 @@ impl Lowering {
                 || self.input.nodes[0].entity.is_none()
                 || edge.hops != HopRange::default()
                 || !edge.filters.is_empty()
+                || self
+                    .input
+                    .references(&PredicateTarget::Node(far.id.clone()))
+                || self.input.references(&PredicateTarget::Relationship(0))
             {
                 return Err(QueryError::Validation("neighbors requires one labeled center and an unfiltered, unlabeled endpoint at one hop".into()));
             }
