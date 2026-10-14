@@ -29,7 +29,7 @@ check "jwt round-trips" 'k"e\y' "$(yq '.gitlab.jwt.verifying_key' "$overlay")"
 check "base url" "http://gitlab.caproni.test" "$(yq '.gitlab.base_url' "$overlay")"
 check "indexer probe port" "127.0.0.1:9200" "$(yq '.probe_server.bind_address' "$overlay")"
 check "dev.yaml values kept" "gitlab_main" "$(yq '.datalake.database' "$overlay")"
-check "overlay is private" "600" "$(stat -f '%Lp' "$overlay" 2>/dev/null || stat -c '%a' "$overlay")"
+check "overlay is private" "600" "$(stat -c '%a' "$overlay" 2>/dev/null || stat -f '%Lp' "$overlay")"
 
 # local_overlay_wins: config/dev.local.yaml beats cluster-derived and dev.yaml values.
 LOCAL_OVERLAY="$HERE/fixtures/dev.local.yaml"
