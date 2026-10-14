@@ -13,11 +13,11 @@ const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
 ];
 
 pub trait ClickHouseConfigurationExt {
-    fn build_client(&self) -> ArrowClickHouseClient;
+    fn build_client(&self, service: &'static str) -> ArrowClickHouseClient;
 }
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
-    fn build_client(&self) -> ArrowClickHouseClient {
+    fn build_client(&self, service: &'static str) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
@@ -25,6 +25,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             self.password.as_deref(),
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
+            service,
         )
         .with_replicated(self.replicated)
     }
@@ -52,6 +53,7 @@ fn build_session_settings_with_quorum_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ClickHouseError;
     use orbit_server_config::{AppConfig, ConfigurationError};
 
     #[test]
@@ -232,6 +234,29 @@ mod tests {
         assert!(settings.is_empty());
     }
 
+    #[tokio::test]
+    async fn built_client_opens_its_circuit_after_repeated_network_failures() {
+        let config = ClickHouseConfiguration {
+            url: crate::testing::UNREACHABLE_URL.to_string(),
+            ..AppConfig::embedded_defaults().graph
+        };
+        let client = config.build_client("graph");
+
+        for _ in 0..circuit_breaker::CircuitConfig::default().failure_threshold {
+            let err = client.execute("SELECT 1").await.unwrap_err();
+            assert!(
+                !matches!(err, ClickHouseError::CircuitOpen { .. }),
+                "got {err}"
+            );
+        }
+
+        let err = client.execute("SELECT 1").await.unwrap_err();
+        assert!(
+            matches!(err, ClickHouseError::CircuitOpen { .. }),
+            "got {err}"
+        );
+    }
+
     #[test]
     fn replicated_reaches_the_built_client() {
         let config = ClickHouseConfiguration {
@@ -239,7 +264,7 @@ mod tests {
             ..AppConfig::embedded_defaults().graph
         };
 
-        let client = config.build_client();
+        let client = config.build_client("graph");
         assert!(client.has_quorum_writes());
         assert!(client.is_replicated());
     }
@@ -267,7 +292,7 @@ mod tests {
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
-        let client = config.build_client();
+        let client = config.build_client("graph");
         let err = client.execute("SELECT 1").await.unwrap_err();
         let msg = err.to_string();
 
