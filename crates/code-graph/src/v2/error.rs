@@ -112,6 +112,8 @@ pub enum FileSkip {
     DeeplyNested,
     StackLimit,
     TooManyEdges,
+    TooManyNames,
+    CrossFileTimeout,
     Timeout(AbortPhase),
 }
 
@@ -126,6 +128,8 @@ impl FileSkip {
             Self::DeeplyNested => "deeply_nested",
             Self::StackLimit => "stack_limit",
             Self::TooManyEdges => "too_many_edges",
+            Self::TooManyNames => "too_many_names",
+            Self::CrossFileTimeout => "timeout_cross_file",
             Self::Timeout(AbortPhase::Parse) => "timeout_parse",
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
             Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",

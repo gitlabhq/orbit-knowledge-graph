@@ -792,13 +792,23 @@ impl CodeIndexer {
         for skipped in &result.skipped {
             self.metrics
                 .record_file_skipped(skipped.kind.as_metric_label(), &skipped.path);
-            debug!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                path = %skipped.path,
-                reason = skipped.kind.as_metric_label(),
-                "file skipped during code indexing"
-            );
+            if skipped.path.is_empty() {
+                warn!(
+                    project_id = request.project_id,
+                    branch = %request.branch,
+                    reason = skipped.kind.as_metric_label(),
+                    detail = %skipped.detail,
+                    "cross-file resolution stopped early during code indexing"
+                );
+            } else {
+                debug!(
+                    project_id = request.project_id,
+                    branch = %request.branch,
+                    path = %skipped.path,
+                    reason = skipped.kind.as_metric_label(),
+                    "file skipped during code indexing"
+                );
+            }
         }
 
         for fault in &result.faults {

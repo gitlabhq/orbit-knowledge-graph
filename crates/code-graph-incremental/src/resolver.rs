@@ -985,13 +985,7 @@ fn propagate_reexports(
                 break 'propagate;
             }
             if max_names > 0 && names + added.get() > max_names {
-                too_many_names = Some(Killed {
-                    cancelled: false,
-                    label: "names",
-                    path: String::new(),
-                    elapsed: Duration::ZERO,
-                    budget: Duration::ZERO,
-                });
+                too_many_names = Some(Killed::limit("names", "", names + added.get(), max_names));
                 break 'propagate;
             }
             match via[i] {

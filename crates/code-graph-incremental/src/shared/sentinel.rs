@@ -39,12 +39,40 @@ pub struct Killed {
     pub path: String,
     pub elapsed: Duration,
     pub budget: Duration,
+    pub limit: Option<(usize, usize)>,
+}
+
+impl Killed {
+    pub fn limit(label: &'static str, path: &str, observed: usize, cap: usize) -> Self {
+        Self {
+            cancelled: false,
+            label,
+            path: path.to_string(),
+            elapsed: Duration::ZERO,
+            budget: Duration::ZERO,
+            limit: Some((observed, cap)),
+        }
+    }
 }
 
 impl std::fmt::Display for Killed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.cancelled {
             return write!(f, "{} cancelled", self.label);
+        }
+        if let Some((observed, cap)) = self.limit {
+            return match self.path.is_empty() {
+                true => write!(
+                    f,
+                    "{} reached {observed} against a limit of {cap}",
+                    self.label
+                ),
+                false => write!(
+                    f,
+                    "{} reached {observed} in {} against a limit of {cap}",
+                    self.path, self.label
+                ),
+            };
         }
         let (e, b) = (self.elapsed.as_millis(), self.budget.as_millis());
         match self.path.is_empty() {
@@ -142,6 +170,7 @@ impl Sentinel {
                 path: self.path.clone(),
                 elapsed: over.unwrap_or_else(|| self.started.elapsed()),
                 budget: self.budget,
+                limit: None,
             });
         }
         Ok(())

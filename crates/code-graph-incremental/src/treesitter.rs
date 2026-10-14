@@ -1,5 +1,4 @@
 use std::ops::ControlFlow;
-use std::time::Duration;
 
 use crate::intern::Lang;
 use crate::sentinel::Killed;
@@ -414,7 +413,9 @@ pub fn parse_with_sentinel(
             let stop = match sentinel.check() {
                 Ok(()) => match guard(state.current_byte_offset()) {
                     ControlFlow::Continue(()) => return ControlFlow::Continue(()),
-                    ControlFlow::Break(reason) => guard_stop(reason, label),
+                    ControlFlow::Break((reason, observed, cap)) => {
+                        Killed::limit(reason, label, observed, cap)
+                    }
                 },
                 Err(error) => error,
             };
@@ -427,35 +428,25 @@ pub fn parse_with_sentinel(
         let ts_tree = c
             .parser
             .parse_with_options(&mut input, None, Some(options))
-            .ok_or_else(|| stopped.unwrap_or_else(|| guard_stop("tree-sitter", label)))?;
+            .ok_or_else(|| stopped.unwrap_or_else(|| Killed::limit("tree-sitter", label, 0, 0)))?;
         sentinel.check()?;
         let tree = from_tree_sitter(
             source, &ts_tree, lang, &c.kinds, &c.fields, label, max_depth,
         )
-        .ok_or_else(|| guard_stop("depth", label))?;
+        .ok_or_else(|| Killed::limit("depth", label, max_depth + 1, max_depth))?;
         sentinel.check()?;
         Ok(tree)
     })
 }
 
-fn guard_stop(label: &'static str, path: &str) -> Killed {
-    Killed {
-        cancelled: false,
-        label,
-        path: path.to_string(),
-        elapsed: Duration::ZERO,
-        budget: Duration::ZERO,
-    }
-}
+const MAX_STALL: usize = 100_000;
+const PARSE_STACK_RESERVE: usize = 256 * 1024;
 
-const MAX_STALL: u64 = 100_000;
-const STACK_RED_ZONE: usize = 256 * 1024;
-
-fn parse_guard() -> impl FnMut(usize) -> ControlFlow<&'static str> {
+fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, usize, usize)> {
     let (mut last_offset, mut stalled) = (usize::MAX, 0);
     move |offset| {
-        if stacker::remaining_stack().is_some_and(|left| left < STACK_RED_ZONE) {
-            return ControlFlow::Break("stack");
+        if let Some(left) = stacker::remaining_stack().filter(|&left| left < PARSE_STACK_RESERVE) {
+            return ControlFlow::Break(("stack", left, PARSE_STACK_RESERVE));
         }
         if offset != last_offset {
             (last_offset, stalled) = (offset, 0);
@@ -463,7 +454,7 @@ fn parse_guard() -> impl FnMut(usize) -> ControlFlow<&'static str> {
         }
         stalled += 1;
         match stalled > MAX_STALL {
-            true => ControlFlow::Break("tree-sitter"),
+            true => ControlFlow::Break(("tree-sitter", stalled, MAX_STALL)),
             false => ControlFlow::Continue(()),
         }
     }
@@ -476,6 +467,7 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use std::time::Duration;
 
     #[test]
     fn a_parse_stops_after_too_many_steps_without_progress() {
@@ -490,7 +482,7 @@ mod tests {
     fn a_parse_near_the_end_of_the_stack_stops_as_a_stack_skip() {
         let source = "def f(x):\n    return x\n".repeat(2_000);
         let killed = std::thread::Builder::new()
-            .stack_size(128 * 1024)
+            .stack_size(224 * 1024)
             .spawn(move || parse(&source, SupportLang::Python, &Lang::default(), "main.py").err())
             .unwrap()
             .join()

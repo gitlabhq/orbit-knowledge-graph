@@ -235,6 +235,7 @@ async fn the_cross_file_budget_stops_package_reexports() {
     };
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
+    assert_eq!(timings.skipped_reasons, ["timeout_cross_file"]);
     assert_eq!(timings.languages, [("csharp".to_owned(), 600)]);
 }
 
@@ -252,6 +253,7 @@ async fn cross_file_resolution_stops_at_the_name_limit() {
     };
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
+    assert_eq!(timings.skipped_reasons, ["too_many_names"]);
     assert_eq!(timings.languages, [("csharp".to_owned(), 200)]);
 }
 

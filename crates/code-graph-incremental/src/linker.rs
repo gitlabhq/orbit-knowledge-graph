@@ -25,13 +25,7 @@ fn edge_limit(edges: &[Edge], path: &str) -> Result<(), Killed> {
     if edges.len() <= MAX_FILE_EDGES {
         return Ok(());
     }
-    Err(Killed {
-        cancelled: false,
-        label: "edges",
-        path: path.to_string(),
-        elapsed: std::time::Duration::ZERO,
-        budget: std::time::Duration::ZERO,
-    })
+    Err(Killed::limit("edges", path, edges.len(), MAX_FILE_EDGES))
 }
 
 enum WorkItem {

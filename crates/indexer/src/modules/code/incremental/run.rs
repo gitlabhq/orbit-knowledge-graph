@@ -153,6 +153,8 @@ pub(in crate::modules::code) fn run(
             .into_iter()
             .map(|killed| {
                 let kind = match killed.label {
+                    "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
+                    "names" => FileSkip::TooManyNames,
                     "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
                     "depth" => FileSkip::DeeplyNested,
                     "stack" => FileSkip::StackLimit,
