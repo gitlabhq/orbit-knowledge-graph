@@ -56,5 +56,12 @@ check "slice service label" "gkg-webserver" "$(yq '.metadata.labels."kubernetes.
 # host_ip honours the override without touching the cluster.
 check "host ip override" "10.0.0.9" "$(ORBIT_DEV_HOST_IP=10.0.0.9 host_ip)"
 
+# cluster_name follows the kube context Caproni hands out, so directory-hash profiles work.
+kc() { echo "colima-caproni-gitlab-caproni-9fd39f"; }
+check "cluster name from colima context" "caproni-gitlab-caproni-9fd39f" "$(cluster_name)"
+kc() { echo "k3d-caproni"; }
+check "cluster name from k3d context" "caproni" "$(cluster_name)"
+check "cluster name override" "mine" "$(CAPRONI_CLUSTER_NAME=mine cluster_name)"
+
 if [[ "$failures" -gt 0 ]]; then printf '\n%d check(s) failed\n' "$failures"; exit 1; fi
 printf '\nall checks passed\n'

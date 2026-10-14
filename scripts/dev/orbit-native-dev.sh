@@ -157,10 +157,19 @@ wait_for_port() { # port, what, seconds
   return 1
 }
 
+# The Caproni cluster (colima profile or k3d cluster) name. Caproni's kube context is
+# `colima-<name>` or `k3d-<name>`, which also covers the directory-hash naming strategy.
+# CAPRONI_CLUSTER_NAME overrides.
+cluster_name() {
+  if [[ -n "${CAPRONI_CLUSTER_NAME:-}" ]]; then echo "$CAPRONI_CLUSTER_NAME"; return; fi
+  kc config current-context 2>/dev/null | sed -e 's/^colima-//' -e 's/^k3d-//'
+}
+
 # The host's IP as the cluster sees it, for the EndpointSlice. ORBIT_DEV_HOST_IP overrides.
 host_ip() {
   if [[ -n "${ORBIT_DEV_HOST_IP:-}" ]]; then echo "$ORBIT_DEV_HOST_IP"; return; fi
-  local cluster="${CAPRONI_CLUSTER_NAME:-caproni}" ip=""
+  local cluster ip=""
+  cluster="$(cluster_name)"
   case "$(cluster_driver)" in
     colima)
       # colima writes host.docker.internal into the VM's /etc/hosts; the default route is the
