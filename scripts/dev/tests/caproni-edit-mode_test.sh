@@ -31,6 +31,16 @@ check "probe port rewritten" "0.0.0.0:9395" "$(yq '.probe_server.bind_address' "
 check "other keys untouched" "gkg" "$(yq '.graph.database' "$overlay")"
 check "grpc bind untouched" "0.0.0.0:50054" "$(yq '.grpc_bind_address' "$overlay")"
 check "overlay is private" "600" "$(stat -f '%Lp' "$overlay" 2>/dev/null || stat -c '%a' "$overlay")"
+# The server refuses a config where metrics.prometheus.port disagrees with the probe
+# bind address, so the deprecated key must go when the port moves.
+check "deprecated prometheus port removed" "null" "$(yq '.metrics.prometheus.port' "$overlay")"
+check "prometheus stays enabled" "true" "$(yq '.metrics.prometheus.enabled' "$overlay")"
+
+# malformed_pod_config_fails: a yq failure must not produce a header-only overlay.
+printf 'probe_server: [unclosed\n' >"$TMP/bad.yaml"
+rc=0; out="$(POD_CONFIG="$TMP/bad.yaml" write_overlay dispatcher 2>&1)" || rc=$?
+check "malformed pod config fails" "1" "$rc"
+check "no overlay left behind" "no" "$([[ -f "$TMP/caproni-dispatcher.yaml" ]] && echo yes || echo no)"
 
 # missing_pod_config_errors: outside mirrord the pod config does not exist.
 out="$(ORBIT_POD_CONFIG="$TMP/does-not-exist.yaml" bash "$SCRIPT" webserver 2>&1 || true)"
