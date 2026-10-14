@@ -46,6 +46,10 @@ pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "handler wiring takes each collaborator explicitly"
+)]
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
