@@ -126,8 +126,9 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
      timeout `timeout_resolve`. Cross-file stops `too_many_names` and \
      `timeout_cross_file` count once per language family per run, with an empty path. \
      `too_many_field_copies` counts a file that stays in the graph with its \
-     field flows cut at the copy limit, and `too_many_manifest_bytes` a manifest \
-     that stays in the graph but is not read for resolution. \
+     field flows cut at the copy limit, `too_many_manifest_bytes` a manifest \
+     that stays in the graph but is not read for resolution, and \
+     `too_many_members` a file or family whose nested members stop at a limit. \
      `language` comes from the file extension, `unknown` when none matches.",
     None,
     &[labels::REASON, labels::LANGUAGE],

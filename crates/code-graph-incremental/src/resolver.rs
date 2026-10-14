@@ -62,6 +62,8 @@ pub struct ResolveResult {
     /// Files, or the whole family, whose cross-file pass overran its budget;
     /// the edges it had not resolved are absent.
     pub killed: Vec<Killed>,
+    /// Files, or the whole family, whose declared members stopped at a limit.
+    pub limited: Vec<Killed>,
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
     /// How long each file's cross-file pass took.
     pub file_timings: Vec<(u32, Duration)>,
@@ -391,28 +393,7 @@ impl Resolver {
         }
 
         let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
-        let declared_members: Vec<FxHashMap<(u32, u32), u32>> = trees
-            .par_iter()
-            .map(|tree| {
-                let mut members = FxHashMap::default();
-                for member in tree.root().descendants().filter(|node| node.is(C::Def)) {
-                    let Some(name) = member.child_sym(C::DefName) else {
-                        continue;
-                    };
-                    for owner in member.ancestors() {
-                        if owner.is(C::Def) {
-                            members
-                                .entry((owner.index(), name))
-                                .or_insert(member.index());
-                        }
-                        if owner.is_class() && !owner.has(C::ImplBlock) {
-                            break;
-                        }
-                    }
-                }
-                members
-            })
-            .collect();
+        let (declared_members, limited) = declared_members(trees);
         let exporters: Vec<FxHashSet<u32>> = self
             .visible
             .iter()
@@ -568,6 +549,7 @@ impl Resolver {
         Ok(ResolveResult {
             cross_edges,
             killed,
+            limited,
             resolved_source_paths,
             file_timings,
         })
@@ -926,6 +908,75 @@ fn gather_imports_for(
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
+const MAX_FILE_MEMBERS: usize = 100_000;
+const MAX_FAMILY_MEMBERS: usize = 2_500_000;
+
+type DeclaredMembers = Vec<FxHashMap<(u32, u32), u32>>;
+
+fn walk_members(tree: &Tree, limit: usize, mut add: impl FnMut(u32, u32, u32)) -> usize {
+    let mut added = 0;
+    for member in tree.root().descendants().filter(|node| node.is(C::Def)) {
+        let Some(name) = member.child_sym(C::DefName) else {
+            continue;
+        };
+        for owner in member.ancestors() {
+            if owner.is(C::Def) {
+                if added == limit {
+                    return added;
+                }
+                add(owner.index(), name, member.index());
+                added += 1;
+            }
+            if owner.is_class() && !owner.has(C::ImplBlock) {
+                break;
+            }
+        }
+    }
+    added
+}
+
+fn declared_members(trees: &[Tree]) -> (DeclaredMembers, Vec<Killed>) {
+    let counts: Vec<usize> = trees
+        .par_iter()
+        .map(|tree| walk_members(tree, MAX_FILE_MEMBERS + 1, |_, _, _| {}))
+        .collect();
+    let mut limited = Vec::new();
+    let (mut total, mut remaining) = (0usize, MAX_FAMILY_MEMBERS);
+    let allowances: Vec<usize> = trees
+        .iter()
+        .zip(counts)
+        .map(|(tree, count)| {
+            if count > MAX_FILE_MEMBERS {
+                limited.push(Killed::limit(
+                    "members",
+                    &tree.label,
+                    count,
+                    MAX_FILE_MEMBERS,
+                ));
+            }
+            let wanted = count.min(MAX_FILE_MEMBERS);
+            total += wanted;
+            let allowed = wanted.min(remaining);
+            remaining -= allowed;
+            allowed
+        })
+        .collect();
+    if total > MAX_FAMILY_MEMBERS {
+        limited.push(Killed::limit("members", "", total, MAX_FAMILY_MEMBERS));
+    }
+    let members = trees
+        .par_iter()
+        .zip(allowances)
+        .map(|(tree, allowed)| {
+            let mut members = FxHashMap::default();
+            walk_members(tree, allowed, |owner, name, member| {
+                members.entry((owner, name)).or_insert(member);
+            });
+            members
+        })
+        .collect();
+    (members, limited)
+}
 
 #[allow(clippy::too_many_arguments)]
 fn propagate_reexports(

@@ -878,3 +878,35 @@ async fn manifests_past_the_byte_limit_are_reported_and_not_read() {
     assert_eq!(timings.limited_reasons, ["too_many_manifest_bytes"]);
     assert_eq!(timings.errors, 0);
 }
+
+#[tokio::test]
+async fn nested_definitions_past_the_member_limits_are_reported_without_a_skip() {
+    let files: Vec<(String, String)> = (0..26)
+        .map(|file| {
+            let opens: String = (0..500)
+                .map(|level| format!("function f{file}_{level}() {{\n"))
+                .collect();
+            (
+                format!("root/nested{file:02}.js"),
+                format!(
+                    "function target() {{}}\n{opens}target();\n{}",
+                    "}\n".repeat(500)
+                ),
+            )
+        })
+        .collect();
+    let files: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(path, source)| (path.as_str(), source.as_bytes()))
+        .collect();
+    let timings = timings_for(&files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.limited_reasons.len(), 27);
+    assert!(
+        timings
+            .limited_reasons
+            .iter()
+            .all(|reason| *reason == "too_many_members")
+    );
+    assert_eq!(timings.errors, 0);
+}
