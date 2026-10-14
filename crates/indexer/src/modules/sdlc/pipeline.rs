@@ -22,8 +22,8 @@ use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
 use crate::durability::{RunDurability, WriteDurability};
+use orbit_arrow::batch_slice_bytes;
 use orbit_server_config::DatalakeRetryConfig;
-use orbit_utils::arrow::batch_slice_bytes;
 
 const MAX_RETRIES: u32 = 3;
 

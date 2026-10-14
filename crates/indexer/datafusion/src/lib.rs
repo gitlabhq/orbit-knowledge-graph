@@ -8,7 +8,7 @@ use indexer::handler::HandlerError;
 use indexer::modules::sdlc::{
     BlockTransform, SOURCE_DATA_TABLE, SqlTransformFactory, TableBatch, Transformation,
 };
-use orbit_utils::arrow::prepare_batches;
+use orbit_arrow::prepare_batches;
 
 pub fn sql_transform() -> SqlTransformFactory {
     Arc::new(|name, transforms| Arc::new(DataFusionTransform::new(name, transforms)))

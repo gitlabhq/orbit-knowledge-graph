@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 
 use crate::execute::MigrationError;
 use crate::schema::{self, GraphSchema};

@@ -1379,6 +1379,7 @@ dependencies = [
  "ignore",
  "jsonschema",
  "memchr",
+ "orbit-arrow",
  "orbit-utils",
  "oxc",
  "oxc_linter",
@@ -1424,6 +1425,7 @@ dependencies = [
  "itertools 0.14.0",
  "lasso",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "pest",
  "pest_consume",
@@ -2785,6 +2787,7 @@ dependencies = [
  "code-graph",
  "duckdb",
  "ontology",
+ "orbit-arrow",
  "orbit-search",
  "orbit-utils",
  "serde_json",
@@ -3125,6 +3128,7 @@ dependencies = [
  "arrow",
  "compiler",
  "indexmap 2.14.2",
+ "orbit-arrow",
  "orbit-utils",
  "orbit-versions",
  "semver",
@@ -3969,6 +3973,7 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "orbit-analytics",
+ "orbit-arrow",
  "orbit-migrations",
  "orbit-observability",
  "orbit-server-config",
@@ -4003,7 +4008,7 @@ dependencies = [
  "async-trait",
  "datafusion",
  "indexer",
- "orbit-utils",
+ "orbit-arrow",
 ]
 
 [[package]]
@@ -4104,6 +4109,7 @@ dependencies = [
  "futures",
  "gitalisk-core",
  "ontology",
+ "orbit-arrow",
  "orbit-migrations",
  "orbit-server",
  "orbit-server-config",
@@ -4157,6 +4163,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "orbit-analytics",
+ "orbit-arrow",
  "orbit-migrations",
  "orbit-server",
  "orbit-server-config",
@@ -4200,6 +4207,7 @@ dependencies = [
  "duckdb-client",
  "globset",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "rayon",
  "regex",
@@ -5598,6 +5606,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-arrow"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "chrono",
+ "enum-as-inner",
+ "rustc-hash 2.1.3",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "orbit-billing"
 version = "0.1.0"
 dependencies = [
@@ -5693,6 +5713,7 @@ dependencies = [
  "futures",
  "nats-client",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "orbit-versions",
  "query-data-model",
@@ -5773,6 +5794,7 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "orbit-analytics",
+ "orbit-arrow",
  "orbit-billing",
  "orbit-migrations",
  "orbit-observability",
@@ -5829,10 +5851,7 @@ dependencies = [
 name = "orbit-utils"
 version = "0.1.0"
 dependencies = [
- "arrow",
- "chrono",
  "dunce",
- "enum-as-inner",
  "flate2",
  "ignore",
  "libc",
@@ -9088,6 +9107,7 @@ dependencies = [
  "compiler",
  "futures",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "pipeline",
  "query-data-model",
@@ -10516,7 +10536,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "compiler",
- "orbit-utils",
+ "orbit-arrow",
 ]
 
 [[package]]

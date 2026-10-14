@@ -11,7 +11,7 @@ use compiler::{
     edge_kinds_column, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
     path_column, relationship_type_column,
 };
-use orbit_utils::arrow::ColumnValue;
+use orbit_arrow::ColumnValue;
 use serde_json::{Map, Value, json};
 use shared::{PaginationMeta, PipelineOutput};
 use types::QueryResult;

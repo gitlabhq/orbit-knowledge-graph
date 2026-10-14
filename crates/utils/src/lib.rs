@@ -1,8 +1,4 @@
 pub mod archive;
-#[cfg(feature = "arrow")]
-pub mod arrow;
-#[cfg(feature = "arrow")]
-pub(crate) mod arrow_logical_bytes;
 pub mod clickhouse;
 pub mod fs;
 pub mod fs_walk;

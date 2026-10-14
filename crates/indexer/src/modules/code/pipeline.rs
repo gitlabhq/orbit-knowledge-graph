@@ -638,7 +638,7 @@ impl CodeIndexer {
                 }
                 // logical_byte_size is slice-invariant, so metering the whole batch once equals
                 // summing the slices below.
-                let batch_bytes = match orbit_utils::arrow::logical_byte_size(&batch) {
+                let batch_bytes = match orbit_arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
                         tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
@@ -677,7 +677,7 @@ impl CodeIndexer {
             worker_threads: legacy_config.worker_threads,
             concurrent_families: legacy_config.concurrent_languages(),
             small_family_files: self.small_repo_max_files,
-            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+            batch_bytes: orbit_arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
         };

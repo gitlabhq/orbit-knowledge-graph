@@ -13,7 +13,7 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
 use ontology::sql_template;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;

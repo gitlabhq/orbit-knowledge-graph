@@ -10,7 +10,7 @@ use thiserror::Error;
 use tracing::debug;
 
 use super::paging::PAGE_BYTE_BUDGET;
-use orbit_utils::arrow::batch_slice_bytes;
+use orbit_arrow::batch_slice_bytes;
 
 #[derive(Debug, Error)]
 pub(crate) enum DatalakeError {

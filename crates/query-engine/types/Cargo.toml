@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 arrow = { workspace = true }
-orbit-utils = { path = "../../utils" }
+orbit-arrow = { path = "../../utils/arrow" }
 compiler = { path = "../compiler" }
 
 [dev-dependencies]

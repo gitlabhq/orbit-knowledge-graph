@@ -2,7 +2,7 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
 use ontology::Ontology;
-use orbit_utils::arrow::{ArrowUtils, AsRecordBatch, BatchBuilder};
+use orbit_arrow::{ArrowUtils, AsRecordBatch, BatchBuilder};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -36,7 +36,7 @@ impl<'a> Output<'a> {
             envelope,
             ontology,
             emitted_branch: AtomicBool::new(false),
-            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+            batch_bytes: orbit_arrow::BATCH_BYTES,
         }
     }
 

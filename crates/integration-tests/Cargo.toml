@@ -17,6 +17,7 @@ duckdb-client = { path = "../duckdb-client" }
 orbit-server = { path = "../orbit-server", features = ["testkit"] }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }

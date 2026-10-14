@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 use arrow::record_batch::RecordBatch;
-use orbit_utils::arrow::{BatchBuilder, ColumnType};
+use orbit_arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::dsl::types::Tf;

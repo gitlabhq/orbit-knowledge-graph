@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use semver::Version;
 use serde_json::{Value, json};
 
-use orbit_utils::arrow::ColumnValue;
+use orbit_arrow::ColumnValue;
 use shared::PipelineOutput;
 
 pub use gql::{GQL_OUTPUT_FORMAT_VERSION, GqlFormatter};
