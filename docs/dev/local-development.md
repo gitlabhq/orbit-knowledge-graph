@@ -159,17 +159,18 @@ mise run dev:status   # show derived config
 On the first run, `cargo` compiles the full workspace, which takes several minutes.
 Subsequent runs use the cached build and start in seconds.
 
-To run several isolated local clusters on one machine, give each `gitlab-caproni` checkout
-Caproni's `directory-hash` naming strategy. Point each `.env` at its checkout and override
-the bind addresses in `config/dev.local.yaml`. The file is Git-ignored and the dev script
+Run one `mise run dev` session at a time. The port-forwards, the gRPC port the EndpointSlice
+targets, and the NATS consumer name are fixed, so two sessions would share them. To work
+against several clusters, give each `gitlab-caproni` checkout Caproni's `directory-hash`
+naming strategy and switch between them by changing `CAPRONI_DIR` in `.env`.
+
+Personal overrides go in `config/dev.local.yaml`. The file is Git-ignored and the dev script
 merges it last into the generated `.dev/<mode>.yaml` that each process loads:
 
 ```yaml
 bind_address: "127.0.0.1:8091"
-grpc_bind_address: "0.0.0.0:50055"
-indexer_health_bind_address: "127.0.0.1:4212"
-nats:
-  consumer_name: "gkg-indexer-dev-2"
+engine:
+  max_concurrent_workers: 16
 ```
 
 ## Rails console and data tasks
