@@ -11,6 +11,7 @@ duckdb-client = { path = "../duckdb-client" }
 orbit-server-config = { path = "../orbit-server-config" }
 gitalisk-core = { workspace = true }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 orbit-versions = { path = "../orbit-versions" }
 futures = { workspace = true }
 orbit-server = { path = "../orbit-server" }

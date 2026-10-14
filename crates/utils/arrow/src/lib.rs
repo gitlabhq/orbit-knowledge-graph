@@ -81,7 +81,7 @@ impl ColumnValue {
     /// Extract as the requested type, parsing from string if needed.
     ///
     /// ```
-    /// # use orbit_utils::arrow::ColumnValue;
+    /// # use orbit_arrow::ColumnValue;
     /// assert_eq!(ColumnValue::Int64(42).coerce::<i64>(), Some(42));
     /// assert_eq!(ColumnValue::String("42".into()).coerce::<i64>(), Some(42));
     /// assert_eq!(ColumnValue::String("hello".into()).coerce::<i64>(), None);
@@ -534,7 +534,7 @@ impl ColRef<'_> {
 /// columns exist or their order -- the caller controls the full schema.
 ///
 /// ```ignore
-/// use orbit_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
+/// use orbit_arrow::{BatchBuilder, ColumnSpec, ColumnType};
 ///
 /// let specs = vec![
 ///     ColumnSpec { name: "id".into(), col_type: ColumnType::Int, nullable: false },
@@ -823,9 +823,9 @@ pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<Strin
     }
 }
 
-pub use crate::arrow_logical_bytes::{
-    UnsupportedTypeError, has_logical_byte_size, logical_byte_size,
-};
+mod logical_bytes;
+
+pub use crate::logical_bytes::{UnsupportedTypeError, has_logical_byte_size, logical_byte_size};
 
 #[cfg(test)]
 mod tests {

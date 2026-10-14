@@ -28,9 +28,11 @@ orbit-observability = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts" }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
+indexer-datafusion = { path = "../indexer/datafusion" }
 orbit-migrations = { path = "../orbit-migrations" }
 minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }

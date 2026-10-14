@@ -78,6 +78,7 @@ async fn build_fan_out(
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         indexer::modules::sdlc::PARTITION_MIN_ROWS,
+        indexer_datafusion::sql_transform(),
     )
     .await
     .expect("failed to register SDLC handlers");
@@ -125,6 +126,7 @@ pub async fn entity_handler_with_partitions(
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         0,
+        indexer_datafusion::sql_transform(),
     )
     .await
     .expect("failed to register SDLC handlers");

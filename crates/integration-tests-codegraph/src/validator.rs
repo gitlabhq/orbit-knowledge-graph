@@ -6,7 +6,7 @@ use arrow::record_batch::RecordBatch;
 use compiler::{Frontend, compile_local};
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{

@@ -44,7 +44,7 @@ fn envelope() -> Envelope<'static> {
 #[test]
 fn export_config_emits_typed_metadata_and_envelope_overrides() {
     use code_graph_incremental::export::ExportConfig;
-    use orbit_utils::arrow::{ColumnSpec, ColumnType};
+    use orbit_arrow::{ColumnSpec, ColumnType};
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
     let sources = common::walk(repo.path());
@@ -240,7 +240,7 @@ fn options() -> templates::Options {
         worker_threads: 0,
         concurrent_families: 2,
         small_family_files: 0,
-        batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+        batch_bytes: orbit_arrow::BATCH_BYTES,
         cancelled: std::sync::Arc::new(|| false),
         family_finished: std::sync::Arc::new(|| {}),
     }
@@ -387,7 +387,7 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
         .unwrap();
         tables.into_inner().unwrap()
     };
-    let whole = export(orbit_utils::arrow::BATCH_BYTES);
+    let whole = export(orbit_arrow::BATCH_BYTES);
     let split = export(1);
     assert_eq!(
         whole.keys().collect::<Vec<_>>(),

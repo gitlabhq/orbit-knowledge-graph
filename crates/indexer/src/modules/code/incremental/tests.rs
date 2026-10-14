@@ -7,7 +7,7 @@ use super::super::{
 };
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::{OnBatch, SinkError};
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use std::sync::Mutex;
 
 struct IndexFixture {
@@ -53,7 +53,7 @@ impl IndexFixture {
 fn collected_rows(
     batches: &[(String, RecordBatch)],
     table: &str,
-) -> Vec<std::collections::HashMap<String, orbit_utils::arrow::ColumnValue>> {
+) -> Vec<std::collections::HashMap<String, orbit_arrow::ColumnValue>> {
     batches
         .iter()
         .filter(|(name, _)| name == table)
@@ -329,7 +329,7 @@ async fn tables_over_the_batch_byte_budget_index_the_same_rows() {
         }
         tables
     };
-    let (whole_stats, whole) = index(orbit_utils::arrow::BATCH_BYTES).await;
+    let (whole_stats, whole) = index(orbit_arrow::BATCH_BYTES).await;
     let (split_stats, split) = index(1).await;
     assert!(split.len() > whole.len());
     assert_eq!(rows(&split), rows(&whole));
@@ -451,7 +451,7 @@ fn options() -> Options {
         worker_threads: config().worker_threads,
         concurrent_families: code_graph::v2::PipelineConfig::default().concurrent_languages(),
         small_family_files: config().small_repo_max_files,
-        batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+        batch_bytes: orbit_arrow::BATCH_BYTES,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| {}),
     }

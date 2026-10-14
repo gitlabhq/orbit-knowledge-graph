@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arrow::array::StringArray;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 
 use super::format::{Row, Seed, SeedSettings};

@@ -151,7 +151,7 @@ fn list_logical_bytes<O: OffsetSizeTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arrow::{BatchBuilder, ColumnSpec, ColumnType};
+    use crate::{BatchBuilder, ColumnSpec, ColumnType};
     use arrow::array::{
         ArrayRef, BinaryArray, BinaryViewArray, Date32Array, Float64Array, Int16Array, Int32Array,
         Int64Array, LargeStringArray, ListBuilder, NullArray, StringBuilder, StringViewArray,
