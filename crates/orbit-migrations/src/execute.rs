@@ -95,7 +95,6 @@ pub async fn create_tables_with_selective_cloning(
     let mut cloned = 0;
     let mut rebuilt = 0;
     let mut seeded = 0;
-    let mut rebuilt_tables = std::collections::BTreeSet::new();
     for table in &schema.tables {
         let active_name = format!("{active_prefix}{}", table.name);
         let target_name = format!("{target_prefix}{}", table.name);
@@ -114,7 +113,6 @@ pub async fn create_tables_with_selective_cloning(
             tracing::info!(table = %target_name, "rebuilding table empty");
             run_ddl(graph, &target_name, table.to_create_sql(&target_prefix)).await?;
             rebuilt += 1;
-            rebuilt_tables.insert(table.name.as_str());
         }
     }
     tracing::info!(
@@ -125,27 +123,7 @@ pub async fn create_tables_with_selective_cloning(
         "clone-based migration tables prepared"
     );
 
-    create_dictionaries_and_views(graph, schema, credentials, &target_prefix).await?;
-    for copy in schema.storage.copies() {
-        if rebuilt_tables.contains(copy.table.as_str())
-            && !rebuilt_tables.contains(copy.source.as_str())
-        {
-            let target = format!("{target_prefix}{}", copy.table);
-            let source = format!("{target_prefix}{}", copy.source);
-            run_parameterized_query(
-                &target,
-                graph
-                    .query("INSERT INTO {target:Identifier} SELECT * FROM {source:Identifier}")
-                    .param("target", &target)
-                    .param("source", &source)
-                    .with_setting("max_execution_time", "60")
-                    .with_setting("max_memory_usage", "1073741824")
-                    .without_quorum_retry(),
-            )
-            .await?;
-        }
-    }
-    Ok(())
+    create_dictionaries_and_views(graph, schema, credentials, &target_prefix).await
 }
 
 pub async fn create_unversioned_definitions(

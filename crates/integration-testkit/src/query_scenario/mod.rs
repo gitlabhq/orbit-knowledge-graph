@@ -157,17 +157,6 @@ async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, pr
             )
             .await
             .unwrap();
-            for copy in schema.storage.copies() {
-                forked
-                    .execute(&format!(
-                        "INSERT INTO {}{} SELECT * FROM {}{}",
-                        *crate::TABLE_PREFIX,
-                        copy.table,
-                        *crate::TABLE_PREFIX,
-                        copy.source
-                    ))
-                    .await;
-            }
         }
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         let mut settings = Default::default();

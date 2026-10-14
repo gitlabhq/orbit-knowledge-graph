@@ -223,40 +223,7 @@ pub(super) fn plan(
 ) -> Result<QueryPlan> {
     let input = context.input;
     let model = context.model;
-    let mut hops = build_hops(input, model)?;
-    for hop in &mut hops {
-        if hop.max_hops > 1 {
-            continue;
-        }
-        let mut equality_columns = Vec::new();
-        if hop.rel_types.len() == 1 && hop.rel_types[0] != "*" {
-            equality_columns.push(RELATIONSHIP_KIND_COLUMN);
-        }
-        for (alias, column) in [
-            (&hop.from_node, hop.direction.edge_columns().0),
-            (&hop.to_node, hop.direction.edge_columns().1),
-        ] {
-            if let Some(node) = input.nodes.iter().find(|node| &node.id == alias) {
-                if node.node_ids.len() == 1 {
-                    equality_columns.push(column);
-                }
-                if node.entity.is_some() {
-                    equality_columns.push(if column == SOURCE_ID_COLUMN {
-                        SOURCE_KIND_COLUMN
-                    } else {
-                        TARGET_KIND_COLUMN
-                    });
-                }
-            }
-        }
-        if let Some(table) = hop.single_edge_table() {
-            hop.edge_tables = vec![super::clickhouse::select_read_layout(
-                model,
-                table,
-                &equality_columns,
-            )];
-        }
-    }
+    let hops = build_hops(input, model)?;
     let mut nodes = build_node_plans(input, model);
     let denormalized = super::denormalized_facts(input, model);
     let placement = place_conditions(input, model, &hops, &nodes, &denormalized)?;

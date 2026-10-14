@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use query_data_model::{ClickHouseDataModel, OrbitQueryModel, RelationalMapping};
+use query_data_model::ClickHouseDataModel;
 
 use super::{HydrationCompileOptions, QueryPlan, context::PlanningContext};
 use crate::{Input, Result, input::QueryType};
@@ -24,30 +24,4 @@ pub fn plan(
             super::hydration::plan_hydration(context, hydration_options).map(QueryPlan::Hydration)
         }
     }
-}
-
-pub(super) fn select_read_layout(
-    model: &ClickHouseDataModel,
-    canonical: &str,
-    equality_columns: &[&str],
-) -> String {
-    let score = |table: &str| {
-        model
-            .table_sort_key(table)
-            .unwrap_or_default()
-            .iter()
-            .skip_while(|column| column.as_str() == ontology::TRAVERSAL_PATH_COLUMN)
-            .take_while(|column| equality_columns.contains(&column.as_str()))
-            .count()
-    };
-    let mut selected = canonical;
-    let mut best = score(canonical);
-    for table in model.query_backend().equivalent_layouts(canonical) {
-        let candidate = score(table);
-        if candidate > best {
-            selected = table;
-            best = candidate;
-        }
-    }
-    selected.to_string()
 }

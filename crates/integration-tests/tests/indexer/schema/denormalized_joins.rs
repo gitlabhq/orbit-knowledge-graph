@@ -59,26 +59,6 @@ async fn denormalized_tables_match_their_source_join() {
             );
         }
     }
-    for copy in model.backend().reordered_layouts() {
-        let identity = model
-            .backend()
-            .table(&copy.source)
-            .unwrap()
-            .replacement_identity()
-            .join(", ");
-        ctx.execute(&format!("INSERT INTO {} ({identity}, _version, _deleted) SELECT {identity}, toDateTime64('2099-01-01 00:00:00', 6), true FROM {} FINAL LIMIT 1", copy.source, copy.source)).await;
-        for (left, right) in [(&copy.source, &copy.table), (&copy.table, &copy.source)] {
-            let difference = count(
-                &ctx,
-                &format!(
-                    "FROM (SELECT * FROM {left} FINAL EXCEPT ALL SELECT * FROM {right} FINAL)"
-                ),
-            )
-            .await;
-            assert_eq!(difference, 0, "{} differs from {}", copy.table, copy.source);
-        }
-        assert!(count(&ctx, &format!("FROM {} FINAL", copy.table)).await > 0);
-    }
 }
 
 async fn count(ctx: &TestContext, from: &str) -> i64 {
