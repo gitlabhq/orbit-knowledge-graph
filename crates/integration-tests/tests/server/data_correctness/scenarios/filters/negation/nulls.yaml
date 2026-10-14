@@ -1,320 +1,338 @@
 cases:
-- name: bang_eq_literal
-  description: The != operator matches the same rows as NOT = and drops NULL values
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight != 3
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 3
-    nodes:
-      WorkItem:
-        ids: [4001, 4003, 4010]
-        filters:
-          weight:
-            in: [8, 13, 5]
-        absent: [4000, 4002]
-- name: ne_literal
-  description: The <> operator matches the same rows as NOT = and drops NULL values
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight <> 3
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 3
-    nodes:
-      WorkItem:
-        ids: [4001, 4003, 4010]
-        filters:
-          weight:
-            in: [8, 13, 5]
-        absent: [4000, 4002]
-- name: nested_not_in_null_dropped
-  description: |
-    A NULL weight under a nested NOT IN makes the whole condition NULL, so work item 4002 is dropped. A guard such as weight IS NOT NULL AND weight NOT IN [...] would wrongly keep it.
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010
-        AND NOT (NOT wi.weight IN [3] AND wi.state = 'opened')
-      RETURN wi.weight, wi.state ORDER BY wi.id LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        order: [4000, 4001]
-        absent: [4002, 4003, 4010]
-- name: not_contains_excludes_null
-  description: NOT CONTAINS on a nullable string drops the match and the NULL row
-  config:
-    redaction:
-      allow:
-        note: [9500, 9501, 9502]
-    extra_seed:
-      gl_note:
-      - {id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: 1/100/1000/}
-      - {id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/}
-      - {id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/}
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","id_range":{"start":9500,"end":9502},"not":{"discussion_id":{"contains":"abc"}},"columns":["discussion_id"]}],"limit":10}
-    gql: |
-      MATCH (n:Note)
-      WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id CONTAINS 'abc'
-      RETURN n.discussion_id LIMIT 10
-  expect:
-    node_count: 1
-    nodes:
-      Note:
-        ids: [9501]
-        absent: [9500, 9502]
-- name: not_cross_node_comparison_null
-  description: |
-    A negated group with a cross-node comparison against a NULL column keeps only the rows where the group is false. Every user has a NULL avatar_url, so the group is NULL for opened merge requests and false for the others.
-  query:
-    gql: |
-      MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
-      WHERE u.id >= 1 AND u.id <= 3
-        AND NOT (u.avatar_url = mr.title AND mr.state = 'opened')
-      RETURN u.username, mr.title LIMIT 20
-  expect:
-    node_count: 4
-    nodes:
-      MergeRequest:
-        ids: [2002, 2003]
-        absent: [2000, 2001, 9100]
-    edges:
-      AUTHORED:
-      - [2, 2002]
-      - [3, 2003]
-- name: not_ends_with_excludes_null
-  description: NOT ENDS WITH on a nullable string drops the match and the NULL row
-  config:
-    redaction:
-      allow:
-        note: [9500, 9501, 9502]
-    extra_seed:
-      gl_note:
-      - {id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: 1/100/1000/}
-      - {id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/}
-      - {id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/}
-  query:
-    gql: |
-      MATCH (n:Note)
-      WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id ENDS WITH 'xyz-1'
-      RETURN n.discussion_id LIMIT 10
-  expect:
-    node_count: 1
-    nodes:
-      Note:
-        ids: [9500]
-        absent: [9501, 9502]
-- name: not_eq_excludes_null
-  description: NOT = becomes <> and drops rows whose value is NULL
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"ne":3}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 3
-    nodes:
-      WorkItem:
-        ids: [4001, 4003, 4010]
-        filters:
-          weight:
-            in: [8, 13, 5]
-        absent: [4000, 4002]
-- name: not_group_null_checks
-  description: NOT over a group of IS NOT NULL checks keeps the rows where either value is NULL
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010
-        AND NOT (wi.weight IS NOT NULL AND wi.milestone_id IS NOT NULL)
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 3
-    nodes:
-      WorkItem:
-        ids: [4002, 4003, 4010]
-        absent: [4000, 4001]
-- name: not_is_not_null
-  description: NOT IS NOT NULL matches the same rows as IS NULL
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_null":true}},"columns":["weight","state"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NOT NULL
-      RETURN wi.weight, wi.state LIMIT 10
-  expect:
-    node_count: 1
-    nodes:
-      WorkItem:
-        ids: [4002]
-        prop_present: [state]
-        prop_absent: [weight]
-- name: not_is_null
-  description: NOT IS NULL matches the same rows as IS NOT NULL
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_not_null":true}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NULL
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 4
-    nodes:
-      WorkItem:
-        ids: [4000, 4001, 4003, 4010]
-        filters:
-          weight: {is_not_null: true}
-        absent: [4002]
-- name: not_property_comparison_null
-  description: |
-    NOT over same-node property comparisons drops rows where either side is NULL. Work item 4002 has no weight, so both the complemented comparison and the negated group evaluate to NULL for it.
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010
-        AND NOT wi.weight = wi.iid
-        AND NOT (wi.weight >= wi.iid AND wi.state = 'opened')
-      RETURN wi.weight, wi.iid LIMIT 10
-  expect:
-    node_count: 1
-    nodes:
-      WorkItem:
-        ids: [4001]
-        absent: [4000, 4002, 4003, 4010]
-        filters:
-          weight:
-            in: [8]
-- name: not_range_complement
-  description: NOT over a range keeps the smaller weights and drops NULL weights
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"gte":8}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight >= 8
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        ids: [4000, 4010]
-        absent: [4001, 4002, 4003]
-- name: not_single_value_in
-  description: NOT IN with one value stays a NOT condition and drops the NULL weight
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 3
-    nodes:
-      WorkItem:
-        ids: [4001, 4003, 4010]
-        absent: [4000, 4002]
-- name: not_starts_with
-  description: NOT STARTS WITH on a nullable string drops the match and the NULL row
-  config:
-    redaction:
-      allow:
-        note: [9500, 9501, 9502]
-    extra_seed:
-      gl_note:
-      - {id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: 1/100/1000/}
-      - {id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/}
-      - {id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/}
-  query:
-    gql: |
-      MATCH (n:Note)
-      WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id STARTS WITH 'thread-a'
-      RETURN n.discussion_id LIMIT 10
-  expect:
-    node_count: 1
-    nodes:
-      Note:
-        ids: [9501]
-        absent: [9500, 9502]
-- name: nullable_double_not
-  description: Double NOT preserves membership and does not turn NULL into a match
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT NOT wi.weight IN [3, 8]
-      RETURN wi.weight ORDER BY wi.id LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        order: [4000, 4001]
-        filters:
-          weight:
-            in: [3, 8]
-        rows:
-        - {id: 4000, weight: 3}
-        - {id: 4001, weight: 8}
-- name: nullable_not_in
-  description: NOT IN a nonempty list excludes both matching weights and NULL weights
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3,8]}},"columns":["weight"]}],"order_by":"wi.id","limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3, 8]
-      RETURN wi.weight ORDER BY wi.id LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        order: [4003, 4010]
-        rows:
-        - {id: 4003, weight: 13}
-        - {id: 4010, weight: 5}
-- name: transform_null_in_pinned_for_not_tree
-  description: A NOT that survives normalization pins transform_null_in = 0, so NULL under NOT IN stays NULL
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
-      RETURN wi.weight LIMIT 10
-  expect:
-    compile_only: true
-    sql_contains: [transform_null_in = 0]
-- name: transform_null_in_absent_without_not
-  description: A query without NOT leaves transform_null_in at the server default
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3]
-      RETURN wi.weight LIMIT 10
-  expect:
-    compile_only: true
-    sql_not_contains: [transform_null_in]
-- name: transform_null_in_absent_when_not_folds
-  description: A NOT that folds to an ordinary filter does not set transform_null_in
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
-      RETURN wi.weight LIMIT 10
-  expect:
-    compile_only: true
-    sql_not_contains: [transform_null_in]
+  - name: bang_eq_literal
+    description: The != operator matches the same rows as NOT = and drops NULL values
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight != 3
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        WorkItem:
+          ids: [4001, 4003, 4010]
+          filters:
+            weight:
+              in: [8, 13, 5]
+          absent: [4000, 4002]
+
+  - name: ne_literal
+    description: The <> operator matches the same rows as NOT = and drops NULL values
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight <> 3
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        WorkItem:
+          ids: [4001, 4003, 4010]
+          filters:
+            weight:
+              in: [8, 13, 5]
+          absent: [4000, 4002]
+
+  - name: nested_not_in_null_dropped
+    description: |
+      A NULL weight under a nested NOT IN makes the whole condition NULL, so work item 4002 is dropped. A guard such as weight IS NOT NULL AND weight NOT IN [...] would wrongly keep it.
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010
+          AND NOT (NOT wi.weight IN [3] AND wi.state = 'opened')
+        RETURN wi.weight, wi.state ORDER BY wi.id LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          order: [4000, 4001]
+          absent: [4002, 4003, 4010]
+
+  - name: not_contains_excludes_null
+    description: NOT CONTAINS on a nullable string drops the match and the NULL row
+    config:
+      redaction:
+        allow:
+          note: [9500, 9501, 9502]
+      extra_seed:
+        gl_note:
+          - { id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: 1/100/1000/ }
+          - { id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/ }
+          - { id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/ }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","id_range":{"start":9500,"end":9502},"not":{"discussion_id":{"contains":"abc"}},"columns":["discussion_id"]}],"limit":10}
+      gql: |
+        MATCH (n:Note)
+        WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id CONTAINS 'abc'
+        RETURN n.discussion_id LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [9501]
+          absent: [9500, 9502]
+
+  - name: not_cross_node_comparison_null
+    description: |
+      A negated group with a cross-node comparison against a NULL column keeps only the rows where the group is false. Every user has a NULL avatar_url, so the group is NULL for opened merge requests and false for the others.
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+        WHERE u.id >= 1 AND u.id <= 3
+          AND NOT (u.avatar_url = mr.title AND mr.state = 'opened')
+        RETURN u.username, mr.title LIMIT 20
+    expect:
+      node_count: 4
+      nodes:
+        MergeRequest:
+          ids: [2002, 2003]
+          absent: [2000, 2001, 9100]
+      edges:
+        AUTHORED:
+          - [2, 2002]
+          - [3, 2003]
+
+  - name: not_ends_with_excludes_null
+    description: NOT ENDS WITH on a nullable string drops the match and the NULL row
+    config:
+      redaction:
+        allow:
+          note: [9500, 9501, 9502]
+      extra_seed:
+        gl_note:
+          - { id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: 1/100/1000/ }
+          - { id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/ }
+          - { id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/ }
+    query:
+      gql: |
+        MATCH (n:Note)
+        WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id ENDS WITH 'xyz-1'
+        RETURN n.discussion_id LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [9500]
+          absent: [9501, 9502]
+
+  - name: not_eq_excludes_null
+    description: NOT = becomes <> and drops rows whose value is NULL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"ne":3}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        WorkItem:
+          ids: [4001, 4003, 4010]
+          filters:
+            weight:
+              in: [8, 13, 5]
+          absent: [4000, 4002]
+
+  - name: not_group_null_checks
+    description: NOT over a group of IS NOT NULL checks keeps the rows where either value is NULL
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010
+          AND NOT (wi.weight IS NOT NULL AND wi.milestone_id IS NOT NULL)
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        WorkItem:
+          ids: [4002, 4003, 4010]
+          absent: [4000, 4001]
+
+  - name: not_is_not_null
+    description: NOT IS NOT NULL matches the same rows as IS NULL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_null":true}},"columns":["weight","state"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NOT NULL
+        RETURN wi.weight, wi.state LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        WorkItem:
+          ids: [4002]
+          prop_present: [state]
+          prop_absent: [weight]
+
+  - name: not_is_null
+    description: NOT IS NULL matches the same rows as IS NOT NULL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_not_null":true}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NULL
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 4
+      nodes:
+        WorkItem:
+          ids: [4000, 4001, 4003, 4010]
+          filters:
+            weight: { is_not_null: true }
+          absent: [4002]
+
+  - name: not_property_comparison_null
+    description: |
+      NOT over same-node property comparisons drops rows where either side is NULL. Work item 4002 has no weight, so both the complemented comparison and the negated group evaluate to NULL for it.
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010
+          AND NOT wi.weight = wi.iid
+          AND NOT (wi.weight >= wi.iid AND wi.state = 'opened')
+        RETURN wi.weight, wi.iid LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        WorkItem:
+          ids: [4001]
+          absent: [4000, 4002, 4003, 4010]
+          filters:
+            weight:
+              in: [8]
+
+  - name: not_range_complement
+    description: NOT over a range keeps the smaller weights and drops NULL weights
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"gte":8}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight >= 8
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000, 4010]
+          absent: [4001, 4002, 4003]
+
+  - name: not_single_value_in
+    description: NOT IN with one value stays a NOT condition and drops the NULL weight
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        WorkItem:
+          ids: [4001, 4003, 4010]
+          absent: [4000, 4002]
+
+  - name: not_starts_with
+    description: NOT STARTS WITH on a nullable string drops the match and the NULL row
+    config:
+      redaction:
+        allow:
+          note: [9500, 9501, 9502]
+      extra_seed:
+        gl_note:
+          - { id: 9500, note: first thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-abc-1, traversal_path: 1/100/1000/ }
+          - { id: 9501, note: second thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, discussion_id: thread-xyz-1, traversal_path: 1/100/1000/ }
+          - { id: 9502, note: no thread, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: 1/100/1000/ }
+    query:
+      gql: |
+        MATCH (n:Note)
+        WHERE n.id >= 9500 AND n.id <= 9502 AND NOT n.discussion_id STARTS WITH 'thread-a'
+        RETURN n.discussion_id LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [9501]
+          absent: [9500, 9502]
+
+  - name: nullable_double_not
+    description: Double NOT preserves membership and does not turn NULL into a match
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT NOT wi.weight IN [3, 8]
+        RETURN wi.weight ORDER BY wi.id LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          order: [4000, 4001]
+          filters:
+            weight:
+              in: [3, 8]
+          rows:
+            - { id: 4000, weight: 3 }
+            - { id: 4001, weight: 8 }
+
+  - name: nullable_not_in
+    description: NOT IN a nonempty list excludes both matching weights and NULL weights
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3,8]}},"columns":["weight"]}],"order_by":"wi.id","limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3, 8]
+        RETURN wi.weight ORDER BY wi.id LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          order: [4003, 4010]
+          rows:
+            - { id: 4003, weight: 13 }
+            - { id: 4010, weight: 5 }
+
+  - name: transform_null_in_pinned_for_not_tree
+    description: A NOT that survives normalization pins transform_null_in = 0, so NULL under NOT IN stays NULL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    expect:
+      compile_only: true
+      sql_contains: [transform_null_in = 0]
+
+  - name: transform_null_in_absent_without_not
+    description: A query without NOT leaves transform_null_in at the server default
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    expect:
+      compile_only: true
+      sql_not_contains: [transform_null_in]
+
+  - name: transform_null_in_absent_when_not_folds
+    description: A NOT that folds to an ordinary filter does not set transform_null_in
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
+        RETURN wi.weight LIMIT 10
+    expect:
+      compile_only: true
+      sql_not_contains: [transform_null_in]

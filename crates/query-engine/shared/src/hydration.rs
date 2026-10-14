@@ -14,7 +14,7 @@ use compiler::{
     InputNode, QueryType,
 };
 use ontology::{DataType, Ontology};
-use orbit_utils::arrow::{ArrowUtils, ColumnValue};
+use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
 use types::QueryResult;

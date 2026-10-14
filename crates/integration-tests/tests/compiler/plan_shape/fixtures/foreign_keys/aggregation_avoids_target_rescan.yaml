@@ -1,11 +1,14 @@
 name: FK aggregation avoids redundant center-derived target narrowing
+
 query:
   json: |
     {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"n"}]}
   gql: |
     MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT]->(p:Project) RETURN p.name, count(mr) AS n
+
 logical:
   expect: ["(Aggregate ... (_))"]
+
 physical:
   clickhouse:
     planned:

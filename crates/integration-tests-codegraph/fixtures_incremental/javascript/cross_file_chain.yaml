@@ -1,0 +1,46 @@
+name: "JavaScript: a function re-exported through a second module"
+
+fixtures:
+  - path: src/a.js
+    content: |
+      export function helper() {}
+
+  - path: src/b.js
+    content: |
+      export { helper } from './a';
+
+  - path: src/c.js
+    content: |
+      import { helper } from './b';
+
+      export function run() {
+        helper();
+      }
+
+tests:
+  - name: "the function is defined in the first module"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/a.js } }
+
+  - name: "a call through the re-export links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: src/a.js } }
+
+  - name: "the import resolves to the definition"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/c.js' AND i.identifier_name = 'helper'
+      RETURN d.file_path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: src/a.js } }

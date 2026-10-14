@@ -30,13 +30,14 @@ tests:
           RETURN caller.name AS caller, target.name AS target, target.file_path AS file
         assert:
           - { row_count: 1 }
-          - { row: { caller: create, target: processOrder, file: 'valid.js' } }
+          - { row: { caller: create, target: processOrder, file: "valid.js" } }
       - query: |
           MATCH (file:File)-[:DEFINES]->(d:Definition)
           WHERE file.path = 'broken.js'
           RETURN d.name
         assert:
           - { empty: true }
+
   - name: "broken.js is skipped and contributes no definitions"
     query: |
       MATCH (d:Definition)

@@ -1,4 +1,5 @@
 name: Node type properties do not suppress planned edge outputs
+
 query:
   json: |
     {
@@ -14,9 +15,11 @@ query:
   gql: |
     MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970})
     RETURN u.username, u.user_type, g.name ORDER BY u.username LIMIT 5
+
 logical:
   expect:
     - (EdgeScan MEMBER_OF u->g AS e0)
+
 physical:
   clickhouse:
     planned:

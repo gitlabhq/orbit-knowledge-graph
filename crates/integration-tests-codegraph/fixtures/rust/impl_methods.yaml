@@ -1,4 +1,5 @@
 name: "Rust: impl methods and self calls"
+
 fixtures:
   - path: main.rs
     content: |

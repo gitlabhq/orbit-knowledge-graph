@@ -1,5 +1,5 @@
 use arrow::array::StringArray;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;

@@ -169,4 +169,3 @@ data_correctness:
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
     - { traversal_path: "1/101/1001/", project_id: 1001, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
-

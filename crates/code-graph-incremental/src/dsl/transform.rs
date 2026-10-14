@@ -7,6 +7,8 @@ use crate::tree::{EdgeKind, Node, Storage, Tree};
 
 use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
 
+const MAX_REGEX_LOOP_PASSES: usize = 64;
+
 fn child_sym<S: Storage<Node = Node>>(
     t: &Tree<S>,
     lang: &Lang,
@@ -205,7 +207,7 @@ impl Tf {
             Tf::RegexFirst(re, replacement) => re.replace(s, &**replacement),
             Tf::RegexLoop(re, replacement) => {
                 let mut cur = Cow::Borrowed(s);
-                loop {
+                for _ in 0..MAX_REGEX_LOOP_PASSES {
                     let next = re.replace_all(&cur, &**replacement);
                     if let Cow::Borrowed(_) = next {
                         break;

@@ -1,16 +1,20 @@
 name: "Rust: a workspace member's crate name changes under an untouched file"
+
 fixtures:
   - path: Cargo.toml
     content: |
       [workspace]
       members = ["crates/shared"]
+
   - path: crates/shared/Cargo.toml
     content: |
       [package]
       name = "shared-lib"
+
   - path: crates/shared/src/lib.rs
     content: |
       pub mod util;
+
   - path: crates/shared/src/util.rs
     content: |
       pub fn helper() {}

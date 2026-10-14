@@ -1,4 +1,5 @@
 name: "Python: return type inference (same-file)"
+
 fixtures:
   - path: main.py
     content: |

@@ -11,9 +11,11 @@ fixtures:
       export function make(): Widget { return new WidgetImpl(); }
       export default function bootstrap(): void {}
       function privateHelper(): number { return 1; }
+
   - path: lib/barrel.ts
     content: |
       export { Widget, WidgetImpl } from './widget';
+
   - path: consumer.ts
     content: |
       import { Widget, WidgetImpl } from './lib/barrel';
@@ -30,6 +32,7 @@ tests:
       - { row_count: 2 }
       - { row: { imported: Widget, name: "Widget", file: "lib/widget.ts", type: Interface } }
       - { row: { imported: WidgetImpl, name: "WidgetImpl", file: "lib/widget.ts", type: Class } }
+
   - name: Barrel consumer calls only the concrete constructor
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -37,7 +40,7 @@ tests:
       RETURN target.name AS name, target.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { name: WidgetImpl, file: 'lib/widget.ts' } }
+      - { row: { name: WidgetImpl, file: "lib/widget.ts" } }
 
   - name: Each exported local symbol is a single definition row
     query: |

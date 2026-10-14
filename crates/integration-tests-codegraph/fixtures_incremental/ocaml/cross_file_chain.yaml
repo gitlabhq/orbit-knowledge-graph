@@ -1,0 +1,37 @@
+name: "OCaml: a function included into a second module"
+
+fixtures:
+  - path: lib/a.ml
+    content: |
+      let helper () = ()
+
+  - path: lib/b.ml
+    content: |
+      include A
+
+  - path: lib/c.ml
+    content: |
+      let run () = B.helper ()
+
+tests:
+  - name: "the function is defined in the first module"
+    # Known gap: OCaml has no extraction rules in langs/, so the engine emits no definitions for it.
+    skip: true
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: lib/a.ml } }
+
+  - name: "a call through the included module links to the definition"
+    # Known gap: OCaml has no extraction rules in langs/, so the engine emits no definitions for it.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: lib/a.ml } }

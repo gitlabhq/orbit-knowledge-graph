@@ -1,4 +1,5 @@
 name: "Rust: closures, match, and control flow"
+
 fixtures:
   - path: main.rs
     content: |

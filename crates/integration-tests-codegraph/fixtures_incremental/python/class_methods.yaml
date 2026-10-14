@@ -1,4 +1,5 @@
 name: "Python: class method types"
+
 fixtures:
   - path: main.py
     content: |

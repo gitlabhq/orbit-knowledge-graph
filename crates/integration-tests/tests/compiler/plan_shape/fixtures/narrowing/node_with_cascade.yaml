@@ -1,4 +1,5 @@
 name: Joined node narrowing plans an edge key scan with its upstream cascade
+
 query:
   json: |
     {
@@ -17,10 +18,12 @@ query:
   gql: |
     MATCH (a:Definition {name: 'caller'})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
     RETURN a.id, b.id, c.id ORDER BY c.id
+
 logical:
   expect:
     - (Sort c.id (_))
     - (EdgeScan CALLS a->b AS e0)
+
 physical:
   clickhouse:
     planned:

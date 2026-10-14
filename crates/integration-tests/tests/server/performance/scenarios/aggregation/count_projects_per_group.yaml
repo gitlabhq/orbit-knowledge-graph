@@ -1,4 +1,5 @@
 description: Aggregation - count Projects contained per Group
+
 query:
   json: |
     {
@@ -12,5 +13,6 @@ query:
       "aggregations": [{"count": "p", "as": "project_count"}],
       "limit": 50
     }
+
 expect:
   compile_only: true

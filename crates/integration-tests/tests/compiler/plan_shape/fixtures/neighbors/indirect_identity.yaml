@@ -1,4 +1,5 @@
 name: Neighbors uses its family emitter without an edge-chain strategy
+
 query:
   json: |
     {
@@ -8,10 +9,12 @@ query:
     }
   gql: |
     MATCH (d:Definition {id: 1})-[:CALLS]-(neighbor) RETURN d, neighbor
+
 logical:
   expect:
     - (Input neighbors (...))
     - (Filter d.id IN [1] (NodeScan Definition AS d))
+
 physical:
   clickhouse:
     planned:

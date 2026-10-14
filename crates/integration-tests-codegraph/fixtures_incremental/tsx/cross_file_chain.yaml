@@ -1,0 +1,48 @@
+name: "TSX: a component re-exported through a second module"
+
+fixtures:
+  - path: src/Button.tsx
+    content: |
+      export function Button() {
+        return <button />;
+      }
+
+  - path: src/index.tsx
+    content: |
+      export { Button } from './Button';
+
+  - path: src/Toolbar.tsx
+    content: |
+      import { Button } from './index';
+
+      export function Toolbar() {
+        return Button();
+      }
+
+tests:
+  - name: "the component is defined in the first module"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Button'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/Button.tsx } }
+
+  - name: "a call through the re-export links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Toolbar'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: Button, file: src/Button.tsx } }
+
+  - name: "the import resolves to the definition"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/Toolbar.tsx' AND i.identifier_name = 'Button'
+      RETURN d.file_path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: src/Button.tsx } }

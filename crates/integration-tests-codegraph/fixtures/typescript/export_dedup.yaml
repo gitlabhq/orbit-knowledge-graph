@@ -11,6 +11,7 @@ fixtures:
       export function make(): Widget { return new WidgetImpl(); }
       export default function bootstrap(): void {}
       function privateHelper(): number { return 1; }
+
   - path: lib/barrel.ts
     content: |
       export { Widget, WidgetImpl } from './widget';

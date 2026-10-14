@@ -15,6 +15,8 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 | `check-mr-description.sh` | Reads the description from the predefined `CI_MERGE_REQUEST_DESCRIPTION` variable and runs the scorer. |
 | `prose_lint.py` | Prose linter for the text LLMs read. PEP 723 script (`uv run`, PyYAML only). Modes: `FILE...`, `--all`, `--diff-base <sha>`. |
 | `prose_lint_test.py` | Unit tests for the prose linter (`mise run lint:prose:test`). |
+| `yaml_lint.py` | Layout linter for the YAML test suites: Prettier plus a blank-line rule. PEP 723 script (`uv run`, PyYAML only). Modes: `FILE...`, no files for every suite, `--fix`. |
+| `yaml_lint_test.py` | Unit tests for the YAML layout linter (`mise run lint:yaml:test`). |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
 
 ## Prose linter
@@ -57,13 +59,36 @@ mise run lint:prose -- skills/orbit/SKILL.md
 mise run lint:prose:test
 ```
 
+## YAML layout linter
+
+Scope (the `SUITES` tuple in `yaml_lint.py`): the integration test suites under
+`crates/integration-tests/tests`, the code-graph fixtures, and the query corpus
+under `fixtures/queries`. The goal is suite files that are easy to read.
+
+Prettier, pinned in `package.json` and configured in `.prettierrc.yaml`, sets
+the indentation, the quotes, and the spacing in a line. The print width is
+large, so Prettier does not wrap long flow maps such as seed rows.
+
+The script then adds one rule. A blank line separates two sibling entries when
+one of them spans more than one line. Siblings are the top-level keys and the
+items of each top-level list, for example each case of a suite. A comment
+directly above an entry stays with that entry.
+
+```shell
+mise run lint:yaml
+mise run lint:yaml:fix
+mise run lint:yaml:test
+```
+
 ## Where the gates run
 
 - **lefthook** `pre-commit` job `narration` (advisory; prints warnings, does not
-  block — `|| true` in `lefthook.yml`) and `prose` (blocks the commit).
-- **CI** jobs `lint:narration`, `lint:mr-description`, and `lint:prose`, defined in
+  block — `|| true` in `lefthook.yml`), `prose`, and `yaml-suites` (both
+  block the commit).
+- **CI** jobs `lint:narration`, `lint:mr-description`, `lint:prose`, and
+  `lint:yaml`, defined in
   [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). The first two use
-  `allow_failure: true` (yellow/advisory); `lint:prose` blocks. In merge-request
+  `allow_failure: true` (yellow/advisory); `lint:prose` and `lint:yaml` block. In merge-request
   pipelines the narration and prose jobs scope to files the MR changed
   (`--diff-base`).
 
@@ -108,6 +133,7 @@ fail-loud, so nothing silently lingers):
 rm -rf scripts/linting .gitlab/ci/linting.yml
 # then remove:
 #   - the `- local: .gitlab/ci/linting.yml` line in .gitlab-ci.yml
-#   - the `narration` and `prose` pre-commit jobs in lefthook.yml
-#   - the `lint:prose` and `lint:prose:test` tasks in mise.toml
+#   - the `narration`, `prose`, and `yaml-suites` pre-commit jobs in lefthook.yml
+#   - the `lint:prose*` and `lint:yaml*` tasks in mise.toml
+#   - the `prettier` dev dependency and `.prettierrc.yaml`
 ```

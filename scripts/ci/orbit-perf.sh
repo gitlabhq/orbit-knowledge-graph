@@ -25,8 +25,8 @@ GKG_SELECTOR="app.kubernetes.io/name=gkg,app.kubernetes.io/component=webserver"
 DISPATCHER_SELECTOR="app.kubernetes.io/name=gkg,app.kubernetes.io/component=dispatcher"
 
 log() { echo "==> $*" >&2; }
-# Debug build, so it shares the compile cache with the lint jobs that also build xtask.
-xtask() { mise exec -- cargo run -p xtask -- "$@"; }
+# The synth profile optimises Arrow, Parquet and zstd for data generation.
+xtask() { mise exec -- cargo run --profile synth -p xtask -- "$@"; }
 cap() { mise -C "$CAPRONI_DIR" exec -- caproni -c "$CAPRONI_DIR/caproni.yaml" "$@"; }
 kc()  { cap kubectl "$@"; }
 chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c clickhouse -- clickhouse-client "$@"; }

@@ -12,7 +12,7 @@ use indexer::testkit::MockLockService;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 
 use super::helpers::*;
 use orbit_utils::traversal_path::TraversalPath;

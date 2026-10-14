@@ -1,4 +1,5 @@
 name: "Go: method call resolution"
+
 fixtures:
   - path: main.go
     content: |

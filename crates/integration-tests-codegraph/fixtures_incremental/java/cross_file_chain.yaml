@@ -1,0 +1,52 @@
+name: "Java: classes in one package call each other across files"
+
+fixtures:
+  - path: src/main/java/app/End.java
+    content: |
+      package app;
+
+      public class End {
+          public void stop() {}
+      }
+
+  - path: src/main/java/app/Middle.java
+    content: |
+      package app;
+
+      public class Middle {
+          public void go() {
+              new End().stop();
+          }
+      }
+
+  - path: src/main/java/app/Start.java
+    content: |
+      package app;
+
+      public class Start {
+          public void run() {
+              new Middle().go();
+          }
+      }
+
+tests:
+  - name: "each file defines its method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['stop', 'go', 'run']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: app.End.stop } }
+      - { row: { fqn: app.Middle.go } }
+      - { row: { fqn: app.Start.run } }
+
+  - name: "calls in one package link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'stop']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: go, file: src/main/java/app/Middle.java } }
+      - { row: { caller: go, callee: stop, file: src/main/java/app/End.java } }

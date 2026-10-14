@@ -1,0 +1,32 @@
+name: "HCL: a variable and a local shared by the files of one module"
+
+fixtures:
+  - path: infra/variables.tf
+    content: |
+      variable "region" {
+        type = string
+      }
+
+  - path: infra/locals.tf
+    content: |
+      locals {
+        zone = "${var.region}-a"
+      }
+
+  - path: infra/main.tf
+    content: |
+      resource "aws_instance" "web" {
+        availability_zone = local.zone
+      }
+
+tests:
+  - name: "the variable is defined in its own file"
+    # Known gap: HCL has no extraction rules in langs/, so the engine emits no definitions for it.
+    skip: true
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'region'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: infra/variables.tf } }

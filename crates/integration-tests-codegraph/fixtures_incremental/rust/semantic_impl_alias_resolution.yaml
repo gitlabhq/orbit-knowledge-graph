@@ -1,4 +1,5 @@
 name: "Rust: semantic impl alias resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -33,8 +34,8 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'Runner::run' } }
-      - { row: { fqn: 'domain::Service::run' } }
+      - { row: { fqn: "Runner::run" } }
+      - { row: { fqn: "domain::Service::run" } }
 
   - name: "alias-based impl container names are not emitted"
     # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.

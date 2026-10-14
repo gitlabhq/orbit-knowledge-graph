@@ -1,4 +1,5 @@
 name: "Rust: associated functions vs methods"
+
 fixtures:
   - path: main.rs
     content: |

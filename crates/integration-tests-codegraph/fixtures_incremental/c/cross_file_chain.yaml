@@ -1,0 +1,38 @@
+name: "C: a function visible through a header that includes its header"
+
+fixtures:
+  - path: a.h
+    content: |
+      int helper(void);
+
+  - path: a.c
+    content: |
+      #include "a.h"
+      int helper(void) { return 1; }
+
+  - path: b.h
+    content: |
+      #include "a.h"
+
+  - path: c.c
+    content: |
+      #include "b.h"
+      int run() { return helper(); }
+
+tests:
+  - name: "the function is defined in the first source file"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper' AND d.file_path = 'a.c'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: "a call through the nested include links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: a.c } }

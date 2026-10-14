@@ -1,0 +1,18 @@
+name: "Java: a long member chain links on the worker stack"
+
+fixtures:
+  - path: Chain.java
+    content:
+      - "class Chain {\n    void target() {}\n\n    void memberChain(Node node) {\n        node\n"
+      - { repeat: 20000, text: "            .next\n" }
+      - "            .go();\n        target();\n    }\n}\n"
+
+tests:
+  - name: "a method with a long member chain still links its other calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'memberChain'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: target } }

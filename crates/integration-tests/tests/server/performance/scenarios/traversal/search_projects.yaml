@@ -1,4 +1,5 @@
 description: Single-node Project lookup (search)
+
 query:
   json: |
     {
@@ -6,5 +7,6 @@ query:
       "nodes": [{"id": "p", "entity": "Project", "node_ids": [5001]}],
       "limit": 10
     }
+
 expect:
   compile_only: true

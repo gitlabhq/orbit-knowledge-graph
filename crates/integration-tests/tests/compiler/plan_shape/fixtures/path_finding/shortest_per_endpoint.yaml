@@ -1,13 +1,16 @@
 name: Shortest paths keep one minimum-depth row per endpoint pair
+
 query:
   json: |
     {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
   gql: |
     MATCH path = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(p:Project {id: 100})
     RETURN path
+
 logical:
   expect:
     - (Input path_finding (...))
+
 physical:
   clickhouse:
     emitted:

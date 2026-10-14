@@ -1,4 +1,5 @@
 name: "Rust: re-exports and self resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -43,7 +44,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs' } }
+      - { row: { src: "src/lib.rs", tgt: "src/inner.rs" } }
 
   - name: "re-exported type keeps associated function resolution"
     query: |
@@ -52,7 +53,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs', type: 'Function' } }
+      - { row: { src: "src/lib.rs", tgt: "src/inner.rs", type: "Function" } }
 
   - name: "Self::new inside impl resolves to the inherent constructor"
     query: |
@@ -61,7 +62,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/inner.rs', tgt: 'src/inner.rs', type: 'Function' } }
+      - { row: { src: "src/inner.rs", tgt: "src/inner.rs", type: "Function" } }
 
   - name: "re-export aliases are preserved in import metadata"
     query: |
@@ -70,5 +71,5 @@ tests:
       RETURN i.identifier_alias AS alias, i.import_type AS type
     assert:
       - { row_count: 2 }
-      - { row: { alias: 'exported_helper', type: 'ReExportAliased' } }
-      - { row: { alias: 'ExportedService', type: 'ReExportAliased' } }
+      - { row: { alias: "exported_helper", type: "ReExportAliased" } }
+      - { row: { alias: "ExportedService", type: "ReExportAliased" } }

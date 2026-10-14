@@ -1,4 +1,5 @@
 name: Planned range and time bucket lower to comparisons and typed date expressions
+
 query:
   json: |
     {
@@ -10,9 +11,11 @@ query:
   gql: |
     MATCH (n:Note) WHERE n.id >= 1 AND n.id <= 100
     RETURN date_trunc('month', n.created_at), count(n) AS n
+
 logical:
   expect:
     - (Filter n.id >= 1, n.id <= 100 (NodeScan Note AS n))
+
 physical:
   clickhouse:
     planned:

@@ -1,4 +1,5 @@
 name: Structural invariants
+
 fixtures:
   - path: service.py
     content: |
@@ -8,6 +9,7 @@ fixtures:
           def create_user(self, name):
               user = self.get_user(name)
               return user
+
   - path: main.py
     content: |
       from service import UserService

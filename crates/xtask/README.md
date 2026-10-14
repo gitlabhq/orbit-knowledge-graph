@@ -10,10 +10,10 @@ Development task runner for GitLab Orbit.
 ## Quick start
 
 ```shell
-# Generate synthetic graph data
-cargo xtask synth generate -c crates/xtask/simulator-slim.yaml
-cargo xtask synth generate --dry-run    # preview plan only
-cargo xtask synth generate --force      # regenerate even if data exists
+# Generate synthetic graph data (the synth profile optimises Arrow, Parquet and zstd)
+cargo synth generate -c crates/xtask/simulator-slim.yaml
+cargo synth generate --dry-run    # preview plan only
+cargo synth generate --force      # regenerate even if data exists
 
 # Generate server config JSON schema
 cargo xtask schema -o config/schemas/config.schema.json

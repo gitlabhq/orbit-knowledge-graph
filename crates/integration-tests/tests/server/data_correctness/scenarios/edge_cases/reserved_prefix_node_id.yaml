@@ -11,4 +11,4 @@ query:
     MATCH (_orbit_p:Project {id: 1000}) RETURN _orbit_p{.id} LIMIT 10
 
 expect:
-  compile_error: "node id \"_orbit_p\" conflicts with reserved prefix \"_orbit_\""
+  compile_error: 'node id "_orbit_p" conflicts with reserved prefix "_orbit_"'

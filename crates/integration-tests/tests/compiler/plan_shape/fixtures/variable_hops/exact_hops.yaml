@@ -1,4 +1,5 @@
 name: Exact hop depth excludes shorter arms
+
 query:
   json: |
     {
@@ -11,9 +12,11 @@ query:
     }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition) RETURN a.id, b.id
+
 logical:
   expect:
     - (EdgeScan CALLS a->b AS e0 HOPS 2..2)
+
 physical:
   clickhouse:
     planned:

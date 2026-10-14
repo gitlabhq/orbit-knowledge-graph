@@ -1,4 +1,5 @@
 description: Path finding - shortest User -> User within 3 hops
+
 query:
   json: |
     {
@@ -10,5 +11,6 @@ query:
       "path": {"type": "shortest", "from": "u1", "to": "u2", "max_depth": 3,
                "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
     }
+
 expect:
   compile_only: true

@@ -1,5 +1,6 @@
 name: "TypeScript: method calls through typed class fields"
 pipeline: js
+
 fixtures:
   - path: terminalProcess.ts
     content: |
@@ -8,6 +9,7 @@ fixtures:
           console.log('started');
         }
       }
+
   - path: ptyService.ts
     content: |
       import { TerminalProcess } from './terminalProcess';
@@ -23,6 +25,7 @@ fixtures:
           this._terminalProcess.start();
         }
       }
+
   - path: localField.ts
     content: |
       class Engine {
@@ -37,6 +40,7 @@ fixtures:
           this.engine.run();
         }
       }
+
   - path: paramProperty.ts
     content: |
       import { TerminalProcess } from './terminalProcess';
@@ -52,6 +56,7 @@ fixtures:
           await this._terminalProcess.start();
         }
       }
+
 tests:
   - name: "Method call through a cross-file typed field resolves to the callee"
     query: |

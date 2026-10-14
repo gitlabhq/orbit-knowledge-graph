@@ -2,13 +2,53 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::stream;
 
+use std::sync::Arc;
+
 use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
 use super::metrics::SdlcMetrics;
+use super::plan::Transformation;
+use super::transform::{BlockTransform, TableBatch, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointError, CheckpointStore};
 use crate::durability::WriteDurability;
+use crate::handler::HandlerError;
 
 pub(crate) fn test_metrics() -> SdlcMetrics {
     SdlcMetrics::with_meter(&crate::testkit::test_meter())
+}
+
+struct PassthroughTransform {
+    outputs: Vec<String>,
+}
+
+#[async_trait]
+impl BlockTransform for PassthroughTransform {
+    fn name(&self) -> &str {
+        "passthrough"
+    }
+
+    fn outputs(&self) -> &[String] {
+        &self.outputs
+    }
+
+    async fn transform(&self, block: &RecordBatch) -> Result<Vec<TableBatch>, HandlerError> {
+        Ok(vec![TableBatch {
+            output_index: 0,
+            batch: block.clone(),
+        }])
+    }
+}
+
+pub(in crate::modules::sdlc) fn passthrough_registry() -> Arc<TransformRegistry> {
+    Arc::new(TransformRegistry::new(Arc::new(
+        |_name, transforms: Vec<Transformation>| {
+            Arc::new(PassthroughTransform {
+                outputs: transforms
+                    .into_iter()
+                    .map(|transform| transform.destination_table)
+                    .collect(),
+            }) as Arc<dyn BlockTransform>
+        },
+    )))
 }
 
 pub(crate) struct EmptyDatalake;

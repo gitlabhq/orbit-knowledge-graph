@@ -1,4 +1,5 @@
 name: "Java: annotation references"
+
 fixtures:
   - path: com/example/MyAnnotation.java
     content: |

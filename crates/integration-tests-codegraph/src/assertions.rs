@@ -6,7 +6,40 @@ use std::fmt;
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureFile {
     pub path: String,
+    #[serde(deserialize_with = "joined_parts")]
     pub content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Content {
+    Text(String),
+    Parts(Vec<Part>),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Part {
+    Text(String),
+    Repeat { repeat: usize, text: String },
+}
+
+fn joined_parts<'de, D: de::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Ok(match Content::deserialize(deserializer)? {
+        Content::Text(text) => text,
+        Content::Parts(parts) => parts
+            .into_iter()
+            .map(|part| match part {
+                Part::Text(text) => text,
+                Part::Repeat { repeat, text } => (0..repeat)
+                    .map(|i| {
+                        text.replace("{i+1}", &(i + 1).to_string())
+                            .replace("{i}", &i.to_string())
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]

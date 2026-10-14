@@ -1,0 +1,58 @@
+name: "Rust: deeply nested control flow, branch values, and arguments link on the worker stack"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "deep_nesting"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content:
+      - "fn target() {}\n\nfn take(x: u8) {}\n\nfn nested_if(c: bool) {\n"
+      - { repeat: 10000, text: "if c {\n" }
+      - "fn innermost_if() {}\n"
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n\nfn branch_value(c: bool) {\nlet v = if c { 0 }"
+      - { repeat: 10000, text: " else if c { 1 }" }
+      - " else { 2 };\ntarget();\n}\n\nfn nested_loop() {\n"
+      - { repeat: 10000, text: "loop {\n" }
+      - "fn innermost_loop() {}\n"
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n\nfn parenthesized_argument() {\ntake(\n"
+      - { repeat: 50000, text: "(\n" }
+      - "1\n"
+      - { repeat: 50000, text: ")\n" }
+      - ");\n}\n"
+
+tests:
+  - name: "each function calls its target after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 3 }
+      - column_values:
+          field: caller
+          values: [nested_if, branch_value, nested_loop]
+
+  - name: "the innermost definition of each nesting belongs to its function"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(nested:Definition)
+      WHERE nested.name IN ['innermost_if', 'innermost_loop']
+      RETURN owner.name AS owner, nested.name AS nested
+    assert:
+      - { row_count: 2 }
+      - { row: { owner: nested_if, nested: innermost_if } }
+      - { row: { owner: nested_loop, nested: innermost_loop } }
+
+  - name: "a call with a deeply parenthesized argument reaches its target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'parenthesized_argument'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: take } }

@@ -1,4 +1,5 @@
 name: "Python: intra-file resolution"
+
 fixtures:
   - path: main.py
     content: |

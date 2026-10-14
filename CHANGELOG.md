@@ -1,3 +1,27 @@
+## [0.142.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.141.0...v0.142.0) (2026-10-14)
+
+### Features
+
+* **catalog:** describe variant routes and derived layouts ([f2c7470](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f2c7470646e9b7589b4eda4fae4a718b48b99d2a)) by Michael Usachenko
+* **cli:** resolve skills credentials with the [secure] chain ([941f95f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/941f95f415a34a0a655fc2d8e3e1c511ca93d290)) by Dmitry Gruzd
+* **compiler:** support NOT predicates in GQL and the JSON DSL ([188e2dc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/188e2dc5f685a7eab91759e65036b7859d2ab6c5)) by Michael Angelo Rivera
+* **local:** isolate revision databases from the manifest ([78f800e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78f800efe2a4ed5bf33aa74b694ca70f5d289c04)) by Michael Usachenko
+* **query:** support type(r) for relationship variables in GQL ([64e3c33](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64e3c332af782680a8743989d6f555a5e731d46d)) by Michael Angelo Rivera
+
+### Fixes
+
+* **compiler:** preserve query semantics ([6ca3acb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ca3acbc90a08e18858e6f463437b1d73ef9d007)) by Michael Usachenko
+* **compiler:** verify role-scoped query paths ([781a3dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/781a3dd860c370c8f929f6167fc5e285e4cc4f19)) by Michael Usachenko
+* **deps:** bump rustls to 0.23.46 for RUSTSEC-2026-0346 to 0349 ([40770a5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/40770a5e5c99a1df54839041fe315f643b733cc1)) by Dmitry Gruzd
+* **indexer:** count only parsed files in incremental language timings ([6f23a8b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6f23a8b583c044bb92828ac58b03d129fbb6b4b7)) by Dmitry Gruzd
+
+### Other
+
+* drop obsolete skip-ci merge ref caveat from agent guidance ([fde5a49](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fde5a4901fcbce65de048c2f099c3fe8f17dfeda)) by Dmitry Gruzd
+* only include docs review app jobs in canonical pipelines ([9d9f167](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9d9f167af6961bb05b3933b6b386a6b01db006ce)) by Marcel Amirault
+* **resilience:** move circuit breakers into the ClickHouse and GitLab clients ([27aa74b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/27aa74b91b2dfd7254280fe86f19da098b98c45d)) by Jean-Gabriel Doyon
+* **runbook:** add emergency code-indexing pause ([787cd26](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/787cd26f3eabc5ea524a7ef9821bfdb58b3e179e)) by Dmitry Gruzd
+
 ## [0.141.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.140.0...v0.141.0) (2026-10-13)
 
 ### Features

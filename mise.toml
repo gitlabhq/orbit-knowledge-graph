@@ -19,6 +19,9 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=
 # Auto-download prebuilt DuckDB shared library on first build (cached in target/).
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
+# CI sets its own wrapper in .sccache-template; export RUSTC_WRAPPER= to opt out locally.
+RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% elif env.CI is defined %}{% else %}sccache{% endif %}"
+
 [tools]
 "rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/checks/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
@@ -104,21 +107,23 @@ description = "Fuzz the Rust code parser"
 run = "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"
 description = "Fuzz indexer message deserialization"
 
+# The workspace step shares the unit-test features; the second relinks `orbit` without the server's FIPS module.
 [tasks.build]
+run = "cargo build --workspace && cargo build -p orbit-cli"
+description = "Build the crates with the dev profile"
+
+[tasks."build:release"]
 run = "cargo build --release --workspace --exclude orbit-cli && cargo build --release -p orbit-cli"
-description = "Build the crates"
+description = "Build the crates with the release profile"
 
 [tasks."build:cli"]
 run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled"
 description = "Build the CLI"
 
 [tasks.test]
+alias = "test:fast"
 run = "./scripts/dev/run-unit-tests.sh"
 description = "Run unit tests (--lib, plus the xtask and orbit binaries; no integration targets, no Docker)"
-
-[tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/dev/run-unit-tests.sh"
-description = "Run unit tests with reduced debug info (no integration targets, no Docker)"
 
 [tasks."test:local"]
 run = "cargo nextest run --test local"
@@ -492,6 +497,18 @@ description = "Lint the prose LLMs read: prompts, skills, agent guides, template
 [tasks."lint:prose:test"]
 run = "uv run --quiet scripts/linting/prose_lint_test.py"
 description = "Run the prose linter's unit tests"
+
+[tasks."lint:yaml"]
+run = "uv run --quiet scripts/linting/yaml_lint.py"
+description = "Check the layout of the YAML test suites with Prettier and the blank-line rule (pass files to scope)"
+
+[tasks."lint:yaml:fix"]
+run = "uv run --quiet scripts/linting/yaml_lint.py --fix"
+description = "Fix the layout of the YAML test suites"
+
+[tasks."lint:yaml:test"]
+run = "uv run --quiet scripts/linting/yaml_lint_test.py"
+description = "Run the YAML layout linter's unit tests"
 
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:vale", "lint:links"]
