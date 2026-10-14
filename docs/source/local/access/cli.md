@@ -202,6 +202,8 @@ For every agent it configures, `orbit setup`:
   binary otherwise. The directory name stays `orbit` in both cases. Setup
   overwrites an existing `orbit` skill, such as one from `glab skills install`,
   and removes the `orbit-cli` skill and link that earlier releases installed.
+  `glab skills update orbit` replaces the same directory, so run `orbit setup`
+  again afterward.
 - For Claude Code, adds `Bash(orbit skills get orbit)` and
   `Bash(orbit skills get orbit *)` to `permissions.allow` in `settings.json`, so
   the wrapper skill loads without a permission prompt. Under `glab orbit` the
@@ -256,7 +258,7 @@ Graph files use `revisions/<project-id>/<commit-sha>.duckdb`.
 The `manifest.duckdb` file records their paths and status.
 The canonical checkout path determines the project ID.
 Reindexing replaces that commit's graph and preserves other revisions.
-Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root.
+Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads `$ORBIT_DATA_DIR/settings.json` too.
 
 Queries wait up to five seconds for busy revisions before returning an error.
 Workspace queries skip missing or incomplete revisions with a diagnostic.
@@ -265,12 +267,6 @@ Tables combine by column name across revision schemas.
 
 If you used the earlier shared `graph.duckdb`, run `orbit index` to populate the new layout.
 The old file remains on disk.
-
-To keep the graph and settings somewhere else, set `ORBIT_DATA_DIR` to a directory.
-Every command that reads the graph, such as `index` and `sql`, then uses
-`$ORBIT_DATA_DIR/graph.duckdb`, and `orbit config` uses
-`$ORBIT_DATA_DIR/settings.json`. The directory is created when needed.
-`--db` still overrides the graph file for a single command.
 
 ## Configure the CLI
 
