@@ -24,8 +24,15 @@ pub(in crate::modules::code) fn run(
     use code_graph::v2::error::{CodeGraphError, FaultedFile, FileFault};
     use code_graph::v2::pipeline::{PhaseTimings, PipelineStats};
     let started = std::time::Instant::now();
+    let dropped = repository.usage().dropped_listed;
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            "listed-only files past the repository file limit have no File row"
+        );
+    }
     let stats = PipelineStats {
-        files_discovered: repository.usage().files,
+        files_discovered: repository.usage().files + dropped,
         bytes_discovered: repository.usage().bytes,
         files_parsed: code_graph_incremental::pipeline::candidates(
             &repository,
@@ -35,7 +42,8 @@ pub(in crate::modules::code) fn run(
         files_skipped: repository
             .files()
             .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
-            .count(),
+            .count()
+            + dropped,
         files_indexed: 0,
         directories_indexed: 0,
         definitions_count: 0,

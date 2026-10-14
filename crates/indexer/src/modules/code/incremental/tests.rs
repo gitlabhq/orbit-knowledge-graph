@@ -779,7 +779,7 @@ async fn loading_distinguishes_empty_archives_and_total_byte_limits() {
 }
 
 #[tokio::test]
-async fn loading_rejects_repositories_with_more_files_than_the_limit() {
+async fn loading_rejects_repositories_with_more_kept_files_than_the_limit() {
     let mut config = config();
     config.max_repository_files = 3;
     let files: &[(&str, &[u8])] = &[
@@ -794,4 +794,35 @@ async fn loading_rejects_repositories_with_more_files_than_the_limit() {
     ));
     config.max_repository_files = 4;
     assert!(load(stream(build_tar_gz(files)), &config).await.is_ok());
+}
+
+#[tokio::test]
+async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
+    let mut config = config();
+    config.max_repository_files = 3;
+    let assets: Vec<(String, &[u8])> = (0..10)
+        .map(|i| {
+            (
+                format!("root/node_modules/pkg/icon{i}.png"),
+                &b"\x89PNG"[..],
+            )
+        })
+        .collect();
+    let files: Vec<(&str, &[u8])> = [
+        ("root/src/a.js", &b"export function a() {}\n"[..]),
+        ("root/src/b.js", &b"import { a } from './a';\na();\n"[..]),
+    ]
+    .into_iter()
+    .chain(assets.iter().map(|(path, bytes)| (path.as_str(), *bytes)))
+    .collect();
+    let repository = load(stream(build_tar_gz(&files)), &config).await.unwrap();
+    assert_eq!(repository.usage().files, 5);
+    assert_eq!(repository.usage().dropped_listed, 7);
+    let sink = Arc::new(|_: &str, _: RecordBatch| Ok(()));
+    let report = IndexFixture::new()
+        .run(&files, options(), sink)
+        .await
+        .unwrap();
+    assert!(report.errors.is_empty());
+    assert_eq!(report.stats.files_parsed, 2);
 }

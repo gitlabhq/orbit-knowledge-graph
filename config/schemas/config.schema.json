@@ -565,7 +565,7 @@
           "minimum": 0
         },
         "max_repository_files": {
-          "description": "Archive file entries, counted before the content filter, above which a\nrepository is skipped entirely, as for `max_total_bytes`. 0 = no limit.",
+          "description": "Files that pass the content filter above which a repository is skipped\nentirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,\noversize, symlinks) do not count; past the same number they get no File\nrow and are counted as skipped. 0 = no limit.",
           "type": "integer",
           "format": "uint",
           "minimum": 0

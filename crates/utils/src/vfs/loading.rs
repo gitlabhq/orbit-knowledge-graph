@@ -1,5 +1,6 @@
 //! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
-//! Limits count offered files before policy runs. Rejected content is not materialized.
+//! The byte limit counts offered files before policy runs. The file limit counts kept files;
+//! a listed entry past the same count is dropped and counted. Rejected content is not materialized.
 //! Files are read, classified, and stored during loading unless metadata explicitly requests KeepLazy.
 //! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
 
@@ -49,6 +50,8 @@ pub struct Loading<T> {
     blobs: Vec<Mutex<FxHashMap<[u8; 32], Content>>>,
     scratch: Scratch,
     files: AtomicU64,
+    listed: AtomicU64,
+    dropped: AtomicU64,
     bytes: AtomicU64,
     resident: AtomicU64,
     deduped: AtomicU64,
@@ -84,6 +87,8 @@ impl<T: Tag> Loading<T> {
             entries: (0..ENTRY_SHARDS).map(|_| Mutex::default()).collect(),
             blobs: (0..BLOB_SHARDS).map(|_| Mutex::default()).collect(),
             files: AtomicU64::new(0),
+            listed: AtomicU64::new(0),
+            dropped: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
             resident: AtomicU64::new(0),
             deduped: AtomicU64::new(0),
@@ -104,12 +109,6 @@ impl<T: Tag> Loading<T> {
             Put::Listed { size, .. } => *size,
         };
         add_capped(
-            &self.files,
-            LimitKind::Files,
-            1,
-            self.limits.files.map(|n| n as u64),
-        )?;
-        add_capped(
             &self.bytes,
             LimitKind::TotalBytes,
             size,
@@ -118,15 +117,13 @@ impl<T: Tag> Loading<T> {
 
         if let Put::Symlink(target) = what {
             let file = File::new(key, size, Decision::List("symlink"));
-            self.add_entry(file, Content::Symlink(target));
-            return Ok(());
+            return self.record(file, Content::Symlink(target));
         }
         if let Put::Listed { reason, .. } = what {
-            self.add_entry(
+            return self.record(
                 File::new(key, size, Decision::List(reason)),
                 Content::Excluded,
             );
-            return Ok(());
         }
         let mut file = File::new(key, size, Decision::Pending);
         file.metadata_decision = match self.limits.file_bytes {
@@ -134,11 +131,11 @@ impl<T: Tag> Loading<T> {
             _ => self.passes.metadata(&file),
         };
         match (file.decision(), what) {
-            (Decision::List(_), _) => self.add_entry(file, Content::Unavailable),
+            (Decision::List(_), _) => self.record(file, Content::Unavailable)?,
             (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes))?,
             (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read())?,
             (Decision::KeepLazy(_), Put::ReadOnDemand { read, .. }) => {
-                self.add_entry(file, Content::ReadOnDemand(read))
+                self.record(file, Content::ReadOnDemand(read))?
             }
             (Decision::Pending | Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
                 self.put_bytes(file, read(self.limits.file_bytes.unwrap_or(u64::MAX)))?;
@@ -167,8 +164,7 @@ impl<T: Tag> Loading<T> {
         }) {
             Ok(bytes) => bytes,
             Err(error) => {
-                self.add_entry(file, Content::Failed(Arc::new(error)));
-                return Ok(());
+                return self.record(file, Content::Failed(Arc::new(error)));
             }
         };
         file.classify(&*self.passes, &bytes);
@@ -176,6 +172,17 @@ impl<T: Tag> Loading<T> {
             Decision::Keep(_) => self.store(bytes)?,
             _ => Content::Unavailable,
         };
+        self.record(file, content)
+    }
+
+    fn record(&self, file: File<'static, T>, content: Content) -> Result<(), SourceError> {
+        let cap = self.limits.files.map(|n| n as u64);
+        if file.keeps() && !matches!(content, Content::Failed(_)) {
+            add_capped(&self.files, LimitKind::Files, 1, cap)?;
+        } else if add_capped(&self.listed, LimitKind::Files, 1, cap).is_err() {
+            self.dropped.fetch_add(1, Relaxed);
+            return Ok(());
+        }
         self.add_entry(file, content);
         Ok(())
     }
@@ -245,6 +252,7 @@ impl<T: Tag> Loading<T> {
             spilled: self.scratch.end.load(Relaxed),
             deduped_bytes: self.deduped.load(Relaxed),
             duplicate_paths,
+            dropped_listed: self.dropped.load(Relaxed) as usize,
         };
         Vfs {
             passes: self.passes,
