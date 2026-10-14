@@ -391,7 +391,7 @@ impl Resolver {
         }
 
         let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
-        let declared_members: Vec<MemberCache> = trees.iter().map(|_| Default::default()).collect();
+        let declared_members: Vec<MemberSlots> = trees.par_iter().map(MemberSlots::new).collect();
         let exporters: Vec<FxHashSet<u32>> = self
             .visible
             .iter()
@@ -695,7 +695,7 @@ struct ResolveCtx<'a> {
     merge_types: bool,
     partials: &'a FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
-    declared_members: &'a [MemberCache],
+    declared_members: &'a [MemberSlots],
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -916,35 +916,43 @@ fn gather_imports_for(
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
-type MemberCache = std::sync::Mutex<FxHashMap<u32, std::sync::Arc<FxHashMap<u32, u32>>>>;
+struct MemberSlots {
+    defs: Vec<u32>,
+    of: Vec<std::sync::OnceLock<FxHashMap<u32, u32>>>,
+}
 
-fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<FxHashMap<u32, u32>> {
-    let cache = &ctx.declared_members[owner.fi() as usize];
-    if let Some(members) = cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&owner.index())
-    {
-        return members.clone();
+impl MemberSlots {
+    fn new(tree: &Tree) -> Self {
+        let mut defs: Vec<u32> = tree
+            .root()
+            .descendants()
+            .filter(|node| node.is(C::Def))
+            .map(|node| node.index())
+            .collect();
+        defs.sort_unstable();
+        let of = defs.iter().map(|_| Default::default()).collect();
+        Self { defs, of }
     }
-    let mut members = FxHashMap::default();
-    let mut walk = owner.walk();
-    while let Some(node) = walk.next() {
-        if node.is(C::Def) {
-            if let Some(name) = node.child_sym(C::DefName) {
-                members.entry(name).or_insert(node.index());
-            }
-            if node.is_class() && !node.has(C::ImplBlock) {
-                walk.skip_subtree();
+}
+
+fn members_of<'c>(ctx: &'c ResolveCtx, owner: Cursor) -> Option<&'c FxHashMap<u32, u32>> {
+    let members = &ctx.declared_members[owner.fi() as usize];
+    let slot = members.defs.binary_search(&owner.index()).ok()?;
+    Some(members.of[slot].get_or_init(|| {
+        let mut members = FxHashMap::default();
+        let mut walk = owner.walk();
+        while let Some(node) = walk.next() {
+            if node.is(C::Def) {
+                if let Some(name) = node.child_sym(C::DefName) {
+                    members.entry(name).or_insert(node.index());
+                }
+                if node.is_class() && !node.has(C::ImplBlock) {
+                    walk.skip_subtree();
+                }
             }
         }
-    }
-    cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .entry(owner.index())
-        .or_insert_with(|| std::sync::Arc::new(members))
-        .clone()
+        members
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1822,7 +1830,7 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
         .find_map(|owner| {
             if owner.is(C::Def) {
                 members_of(ctx, owner)
-                    .get(&name)
+                    .and_then(|members| members.get(&name))
                     .map(|&node| owner.jump(owner.fi(), node))
             } else {
                 find_method_in(owner, name)
