@@ -7,7 +7,10 @@
 # One reloader per Orbit deployment, because a mirrord session targets one pod
 # and each deployment has its own rendered config. Each reloader starts the
 # same wrapper, which runs the matching gkg-server mode on the host with the
-# pod's /app/config/config.yaml and /etc/secrets served through mirrord.
+# pod's /app/config/config.yaml and /etc/secrets served through mirrord. The
+# read-only patterns match the directories as well as the files under them:
+# the server stats /etc/secrets before walking it, and a pattern that only
+# covers the files makes that stat run locally and silently load no secrets.
 # See docs/dev/local-development.md.
 
 lifecycle_hooks:
@@ -30,8 +33,8 @@ reloaders:
       filesystem:
         mode: localwithoverrides
         read_only:
-          - "^/app/config/.*"
-          - "^/etc/secrets/.*"
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
       network:
         outgoing:
           ignore_localhost: true
@@ -52,8 +55,8 @@ reloaders:
       filesystem:
         mode: localwithoverrides
         read_only:
-          - "^/app/config/.*"
-          - "^/etc/secrets/.*"
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
       network:
         outgoing:
           ignore_localhost: true
@@ -73,8 +76,8 @@ reloaders:
       filesystem:
         mode: localwithoverrides
         read_only:
-          - "^/app/config/.*"
-          - "^/etc/secrets/.*"
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
       network:
         outgoing:
           ignore_localhost: true
@@ -94,8 +97,8 @@ reloaders:
       filesystem:
         mode: localwithoverrides
         read_only:
-          - "^/app/config/.*"
-          - "^/etc/secrets/.*"
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
       network:
         outgoing:
           ignore_localhost: true

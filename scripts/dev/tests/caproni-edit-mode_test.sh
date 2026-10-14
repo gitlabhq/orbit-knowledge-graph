@@ -46,5 +46,20 @@ check "no overlay left behind" "no" "$([[ -f "$TMP/caproni-dispatcher.yaml" ]] &
 out="$(ORBIT_POD_CONFIG="$TMP/does-not-exist.yaml" bash "$SCRIPT" webserver 2>&1 || true)"
 check "missing pod config names caproni run" "yes" "$(grep -q 'caproni run' <<<"$out" && echo yes || echo no)"
 
+# secrets_dir_pattern: the server checks that /etc/secrets itself exists before walking it, so
+# the mirrord read-only pattern must match the directory path as well as the files under it.
+PROJECT="$HERE/../../../caproni-project.yaml"
+matches_pattern() { # path -> yes if any read_only pattern of the first reloader matches
+  local path="$1" pat
+  while IFS= read -r pat; do [[ "$path" =~ $pat ]] && { echo yes; return; }; done < <(yq -r '.reloaders.gkg-webserver.mirror.filesystem.read_only[]' "$PROJECT")
+  echo no
+}
+check "pattern matches the secrets dir" "yes" "$(matches_pattern /etc/secrets)"
+check "pattern matches a secret file" "yes" "$(matches_pattern /etc/secrets/gitlab/jwt/verifying_key)"
+check "pattern matches the config dir" "yes" "$(matches_pattern /app/config)"
+check "pattern matches the config file" "yes" "$(matches_pattern /app/config/config.yaml)"
+check "pattern leaves the repo local" "no" "$(matches_pattern /Users/me/knowledge-graph/config/default.yaml)"
+check "every reloader shares the patterns" "1" "$(yq -r '[.reloaders[].mirror.filesystem.read_only | join(",")] | unique | length' "$PROJECT")"
+
 if [[ "$failures" -gt 0 ]]; then printf '\n%d check(s) failed\n' "$failures"; exit 1; fi
 printf '\nall checks passed\n'
