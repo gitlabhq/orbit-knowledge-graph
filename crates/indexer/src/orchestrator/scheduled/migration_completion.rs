@@ -2,13 +2,13 @@ use std::sync::{Arc, LazyLock};
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
+use orbit_arrow::ArrowUtils;
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use orbit_migrations::version::{
     SCHEMA_VERSION, promote_version, read_migrating_version, table_prefix,
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
-use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
 use tracing::{info, warn};
 

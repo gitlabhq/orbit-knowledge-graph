@@ -5,7 +5,7 @@ use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
-use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
+use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};

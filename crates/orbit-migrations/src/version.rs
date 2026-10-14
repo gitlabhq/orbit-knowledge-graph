@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use thiserror::Error;
 use uuid::Uuid;
 

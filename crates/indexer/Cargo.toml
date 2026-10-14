@@ -24,7 +24,7 @@ orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 petgraph = { workspace = true }
 orbit-utils = { path = "../utils" }
-datafusion = { workspace = true }
+orbit-arrow = { path = "../utils/arrow" }
 flate2 = { workspace = true }
 futures = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }

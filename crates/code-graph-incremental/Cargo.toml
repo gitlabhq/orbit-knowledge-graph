@@ -56,6 +56,7 @@ tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

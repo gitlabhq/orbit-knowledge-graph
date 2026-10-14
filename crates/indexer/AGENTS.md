@@ -140,7 +140,7 @@ preventable feedback (see #2772, !1416). Check each of these first:
   extraction, keyset cursor persistence (`cursor_values` / `to_checkpoint_values()`), and
   watermark advance. Reuse them before hand-rolling a page loop. For code indexing, reuse the
   checkpoint store in `modules/code/checkpoint.rs`.
-- **Arrow extraction:** decode datalake `RecordBatch` rows with the `orbit_utils::arrow` helpers
+- **Arrow extraction:** decode datalake `RecordBatch` rows with the `orbit_arrow` helpers
   (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
   `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
 - **Edge/node `RecordBatch` specs:** derive column specs from the ontology. Use `edge_specs(ontology)`
