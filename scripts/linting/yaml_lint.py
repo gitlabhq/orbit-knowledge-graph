@@ -56,25 +56,28 @@ def run_prettier(files: list[Path], fix: bool) -> bool:
     return all([subprocess.run([*command, *batch], cwd=ROOT).returncode == 0 for batch in batches])
 
 
-def dash_line(lines: list[str], line: int) -> int:
-    while not lines[line].lstrip().startswith("-"):
-        line -= 1
-    return line
-
-
 def sibling_groups(root: yaml.Node, lines: list[str]) -> list[list[int]]:
     if not isinstance(root, yaml.MappingNode):
         return []
-    line_ends = list(itertools.accumulate(len(line) + 1 for line in lines))
+    line_starts = [0, *itertools.accumulate(len(line) + 1 for line in lines)]
 
     def line_of(node: yaml.Node) -> int:
-        return bisect.bisect_right(line_ends, node.start_mark.index)
+        return bisect.bisect_right(line_starts, node.start_mark.index) - 1
+
+    def dash_line(item: yaml.Node) -> int:
+        line = line_of(item)
+        if lines[line][: item.start_mark.index - line_starts[line]].rstrip().endswith("-"):
+            return line
+        line = max(line - 1, 0)
+        while line > 0 and not lines[line].lstrip().startswith("-"):
+            line -= 1
+        return line
 
     keys = [line_of(key) for key, _ in root.value]
     groups = [keys + [len(lines)]]
     for (_, value), end in zip(root.value, keys[1:] + [len(lines)]):
         if isinstance(value, yaml.SequenceNode) and not value.flow_style:
-            groups.append([dash_line(lines, line_of(item)) for item in value.value] + [end])
+            groups.append([dash_line(item) for item in value.value] + [end])
     return groups
 
 

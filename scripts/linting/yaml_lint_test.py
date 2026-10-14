@@ -90,6 +90,7 @@ class SpacingTest(unittest.TestCase):
 
     def test_dash_first_items_get_the_blank_line_above_the_dash(self):
         self.assertEqual(gaps("l:\n  - name: a\n    q: 1\n  - # b\n    name: b\n    q: 2\n  -\n    name: c\n"), [3, 6])
+        self.assertEqual(gaps("l:\n  - x: 1\n    y: 2\n  - # c\n    -x: 1\n    y: 2\n"), [3])
 
     def test_a_missing_suite_folder_fails_the_full_run(self):
         with patch.object(yaml_lint, "SUITES", (yaml_lint.ROOT / "no-such-suite",)):
