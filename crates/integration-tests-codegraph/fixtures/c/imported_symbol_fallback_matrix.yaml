@@ -1,4 +1,5 @@
 name: "C: imported-symbol fallback matrix"
+
 fixtures:
   - path: app.c
     content: |
@@ -36,7 +37,7 @@ tests:
       - { row_count: 3 }
       - { row: { file: "app.c", path: "<stdio.h>", name: null } }
       - { row: { file: "app.c", path: "<stdlib.h>", name: null } }
-      - { row: { file: "worker.c", path: "\"external_api.h\"", name: null } }
+      - { row: { file: "worker.c", path: '"external_api.h"', name: null } }
 
   - name: "resolved same-file calls still target definitions"
     query: |

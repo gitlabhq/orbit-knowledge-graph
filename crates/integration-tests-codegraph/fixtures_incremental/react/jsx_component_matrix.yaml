@@ -1,5 +1,6 @@
 name: "React JSX component resolution matrix"
 pipeline: js
+
 fixtures:
   - path: src/components/button.tsx
     content: |
@@ -199,6 +200,7 @@ tests:
       - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "Icons" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "Button" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "StatusIcon" } }
+
   - name: Namespace imports resolve only the definitions accessed through their binding
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -206,8 +208,9 @@ tests:
       RETURN i.identifier_alias AS alias, d.name AS name, d.file_path AS file
     assert:
       - { row_count: 2 }
-      - { row: { alias: Reexported, name: IconButton, file: 'src/components/button.tsx' } }
-      - { row: { alias: CardModule, name: Card, file: 'src/components/card.tsx' } }
+      - { row: { alias: Reexported, name: IconButton, file: "src/components/button.tsx" } }
+      - { row: { alias: CardModule, name: Card, file: "src/components/card.tsx" } }
+
   - name: Namespace default access calls exactly the original component
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -215,7 +218,8 @@ tests:
       RETURN target.name AS name, target.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { name: Card, file: 'src/components/card.tsx' } }
+      - { row: { name: Card, file: "src/components/card.tsx" } }
+
   - name: React namespace imports retain their source and alias
     query: |
       MATCH (i:ImportedSymbol)
@@ -223,8 +227,8 @@ tests:
       RETURN i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
     assert:
       - { row_count: 2 }
-      - { row: { path: './components/card', name: '*', alias: CardModule } }
-      - { row: { path: './components', name: '*', alias: Reexported } }
+      - { row: { path: "./components/card", name: "*", alias: CardModule } }
+      - { row: { path: "./components", name: "*", alias: Reexported } }
 
   - name: External React and package imports stay unresolved
     query: |

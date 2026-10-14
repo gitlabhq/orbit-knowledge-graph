@@ -1,4 +1,5 @@
 name: "Rust: intrafile resolution"
+
 fixtures:
   - path: main.rs
     content: |

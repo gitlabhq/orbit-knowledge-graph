@@ -1,4 +1,5 @@
 name: "Lua: cross-file function calls"
+
 fixtures:
   - path: logger.lua
     content: |

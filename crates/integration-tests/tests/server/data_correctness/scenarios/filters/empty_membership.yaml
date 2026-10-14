@@ -1,6 +1,8 @@
 description: IN over an empty list is rejected, because it compares no value with the property
+
 query:
   gql: |
     MATCH (wi:WorkItem) WHERE wi.weight IN [] RETURN wi.weight LIMIT 10
+
 expect:
   compile_error: "IN requires 1-100 values"

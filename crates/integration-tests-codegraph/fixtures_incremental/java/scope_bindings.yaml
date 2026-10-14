@@ -1,4 +1,5 @@
 name: "Java: lexical binding ownership"
+
 fixtures:
   - path: shadow/Main.java
     content: |
@@ -16,6 +17,7 @@ fixtures:
               f.ping();
           }
       }
+
   - path: control/Main.java
     content: |
       class First {
@@ -29,6 +31,7 @@ fixtures:
               f.ping();
           }
       }
+
   - path: siblings/Main.java
     content: |
       class First {
@@ -51,6 +54,7 @@ fixtures:
               }
           }
       }
+
   - path: local_class/Main.java
     content: |
       class First {
@@ -69,6 +73,7 @@ fixtures:
               f.ping();
           }
       }
+
 tests:
   - name: "Local classes and variables do not escape their blocks"
     query: |

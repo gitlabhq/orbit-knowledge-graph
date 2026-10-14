@@ -1,4 +1,5 @@
 name: Scala standard provider and implicit prelude names
+
 fixtures:
   - path: Main.scala
     content: |
@@ -7,6 +8,7 @@ fixtures:
         def run(): Double = sqrt(4.0)
         def implicitCall(): Unit = println("hello")
       }
+
 tests:
   - name: Standard and prelude calls avoid wildcard fallback
     query: |

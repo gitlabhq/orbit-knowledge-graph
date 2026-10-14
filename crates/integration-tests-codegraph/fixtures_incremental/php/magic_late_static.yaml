@@ -363,4 +363,3 @@ tests:
     assert:
       - { row_count: 3 }
       - { unique: fqn }
-

@@ -1,4 +1,5 @@
 name: "C++: template classes and functions"
+
 fixtures:
   - path: templates.cpp
     content: |

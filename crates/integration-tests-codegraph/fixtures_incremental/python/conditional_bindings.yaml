@@ -1,4 +1,5 @@
 name: "Python: conditional bindings — phi nodes at branch merge points"
+
 fixtures:
   - path: main.py
     content: |

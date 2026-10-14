@@ -1,5 +1,6 @@
 name: "TypeScript: nested functions and recursive calls"
 pipeline: js
+
 fixtures:
   - path: main.ts
     content: |

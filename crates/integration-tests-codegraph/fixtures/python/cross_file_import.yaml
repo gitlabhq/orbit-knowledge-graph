@@ -1,4 +1,5 @@
 name: "Python: cross-file from-import"
+
 fixtures:
   - path: utils.py
     content: |
@@ -7,6 +8,7 @@ fixtures:
 
       def unused():
           pass
+
   - path: main.py
     content: |
       from utils import helper

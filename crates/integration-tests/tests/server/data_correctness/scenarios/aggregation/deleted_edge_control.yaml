@@ -1,4 +1,5 @@
 description: Latest-row aggregation counts an edge whose current version is live
+
 config:
   unmerged_seed: true
   extra_seed:
@@ -8,10 +9,12 @@ config:
       - { id: 99010, traversal_path: "1/100/1000/", project_id: 1000, title: live_mr }
     gl_edge:
       - { traversal_path: "1/100/1000/", source_id: 99012, source_kind: User, relationship_kind: APPROVED, target_id: 99010, target_kind: MergeRequest, _version: "2026-01-01 00:00:00", _deleted: false }
+
 query:
   gql: |
     MATCH (u:User {id: 99012})-[:APPROVED]->(mr:MergeRequest)
     RETURN count(mr) AS n
+
 expect:
   skip_requirements: [node_ids]
   row_count: 1

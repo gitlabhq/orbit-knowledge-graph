@@ -1,4 +1,5 @@
 name: "Rust: binding evaluation and nested pattern regressions"
+
 fixtures:
   - path: main.rs
     content: |
@@ -138,6 +139,7 @@ fixtures:
           let Holder { ref callback, .. } = holder;
           callback();
       }
+
 tests:
   - name: "Scalar and tuple bindings emit no extra calls"
     query: |
@@ -153,6 +155,7 @@ tests:
       - { row: { caller: before, target: second } }
       - { row: { caller: after, target: second } }
       - { row: { caller: unchanged, target: first } }
+
   - name: "Unknown values do not retain known callback targets"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -160,6 +163,7 @@ tests:
       RETURN caller.name AS caller, callee.name AS target
     assert:
       - { empty: true }
+
   - name: "Bindings preserve exact callable targets through loops and nested patterns"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -187,6 +191,7 @@ tests:
       - { row: { caller: mutable_pattern, target: first } }
       - { row: { caller: mutable_pattern, target: second } }
       - { row: { caller: reference_pattern, target: first } }
+
   - name: "Each source call executes once per expression"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

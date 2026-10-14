@@ -1,10 +1,12 @@
 name: "TypeScript type-only bindings retain imports without runtime calls"
+
 fixtures:
   - path: types.ts
     content: |
       export class Client {}
       export default class DefaultClient {}
       export function createClient() {}
+
   - path: main.ts
     content: |
       import type DefaultClient from './types';
@@ -20,6 +22,7 @@ fixtures:
         Missing();
         createClient();
       }
+
 tests:
   - name: "every imported binding remains cataloged"
     query: |
@@ -33,6 +36,7 @@ tests:
       - { row: { name: "Client", alias: null } }
       - { row: { name: "Missing", alias: null } }
       - { row: { name: "createClient", alias: null } }
+
   - name: "type-only names still resolve to their definitions"
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -43,6 +47,7 @@ tests:
       - { row: { alias: "DefaultClient", target: "DefaultClient" } }
       - { row: { alias: "TypeClient", target: "Client" } }
       - { row: { alias: null, target: "Client" } }
+
   - name: "only the runtime binding creates a call"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -50,6 +55,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { name: "createClient" } }
+
   - name: "type-only bindings never fall back to runtime imports"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(i:ImportedSymbol)

@@ -1,5 +1,6 @@
 name: "TypeScript: nested classes"
 pipeline: js
+
 fixtures:
   - path: main.ts
     content: |

@@ -1,4 +1,5 @@
 name: "Elixir lexical calls and import scope"
+
 fixtures:
   - path: util.ex
     content: |
@@ -6,6 +7,7 @@ fixtures:
         def dub(x), do: x
         def internal(x), do: x
       end
+
   - path: callers.ex
     content: |
       defmodule Imported do
@@ -41,6 +43,7 @@ tests:
       - { row: { caller: Imported.doubled } }
       - { row: { caller: Scoped.imported } }
       - { row: { caller: Ordered.after_import } }
+
   - name: "Forward local functions take lexical precedence"
     query: |
       MATCH (s:Definition)-[e:CALLS]->(t:Definition)
@@ -49,6 +52,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: Imported.internal } }
+
   - name: "Imports do not enter sibling or earlier scopes"
     query: |
       MATCH (s:Definition)-[e:CALLS]->(t:Definition)
@@ -56,6 +60,7 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { empty: true }
+
   - name: "Modules are not callable values"
     query: |
       MATCH (s:Definition)-[e:CALLS]->(t:Definition)

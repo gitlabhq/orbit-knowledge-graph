@@ -1,4 +1,5 @@
 name: "Python: comprehensive import extraction (C1-C11)"
+
 fixtures:
   - path: main.py
     content: |

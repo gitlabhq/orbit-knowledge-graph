@@ -1,4 +1,5 @@
 description: Count of a nullable property includes a non-null value
+
 config:
   extra_seed:
     gl_user:
@@ -7,10 +8,12 @@ config:
       - { id: 99010, traversal_path: "1/100/1000/", project_id: 1000, title: merged, merged_at: "2026-01-01 00:00:00" }
     gl_edge:
       - { traversal_path: "1/100/1000/", source_id: 99012, source_kind: User, relationship_kind: APPROVED, target_id: 99010, target_kind: MergeRequest }
+
 query:
   gql: |
     MATCH (u:User {id: 99012})-[:APPROVED]->(mr:MergeRequest)
     RETURN count(mr.merged_at) AS n
+
 expect:
   skip_requirements: [node_ids]
   row_count: 1

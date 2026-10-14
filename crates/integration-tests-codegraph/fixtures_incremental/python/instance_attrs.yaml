@@ -1,4 +1,5 @@
 name: "Python: instance attribute resolution across methods"
+
 fixtures:
   - path: main.py
     content: |

@@ -1,4 +1,5 @@
 name: "Kotlin: data class component-function and destructuring resolution"
+
 fixtures:
   - path: com/example/DataClasses.kt
     content: |

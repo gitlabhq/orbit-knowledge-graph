@@ -1,5 +1,6 @@
 name: "JavaScript: simple function call"
 pipeline: js
+
 fixtures:
   - path: main.js
     content: |

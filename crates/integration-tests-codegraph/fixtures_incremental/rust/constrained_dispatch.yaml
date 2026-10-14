@@ -1,4 +1,5 @@
 name: "Rust qualified dispatch selects the requested implementation"
+
 fixtures:
   - path: src/lib.rs
     content: |
@@ -15,6 +16,7 @@ fixtures:
       pub fn missing_implementation() { <Here as Runner>::run(); }
       pub fn unknown_contract() { <Service as Missing>::run(); }
       pub fn inherent_with_argument() { Service::accept(&Service::new()); }
+
   - path: src/types.rs
     content: |
       pub struct Service;
@@ -33,6 +35,7 @@ fixtures:
           pub fn new() -> Self { Service }
           pub fn accept(_: &Service) {}
       }
+
 tests:
   - name: "explicit contracts exclude competing and inherent methods"
     query: |
@@ -44,6 +47,7 @@ tests:
       - { row: { caller: explicit_runner, body: runner_body } }
       - { row: { caller: explicit_other, body: other_body } }
       - { row: { caller: explicit_default, body: default_body } }
+
   - name: "same-file default implementation is selected"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
@@ -51,6 +55,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { body: local_body } }
+
   - name: "unresolved constraints never select an unrelated implementation"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)
@@ -58,6 +63,7 @@ tests:
       RETURN method.name
     assert:
       - { empty: true }
+
   - name: "ordinary associated calls retain their receiver type"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)
@@ -66,6 +72,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { name: accept } }
+
 steps:
   - name: restore qualified calls from snapshot
     snapshot: true

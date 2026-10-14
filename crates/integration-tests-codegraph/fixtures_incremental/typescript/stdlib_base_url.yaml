@@ -1,11 +1,14 @@
 name: Explicit baseUrl resolves project modules sharing Node names
+
 fixtures:
   - path: tsconfig.json
     content: |
       {"compilerOptions":{"baseUrl":"./src"}}
+
   - path: src/constants/index.ts
     content: |
       export function value() {}
+
   - path: main.ts
     content: |
       import { value } from 'constants';
@@ -16,9 +19,11 @@ fixtures:
       function runtime() { builtin(); }
       function missingCandidate() { format(); }
       function relativeCall() { relative(); }
+
   - path: other/constants/index.ts
     content: |
       export function value() {}
+
 tests:
   - name: Configured project module remains reachable
     query: |
@@ -28,6 +33,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { file: src/constants/index.ts } }
+
   - name: Explicit runtime spelling stays external
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
@@ -35,7 +41,8 @@ tests:
       RETURN target.import_path AS path
     assert:
       - { row_count: 1 }
-      - { row: { path: 'node:constants' } }
+      - { row: { path: "node:constants" } }
+
 steps:
   - name: Explicit aliases take precedence over conditional root mappings
     snapshot: true
@@ -68,6 +75,7 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { file: other/constants/index.ts } }
+
   - name: Removing an alias restores configured root lookup
     snapshot: true
     modify:
@@ -83,6 +91,7 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { file: src/constants/index.ts } }
+
   - name: Change configured root after loading a snapshot
     snapshot: true
     modify:
@@ -98,6 +107,7 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { file: other/constants/index.ts } }
+
   - name: Remove baseUrl
     snapshot: true
     modify:
@@ -120,6 +130,7 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { path: constants } }
+
   - name: Restore baseUrl without adding files
     snapshot: true
     modify:

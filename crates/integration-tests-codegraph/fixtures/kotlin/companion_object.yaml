@@ -1,4 +1,5 @@
 name: "Kotlin: companion object resolution"
+
 fixtures:
   - path: com/example/App.kt
     content: |

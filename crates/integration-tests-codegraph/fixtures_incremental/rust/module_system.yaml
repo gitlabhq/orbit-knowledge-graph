@@ -1,4 +1,5 @@
 name: "Rust: module system (mod, pub use, re-exports)"
+
 fixtures:
   - path: lib.rs
     content: |
@@ -53,4 +54,4 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: run, callee: 'models::create_user' } }
+      - { row: { caller: run, callee: "models::create_user" } }

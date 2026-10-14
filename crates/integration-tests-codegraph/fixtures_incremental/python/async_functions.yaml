@@ -1,4 +1,5 @@
 name: "Python: async function definitions and calls"
+
 fixtures:
   - path: main.py
     content: |

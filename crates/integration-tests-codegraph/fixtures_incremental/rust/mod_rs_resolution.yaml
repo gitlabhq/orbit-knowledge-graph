@@ -1,4 +1,5 @@
 name: "Rust: mod.rs module trees"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -33,7 +34,7 @@ tests:
       RETURN caller.fqn AS caller_fqn, callee.fqn AS callee_fqn, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { caller_fqn: 'net::outer', callee_fqn: 'net::inner::leaf', tgt: 'src/net/inner.rs' } }
+      - { row: { caller_fqn: "net::outer", callee_fqn: "net::inner::leaf", tgt: "src/net/inner.rs" } }
 
   - name: "definitions under mod.rs keep nested module FQNs"
     query: |
@@ -42,4 +43,4 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'net::inner::leaf' } }
+      - { row: { fqn: "net::inner::leaf" } }

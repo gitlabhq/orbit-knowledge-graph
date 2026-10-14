@@ -1,4 +1,5 @@
 name: Branch joins and cascade bounds follow the shared alias rather than the preceding hop
+
 query:
   json: |
     {
@@ -19,11 +20,13 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
           (a)-[:CALLS]->(d:Definition)
     RETURN a, b, c, d
+
 logical:
   expect:
     - (EdgeScan CALLS a->b AS e0)
     - (EdgeScan CALLS b->c AS e1)
     - (EdgeScan CALLS a->d AS e2)
+
 physical:
   clickhouse:
     planned:

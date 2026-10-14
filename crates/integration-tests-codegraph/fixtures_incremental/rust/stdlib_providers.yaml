@@ -1,4 +1,5 @@
 name: Rust imported standard functions and local declarations
+
 fixtures:
   - path: src/lib.rs
     content: |
@@ -6,10 +7,12 @@ fixtures:
       fn unknown() { unknown_function(); }
       fn size_of() {}
       fn local_call() { size_of(); }
+
   - path: src/standard.rs
     content: |
       use std::mem::*;
       fn standard() { let _ = size_of::<u32>(); }
+
 tests:
   - name: Imported standard function avoids wildcard fallback
     query: |
@@ -18,6 +21,7 @@ tests:
       RETURN target.import_path
     assert:
       - { empty: true }
+
   - name: Local declaration keeps its identity despite provider spelling
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -26,6 +30,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { name: size_of } }
+
   - name: Unlisted symbols retain fallback
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
@@ -33,4 +38,4 @@ tests:
       RETURN target.import_path AS path
     assert:
       - { row_count: 1 }
-      - { row: { path: 'std::mem' } }
+      - { row: { path: "std::mem" } }

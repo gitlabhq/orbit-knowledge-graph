@@ -1,6 +1,8 @@
 description: Property comparison with a virtual left operand is rejected
+
 query:
   gql: |
     MATCH (f:File {id: 13004}) WHERE f.content = f.name RETURN f.id
+
 expect:
   compile_error: "property comparison cannot reference virtual column"

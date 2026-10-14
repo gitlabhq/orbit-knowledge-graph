@@ -1,4 +1,5 @@
 name: "Go: package-level var and const as definitions"
+
 fixtures:
   - path: errors.go
     content: |
