@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://gitlab.com/gitlab-org/caproni/-/raw/main/schema/caproni-project.schema.json
+#
+# Orbit's Caproni edit-mode reloaders. The cluster, the Orbit Helm release, and
+# the dev stack live in gitlab-caproni (fragments/caproni.orbit.yaml). Caproni
+# merges this file in only when repositories.knowledge-graph is in edit mode.
+#
+# One reloader per Orbit deployment, because a mirrord session targets one pod
+# and each deployment has its own rendered config. Each reloader starts the
+# same wrapper, which runs the matching gkg-server mode on the host with the
+# pod's /app/config/config.yaml and /etc/secrets served through mirrord.
+# See docs/dev/local-development.md.
+
+lifecycle_hooks:
+  # Runs after clone or update, outside mirrord: tools for the processes below,
+  # and a first build so cargo watch starts from a warm cache.
+  - type: edit_mode_prepare
+    script: mise trust && mise install && mise exec -- cargo build --bin gkg-server
+
+reloaders:
+  gkg-webserver:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-webserver
+        container: gkg-webserver
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config/.*"
+          - "^/etc/secrets/.*"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-webserver:
+          command: scripts/dev/caproni-edit-mode.sh webserver
+          port: 50054
+  gkg-indexer-sdlc:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-indexer-sdlc
+        container: gkg-indexer
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config/.*"
+          - "^/etc/secrets/.*"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-indexer-sdlc:
+          command: scripts/dev/caproni-edit-mode.sh indexer-sdlc
+  gkg-indexer-code:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-indexer-code
+        container: gkg-indexer
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config/.*"
+          - "^/etc/secrets/.*"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-indexer-code:
+          command: scripts/dev/caproni-edit-mode.sh indexer-code
+  gkg-dispatcher:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-dispatcher
+        container: gkg-dispatcher
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config/.*"
+          - "^/etc/secrets/.*"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-dispatcher:
+          command: scripts/dev/caproni-edit-mode.sh dispatcher
