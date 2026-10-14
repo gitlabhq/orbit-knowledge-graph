@@ -167,12 +167,17 @@ Local `grep` scans the working tree with ripgrep's engine (`grep-searcher`,
 `grep-regex`, `ignore`). Results follow `.gitignore` and see unsaved edits.
 Each OR alternative is a regex when it contains regex syntax. Otherwise it is
 a literal that ignores case, `_`, `-`, and spaces. The common rg and grep flags
-work, and unsupported ones are skipped with a warning. Each file prints as one
-row, with matching lines grouped under their enclosing indexed definition.
-Each definition shows its kind, span, callers, and callees. A definition that a
-plain term names prints first with its source. With `-A`, `-B`, or `-C`, output
-switches to rg's `path:line:text` lines. Files edited since the indexed commit
-are marked and carry no definitions, because the graph describes the commit.
+work, and unsupported ones are skipped with a warning. Output follows rg's
+heading layout: each file prints as a heading, then its matching lines as
+`N:text` in full, so `head` truncates cleanly. A `N-»` line above the matches in
+each enclosing indexed definition shows its kind, span, callers, and callees.
+Import lines show the symbols they import, and other code lines are marked as
+outside indexed definitions, as in Rust `#[cfg(test)]` modules. `-m` caps
+matches per file and `-M` replaces lines wider than its limit. A definition
+that a plain term names prints first with its source. With `-A`, `-B`, or `-C`,
+context lines print as `N-text` with `--` between blocks. Files edited since the
+indexed commit are marked and carry no definitions, because the graph describes
+the commit.
 Files order defining code first, then other code, tests, and text files.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).

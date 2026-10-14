@@ -16,6 +16,8 @@ pub(super) struct Hit {
     pub(super) line: usize,
     pub(super) text: String,
     pub(super) def: Option<Def>,
+    /// Symbols an import on this line brings in, when no definition encloses it.
+    pub(super) imports: Vec<String>,
     /// A `-A`/`-B`/`-C` line around a match rather than a match.
     pub(super) context: bool,
 }
@@ -37,6 +39,7 @@ impl Collect<'_> {
                 .trim_end_matches(['\n', '\r'])
                 .to_string(),
             def: None,
+            imports: Vec::new(),
             context,
         });
     }
