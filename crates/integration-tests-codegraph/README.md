@@ -138,7 +138,7 @@ Four test targets run the suites and the pipeline checks:
 | Target | What it runs |
 |---|---|
 | `suites` | one test for each YAML file in `fixtures/`, through `code-graph` |
-| `incremental_suites` | one test for each YAML file in `fixtures_incremental/`, through `code-graph-incremental` on the production worker stack size |
+| `incremental_suites` | one test for each YAML file in `fixtures_incremental/`, through `code-graph-incremental` on the indexer worker stack size |
 | `cancellation` | a job that runs past its budget cancels the run, and its work stops |
 | `vanished_tree` | a repository tree that disappears does not fail the other files |
 
