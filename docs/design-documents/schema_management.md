@@ -185,6 +185,8 @@ Deploy variant-table parsing and routing support to every query server before pu
 Older binaries can ignore a variant's `table` field and read the wrong table.
 The metadata-only release rejects split routes at dispatcher startup and server snapshot loading.
 Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
+If a server rejects the active archive, it clears its last installed snapshot. All query servers
+return `503` until an operator repairs the archive or rolls back the active version.
 
 ### Webserver readiness gate
 

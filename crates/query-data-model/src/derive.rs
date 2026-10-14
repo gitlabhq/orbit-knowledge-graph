@@ -94,7 +94,37 @@ mod tests {
     fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         let model = ClickHouseDataModel::derive(overlay_ontology("denorm_approved")).unwrap();
         let storage = model.layout().schema();
-        assert!(!model.backend().materialized_joins().is_empty());
+        let approved = model
+            .backend()
+            .materialized_joins()
+            .iter()
+            .find(|binding| binding.table == "gl_denorm_approved")
+            .unwrap();
+        assert_eq!(approved.nodes.len(), 2);
+        assert_eq!(approved.relationships.len(), 1);
+        assert_eq!(approved.sources, ["gl_user", "gl_edge", "gl_merge_request"]);
+
+        let approved_project_model =
+            ClickHouseDataModel::derive(overlay_ontology("denorm_approved_project")).unwrap();
+        let approved_project = approved_project_model
+            .backend()
+            .materialized_joins()
+            .iter()
+            .find(|binding| binding.table == "gl_denorm_approved_project")
+            .unwrap();
+        assert_eq!(approved_project.nodes.len(), 3);
+        assert_eq!(approved_project.relationships.len(), 2);
+        assert_eq!(
+            approved_project.sources,
+            [
+                "gl_user",
+                "gl_edge",
+                "gl_merge_request",
+                "gl_edge",
+                "gl_project"
+            ]
+        );
+
         for binding in model.backend().materialized_joins() {
             let table = storage.table(&binding.table).unwrap();
             let has_column = |name: &str| table.columns.iter().any(|column| column.name == name);

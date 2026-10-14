@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::{EntityId, PropertyId, RelationshipVariantId};
 
@@ -26,5 +26,5 @@ pub struct MaterializedJoin {
     pub table: String,
     pub nodes: Vec<MaterializedNode>,
     pub relationships: Vec<MaterializedRelationship>,
-    pub sources: BTreeSet<String>,
+    pub sources: Vec<String>,
 }

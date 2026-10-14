@@ -62,8 +62,30 @@ fn reordered_table_declarations_do_not_change_deployed_schema() {
     let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
     let base_schema = test_schema(&base);
     let overlay_schema = test_schema(&overlay);
-    assert_eq!(base_schema.tables.len(), overlay_schema.tables.len());
-    assert_eq!(base_schema.views.len(), overlay_schema.views.len());
+    assert_eq!(
+        base_schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        overlay_schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        base_schema
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect::<Vec<_>>(),
+        overlay_schema
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect::<Vec<_>>()
+    );
     assert!(
         !overlay_schema
             .tables
