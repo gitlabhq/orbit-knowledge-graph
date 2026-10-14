@@ -119,10 +119,6 @@ impl EntityHandler {
         }
     }
 
-    #[expect(
-        clippy::unwrap_used,
-        reason = "mutex poisoning means another thread already panicked; propagating is intended"
-    )]
     async fn execute(
         &self,
         context: HandlerContext,
@@ -268,9 +264,18 @@ impl EntityHandler {
                     duration_ms = stats.duration_ms,
                     "indexing resource stats"
                 );
-                observer.lock().unwrap().finish()
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
+                let mut obs = observer.lock().unwrap();
+                obs.finish();
             }
             Err(e) => {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
                 let mut obs = observer.lock().unwrap();
                 obs.record_error(&e.to_string());
                 obs.finish();

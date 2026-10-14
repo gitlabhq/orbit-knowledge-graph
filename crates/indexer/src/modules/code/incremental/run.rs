@@ -13,10 +13,6 @@ use super::super::{
 };
 use super::{Repository, output::Output};
 
-#[expect(
-    clippy::expect_used,
-    reason = "mutex poisoning means another thread already panicked; propagating is intended"
-)]
 pub(in crate::modules::code) fn run(
     repository: Repository,
     options: templates::Options,
@@ -86,6 +82,10 @@ pub(in crate::modules::code) fn run(
         |batches| -> Result<(), SinkError> {
             for batches in output.convert(batches)? {
                 {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                    )]
                     let mut stats = indexed.lock().expect("stats lock");
                     stats.files_indexed += batches.files.num_rows();
                     stats.directories_indexed += batches.directories.num_rows();
@@ -105,6 +105,10 @@ pub(in crate::modules::code) fn run(
             Ok(())
         },
     );
+    #[expect(
+        clippy::expect_used,
+        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+    )]
     let mut stats = indexed.into_inner().expect("stats lock");
     let report = match report {
         Ok(report) => report,

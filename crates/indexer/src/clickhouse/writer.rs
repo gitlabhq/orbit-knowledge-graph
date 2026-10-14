@@ -250,10 +250,6 @@ struct DrainLimits {
     max_age: Duration,
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "key was just inserted by `entry().or_default()` above; keys come from `pending` itself and are removed once each"
-)]
 async fn drain(
     writer: Arc<ClickHouseWriter>,
     mut rx: mpsc::Receiver<Msg>,
@@ -289,6 +285,7 @@ async fn drain(
                     buf.batches.push(batch);
                     buf.tokens.push(token);
                     if buf.rows >= limits.max_rows {
+                        #[expect(clippy::unwrap_used, reason = "key was just inserted by `entry().or_default()` above")]
                         let buf = pending.remove(&table).unwrap();
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
@@ -307,6 +304,7 @@ async fn drain(
                     .map(|(table, _)| table.clone())
                     .collect();
                 for table in ripe {
+                    #[expect(clippy::unwrap_used, reason = "keys come from `pending` itself and are removed once each")]
                     let buf = pending.remove(&table).unwrap();
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }

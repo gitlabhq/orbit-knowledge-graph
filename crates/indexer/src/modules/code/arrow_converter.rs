@@ -133,7 +133,7 @@ fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashS
 
 #[expect(
     clippy::panic,
-    reason = "every caller passes a built-in code-graph entity that the embedded ontology defines"
+    reason = "callers pass either a built-in code-graph entity name or a name taken from this same ontology, so the lookup cannot miss"
 )]
 pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology

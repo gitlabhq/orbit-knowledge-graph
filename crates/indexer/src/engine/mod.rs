@@ -871,6 +871,57 @@ mod tests {
         );
     }
 
+    /// `MockHandler` rewrites deserialization errors as processing errors, so this
+    /// handler returns the real variant.
+    struct DeserializationFailingHandler(std::sync::Mutex<Option<serde_json::Error>>);
+
+    #[async_trait::async_trait]
+    impl Handler for DeserializationFailingHandler {
+        fn name(&self) -> &str {
+            "deserialization-failing"
+        }
+
+        fn subscription(&self) -> Subscription {
+            Subscription::new("stream", "subject")
+        }
+
+        async fn handle(
+            &self,
+            _context: HandlerContext,
+            _message: Envelope,
+        ) -> Result<(), HandlerError> {
+            match self.0.lock().ok().and_then(|mut error| error.take()) {
+                Some(error) => Err(HandlerError::Deserialization(error)),
+                None => Ok(()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn deserialization_error_returns_exhausted() {
+        let deserialization_error = serde_json::from_str::<u32>("not json").unwrap_err();
+        let handler =
+            DeserializationFailingHandler(std::sync::Mutex::new(Some(deserialization_error)));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+
+        let envelope = TestEnvelopeFactory::simple("payload");
+        let runtime = test_runtime(&test_engine_configuration());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Exhausted { .. }),
+            "deserialization failure should produce Exhausted, got {outcome:?}"
+        );
+    }
+
     #[tokio::test]
     async fn permanent_dead_letter_error_returns_exhausted() {
         let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Permanent {
