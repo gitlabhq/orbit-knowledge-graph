@@ -1,4 +1,4 @@
-name: "JavaScript: deeply nested control flow links on the worker stack"
+name: "JavaScript: deeply nested control flow and returns link on the worker stack"
 fixtures:
   - path: target.js
     content: |
@@ -36,6 +36,13 @@ fixtures:
       - "0\n"
       - { repeat: 10000, text: ") : 0\n" }
       - ";\ntarget();\n}\n"
+  - path: return_ternary.js
+    content:
+      - "class Made {\ngo() {}\n}\nfunction make(c) {\nreturn (\n"
+      - { repeat: 5000, text: "c ? (\n" }
+      - "new Made()\n"
+      - { repeat: 5000, text: ") : new Made()\n" }
+      - ");\n}\nfunction useMake(c) {\nmake(c).go();\n}\n"
 tests:
   - name: "each function calls its target after the nesting"
     query: |
@@ -58,3 +65,12 @@ tests:
       - { row: { owner: elseIf, nested: innermostElseIf } }
       - { row: { owner: nestedTry, nested: innermostTry } }
       - { row: { owner: nestedLoop, nested: innermostLoop } }
+  - name: "a call on the value of a deeply nested return reaches its method"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useMake'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: make } }
+      - { row: { callee: go } }

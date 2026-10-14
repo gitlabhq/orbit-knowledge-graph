@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::file_tree::LookupConfig;
 use crate::intern::Lang;
@@ -1367,10 +1367,12 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     if !RESOLVING.with_borrow_mut(|resolving| resolving.insert(key)) {
         return None;
     }
-    let resolved = chain(ctx, c, &|r| {
-        resolve_reference(ctx, r)
-            .or_else(|| enclosing_alias(ctx, r))
-            .or_else(|| visible_type(ctx, r.fi(), r.sym()))
+    let resolved = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
+        chain(ctx, c, &|r| {
+            resolve_reference(ctx, r)
+                .or_else(|| enclosing_alias(ctx, r))
+                .or_else(|| visible_type(ctx, r.fi(), r.sym()))
+        })
     });
     RESOLVING.with_borrow_mut(|resolving| resolving.remove(&key));
     resolved
@@ -1411,7 +1413,8 @@ fn chain<'a>(
     let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
         return value_type(ctx, root(c)?);
     };
-    let receiver = chain(ctx, m.child(C::Object)?, root)?;
+    let object = m.child(C::Object)?;
+    let receiver = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || chain(ctx, object, root))?;
     let targets = member_targets(ctx, m, receiver);
     let member = targets.into_iter().exactly_one().ok()?;
     value_type(ctx, member)
@@ -1551,7 +1554,7 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
                 return None;
             }
             Some(if tail.is(C::SsaBranch) {
-                branch_type(ctx, tail)
+                stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || branch_type(ctx, tail))
             } else {
                 resolve_chain(ctx, tail.child(C::Callee)?)
             })

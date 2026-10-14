@@ -31,7 +31,12 @@ fn joined_parts<'de, D: de::Deserializer<'de>>(deserializer: D) -> Result<String
             .into_iter()
             .map(|part| match part {
                 Part::Text(text) => text,
-                Part::Repeat { repeat, text } => text.repeat(repeat),
+                Part::Repeat { repeat, text } => (0..repeat)
+                    .map(|i| {
+                        text.replace("{i+1}", &(i + 1).to_string())
+                            .replace("{i}", &i.to_string())
+                    })
+                    .collect(),
             })
             .collect(),
     })

@@ -1,4 +1,4 @@
-name: "Rust: type names that resolve to themselves stop resolving"
+name: "Rust: type names that chain through aliases and bounds"
 fixtures:
   - path: Cargo.toml
     content: |
@@ -8,7 +8,9 @@ fixtures:
       edition = "2021"
   - path: src/lib.rs
     content: |
+      mod alias_chain;
       mod aliases;
+      mod bound_chain;
       mod bounds;
       mod error;
       mod value;
@@ -37,6 +39,16 @@ fixtures:
       pub fn bounded<T: U, U: T>(t: T) {
           t.go();
       }
+  - path: src/alias_chain.rs
+    content:
+      - "pub struct Service;\n\nimpl Service {\n    pub fn run(&self) {}\n}\n\n"
+      - { repeat: 10000, text: "pub type Alias{i} = Alias{i+1};\n" }
+      - "pub type Alias10000 = Service;\n\npub fn use_alias_chain(a: Alias0) {\n    a.run();\n}\n"
+  - path: src/bound_chain.rs
+    content:
+      - "pub fn target() {}\n\npub fn bound_chain<\n"
+      - { repeat: 5000, text: "B{i}: B{i+1},\n" }
+      - "B5000>(b: B0) {\n    b.go();\n    target();\n}\n"
   - path: src/error.rs
     content: |
       pub struct Error;
@@ -90,3 +102,19 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: custom, file: src/error.rs } }
+  - name: "a call through a long alias chain reaches the aliased type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_alias_chain'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: run } }
+  - name: "a function with a long bound chain still links its other calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'bound_chain'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: target } }

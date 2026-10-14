@@ -1,4 +1,4 @@
-name: "Python: annotations that name each other stop resolving"
+name: "Python: annotations that name each other"
 fixtures:
   - path: main.py
     content: |
@@ -8,6 +8,11 @@ fixtures:
       def mutual(a: b, b: a):
           a.go()
           target()
+  - path: chain.py
+    content:
+      - "def target():\n    pass\n\ndef chained(\n"
+      - { repeat: 5000, text: "    a{i}: a{i+1},\n" }
+      - "    a5000: int,\n):\n    a0.go()\n    target()\n"
 tests:
   - name: "a function with mutually annotated parameters still links its calls"
     query: |
@@ -17,3 +22,11 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: target, file: main.py } }
+  - name: "a function with a long annotation chain still links its calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'chained'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: target, file: chain.py } }

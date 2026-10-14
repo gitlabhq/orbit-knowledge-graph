@@ -6,9 +6,9 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+use crate::constants::{RED_ZONE, STACK_SEGMENT};
+
 const MAX_READ_DEPTH: usize = 10_000;
-const RED_ZONE: usize = 128 * 1024;
-const STACK_SEGMENT: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);

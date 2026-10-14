@@ -38,8 +38,9 @@ tests:
 ```
 
 A fixture `content` can also be a list of parts. Each part is a string or
-`{ repeat: N, text: "..." }`, which writes the text N times. Use parts for large
-inputs, such as deep nesting:
+`{ repeat: N, text: "..." }`, which writes the text N times. In a repeated text,
+`{i}` becomes the repetition number from 0, and `{i+1}` becomes the next number.
+Use parts for large inputs, such as deep nesting or long chains:
 
 ```yaml
   - path: main.js

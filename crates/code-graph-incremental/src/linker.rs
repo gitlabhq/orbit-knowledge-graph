@@ -4,7 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::smallvec;
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
@@ -938,7 +938,9 @@ impl<'t> Fold<'t> {
         if !self.obj_seen.insert(obj.index()) {
             return;
         }
-        self.resolve_obj_inner(obj, method, from);
+        stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
+            self.resolve_obj_inner(obj, method, from)
+        });
         self.obj_seen.remove(&obj.index());
     }
 
@@ -1104,7 +1106,7 @@ impl<'t> Fold<'t> {
         if !self.chain_seen.insert(c.index()) {
             return vec![];
         }
-        let out = self.lookup_chain_inner(c);
+        let out = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || self.lookup_chain_inner(c));
         self.chain_seen.remove(&c.index());
         self.chain_memo.insert(c.index(), out.clone());
         out
