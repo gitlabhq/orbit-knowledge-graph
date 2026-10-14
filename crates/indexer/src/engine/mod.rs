@@ -448,12 +448,12 @@ async fn run_handlers(
                 return HandlerTaskOutcome::Backpressure;
             }
 
-            if error.is_permanent() {
-                let action = match &error {
-                    HandlerError::Permanent { action, .. } => *action,
-                    HandlerError::Deserialization(_) => PermanentAction::DeadLetter,
-                    _ => unreachable!("is_permanent() returned true"),
-                };
+            let permanent_action = match &error {
+                HandlerError::Permanent { action, .. } => Some(*action),
+                HandlerError::Deserialization(_) => Some(PermanentAction::DeadLetter),
+                _ => None,
+            };
+            if let Some(action) = permanent_action {
                 warn!(
                     handler = handler.name(),
                     subject = %envelope.subject,

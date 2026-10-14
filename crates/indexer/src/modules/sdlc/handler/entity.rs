@@ -119,6 +119,10 @@ impl EntityHandler {
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+    )]
     async fn execute(
         &self,
         context: HandlerContext,
@@ -181,16 +185,13 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let should_partition =
-            self.partition_strategy.is_some() && checkpoint.is_first_pass_before_paging();
-        let ranges = if should_partition {
-            self.partition_strategy
-                .as_ref()
-                .unwrap()
-                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
-                .await?
-        } else {
-            Vec::new()
+        let ranges = match &self.partition_strategy {
+            Some(strategy) if checkpoint.is_first_pass_before_paging() => {
+                strategy
+                    .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
+                    .await?
+            }
+            _ => Vec::new(),
         };
 
         let result = if ranges.is_empty() {

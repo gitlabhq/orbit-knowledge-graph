@@ -130,6 +130,11 @@ impl Pipeline {
         self
     }
 
+    #[expect(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        reason = "a page that reached this point is non-empty, so it has a last block; mutex poisoning means another thread already panicked; propagating is intended"
+    )]
     pub async fn run_plan(
         &self,
         context: &PipelineContext,

@@ -250,6 +250,10 @@ struct DrainLimits {
     max_age: Duration,
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "key was just inserted by `entry().or_default()` above; keys come from `pending` itself and are removed once each"
+)]
 async fn drain(
     writer: Arc<ClickHouseWriter>,
     mut rx: mpsc::Receiver<Msg>,
@@ -319,6 +323,7 @@ async fn drain(
 }
 
 /// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
+#[expect(clippy::expect_used, reason = "the write semaphore is never closed")]
 fn spawn_write(
     writes: &mut JoinSet<()>,
     sem: &Arc<tokio::sync::Semaphore>,
