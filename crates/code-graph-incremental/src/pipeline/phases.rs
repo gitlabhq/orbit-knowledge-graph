@@ -549,7 +549,6 @@ impl Phase<DirtyGraph> for Resolve {
         for k in result.killed {
             context.skip(k);
         }
-        context.report.limited.extend(result.limited);
         Ok(Resolved { state, resolved })
     }
 }

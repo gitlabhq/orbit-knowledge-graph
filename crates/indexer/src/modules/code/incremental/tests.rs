@@ -880,7 +880,7 @@ async fn manifests_past_the_byte_limit_are_reported_and_not_read() {
 }
 
 #[tokio::test]
-async fn nested_definitions_past_the_member_limits_are_reported_without_a_skip() {
+async fn nested_definitions_index_without_a_member_limit() {
     let files: Vec<(String, String)> = (0..26)
         .map(|file| {
             let opens: String = (0..500)
@@ -901,15 +901,7 @@ async fn nested_definitions_past_the_member_limits_are_reported_without_a_skip()
         .collect();
     let timings = timings_for(&files, code_graph_incremental::Limits::UNLIMITED).await;
     assert!(timings.skipped_paths.is_empty());
-    let count = |reason: &str| {
-        timings
-            .limited_reasons
-            .iter()
-            .filter(|limited| **limited == reason)
-            .count()
-    };
-    assert_eq!(count("too_many_members"), 27);
-    assert_eq!(count("fqn_truncated"), 26);
+    assert_eq!(timings.limited_reasons, vec!["fqn_truncated"; 26]);
     assert_eq!(timings.errors, 0);
 }
 

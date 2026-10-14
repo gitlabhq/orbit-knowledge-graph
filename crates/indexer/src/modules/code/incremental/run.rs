@@ -183,7 +183,6 @@ fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error
         "edges" => FileSkip::TooManyEdges,
         "fields" => FileSkip::TooManyFieldCopies,
         "manifests" => FileSkip::TooManyManifestBytes,
-        "members" => FileSkip::TooManyMembers,
         "fqn" => FileSkip::FqnTruncated,
         _ => FileSkip::Timeout(AbortPhase::Sentinel),
     };
