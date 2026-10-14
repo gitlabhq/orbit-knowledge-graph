@@ -1,4 +1,5 @@
 name: "C#: names from one namespace and from using directives"
+
 fixtures:
   - path: App/Start.cs
     content: |
@@ -11,6 +12,7 @@ fixtures:
               new Middle().Go();
           }
       }
+
   - path: App/Middle.cs
     content: |
       namespace App;
@@ -22,6 +24,7 @@ fixtures:
               new End().Stop();
           }
       }
+
   - path: App/End.cs
     content: |
       namespace App;
@@ -30,6 +33,7 @@ fixtures:
       {
           public void Stop() {}
       }
+
   - path: One/Dup.cs
     content: |
       namespace One;
@@ -38,6 +42,7 @@ fixtures:
       {
           public void Hit() {}
       }
+
   - path: Two/Dup.cs
     content: |
       namespace Two;
@@ -46,6 +51,7 @@ fixtures:
       {
           public void Hit() {}
       }
+
   - path: Client/Client.cs
     content: |
       using One;
@@ -60,6 +66,7 @@ fixtures:
               new Dup().Hit();
           }
       }
+
 tests:
   - name: "classes in one namespace call each other across files"
     query: |
@@ -70,6 +77,7 @@ tests:
       - { row_count: 2 }
       - { row: { caller: Run, callee: Go, file: App/Middle.cs } }
       - { row: { caller: Go, callee: Stop, file: App/End.cs } }
+
   - name: "a class name that two using directives import links to both candidates"
     # C# rejects the ambiguous name (CS0104); the engine keeps both candidates.
     query: |

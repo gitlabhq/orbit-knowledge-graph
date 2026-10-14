@@ -1,10 +1,12 @@
 name: "Bash: functions loaded through a chain of source commands"
+
 fixtures:
   - path: a.sh
     content: |
       helper() {
         echo "helper"
       }
+
   - path: b.sh
     content: |
       source ./a.sh
@@ -12,6 +14,7 @@ fixtures:
       middle() {
         helper
       }
+
   - path: c.sh
     content: |
       source ./b.sh
@@ -19,6 +22,7 @@ fixtures:
       run() {
         middle
       }
+
 tests:
   - name: "each file defines its function"
     query: |
@@ -30,6 +34,7 @@ tests:
       - { row: { name: helper, file: a.sh } }
       - { row: { name: middle, file: b.sh } }
       - { row: { name: run, file: c.sh } }
+
   - name: "each source command is an import"
     query: |
       MATCH (f:File)-[:IMPORTS]->(s:ImportedSymbol)
@@ -39,6 +44,7 @@ tests:
       - { row_count: 2 }
       - { row: { file: b.sh, path: ./a.sh } }
       - { row: { file: c.sh, path: ./b.sh } }
+
   - name: "calls to loaded functions link across files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

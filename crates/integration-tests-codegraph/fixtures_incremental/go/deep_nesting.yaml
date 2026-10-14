@@ -1,4 +1,5 @@
 name: "Go: deeply nested control flow links on the worker stack"
+
 fixtures:
   - path: main.go
     content:
@@ -11,6 +12,7 @@ fixtures:
       - { repeat: 10000, text: "for {\n" }
       - { repeat: 10000, text: "}\n" }
       - "target()\n}\n"
+
 tests:
   - name: "each function calls its target after the nesting"
     query: |

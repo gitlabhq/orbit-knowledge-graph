@@ -1,13 +1,16 @@
 name: "TSX: a component re-exported through a second module"
+
 fixtures:
   - path: src/Button.tsx
     content: |
       export function Button() {
         return <button />;
       }
+
   - path: src/index.tsx
     content: |
       export { Button } from './Button';
+
   - path: src/Toolbar.tsx
     content: |
       import { Button } from './index';
@@ -15,6 +18,7 @@ fixtures:
       export function Toolbar() {
         return Button();
       }
+
 tests:
   - name: "the component is defined in the first module"
     query: |
@@ -24,6 +28,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { file: src/Button.tsx } }
+
   - name: "a call through the re-export links to the definition"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -32,6 +37,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: Button, file: src/Button.tsx } }
+
   - name: "the import resolves to the definition"
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

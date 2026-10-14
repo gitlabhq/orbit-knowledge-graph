@@ -1,4 +1,5 @@
 name: "C++: functions visible through a header that includes their header"
+
 fixtures:
   - path: a.hpp
     content: |
@@ -6,6 +7,7 @@ fixtures:
       namespace util {
       int scaled();
       }
+
   - path: a.cpp
     content: |
       #include "a.hpp"
@@ -13,14 +15,17 @@ fixtures:
       namespace util {
       int scaled() { return 2; }
       }
+
   - path: b.hpp
     content: |
       #include "a.hpp"
+
   - path: c.cpp
     content: |
       #include "b.hpp"
       int run() { return helper(); }
       int run_scaled() { return util::scaled(); }
+
 tests:
   - name: "the functions are defined in the first source file"
     query: |
@@ -29,6 +34,7 @@ tests:
       RETURN d.name AS name
     assert:
       - { row_count: 2 }
+
   - name: "a call through the nested include links to the definition"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -37,6 +43,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: helper, file: a.cpp } }
+
   - name: "a namespace-qualified call through the nested include links to the definition"
     # Known gap: a namespace-qualified call to a function in another file does not link, even through a direct include.
     skip: true

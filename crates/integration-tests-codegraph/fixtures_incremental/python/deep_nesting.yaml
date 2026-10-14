@@ -1,4 +1,5 @@
 name: "Python: deeply nested code links on the worker stack"
+
 fixtures:
   - path: deep.py
     content:
@@ -19,6 +20,7 @@ fixtures:
       - "\n    target()\n\n\ndef nested_lambda():\n    f = "
       - { repeat: 10000, text: "lambda: " }
       - "0\n    target()\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |

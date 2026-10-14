@@ -1,10 +1,12 @@
 name: "Elixir: an imported function and a module-qualified call across files"
+
 fixtures:
   - path: lib/a.ex
     content: |
       defmodule A do
         def helper, do: :ok
       end
+
   - path: lib/b.ex
     content: |
       defmodule B do
@@ -12,11 +14,13 @@ fixtures:
 
         def go, do: helper()
       end
+
   - path: lib/c.ex
     content: |
       defmodule C do
         def run, do: B.go()
       end
+
 tests:
   - name: "each file defines its function"
     query: |
@@ -28,6 +32,7 @@ tests:
       - { row: { fqn: A.helper } }
       - { row: { fqn: B.go } }
       - { row: { fqn: C.run } }
+
   - name: "the import and the qualified call link across files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

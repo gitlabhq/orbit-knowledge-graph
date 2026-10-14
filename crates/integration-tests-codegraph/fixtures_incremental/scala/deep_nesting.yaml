@@ -1,4 +1,5 @@
 name: "Scala: deeply nested code links on the worker stack"
+
 fixtures:
   - path: src/main/scala/app/Deep.scala
     content:
@@ -25,6 +26,7 @@ fixtures:
       - "0"
       - { repeat: 10000, text: ")" }
       - ")\ntarget()\n}\n}\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |

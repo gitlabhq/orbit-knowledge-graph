@@ -1,4 +1,5 @@
 name: "C#: deeply nested code links on the worker stack"
+
 fixtures:
   - path: Deep.cs
     content:
@@ -25,6 +26,7 @@ fixtures:
       - "0"
       - { repeat: 10000, text: ")" }
       - ");\nTarget();\n}\n}\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |

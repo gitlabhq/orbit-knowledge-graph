@@ -1,4 +1,5 @@
 name: "PHP: classes in one namespace and a use declaration across files"
+
 fixtures:
   - path: src/End.php
     content: |
@@ -9,6 +10,7 @@ fixtures:
       {
           public static function stop() {}
       }
+
   - path: src/Middle.php
     content: |
       <?php
@@ -21,6 +23,7 @@ fixtures:
               End::stop();
           }
       }
+
   - path: src/Start.php
     content: |
       <?php
@@ -35,6 +38,7 @@ fixtures:
               Middle::go();
           }
       }
+
 tests:
   - name: "each file defines its method"
     query: |
@@ -46,6 +50,7 @@ tests:
       - { row: { name: stop, file: src/End.php } }
       - { row: { name: go, file: src/Middle.php } }
       - { row: { name: run, file: src/Start.php } }
+
   - name: "calls through the namespace and the use declaration link across files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -55,6 +60,7 @@ tests:
       - { row_count: 2 }
       - { row: { caller: run, callee: go, file: src/Middle.php } }
       - { row: { caller: go, callee: stop, file: src/End.php } }
+
   - name: "the use declaration resolves to the class"
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

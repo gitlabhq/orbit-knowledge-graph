@@ -1,10 +1,12 @@
 name: "Swift: types in one module call each other across files"
+
 fixtures:
   - path: Sources/App/End.swift
     content: |
       struct End {
           func stop() {}
       }
+
   - path: Sources/App/Middle.swift
     content: |
       struct Middle {
@@ -12,6 +14,7 @@ fixtures:
               End().stop()
           }
       }
+
   - path: Sources/App/Start.swift
     content: |
       struct Start {
@@ -19,6 +22,7 @@ fixtures:
               Middle().go()
           }
       }
+
 tests:
   - name: "each file defines its method"
     query: |
@@ -30,6 +34,7 @@ tests:
       - { row: { fqn: End.stop } }
       - { row: { fqn: Middle.go } }
       - { row: { fqn: Start.run } }
+
   - name: "calls in one module link across files"
     # Known gap: Swift calls do not link across files; the same calls in one file link.
     skip: true

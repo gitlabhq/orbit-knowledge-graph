@@ -1,4 +1,5 @@
 name: "Bash: deeply nested code links on the worker stack"
+
 fixtures:
   - path: deep.sh
     content:
@@ -21,6 +22,7 @@ fixtures:
       - ":\n"
       - { repeat: 10000, text: "}\n" }
       - "target\n}\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |

@@ -1,8 +1,10 @@
 name: "JavaScript: deeply nested control flow and returns link on the worker stack"
+
 fixtures:
   - path: target.js
     content: |
       export function target() {}
+
   - path: nested_if.js
     content:
       - "import { target } from './target';\nfunction nestedIf(c) {\n"
@@ -10,11 +12,13 @@ fixtures:
       - "function innermostIf() {}\n"
       - { repeat: 10000, text: "}\n" }
       - "target();\n}\n"
+
   - path: else_if.js
     content:
       - "import { target } from './target';\nfunction elseIf(c) {\nif (c) {\n"
       - { repeat: 10000, text: "} else if (c) {\n" }
       - "function innermostElseIf() {}\n}\ntarget();\n}\n"
+
   - path: nested_try.js
     content:
       - "import { target } from './target';\nfunction nestedTry() {\n"
@@ -22,6 +26,7 @@ fixtures:
       - "function innermostTry() {}\n"
       - { repeat: 10000, text: "} catch (e) {}\n" }
       - "target();\n}\n"
+
   - path: nested_loop.js
     content:
       - "import { target } from './target';\nfunction nestedLoop() {\n"
@@ -29,6 +34,7 @@ fixtures:
       - "function innermostLoop() {}\n"
       - { repeat: 10000, text: "}\n" }
       - "target();\n}\n"
+
   - path: nested_ternary.js
     content:
       - "import { target } from './target';\nfunction nestedTernary(c) {\nconst v =\n"
@@ -36,6 +42,7 @@ fixtures:
       - "0\n"
       - { repeat: 10000, text: ") : 0\n" }
       - ";\ntarget();\n}\n"
+
   - path: return_ternary.js
     content:
       - "class Made {\ngo() {}\n}\nfunction make(c) {\nreturn (\n"
@@ -43,6 +50,7 @@ fixtures:
       - "new Made()\n"
       - { repeat: 5000, text: ") : new Made()\n" }
       - ");\n}\nfunction useMake(c) {\nmake(c).go();\n}\n"
+
 tests:
   - name: "each function calls its target after the nesting"
     query: |
@@ -54,6 +62,7 @@ tests:
       - column_values:
           field: caller
           values: [nestedIf, elseIf, nestedTry, nestedLoop, nestedTernary]
+
   - name: "the innermost definition of each nesting belongs to its function"
     query: |
       MATCH (owner:Definition)-[:DEFINES]->(nested:Definition)
@@ -65,6 +74,7 @@ tests:
       - { row: { owner: elseIf, nested: innermostElseIf } }
       - { row: { owner: nestedTry, nested: innermostTry } }
       - { row: { owner: nestedLoop, nested: innermostLoop } }
+
   - name: "a call on the value of a deeply nested return reaches its method"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

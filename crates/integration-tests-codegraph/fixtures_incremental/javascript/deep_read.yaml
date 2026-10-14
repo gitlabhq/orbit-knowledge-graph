@@ -1,8 +1,10 @@
 name: "JavaScript: a call inside more than 10,000 nested blocks links to its target"
+
 fixtures:
   - path: target.js
     content: |
       export function target() {}
+
   - path: inside_if.js
     content:
       - "import { target } from './target';\nfunction insideIf(c) {\n"
@@ -10,6 +12,7 @@ fixtures:
       - "target();\n"
       - { repeat: 10001, text: "}\n" }
       - "}\n"
+
   - path: inside_try.js
     content:
       - "import { target } from './target';\nfunction insideTry() {\n"
@@ -17,6 +20,7 @@ fixtures:
       - "target();\n"
       - { repeat: 10001, text: "} catch (e) {}\n" }
       - "}\n"
+
 tests:
   - name: "each innermost call links to the imported target"
     query: |

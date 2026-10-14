@@ -1,4 +1,5 @@
 name: "PHP: deeply nested code links on the worker stack"
+
 fixtures:
   - path: src/deep.php
     content:
@@ -25,6 +26,7 @@ fixtures:
       - "0"
       - { repeat: 10000, text: ")" }
       - ");\ntarget();\n}\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |
@@ -35,6 +37,7 @@ tests:
       - column_values:
           field: caller
           values: [insideIf, nestedIf, nestedLoop, nestedTry, nestedBlock, nestedCall]
+
   - name: "elseIf calls its target after the nesting"
     # Known gap: in PHP, a call after fifty or more elseif branches does not link, on main too.
     skip: true

@@ -1,15 +1,18 @@
 name: "Go: functions in one package call each other across files"
+
 fixtures:
   - path: go.mod
     content: |
       module example.com/chain
 
       go 1.22
+
   - path: app/a.go
     content: |
       package app
 
       func Helper() {}
+
   - path: app/b.go
     content: |
       package app
@@ -17,6 +20,7 @@ fixtures:
       func Middle() {
       	Helper()
       }
+
   - path: app/c.go
     content: |
       package app
@@ -24,6 +28,7 @@ fixtures:
       func Run() {
       	Middle()
       }
+
 tests:
   - name: "each file defines its function"
     query: |
@@ -35,6 +40,7 @@ tests:
       - { row: { name: Helper, file: app/a.go } }
       - { row: { name: Middle, file: app/b.go } }
       - { row: { name: Run, file: app/c.go } }
+
   - name: "calls in one package link across files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

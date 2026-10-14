@@ -1,4 +1,5 @@
 name: "Lua: module tables loaded through a chain of require calls"
+
 fixtures:
   - path: a.lua
     content: |
@@ -8,6 +9,7 @@ fixtures:
       end
 
       return M
+
   - path: b.lua
     content: |
       local a = require("a")
@@ -18,6 +20,7 @@ fixtures:
       end
 
       return M
+
   - path: c.lua
     content: |
       local b = require("b")
@@ -25,6 +28,7 @@ fixtures:
       function run()
         b.middle()
       end
+
 tests:
   - name: "each file defines its function"
     query: |
@@ -36,6 +40,7 @@ tests:
       - { row: { name: helper, file: a.lua } }
       - { row: { name: middle, file: b.lua } }
       - { row: { name: run, file: c.lua } }
+
   - name: "each require call is an import"
     query: |
       MATCH (i:ImportedSymbol)
@@ -45,6 +50,7 @@ tests:
       - { row_count: 2 }
       - { row: { file: b.lua, path: a } }
       - { row: { file: c.lua, path: b } }
+
   - name: "calls on required module tables link across files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -54,6 +60,7 @@ tests:
       - { row_count: 2 }
       - { row: { caller: run, callee: middle, file: b.lua } }
       - { row: { caller: middle, callee: helper, file: a.lua } }
+
   - name: "a call to a global function from a required file links across files"
     # Known gap: a global function that a required file defines does not link; only module tables do.
     skip: true

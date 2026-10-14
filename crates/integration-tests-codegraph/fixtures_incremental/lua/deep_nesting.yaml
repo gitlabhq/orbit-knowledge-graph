@@ -1,4 +1,5 @@
 name: "Lua: deeply nested code links on the worker stack"
+
 fixtures:
   - path: deep.lua
     content:
@@ -22,6 +23,7 @@ fixtures:
       - "0"
       - { repeat: 10000, text: ")" }
       - ")\ntarget()\nend\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |

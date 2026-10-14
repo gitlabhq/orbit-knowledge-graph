@@ -1,4 +1,5 @@
 name: "Java: classes in one package call each other across files"
+
 fixtures:
   - path: src/main/java/app/End.java
     content: |
@@ -7,6 +8,7 @@ fixtures:
       public class End {
           public void stop() {}
       }
+
   - path: src/main/java/app/Middle.java
     content: |
       package app;
@@ -16,6 +18,7 @@ fixtures:
               new End().stop();
           }
       }
+
   - path: src/main/java/app/Start.java
     content: |
       package app;
@@ -25,6 +28,7 @@ fixtures:
               new Middle().go();
           }
       }
+
 tests:
   - name: "each file defines its method"
     query: |
@@ -36,6 +40,7 @@ tests:
       - { row: { fqn: app.End.stop } }
       - { row: { fqn: app.Middle.go } }
       - { row: { fqn: app.Start.run } }
+
   - name: "calls in one package link across files"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

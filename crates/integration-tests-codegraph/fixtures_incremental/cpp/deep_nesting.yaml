@@ -1,4 +1,5 @@
 name: "C++: deeply nested code links on the worker stack"
+
 fixtures:
   - path: deep.cpp
     content:
@@ -26,6 +27,7 @@ fixtures:
       - { repeat: 10000, text: "try {\n" }
       - { repeat: 10000, text: "} catch (...) {}\n" }
       - "target();\n}\n"
+
 tests:
   - name: "each function calls its target inside or after the nesting"
     query: |
@@ -36,6 +38,7 @@ tests:
       - column_values:
           field: caller
           values: [inside_if, nested_if, else_if, nested_loop, nested_call, nested_try]
+
   - name: "nested_block calls its target after the nesting"
     # Known gap: in C++, a call after ten or more nested bare blocks does not link, on main too.
     skip: true

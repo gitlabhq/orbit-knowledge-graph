@@ -1,4 +1,5 @@
 name: "Haskell: a function re-exported through a second module"
+
 fixtures:
   - path: src/A.hs
     content: |
@@ -6,11 +7,13 @@ fixtures:
 
       helper :: Int
       helper = 1
+
   - path: src/B.hs
     content: |
       module B (module A) where
 
       import A
+
   - path: src/C.hs
     content: |
       module C (run) where
@@ -19,6 +22,7 @@ fixtures:
 
       run :: Int
       run = helper
+
 tests:
   - name: "the function is defined in the first module"
     # Known gap: Haskell has no extraction rules in langs/, so the engine emits no definitions for it.
@@ -30,6 +34,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { file: src/A.hs } }
+
   - name: "a reference through the re-export links to the definition"
     # Known gap: Haskell has no extraction rules in langs/, so the engine emits no definitions for it.
     skip: true
