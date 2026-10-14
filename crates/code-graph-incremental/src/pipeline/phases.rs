@@ -665,12 +665,19 @@ mod tests {
                 self.1.store(1, Ordering::Relaxed);
             }
         }
+
+        fn finished(&mut self, phase: &str, _: Duration) {
+            if phase == self.0 {
+                self.1.store(0, Ordering::Relaxed);
+            }
+        }
     }
 
     fn cancelled_inside(
         phase: &'static str,
         lang: crate::treesitter::SupportLang,
         files: &[(String, String)],
+        after: usize,
     ) -> Result<(), Error> {
         let repo = tempfile::tempdir().unwrap();
         for (path, content) in files {
@@ -692,7 +699,7 @@ mod tests {
         let counted = checks.clone();
         let mut context = Context::new(&env, repository).observe(ArmOn(phase, checks));
         context.run = context.run.with_cancellation(Arc::new(move || {
-            counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= 2
+            counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= after
         }));
         templates::index(context)
             .and_then(|graph| graph.then(Display))
@@ -702,24 +709,27 @@ mod tests {
     #[test]
     fn display_stops_when_the_run_is_cancelled() {
         let files = [("main.py".to_string(), "def f():\n    pass\n".to_string())];
-        let displayed = cancelled_inside("display", crate::treesitter::SupportLang::Python, &files);
+        let displayed =
+            cancelled_inside("display", crate::treesitter::SupportLang::Python, &files, 2);
         assert!(matches!(displayed, Err(Error::Killed(killed)) if killed.cancelled));
     }
 
     #[test]
-    fn cross_file_resolution_stops_when_the_run_is_cancelled() {
-        let files: Vec<_> = (0..600)
+    fn cross_file_resolution_stops_when_the_run_is_cancelled_between_imports() {
+        let files: Vec<_> = (0..200)
             .map(|file| {
-                let classes: String = (0..30)
-                    .map(|n| format!("public class C{file}_{n} {{}}\n"))
-                    .collect();
                 (
                     format!("Big/F{file}.cs"),
-                    format!("namespace Big;\n{classes}"),
+                    format!("namespace Big;\npublic class C{file} {{}}\n"),
                 )
             })
             .collect();
-        let resolved = cancelled_inside("resolve", crate::treesitter::SupportLang::CSharp, &files);
+        let resolved = cancelled_inside(
+            "resolve",
+            crate::treesitter::SupportLang::CSharp,
+            &files,
+            20_000,
+        );
         assert!(matches!(resolved, Err(Error::Killed(killed)) if killed.cancelled));
     }
 }
