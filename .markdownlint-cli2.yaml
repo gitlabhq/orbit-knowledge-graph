@@ -65,7 +65,6 @@ config:
       "Facebook",
       "fastlane",
       "fluent-plugin-redis-slowlog",
-      "GDK",
       "Geo",
       "Git LFS",
       "git-annex",
