@@ -6,7 +6,7 @@ use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Node, Storage, Tree};
 
 use super::matching::matches;
-use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text};
+use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text, Tf};
 
 /// How captured subtrees enter a template. The target is about to be removed,
 /// so its descendants can be moved in place of copied, except when the built
@@ -246,6 +246,38 @@ pub fn apply_rewrites_with_edges(
     )
 }
 
+pub(crate) const MAX_FQN_SEGMENTS: usize = 64;
+const MAX_FQN_BYTES: usize = 4096;
+
+thread_local! {
+    static FQN_CUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn take_fqn_cut() -> bool {
+    FQN_CUT.replace(false)
+}
+
+fn cap_fqn(lang: &Lang, sym: u32, sep: &str) -> u32 {
+    let s = lang.syms.resolve(sym);
+    let mut start = s
+        .rmatch_indices(sep)
+        .nth(MAX_FQN_SEGMENTS - 1)
+        .map_or(0, |(i, _)| i + sep.len());
+    if s.len() - start > MAX_FQN_BYTES {
+        let min = s.ceil_char_boundary(s.len() - MAX_FQN_BYTES);
+        start = s[min..]
+            .find(sep)
+            .map(|i| min + i + sep.len())
+            .filter(|&i| i < s.len())
+            .unwrap_or(min);
+    }
+    if start == 0 || sep.is_empty() {
+        return sym;
+    }
+    FQN_CUT.set(true);
+    lang.syms.intern(&s[start..])
+}
+
 pub fn apply_display(
     t: Tree<Compact>,
     lang: &Lang,
@@ -283,6 +315,7 @@ fn apply_rewrites_inner<S: Storage<Node = Node>>(
     structure: impl Fn(&mut Tree<S>, &Lang, S::Id, &Rewrite, &[Cap<S::Id>], Option<&EdgeCtx>) -> bool,
 ) -> Result<(), Killed> {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
+    let fqn_key = lang.syms.lookup("fqn");
     let mut caps: Vec<Cap<S::Id>> = (0..max_slots).map(|_| SmallVec::new()).collect();
 
     let mut by_kind = rustc_hash::FxHashMap::<u16, Vec<usize>>::default();
@@ -352,6 +385,12 @@ fn apply_rewrites_inner<S: Storage<Node = Node>>(
                                 let s = lang.syms.resolve(base_sym);
                                 lang.syms.intern(&entry.val.apply_to_str(s))
                             }
+                        };
+                        let val = match &entry.val {
+                            Tf::Concat(sep, ..) if fqn_key != 0 && entry.key == fqn_key => {
+                                cap_fqn(lang, val, sep)
+                            }
+                            _ => val,
                         };
                         t.set_tag(raw, entry.key, val);
                     }

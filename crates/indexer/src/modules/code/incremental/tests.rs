@@ -901,12 +901,27 @@ async fn nested_definitions_past_the_member_limits_are_reported_without_a_skip()
         .collect();
     let timings = timings_for(&files, code_graph_incremental::Limits::UNLIMITED).await;
     assert!(timings.skipped_paths.is_empty());
-    assert_eq!(timings.limited_reasons.len(), 27);
-    assert!(
+    let count = |reason: &str| {
         timings
             .limited_reasons
             .iter()
-            .all(|reason| *reason == "too_many_members")
-    );
+            .filter(|limited| **limited == reason)
+            .count()
+    };
+    assert_eq!(count("too_many_members"), 27);
+    assert_eq!(count("fqn_truncated"), 26);
+    assert_eq!(timings.errors, 0);
+}
+
+#[tokio::test]
+async fn qualified_names_past_the_segment_limit_keep_their_innermost_segments() {
+    let opens: String = (0..70)
+        .map(|level| format!("function f{level}() {{\n"))
+        .collect();
+    let source = format!("{opens}{}", "}\n".repeat(70));
+    let files: &[(&str, &[u8])] = &[("root/deep.js", source.as_bytes())];
+    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.limited_reasons, ["fqn_truncated"]);
     assert_eq!(timings.errors, 0);
 }
