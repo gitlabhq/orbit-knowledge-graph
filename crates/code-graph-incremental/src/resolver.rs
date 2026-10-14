@@ -1678,12 +1678,19 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
     let cross = |c: Cursor| c.fi() != fi as u32;
     let mut bound_in: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
 
+    let mut path: Vec<(u32, Option<Cursor>)> = Vec::new();
     for node in root.descendants() {
         ctx.run.check().and_then(|()| file.check())?;
-        let Some(from) = Some(node)
-            .filter(|n| n.is(C::Def))
-            .or_else(|| node.enclosing(|e| e.is(C::Def)))
-        else {
+        let parent = node.parent().expect("a descendant has a parent");
+        while path.last().is_some_and(|&(id, _)| id != parent.index()) {
+            path.pop();
+        }
+        let enclosing = match parent.is(C::Def) {
+            true => Some(parent),
+            false => path.last().and_then(|&(_, enclosing)| enclosing),
+        };
+        path.push((node.index(), enclosing));
+        let Some(from) = Some(node).filter(|n| n.is(C::Def)).or(enclosing) else {
             continue;
         };
         if node.is(C::Def) {
