@@ -186,7 +186,7 @@ glab orbit index /path/to/your/repo
 glab orbit schema
 ```
 
-That builds a local DuckDB graph at `~/.gitlab/orbit/graph.duckdb` and prints every
+That builds a revision graph under `~/.gitlab/orbit/local/` and prints every
 table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
 `gl_imported_symbol`, `gl_edge`, and the `_orbit_manifest` bookkeeping table.
 

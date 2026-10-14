@@ -11,7 +11,7 @@
 | `gl_directory` | a directory | `id`, `path`, `name` |
 | `gl_imported_symbol` | an import occurrence | `id`, `identifier_name`, `import_path`, `file_path`, `project_id` |
 | `gl_edge` | a relationship | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` |
-| `_orbit_manifest` | an indexed repository | `repo_path`, `project_id`, `branch`, `commit_sha`, `status` |
+| `_orbit_manifest` | a checkout revision | `repo_path`, `project_id`, `branch`, `commit_sha`, `status`, `database_path` |
 
 `relationship_kind`: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`, `EXTENDS`. Edges hold only IDs. Join `source_id`/`target_id` to `gl_definition.id` or `gl_file.id` to get names.
 
@@ -73,14 +73,14 @@ Cross-repository symbol lookup (`--all`):
 orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS symbol,
                  dm.repo_path AS defining_repo, d.file_path AS defining_file
                  FROM gl_imported_symbol i
-                 JOIN _orbit_manifest im ON im.project_id = i.project_id
+                  JOIN _orbit_manifest im ON im.project_id = i.project_id AND im.commit_sha = i.commit_sha
                  JOIN gl_definition d ON d.name = i.identifier_name
-                 JOIN _orbit_manifest dm ON dm.project_id = d.project_id
+                  JOIN _orbit_manifest dm ON dm.project_id = d.project_id AND dm.commit_sha = d.commit_sha
                  WHERE dm.repo_path <> im.repo_path
                  ORDER BY importing_repo, symbol"
 ```
 
 ## Notes
 
-- `commit_sha` columns matter only with `--all` or `--repo`. `gl_edge` has none, so join to a definition to scope edges.
-- Edges stay inside one repository. Cross-repository questions join through `_orbit_manifest` and need `--all`. The recipe matches on symbol name, so narrow on `im.repo_path` for duplicate names.
+- SQL includes all indexed revisions by default. Use `--repo .` to select the current checkout revision. `gl_edge` has no `commit_sha`, so join to a definition to scope edges.
+- Edges stay inside one repository. Cross-repository questions join through `_orbit_manifest`. The recipe matches on symbol name, so narrow on `im.repo_path` and commit for duplicate names.

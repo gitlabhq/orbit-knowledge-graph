@@ -11,7 +11,7 @@ export const OrbitPlugin = async () => {
     "tool.execute.after": async (input, output) => {
       if (reminded) return;
       if (input.tool !== "bash") return;
-      if (!existsSync(join(root, "graph.duckdb"))) return;
+      if (!existsSync(join(root, "local", "manifest.duckdb"))) return;
       output.output = output.output + "\n\n" + REMINDER;
       reminded = true;
     },

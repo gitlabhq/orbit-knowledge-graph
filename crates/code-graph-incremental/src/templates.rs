@@ -14,11 +14,13 @@ use rustc_hash::FxHashSet;
 
 pub struct Options {
     pub limits: Limits,
+    pub worker_threads: usize,
+    pub concurrent_families: usize,
+    pub small_family_files: usize,
+    pub batch_bytes: usize,
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
 }
-
-const SMALL_FAMILY_FILES: usize = 650;
 
 pub fn index<'e>(context: Context<'e>) -> Result<Pipeline<'e, Resolved>, Error> {
     Pipeline::new(context, ())
@@ -46,7 +48,7 @@ pub fn repository<E: std::fmt::Display>(
     envelope: &Envelope<'_>,
     ontology: &ontology::Ontology,
     export_config: &crate::export::ExportConfig,
-    mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
+    emit: impl Fn(Vec<(String, RecordBatch)>) -> Result<(), E> + Sync,
 ) -> Result<Report, Error> {
     let limits = options.limits;
     let failed = Arc::new(AtomicBool::new(false));
@@ -56,7 +58,7 @@ pub fn repository<E: std::fmt::Display>(
         failure.load(Ordering::Relaxed) || cancelled()
     }));
     run.check()?;
-    let mut emit = |batches| -> Result<(), Error> {
+    let emit = |batches| -> Result<(), Error> {
         run.check()?;
         emit(batches).map_err(|error| {
             Error::Export(arrow::error::ArrowError::ExternalError(
@@ -96,11 +98,13 @@ pub fn repository<E: std::fmt::Display>(
                 crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
             })
             .collect();
+        let mut plan = crate::export::ExportPlan::from_config(export_config, ontology, &lang)?;
+        plan.batch_bytes = options.batch_bytes;
         emit(crate::export::export(
             &trees,
             &[],
             &lang,
-            &crate::export::ExportPlan::from_config(export_config, ontology, &lang)?,
+            &plan,
             envelope,
             true,
             &|_| true,
@@ -114,60 +118,87 @@ pub fn repository<E: std::fmt::Display>(
             .map_or(first, SupportLang::family)
             == family
     };
-    let system_threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let worker_threads = match options.worker_threads {
+        0 => std::thread::available_parallelism().map_or(1, usize::from),
+        n => n,
+    };
     std::thread::scope(|scope| -> Result<(), Error> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(0);
-        for (family, (language, file_count)) in families {
-            let sender = sender.clone();
-            let run = &run;
-            let repository = &repository;
-            let owns = &owns;
-            scope.spawn(move || {
-                let outcome = (|| -> Result<_, Error> {
-                    run.check()?;
-                    let family_threads = if file_count < SMALL_FAMILY_FILES {
-                        (system_threads / 4).max(2)
-                    } else {
-                        system_threads
-                    };
-                    let pool = rayon::ThreadPoolBuilder::new()
-                        .num_threads(family_threads)
-                        .stack_size(8 * 1024 * 1024)
-                        .build()
-                        .map_err(|error| LoadError::new(error.to_string()))?;
-                    let mut env = Env::with_limits(language, limits)?;
-                    env.export_config = export_config.clone();
-                    let mut context = Context::new(&env, repository.clone());
-                    context.run = run.clone();
-                    let pipeline = pool.install(|| index(context))?;
-                    let (context, graph) = pipeline.then(Display)?.finish();
-                    let mut report = context.report;
-                    report.unread_files.retain(|path| owns(family, path));
-                    run.check()?;
-                    let batches = crate::export::export(
-                        &graph.state.trees,
-                        &graph.state.edges,
-                        &env.lang,
-                        &crate::export::ExportPlan::from_config(
-                            &env.export_config,
-                            ontology,
-                            &env.lang,
-                        )?,
-                        envelope,
-                        family == first,
-                        &|path| owns(family, path),
-                    )?;
-                    Ok((report, batches))
-                })();
-                let _ = sender.send(outcome);
-            });
-        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut pending = families
+            .into_iter()
+            .map(|family| (family, sender.clone()))
+            .collect::<Vec<_>>()
+            .into_iter();
         drop(sender);
-        for outcome in receiver {
-            let outcome = outcome.and_then(|(report, batches)| {
-                emit(batches)?;
-                Ok(report)
-            });
+        let mut running = 0;
+        loop {
+            let idle = options.concurrent_families.max(1) - running;
+            for ((family, (language, file_count)), sender) in pending.by_ref().take(idle) {
+                running += 1;
+                let (run, repository, owns, emit) = (&run, &repository, &owns, &emit);
+                let family_threads = if file_count <= options.small_family_files {
+                    (worker_threads / 4).max(2).min(worker_threads)
+                } else {
+                    worker_threads
+                };
+                scope.spawn(move || {
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || -> Result<_, Error> {
+                            run.check()?;
+                            let pool = rayon::ThreadPoolBuilder::new()
+                                .num_threads(family_threads)
+                                .stack_size(8 * 1024 * 1024)
+                                .build()
+                                .map_err(|error| LoadError::new(error.to_string()))?;
+                            pool.install(|| {
+                                let (report, batches) = {
+                                    let mut env = Env::with_limits(language, limits)?;
+                                    env.export_config = export_config.clone();
+                                    let mut context = Context::new(&env, repository.clone());
+                                    context.run = run.clone();
+                                    let (context, graph) = index(context)?.then(Display)?.finish();
+                                    let mut report = context.report;
+                                    report.unread_files.retain(|path| owns(family, path));
+                                    run.check()?;
+                                    let mut plan = crate::export::ExportPlan::from_config(
+                                        &env.export_config,
+                                        ontology,
+                                        &env.lang,
+                                    )?;
+                                    plan.batch_bytes = options.batch_bytes;
+                                    let batches = crate::export::export(
+                                        &graph.state.trees,
+                                        &graph.state.edges,
+                                        &env.lang,
+                                        &plan,
+                                        envelope,
+                                        family == first,
+                                        &|path| owns(family, path),
+                                    )?;
+                                    (report, batches)
+                                };
+                                emit(batches)?;
+                                Ok(report)
+                            })
+                        },
+                    ))
+                    .unwrap_or_else(|payload| {
+                        Err(Error::Panic {
+                            family,
+                            message: payload
+                                .downcast_ref::<&str>()
+                                .map(|message| message.to_string())
+                                .or_else(|| payload.downcast_ref::<String>().cloned())
+                                .unwrap_or_default(),
+                        })
+                    });
+                    let _ = sender.send(outcome);
+                });
+            }
+            let Ok(outcome) = receiver.recv() else {
+                break;
+            };
+            running -= 1;
             let report = match outcome {
                 Ok(report) => report,
                 Err(error) => {

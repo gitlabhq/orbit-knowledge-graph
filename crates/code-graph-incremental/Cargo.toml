@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 arrow = { workspace = true }
+cpu-time = { workspace = true }
 either = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 indextree = "4.9"

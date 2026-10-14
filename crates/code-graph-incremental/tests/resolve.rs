@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::Resolved;
+use code_graph_incremental::pipeline::{FileStats, Resolved};
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Killed, Limits, State, templates};
@@ -43,6 +45,16 @@ fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
     (resolved, context.report.skipped)
 }
 
+fn resolved_paths(resolved: &Resolved) -> Vec<&str> {
+    let mut paths: Vec<_> = resolved
+        .resolved
+        .iter()
+        .map(|&fi| resolved.state.trees[fi as usize].label.as_str())
+        .collect();
+    paths.sort();
+    paths
+}
+
 fn python_env(limits: Limits) -> Env {
     Env::with_limits(SupportLang::Python, limits).unwrap()
 }
@@ -77,31 +89,54 @@ fn pair(a: &str, b: &str) -> (String, String) {
 }
 
 #[test]
-fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
+fn cross_file_timeout_keeps_resolved_edges_and_recovers_on_noop_reindex() {
     let repo = tempfile::tempdir().unwrap();
-    write_all(repo.path(), &[("utils.py", UTILS), ("main.py", MAIN)]);
+    std::fs::create_dir(repo.path().join("pkg")).unwrap();
+    let main = format!("from pkg import mod\n{MAIN}    mod.f()\n");
+    write_all(
+        repo.path(),
+        &[
+            ("utils.py", UTILS),
+            ("main.py", &main),
+            ("pkg/mod.py", "def f():\n    pass\n"),
+        ],
+    );
+    let kinds = [EdgeKind::Imports, EdgeKind::Calls, EdgeKind::Extends];
     let mut env = python_env(Limits::UNLIMITED);
     let (baseline, _) = resolve_repo(&env, repo.path());
-    let expected = cross_file(&env, &baseline.state, EdgeKind::Calls);
-    assert!(!expected.is_empty());
-    env.limits.cross_file_resolve_ms = 0;
+    let expected = kinds.map(|kind| cross_file(&env, &baseline.state, kind));
     let empty_changes = || common::load(orbit_utils::vfs::sources::Memory(vec![]));
-    let (context, degraded) =
+    let family_skip = |skipped: &[Killed]| {
+        let skipped: Vec<_> = skipped
+            .iter()
+            .map(|k| (k.label, k.path.as_str(), k.cancelled))
+            .collect();
+        assert_eq!(skipped, [("resolve", "", false)]);
+    };
+
+    env.limits.cross_file_resolve_ms = 0;
+    let (context, kept) =
         templates::reindex(Context::new(&env, empty_changes()), baseline.state, vec![])
             .unwrap()
             .finish();
-    assert_eq!(context.report.skipped.len(), 1);
-    assert_eq!(context.report.skipped[0].label, "resolve");
-    assert!(!context.report.skipped[0].cancelled);
-    assert_eq!(degraded.state.trees.len(), 2);
-    assert!(!degraded.state.edges.is_empty());
-    assert!(
-        degraded
-            .state
-            .edges
-            .iter()
-            .all(|edge| edge.from_tree == edge.to_tree)
+    family_skip(&context.report.skipped);
+    assert_eq!(
+        kinds.map(|kind| cross_file(&env, &kept.state, kind)),
+        expected
     );
+
+    let (degraded, skipped) = resolve_repo(&env, repo.path());
+    family_skip(&skipped);
+    assert_eq!(degraded.state.trees.len(), 3);
+    assert_eq!(
+        kinds.map(|kind| cross_file(&env, &degraded.state, kind)),
+        [
+            vec![pair("main.py:", "pkg/mod.py:pkg/mod.py")],
+            vec![],
+            vec![]
+        ]
+    );
+
     env.limits.cross_file_resolve_ms = u64::MAX;
     let (context, recovered) =
         templates::reindex(Context::new(&env, empty_changes()), degraded.state, vec![])
@@ -109,7 +144,7 @@ fn cross_file_timeout_keeps_local_graph_and_recovers_on_noop_reindex() {
             .finish();
     assert!(context.report.skipped.is_empty());
     assert_eq!(
-        cross_file(&env, &recovered.state, EdgeKind::Calls),
+        kinds.map(|kind| cross_file(&env, &recovered.state, kind)),
         expected
     );
 }
@@ -237,6 +272,7 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     .unwrap()
     .finish();
     assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair("main.js:caller", "package/first.js:run")]
@@ -254,17 +290,8 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
             .unwrap()
             .finish();
     assert!(context.report.skipped.is_empty());
-    let mut resolved_files: Vec<_> = context
-        .report
-        .files
-        .iter()
-        .map(|file| {
-            assert_eq!(file.phase, "resolve");
-            file.path.as_str()
-        })
-        .collect();
-    resolved_files.sort();
-    assert_eq!(resolved_files, ["barrel.js", "main.js"]);
+    assert!(context.report.files.is_empty());
+    assert_eq!(resolved_paths(&resolved), ["barrel.js", "main.js"]);
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair("main.js:caller", "package/second.js:run")]
@@ -308,16 +335,11 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
         templates::reindex(Context::new(&env, changes), resolved.state, vec![])
             .unwrap()
             .finish();
-    let mut resolved_files: Vec<_> = context
-        .report
-        .files
-        .iter()
-        .filter(|file| file.phase == "resolve")
-        .map(|file| file.path.as_str())
-        .collect();
-    resolved_files.sort();
+    let mut stats_paths: Vec<_> = context.report.files.keys().map(String::as_str).collect();
+    stats_paths.sort();
+    assert_eq!(stats_paths, ["left.js", "right.js"]);
     assert_eq!(
-        resolved_files,
+        resolved_paths(&resolved),
         ["first.js", "left.js", "main.js", "right.js", "second.js"]
     );
     assert_eq!(
@@ -353,4 +375,63 @@ fn a_file_over_the_resolve_budget_keeps_imports_and_loses_inheritance() {
         ]
     );
     assert!(cross_file(&env, &resolved.state, EdgeKind::Extends).is_empty());
+}
+
+fn index_stats(limits: Limits) -> (HashMap<String, FileStats>, Vec<Killed>) {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("a.py", UTILS), ("b.py", MAIN)]);
+    let env = python_env(limits);
+    let (context, _) = templates::index(Context::new(&env, common::walk(repo.path())))
+        .unwrap()
+        .finish();
+    (context.report.files, context.report.skipped)
+}
+
+fn sorted_paths(files: &HashMap<String, FileStats>) -> Vec<&str> {
+    let mut paths: Vec<_> = files.keys().map(String::as_str).collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn file_stats_cover_parsed_files() {
+    let (files, _) = index_stats(Limits::UNLIMITED);
+    assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
+    for stats in files.values() {
+        assert!(stats.parse > Duration::ZERO);
+        assert!(stats.resolve > Duration::ZERO);
+    }
+}
+
+#[test]
+fn file_stats_drop_files_killed_in_a_per_file_phase() {
+    for limits in [
+        Limits {
+            file_parse_ms: 0,
+            ..Limits::UNLIMITED
+        },
+        Limits {
+            file_rewrite_ms: 0,
+            ..Limits::UNLIMITED
+        },
+        Limits {
+            file_link_ms: 0,
+            ..Limits::UNLIMITED
+        },
+    ] {
+        let (files, skipped) = index_stats(limits);
+        assert!(!skipped.is_empty(), "{limits:?}");
+        assert!(files.is_empty(), "{limits:?}");
+    }
+}
+
+#[test]
+fn file_stats_keep_files_killed_by_the_resolve_budget() {
+    let (files, skipped) = index_stats(Limits {
+        file_resolve_ms: 0,
+        ..Limits::UNLIMITED
+    });
+    assert!(!skipped.is_empty());
+    assert!(skipped.iter().all(|killed| killed.label == "resolve"));
+    assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }

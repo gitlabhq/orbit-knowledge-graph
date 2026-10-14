@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use crate::intern::Lang;
@@ -402,11 +403,12 @@ pub fn parse_with_sentinel(
         c.ensure(support_lang, lang);
         c.parser.reset();
         let mut stopped = None;
-        let mut progress = |_: &tree_sitter::ParseState| match sentinel.check() {
-            Ok(()) => std::ops::ControlFlow::Continue(()),
+        let mut guard = parse_guard();
+        let mut progress = |state: &tree_sitter::ParseState| match sentinel.check() {
+            Ok(()) => guard(state.current_byte_offset()),
             Err(error) => {
                 stopped = Some(error);
-                std::ops::ControlFlow::Break(())
+                ControlFlow::Break(())
             }
         };
         let mut input = |offset: usize, _: tree_sitter::Point| &source.as_bytes()[offset..];
@@ -430,6 +432,27 @@ pub fn parse_with_sentinel(
     })
 }
 
+const MAX_STALL: u64 = 100_000;
+const STACK_RED_ZONE: usize = 256 * 1024;
+
+fn parse_guard() -> impl FnMut(usize) -> ControlFlow<()> {
+    let (mut last_offset, mut stalled) = (usize::MAX, 0);
+    move |offset| {
+        if stacker::remaining_stack().is_some_and(|left| left < STACK_RED_ZONE) {
+            return ControlFlow::Break(());
+        }
+        if offset != last_offset {
+            (last_offset, stalled) = (offset, 0);
+            return ControlFlow::Continue(());
+        }
+        stalled += 1;
+        match stalled > MAX_STALL {
+            true => ControlFlow::Break(()),
+            false => ControlFlow::Continue(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,6 +460,15 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn a_parse_stops_after_too_many_steps_without_progress() {
+        let mut guard = parse_guard();
+        assert!(guard(0).is_continue());
+        assert!((0..MAX_STALL).all(|_| guard(0).is_continue()));
+        assert!(guard(0).is_break());
+        assert!(guard(1).is_continue());
+    }
 
     #[test]
     fn parsing_can_cancel_mid_file_and_reuse_the_parser() {

@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use compiler::input::{Direction, group_by_output_names};
+use compiler::input::{
+    Direction, RelationshipColumn, RelationshipColumnKind, group_by_output_names,
+};
 use compiler::{QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column};
 use orbit_utils::arrow::ColumnValue;
 use orbit_utils::strings::quote_escaped;
@@ -14,37 +16,79 @@ use crate::graph::{GraphFormatter, group_node_cell, is_reserved_node_key};
 use crate::text::{ordered_pairs, truncate, truncated_len};
 
 pub fn encode(output: &PipelineOutput) -> String {
-    let (columns, rows) = match output.compiled.input.query_type {
-        QueryType::Aggregation => aggregation_table(output),
-        QueryType::PathFinding | QueryType::Neighbors => path_table(output),
-        _ => node_table(output),
-    };
+    let (columns, rows) = table(output);
     render(&columns, &rows, output.pagination.as_ref())
 }
 
 type Table = (Vec<String>, Vec<Vec<String>>);
 
+pub fn table(output: &PipelineOutput) -> Table {
+    match output.compiled.input.query_type {
+        QueryType::Aggregation => aggregation_table(output),
+        QueryType::PathFinding | QueryType::Neighbors => path_table(output),
+        _ => node_table(output),
+    }
+}
+
 fn node_table(output: &PipelineOutput) -> Table {
     let context = &output.result_context;
     let prefixes = edge_prefixes(context);
-    let aliases: Vec<String> = output
-        .compiled
-        .input
-        .nodes
+    let input = &output.compiled.input;
+    let aliases: Vec<String> = input.nodes.iter().map(|n| n.id.clone()).collect();
+    let relationships = &input.relationship_return.columns;
+    let columns: Vec<String> = aliases
         .iter()
-        .map(|n| n.id.clone())
+        .cloned()
+        .chain(relationships.iter().map(|column| column.name.clone()))
         .collect();
+    let order = &input.relationship_return.column_order;
+    let mut positions: Vec<usize> = (0..columns.len()).collect();
+    positions.sort_by_key(|&index| {
+        order
+            .iter()
+            .position(|name| *name == columns[index])
+            .unwrap_or(usize::MAX)
+    });
     let rows = output
         .query_result
         .authorized_rows()
         .map(|row| {
-            aliases
+            let cells: Vec<String> = aliases
                 .iter()
                 .map(|alias| row_node(row, context, &prefixes, alias).unwrap_or_else(null))
+                .chain(
+                    relationships
+                        .iter()
+                        .map(|column| relationship_cell(row, context, column)),
+                )
+                .collect();
+            positions
+                .iter()
+                .map(|&index| cells[index].clone())
                 .collect()
         })
         .collect();
-    (aliases, rows)
+    let columns = positions
+        .iter()
+        .map(|&index| columns[index].clone())
+        .collect();
+    (columns, rows)
+}
+
+fn relationship_cell(
+    row: &QueryResultRow,
+    context: &ResultContext,
+    column: &RelationshipColumn,
+) -> String {
+    context
+        .edges()
+        .iter()
+        .find(|edge| edge.relationship == column.relationship)
+        .and_then(|edge| row.get_column_string(&edge.type_column))
+        .map_or_else(null, |kind| match column.kind {
+            RelationshipColumnKind::Type => quote_escaped(&kind),
+            RelationshipColumnKind::Relationship => format!("[:{kind}]"),
+        })
 }
 
 fn path_table(output: &PipelineOutput) -> Table {

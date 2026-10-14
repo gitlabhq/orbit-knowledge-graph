@@ -57,14 +57,27 @@ impl CodeIndexingDeps {
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        Self::new_with_ontology(mock, clickhouse, pipeline_config, ontology)
+    }
+
+    pub fn new_with_ontology(
+        mock: &MockGitlabServer,
+        clickhouse: &TestContext,
+        pipeline_config: CodeIndexingPipelineConfig,
+        ontology: ontology::Ontology,
+    ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
-        let graph_client = Arc::new(clickhouse.config.build_client());
+        let graph_client = Arc::new(clickhouse.config.build_client("graph"));
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let table_names =
-            Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
+        let table_names = Arc::new(
+            CodeTableNames::from_ontology(
+                &ontology::Ontology::load_embedded().expect("ontology must load"),
+            )
+            .expect("code tables must resolve"),
+        );
 
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
@@ -84,13 +97,10 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-        let writer = Arc::new(
-            indexer::clickhouse::ClickHouseWriter::new(
-                clickhouse.config.clone(),
-                Arc::new(indexer::metrics::EngineMetrics::new()),
-            )
-            .expect("writer must build"),
-        );
+        let writer = Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+            clickhouse.config.clone().build_client("graph"),
+            Arc::new(indexer::metrics::EngineMetrics::new()),
+        ));
 
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
@@ -124,7 +134,7 @@ impl CodeIndexingDeps {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
-        let graph_client = Arc::new(self.clickhouse_config.build_client());
+        let graph_client = Arc::new(self.clickhouse_config.build_client("graph"));
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
@@ -379,6 +389,37 @@ fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
     encoder.write_all(&tar_bytes).expect("gz write failed");
     encoder.finish().expect("gz finish failed")
 }
+
+pub fn enable_incremental(traversal_path: &str) {
+    let namespace = orbit_utils::traversal_path::TraversalPath::new_unchecked(traversal_path)
+        .top_level_namespace_id()
+        .expect("traversal path has a top-level namespace");
+    use orbit_server_config::features::{Feature, FeatureScope, FeaturesConfig};
+    orbit_server_config::features::init(FeaturesConfig::from_iter([(
+        Feature::CodeGraphIncremental,
+        FeatureScope {
+            enabled: true,
+            namespaces: vec![namespace],
+        },
+    )]));
+}
+
+macro_rules! both_engines {
+    ($($name:ident),+ $(,)?) => {$(
+        mod $name {
+            #[tokio::test]
+            async fn legacy() {
+                super::$name(false).await
+            }
+
+            #[tokio::test]
+            async fn incremental() {
+                super::$name(true).await
+            }
+        }
+    )+};
+}
+pub(crate) use both_engines;
 
 pub fn handler_context() -> HandlerContext {
     handler_context_with_lock_service(Arc::new(MockLockService::new()))

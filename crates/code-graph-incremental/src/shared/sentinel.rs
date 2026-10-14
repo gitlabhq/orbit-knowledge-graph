@@ -3,9 +3,9 @@
 
 use std::time::{Duration, Instant};
 
-use crate::error::LoadError;
+use cpu_time::ThreadTime;
 
-#[derive(Clone, Copy, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_files: usize,
     pub cross_file_resolve_ms: u64,
@@ -17,12 +17,6 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn load() -> Result<Self, LoadError> {
-        Ok(orbit_utils::yaml::from_str(include_str!(
-            "../../config/limits.yaml"
-        ))?)
-    }
-
     pub const UNLIMITED: Self = Self {
         max_files: 0,
         cross_file_resolve_ms: u64::MAX,
@@ -62,10 +56,34 @@ impl std::fmt::Display for Killed {
 
 impl std::error::Error for Killed {}
 
+#[derive(Clone, Copy)]
+enum Clock {
+    Wall(Instant),
+    Thread(Instant, Duration),
+}
+
+impl Clock {
+    fn elapsed(&self) -> Duration {
+        match self {
+            Self::Wall(started) | Self::Thread(started, _) => started.elapsed(),
+        }
+    }
+
+    fn over(&self, budget: Duration) -> Option<Duration> {
+        let wall = self.elapsed();
+        let spent = match self {
+            _ if wall <= budget => return None,
+            Self::Wall(_) => wall,
+            Self::Thread(_, cpu) => ThreadTime::now().as_duration().saturating_sub(*cpu),
+        };
+        (spent > budget).then_some(spent)
+    }
+}
+
 /// `u64::MAX` means no deadline.
 #[derive(Clone)]
 pub struct Sentinel {
-    started: Instant,
+    started: Clock,
     budget: Duration,
     label: &'static str,
     path: String,
@@ -75,7 +93,7 @@ pub struct Sentinel {
 impl Sentinel {
     pub fn new(label: &'static str, path: &str, budget_ms: u64) -> Self {
         Self {
-            started: Instant::now(),
+            started: Clock::Wall(Instant::now()),
             budget: Duration::from_millis(budget_ms),
             label,
             path: path.to_string(),
@@ -96,6 +114,11 @@ impl Sentinel {
         child
     }
 
+    pub fn on_thread_cpu(mut self) -> Self {
+        self.started = Clock::Thread(Instant::now(), ThreadTime::now().as_duration());
+        self
+    }
+
     pub fn with_cancellation(
         mut self,
         cancelled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
@@ -106,14 +129,14 @@ impl Sentinel {
 
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
-        let elapsed = self.started.elapsed();
+        let over = self.started.over(self.budget);
         let cancelled = self.cancelled.as_ref().is_some_and(|cancelled| cancelled());
-        if elapsed > self.budget || cancelled {
+        if over.is_some() || cancelled {
             return Err(Killed {
                 cancelled,
                 label: self.label,
                 path: self.path.clone(),
-                elapsed,
+                elapsed: over.unwrap_or_else(|| self.started.elapsed()),
                 budget: self.budget,
             });
         }

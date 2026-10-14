@@ -36,11 +36,44 @@ fn is_memory_limit_exceeded(message: &str) -> bool {
     message.contains("MEMORY_LIMIT_EXCEEDED")
 }
 
-impl CircuitBreakableError for ClickHouseError {
-    fn is_transient(&self) -> bool {
+const SERVER_OVERLOAD_CODES: [&str; 2] = ["TOO_MANY_PARTS", "TOO_MANY_SIMULTANEOUS_QUERIES"];
+
+// Only the server-wide memory tracker adds `current RSS` to MEMORY_LIMIT_EXCEEDED.
+// A query or user limit ("Query memory limit exceeded") is the caller's problem.
+fn is_server_memory_limit(message: &str) -> bool {
+    is_memory_limit_exceeded(message) && message.contains("current RSS")
+}
+
+fn is_server_overload_message(message: &str) -> bool {
+    is_server_memory_limit(message)
+        || SERVER_OVERLOAD_CODES
+            .iter()
+            .any(|code| message.contains(code))
+}
+
+fn is_server_unavailable(error: &clickhouse::error::Error) -> bool {
+    match error {
+        clickhouse::error::Error::Network(_) => true,
+        clickhouse::error::Error::BadResponse(message) => is_server_overload_message(message),
+        _ => false,
+    }
+}
+
+impl ClickHouseError {
+    pub(crate) fn is_retryable(&self) -> bool {
         match self {
             Self::Query(inner) | Self::Insert(inner) => is_clickhouse_error_transient(inner),
             Self::BadResponse { status, .. } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+impl CircuitBreakableError for ClickHouseError {
+    fn is_transient(&self) -> bool {
+        match self {
+            Self::Query(inner) | Self::Insert(inner) => is_server_unavailable(inner),
+            Self::BadResponse { body, .. } => is_server_overload_message(body),
             _ => false,
         }
     }

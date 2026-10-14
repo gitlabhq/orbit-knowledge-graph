@@ -19,14 +19,7 @@ use orbit_utils::traversal_path::TraversalPath;
 
 #[tokio::test]
 async fn incremental_flag_indexes_archives_and_replaces_stale_definitions() {
-    use orbit_server_config::features::{Feature, FeatureScope, FeaturesConfig};
-    orbit_server_config::features::init(FeaturesConfig::from_iter([(
-        Feature::CodeGraphIncremental,
-        FeatureScope {
-            enabled: true,
-            namespaces: vec![2790],
-        },
-    )]));
+    enable_incremental("1/2790/");
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
         *integration_testkit::GRAPH_SCHEMA_SQL,
@@ -96,19 +89,12 @@ async fn incremental_flag_indexes_archives_and_replaces_stale_definitions() {
 async fn incremental_flag_records_language_timing_metrics() {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
-    use orbit_server_config::features::{Feature, FeatureScope, FeaturesConfig};
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder()
         .with_reader(PeriodicReader::builder(exporter.clone()).build())
         .build();
     opentelemetry::global::set_meter_provider(provider.clone());
-    orbit_server_config::features::init(FeaturesConfig::from_iter([(
-        Feature::CodeGraphIncremental,
-        FeatureScope {
-            enabled: true,
-            namespaces: vec![2801],
-        },
-    )]));
+    enable_incremental("1/2801/");
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
         *integration_testkit::GRAPH_SCHEMA_SQL,
@@ -160,6 +146,41 @@ async fn incremental_flag_records_language_timing_metrics() {
     assert_eq!(
         by_language("gkg.indexer.code.language.bytes"),
         BTreeMap::from([("python".to_string(), 55), ("javascript".to_string(), 27)])
+    );
+}
+
+#[tokio::test]
+async fn incremental_flag_dead_letters_an_export_the_ontology_cannot_map() {
+    enable_incremental("1/2802/");
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(2802, "main", &[("src/main.py", "def f():\n    pass\n")]);
+    let deps = CodeIndexingDeps::new_with_ontology(
+        &mock,
+        &clickhouse,
+        indexer::testkit::test_pipeline_configuration(),
+        ontology::Ontology::new(),
+    );
+    let result = deps
+        .code_indexing_task_handler()
+        .handle(
+            handler_context(),
+            code_indexing_task_envelope(2802, "first", 1, "1/2802/"),
+        )
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(indexer::handler::HandlerError::Permanent {
+                action: indexer::handler::PermanentAction::DeadLetter,
+                ..
+            })
+        ),
+        "got {result:?}"
     );
 }
 
@@ -682,7 +703,7 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
     )
     .await;
 
-    let graph_client = Arc::new(clickhouse.config.build_client());
+    let graph_client = Arc::new(clickhouse.config.build_client("graph"));
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
     let cleaner = ClickHouseStaleDataCleaner::new(graph_client, &table_names);
@@ -1521,16 +1542,14 @@ async fn insert_stale_canary_file(
 }
 
 fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
-    Arc::new(
-        indexer::clickhouse::ClickHouseWriter::new(
-            orbit_server_config::ClickHouseConfiguration {
-                url: "http://127.0.0.1:1".into(),
-                ..orbit_server_config::AppConfig::embedded_defaults().graph
-            },
-            Arc::new(indexer::metrics::EngineMetrics::new()),
-        )
-        .expect("config is valid"),
-    )
+    Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+        orbit_server_config::ClickHouseConfiguration {
+            url: "http://127.0.0.1:1".into(),
+            ..orbit_server_config::AppConfig::embedded_defaults().graph
+        }
+        .build_client("graph"),
+        Arc::new(indexer::metrics::EngineMetrics::new()),
+    ))
 }
 
 async fn latest_checkpoint_task_id(
@@ -1894,8 +1913,10 @@ async fn assert_branch_indexed(
     .await;
 }
 
-#[tokio::test]
-async fn timed_out_job_writes_no_data() {
+async fn timed_out_job_writes_no_data(incremental: bool) {
+    if incremental {
+        enable_incremental("99/99/");
+    }
     let project_id: i64 = 99;
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -1955,8 +1976,10 @@ async fn timed_out_job_writes_no_data() {
     }
 }
 
-#[tokio::test]
-async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
+async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it(incremental: bool) {
+    if incremental {
+        enable_incremental("4242/4242/");
+    }
     let project_id: i64 = 4242;
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -1991,8 +2014,10 @@ async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
     );
 }
 
-#[tokio::test]
-async fn disk_is_clean_after_a_timed_out_job() {
+async fn disk_is_clean_after_a_timed_out_job(incremental: bool) {
+    if incremental {
+        enable_incremental("991/991/");
+    }
     let project_id: i64 = 991;
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -2030,8 +2055,10 @@ async fn disk_is_clean_after_a_timed_out_job() {
     );
 }
 
-#[tokio::test]
-async fn cancelled_run_that_finishes_writes_no_checkpoint() {
+async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
+    if incremental {
+        enable_incremental("993/993/");
+    }
     let project_id: i64 = 993;
     let traversal_path = "993/993/";
     let clickhouse = integration_testkit::TestContext::new(&[
@@ -2093,4 +2120,11 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
         None,
         "a cancelled run must not write a checkpoint"
     );
+}
+
+both_engines! {
+    timed_out_job_writes_no_data,
+    heartbeat_keeps_a_slow_job_alive_and_indexes_it,
+    disk_is_clean_after_a_timed_out_job,
+    cancelled_run_that_finishes_writes_no_checkpoint,
 }

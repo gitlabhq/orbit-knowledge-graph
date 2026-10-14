@@ -89,6 +89,7 @@ pub struct DenormalizedProperty {
     pub edge_column: String,
     pub tag_key: String,
     pub relationships: Vec<RelationshipId>,
+    pub nullable: bool,
 }
 
 #[derive(Debug, Clone, Default)]

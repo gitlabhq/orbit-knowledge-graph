@@ -1,7 +1,9 @@
 use pest::Span;
 use serde_json::Value;
 
-use crate::input::{Direction, FilterOp, OrderDirection, PropertyRef, TruncateUnit};
+use crate::input::{
+    BooleanExpression, Direction, FilterOp, OrderDirection, PropertyRef, TruncateUnit,
+};
 
 pub(super) enum Statement<'i> {
     Query(Box<Query<'i>>),
@@ -10,7 +12,7 @@ pub(super) enum Statement<'i> {
 
 pub(super) struct Query<'i> {
     pub pattern: Pattern<'i>,
-    pub predicates: Vec<Comparison<'i>>,
+    pub predicates: Vec<BooleanExpression<Predicate<'i>>>,
     pub projections: Projections<'i>,
     pub order: Option<Sort<'i>>,
     pub limit: Option<Limit<'i>>,
@@ -91,6 +93,16 @@ pub(super) struct Range<'i> {
     pub end: Option<u32>,
 }
 
+pub(super) enum Predicate<'i> {
+    Comparison(Box<Comparison<'i>>),
+    RelationshipType {
+        span: Span<'i>,
+        variable: Name<'i>,
+        op: FilterOp,
+        value: Option<Value>,
+    },
+}
+
 pub(super) struct Comparison<'i> {
     pub span: Span<'i>,
     pub property: Property<'i>,
@@ -126,6 +138,10 @@ pub(super) enum Expression<'i> {
         span: Span<'i>,
         variable: Name<'i>,
     },
+    RelationshipType {
+        span: Span<'i>,
+        variable: Name<'i>,
+    },
     Node {
         span: Span<'i>,
         variable: Name<'i>,
@@ -151,6 +167,12 @@ pub(super) enum AggregateFunction {
 
 pub(super) struct Sort<'i> {
     pub span: Span<'i>,
-    pub key: Target<'i>,
+    pub key: SortKey<'i>,
     pub direction: OrderDirection,
+}
+
+pub(super) enum SortKey<'i> {
+    Property(Property<'i>),
+    Variable(Name<'i>),
+    RelationshipType(Name<'i>),
 }

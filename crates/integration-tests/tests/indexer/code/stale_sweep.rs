@@ -285,11 +285,11 @@ fn build_sweep(
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
     let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-        clickhouse.config.build_client(),
+        clickhouse.config.build_client("graph"),
     )));
     (
         CodeStaleSweep::new(
-            clickhouse.config.build_client(),
+            clickhouse.config.build_client("graph"),
             &table_names,
             store.clone(),
             sweeps_per_tick,

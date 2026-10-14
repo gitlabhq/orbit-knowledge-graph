@@ -453,6 +453,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                                 edge_column,
                                 tag_key: tag_key.clone(),
                                 enum_values: enum_values.clone(),
+                                nullable: field.nullable,
                             },
                         );
                     }

@@ -17,7 +17,7 @@ use ontology::EtlScope;
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
-use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::clickhouse::ClickHouseClients;
 
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
@@ -46,6 +46,7 @@ pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    clients: &ClickHouseClients,
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
@@ -53,8 +54,8 @@ pub async fn register_handlers(
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
-    let datalake_client = Arc::new(config.datalake.build_client());
-    let graph_client = Arc::new(config.graph.build_client());
+    let datalake_client = Arc::new(clients.datalake.clone());
+    let graph_client = Arc::new(clients.graph.clone());
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(datalake_client));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =

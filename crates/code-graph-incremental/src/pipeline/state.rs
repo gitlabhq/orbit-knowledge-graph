@@ -348,9 +348,8 @@ impl State {
         }
         let mut buf = rkyv::util::AlignedVec::new();
         let header: Header = read_frame(&mut input, &mut buf)?;
-        let limits = Limits::load().map_err(io::Error::other)?;
-        let env =
-            Env::with_lang(lang_id, Lang::from(header.lang), limits).map_err(io::Error::other)?;
+        let env = Env::with_lang(lang_id, Lang::from(header.lang), Limits::UNLIMITED)
+            .map_err(io::Error::other)?;
         let mut trees = Vec::with_capacity(header.trees as usize);
         for _ in 0..header.trees {
             let tree: TreeSnapshot = read_frame(&mut input, &mut buf)?;

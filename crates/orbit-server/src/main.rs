@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
                 include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
             )?;
 
-            let graph = config.graph.build_client();
+            let graph = config.graph.build_client("graph");
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
@@ -155,9 +155,10 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
+    let graph = config.graph.build_client("graph");
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
-        Some(config.graph.build_client()),
+        Some(graph.clone()),
         Some(gitlab_client.clone()),
     )
     .into_arc();
@@ -182,7 +183,7 @@ async fn run_webserver(
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
     ActiveSchema::spawn(
         &active_schema,
-        Arc::new(config.graph.build_client()),
+        Arc::new(graph.clone()),
         archive,
         catalog,
         config,
@@ -199,7 +200,7 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         validator,
         active_schema,
-        &config.graph,
+        graph,
         cluster_health,
         tls_config,
         config.grpc.clone(),

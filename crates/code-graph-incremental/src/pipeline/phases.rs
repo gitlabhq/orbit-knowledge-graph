@@ -1,7 +1,7 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -10,7 +10,7 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase, Labelled,
     LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
     Workset,
 };
@@ -200,7 +200,6 @@ where
             })
             .collect();
         context.run.check()?;
-        let phase_name = self.0.name();
         let mut items = Vec::with_capacity(outcomes.len());
         for outcome in outcomes {
             let (outcome, path, bytes, elapsed) = match outcome {
@@ -210,16 +209,23 @@ where
                     continue;
                 }
             };
-            context.report.files.push(FileTiming {
-                path,
-                phase: phase_name.to_string(),
-                language: env.lang_id,
-                bytes,
-                elapsed,
-            });
             match outcome {
-                Ok(v) => items.push(v),
-                Err(k) => context.skip(k),
+                Ok(v) => {
+                    let stats = context.report.files.entry(path).or_insert(FileStats {
+                        language: env.lang_id,
+                        bytes: 0,
+                        parse: Duration::ZERO,
+                        resolve: Duration::ZERO,
+                    });
+                    stats.bytes += bytes;
+                    stats.parse += elapsed;
+                    items.push(v);
+                }
+                Err(k) => {
+                    // Guard: a killed file must not keep an entry from an earlier phase.
+                    context.report.files.remove(&path);
+                    context.skip(k);
+                }
             }
         }
         context.report.unread_files.sort_unstable();
@@ -279,7 +285,9 @@ impl ItemPhase<SourceFile> for Parse {
 
     fn run(&self, env: &Env, run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
-        let budget = run.child("tree-sitter", &file.path, env.limits.file_parse_ms);
+        let budget = run
+            .child("tree-sitter", &file.path, env.limits.file_parse_ms)
+            .on_thread_cpu();
         treesitter::parse_with_sentinel(&file.content, grammar, &env.lang, &file.path, &budget)
             .map(Parsed)
     }
@@ -301,7 +309,8 @@ impl ItemPhase<Parsed> for Rewrite {
         run: &Sentinel,
         Parsed(mut tree): Parsed,
     ) -> Result<Rewritten, Killed> {
-        let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
+        let budget =
+            Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms).on_thread_cpu();
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
@@ -443,8 +452,10 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
 }
 
 /// Cross-file resolution over the dirty files. A file that overruns its
-/// resolve budget keeps its intra-file edges and is reported. Manifest files
-/// join the project tree so the resolver can read module roots from them.
+/// resolve budget keeps its intra-file edges and is reported. A family that
+/// overruns keeps the edges resolved so far, is reported, and resolves in
+/// full on the next run. Manifest files join the project tree so the
+/// resolver can read module roots from them.
 pub struct Resolve;
 
 impl Phase<DirtyGraph> for Resolve {
@@ -492,50 +503,29 @@ impl Phase<DirtyGraph> for Resolve {
             &walk.entrypoints,
             env,
             &resolve_budget,
-        );
+        )?;
         context.run.check()?;
-        let result = match result {
-            Ok(result) => result,
-            Err(killed) if killed.cancelled => return Err(killed.into()),
-            Err(killed) => {
-                state.edges.retain(|edge| edge.from_tree == edge.to_tree);
-                for edge in &mut state.edges {
-                    if edge.kind == crate::tree::EdgeKind::Imports
-                        && edge.call_resolution != crate::tree::CallResolution::Reference
-                    {
-                        edge.call_resolution = crate::tree::CallResolution::Unknown;
-                    }
-                }
-                state.resolver = crate::resolver::Resolver::new(&env.lang);
-                context.skip(killed);
-                return Ok(Resolved { state });
-            }
-        };
         for rsp in &result.resolved_source_paths {
             state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
-        context.report.files.extend(
-            result
-                .file_timings
-                .into_iter()
-                .filter(|(fi, _)| {
-                    SupportLang::from_path(&state.trees[*fi as usize].label)
-                        .is_some_and(|lang| context.env.in_family(lang))
-                })
-                .map(|(fi, elapsed)| FileTiming {
-                    path: state.trees[fi as usize].label.clone(),
-                    phase: "resolve".to_string(),
-                    language: context.env.lang_id,
-                    bytes: 0,
-                    elapsed,
-                }),
-        );
+        // Only files parsed in this run have an entry.
+        let mut resolved = Vec::with_capacity(result.file_timings.len());
+        for (fi, elapsed) in result.file_timings {
+            resolved.push(fi);
+            if let Some(stats) = context
+                .report
+                .files
+                .get_mut(state.trees[fi as usize].label.as_str())
+            {
+                stats.resolve += elapsed;
+            }
+        }
         for k in result.killed {
             context.skip(k);
         }
-        Ok(Resolved { state })
+        Ok(Resolved { state, resolved })
     }
 }
 
@@ -552,7 +542,7 @@ impl Phase<Resolved> for Display {
     fn run(
         self,
         context: &mut Context,
-        Resolved { mut state }: Resolved,
+        Resolved { mut state, .. }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);

@@ -68,6 +68,7 @@ pub struct DirtyGraph {
 
 pub struct Resolved {
     pub state: State,
+    pub resolved: Vec<u32>,
 }
 
 pub struct Displayed {

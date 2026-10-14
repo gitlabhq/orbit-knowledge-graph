@@ -1,10 +1,18 @@
 use std::collections::BTreeMap;
 
 use ontology::Ontology;
-use ontology::migrations::sha256_hex;
+use ontology::migrations::{Fingerprints, sha256_hex, source_fingerprints};
 use query_data_model::DataModelError;
 
 use crate::schema::{GraphSchema, translate};
+
+pub fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints, DataModelError> {
+    Ok(Fingerprints {
+        sources: source_fingerprints(),
+        ddl: ddl_fingerprints(ontology)?,
+        auxiliary_schema: auxiliary_schema_fingerprints(ontology)?,
+    })
+}
 
 pub fn ddl_fingerprints(ontology: &Ontology) -> Result<BTreeMap<String, String>, DataModelError> {
     let schema = GraphSchema::from_ontology(ontology)?;
