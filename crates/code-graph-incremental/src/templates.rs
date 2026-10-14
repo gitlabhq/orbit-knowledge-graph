@@ -89,28 +89,30 @@ pub fn repository<E: std::fmt::Display>(
     }
     let mut result = Report::default();
     if families.is_empty() {
-        let lang = crate::intern::Lang::new();
-        let trees: Vec<_> = repository
-            .files()
-            .map(|file| {
-                let reason = match file.decision() {
-                    orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
-                    _ => String::new(),
-                };
-                crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
-            })
-            .collect();
-        let mut plan = crate::export::ExportPlan::from_config(export_config, ontology, &lang)?;
-        plan.batch_bytes = options.batch_bytes;
-        emit(crate::export::export(
-            &trees,
-            &[],
-            &lang,
-            &plan,
-            envelope,
-            true,
-            &|_| true,
-        )?)?;
+        on_worker_pool("none", 1, || {
+            let lang = crate::intern::Lang::new();
+            let trees: Vec<_> = repository
+                .files()
+                .map(|file| {
+                    let reason = match file.decision() {
+                        orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
+                        _ => String::new(),
+                    };
+                    crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
+                })
+                .collect();
+            let mut plan = crate::export::ExportPlan::from_config(export_config, ontology, &lang)?;
+            plan.batch_bytes = options.batch_bytes;
+            emit(crate::export::export(
+                &trees,
+                &[],
+                &lang,
+                &plan,
+                envelope,
+                true,
+                &|_| true,
+            )?)
+        })?;
         return Ok(result);
     }
     let first = *families.first_key_value().expect("nonempty families").0;
@@ -144,54 +146,36 @@ pub fn repository<E: std::fmt::Display>(
                     worker_threads
                 };
                 scope.spawn(move || {
-                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                        || -> Result<_, Error> {
-                            run.check()?;
-                            let pool = rayon::ThreadPoolBuilder::new()
-                                .num_threads(family_threads)
-                                .stack_size(WORKER_STACK_BYTES)
-                                .build()
-                                .map_err(|error| LoadError::new(error.to_string()))?;
-                            pool.install(|| {
-                                let (report, batches) = {
-                                    let mut env = Env::with_limits(language, limits)?;
-                                    env.export_config = export_config.clone();
-                                    let mut context = Context::new(&env, repository.clone());
-                                    context.run = run.clone();
-                                    let (context, graph) = index(context)?.then(Display)?.finish();
-                                    let mut report = context.report;
-                                    report.unread_files.retain(|path| owns(family, path));
-                                    run.check()?;
-                                    let mut plan = crate::export::ExportPlan::from_config(
-                                        &env.export_config,
-                                        ontology,
-                                        &env.lang,
-                                    )?;
-                                    plan.batch_bytes = options.batch_bytes;
-                                    let batches = crate::export::export(
-                                        &graph.state.trees,
-                                        &graph.state.edges,
-                                        &env.lang,
-                                        &plan,
-                                        envelope,
-                                        family == first,
-                                        &|path| owns(family, path),
-                                    )?;
-                                    (report, batches)
-                                };
-                                emit(batches)?;
-                                Ok(report)
-                            })
-                        },
-                    ))
-                    .unwrap_or_else(|payload| {
-                        Err(Error::Panic {
-                            family,
-                            message: payload
-                                .downcast_ref::<&str>()
-                                .map(|message| message.to_string())
-                                .or_else(|| payload.downcast_ref::<String>().cloned())
-                                .unwrap_or_default(),
+                    let outcome = run.check().map_err(Error::from).and_then(|()| {
+                        on_worker_pool(family, family_threads, || {
+                            let (report, batches) = {
+                                let mut env = Env::with_limits(language, limits)?;
+                                env.export_config = export_config.clone();
+                                let mut context = Context::new(&env, repository.clone());
+                                context.run = run.clone();
+                                let (context, graph) = index(context)?.then(Display)?.finish();
+                                let mut report = context.report;
+                                report.unread_files.retain(|path| owns(family, path));
+                                run.check()?;
+                                let mut plan = crate::export::ExportPlan::from_config(
+                                    &env.export_config,
+                                    ontology,
+                                    &env.lang,
+                                )?;
+                                plan.batch_bytes = options.batch_bytes;
+                                let batches = crate::export::export(
+                                    &graph.state.trees,
+                                    &graph.state.edges,
+                                    &env.lang,
+                                    &plan,
+                                    envelope,
+                                    family == first,
+                                    &|path| owns(family, path),
+                                )?;
+                                (report, batches)
+                            };
+                            emit(batches)?;
+                            Ok(report)
                         })
                     });
                     let _ = sender.send(outcome);
@@ -217,4 +201,29 @@ pub fn repository<E: std::fmt::Display>(
         Ok(())
     })?;
     Ok(result)
+}
+
+fn on_worker_pool<T: Send>(
+    family: &'static str,
+    threads: usize,
+    work: impl FnOnce() -> Result<T, Error> + Send,
+) -> Result<T, Error> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .stack_size(WORKER_STACK_BYTES)
+            .build()
+            .map_err(|error| LoadError::new(error.to_string()))?
+            .install(work)
+    }))
+    .unwrap_or_else(|payload| {
+        Err(Error::Panic {
+            family,
+            message: payload
+                .downcast_ref::<&str>()
+                .map(|message| message.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_default(),
+        })
+    })
 }

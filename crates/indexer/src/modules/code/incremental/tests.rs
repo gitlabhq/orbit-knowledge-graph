@@ -523,6 +523,25 @@ async fn a_family_panic_is_a_fatal_error() {
 }
 
 #[tokio::test]
+async fn a_panic_without_a_parsed_family_is_a_fatal_error() {
+    let report = IndexFixture::new()
+        .run(
+            &[("root/notes.txt", b"notes")],
+            options(),
+            Arc::new(|_, _| panic!("sink panicked")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.errors.len(), 1);
+    assert!(report.errors[0].fatal);
+    assert!(
+        report.errors[0].to_string().contains("panic"),
+        "{}",
+        report.errors[0]
+    );
+}
+
+#[tokio::test]
 async fn cancelled_run_emits_no_batches_and_no_errors() {
     let mut options = options();
     options.cancelled = Arc::new(|| true);
