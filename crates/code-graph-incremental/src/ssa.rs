@@ -480,68 +480,47 @@ fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let mut indices = vec![usize::MAX; n];
     let mut lowlinks = vec![0usize; n];
     let mut result = Vec::new();
+    let mut calls: Vec<(usize, usize)> = Vec::new();
 
-    #[allow(clippy::too_many_arguments)]
-    fn strongconnect(
-        v: usize,
-        adj: &[Vec<usize>],
-        index_counter: &mut usize,
-        stack: &mut Vec<usize>,
-        on_stack: &mut [bool],
-        indices: &mut [usize],
-        lowlinks: &mut [usize],
-        result: &mut Vec<Vec<usize>>,
-    ) {
-        indices[v] = *index_counter;
-        lowlinks[v] = *index_counter;
-        *index_counter += 1;
-        stack.push(v);
-        on_stack[v] = true;
-
-        for &w in &adj[v] {
-            if indices[w] == usize::MAX {
-                strongconnect(
-                    w,
-                    adj,
-                    index_counter,
-                    stack,
-                    on_stack,
-                    indices,
-                    lowlinks,
-                    result,
-                );
-                lowlinks[v] = lowlinks[v].min(lowlinks[w]);
-            } else if on_stack[w] {
-                lowlinks[v] = lowlinks[v].min(indices[w]);
-            }
+    for root in 0..n {
+        if indices[root] != usize::MAX {
+            continue;
         }
-
-        if lowlinks[v] == indices[v] {
-            let mut scc = Vec::new();
-            loop {
-                let w = stack.pop().expect("scc stack holds the current node");
-                on_stack[w] = false;
-                scc.push(w);
-                if w == v {
-                    break;
+        calls.push((root, 0));
+        while let Some((v, edge)) = calls.last_mut() {
+            let v = *v;
+            if indices[v] == usize::MAX {
+                indices[v] = index_counter;
+                lowlinks[v] = index_counter;
+                index_counter += 1;
+                stack.push(v);
+                on_stack[v] = true;
+            }
+            if let Some(&w) = adj[v].get(*edge) {
+                *edge += 1;
+                if indices[w] == usize::MAX {
+                    calls.push((w, 0));
+                } else if on_stack[w] {
+                    lowlinks[v] = lowlinks[v].min(indices[w]);
                 }
+                continue;
             }
-            result.push(scc);
-        }
-    }
-
-    for v in 0..n {
-        if indices[v] == usize::MAX {
-            strongconnect(
-                v,
-                adj,
-                &mut index_counter,
-                &mut stack,
-                &mut on_stack,
-                &mut indices,
-                &mut lowlinks,
-                &mut result,
-            );
+            calls.pop();
+            if let Some(&(caller, _)) = calls.last() {
+                lowlinks[caller] = lowlinks[caller].min(lowlinks[v]);
+            }
+            if lowlinks[v] == indices[v] {
+                let mut scc = Vec::new();
+                loop {
+                    let w = stack.pop().expect("scc stack holds the current node");
+                    on_stack[w] = false;
+                    scc.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                result.push(scc);
+            }
         }
     }
     result
@@ -699,6 +678,20 @@ mod tests {
         ssa.remove_redundant_phi_sccs();
         let result = ssa.read_variable(1, exit);
         assert_eq!(result, vec![Value::LocalDef(0)]);
+    }
+
+    #[test]
+    fn scc_search_on_a_long_phi_cycle_fits_a_small_stack() {
+        let n = 100_000;
+        let adj: Vec<Vec<usize>> = (0..n).map(|v| vec![(v + 1) % n]).collect();
+        let sccs = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || tarjan_scc(&adj))
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0].len(), n);
     }
 
     #[test]
