@@ -36,6 +36,44 @@ pub struct QueryOptions {
     pub include_debug_sql: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RelationshipReturn {
+    pub columns: Vec<RelationshipColumn>,
+    pub column_order: Vec<String>,
+    pub sort: Option<RelationshipOrder>,
+}
+
+impl RelationshipReturn {
+    pub fn uses(&self, relationship: usize) -> bool {
+        self.columns
+            .iter()
+            .any(|column| column.relationship == relationship)
+            || self
+                .sort
+                .as_ref()
+                .is_some_and(|sort| sort.relationship == relationship)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipColumn {
+    pub name: String,
+    pub relationship: usize,
+    pub kind: RelationshipColumnKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationshipColumnKind {
+    Type,
+    Relationship,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipOrder {
+    pub relationship: usize,
+    pub direction: OrderDirection,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
@@ -55,6 +93,8 @@ pub struct Input {
     pub options: QueryOptions,
     #[serde(skip)]
     pub predicates: Vec<BooleanExpression<Condition>>,
+    #[serde(skip)]
+    pub relationship_return: RelationshipReturn,
 }
 
 impl Input {
@@ -87,6 +127,7 @@ impl Default for Input {
             order_by: None,
             options: QueryOptions::default(),
             predicates: Vec::new(),
+            relationship_return: RelationshipReturn::default(),
         }
     }
 }

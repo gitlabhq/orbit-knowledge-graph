@@ -66,6 +66,9 @@ Write `NOT x.state IN [...]`, not `x.state NOT IN [...]`. Supported forms:
   `branch`. The server folds ASCII letters only, so `STARTS WITH 'ÄRG'` does
   not match `ärger` there. Local queries fold Unicode and do match.
 - Nulls: `IS NULL`, `IS NOT NULL`.
+- Relationship types on a one-hop `r`: `type(r) = 'CLOSES'`, `type(r) IN [...]`,
+  and `NOT type(r) = 'CLOSES'`. A `type(r)` condition that can never match
+  rejects instead of returning zero rows.
 
 Values are literals. There are no query parameters, so never splice untrusted
 text into a query.
@@ -117,9 +120,8 @@ window is incomplete. Do not report the returned rows as a complete list.
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
 subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
-Other function calls, such as `type(r)` or `collect(x)`, reject with an error
-that names the function. For relationship types, match a typed relationship
-such as `-[r:CLOSES]->`. The response lists each edge type under `@edges`.
+Other function calls, such as `collect(x)`, reject with an error that names
+the function.
 
 ## Recipes
 

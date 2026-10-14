@@ -364,6 +364,8 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
+| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
+| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 **Aggregation:**
 

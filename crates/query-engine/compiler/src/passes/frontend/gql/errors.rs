@@ -79,11 +79,13 @@ fn rule_label(rule: &Rule) -> String {
         | Rule::NotExpression
         | Rule::ParenthesizedExpression
         | Rule::ComparisonExpression
-        | Rule::TokenPredicate => "a condition",
+        | Rule::TokenPredicate
+        | Rule::TypePredicate => "a condition",
         Rule::Negation => "NOT",
         Rule::Not => "NULL or NOT NULL",
         Rule::UnsupportedBooleanOperator => "AND",
         Rule::TokenFunction => "token_match, all_tokens, or any_tokens",
+        Rule::RelationshipType => "type(r)",
         Rule::ComparisonOperator => "a comparison operator",
         Rule::StringOperator => "STARTS WITH, ENDS WITH, or CONTAINS",
         Rule::InOperator | Rule::NegatedInOperator => "IN",
