@@ -21,23 +21,13 @@ Core tasks:
 
 | Task | Command |
 |---|---|
-| Build (`dev` profile) | `mise build` |
-| Build (`release` profile) | `mise build:release` |
+| Build | `mise build` |
 | Unit tests (no Docker) | `mise test:fast` |
 | Lint | `mise lint:code` |
 | Apply lint fixes | `mise lint:code:fix` |
 | Validate doc changes | `mise lint:docs` |
 
 For the full local setup (GDK, ClickHouse, NATS), see [Local development](docs/dev/local-development.md).
-
-### Build speed
-
-The `dev` profile compiles dependencies without debug information. Workspace crates keep line tables, so backtraces show file and line. `mise test:fast` reuses the dependencies that `mise build` compiled.
-
-- Local `mise` sessions compile through `sccache`. After `cargo clean` or a deleted `target/`, the next build in the same checkout takes about one minute instead of four. To turn it off, export `RUSTC_WRAPPER=`.
-- To debug with full symbols, add `--config 'profile.dev.debug=true' --config 'profile.dev.package."*".debug=true'` to the `cargo` command.
-- To generate synthetic data, use `cargo synth`. The `synth` profile optimizes Arrow, Parquet, and `zstd`, and the `dev` profile does not.
-- On macOS, add your terminal to **System Settings > Privacy & Security > Developer Tools**. Otherwise, macOS malware scanning (`XProtect`) checks each new build script and test binary before it runs. See [Faster Rust builds on Mac](https://nnethercote.github.io/2025/09/04/faster-rust-builds-on-mac.html).
 
 ## Testing
 
