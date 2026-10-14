@@ -31,6 +31,7 @@ orbit-utils = { path = "../utils" }
 orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
+indexer-datafusion = { path = "../indexer-datafusion" }
 orbit-migrations = { path = "../orbit-migrations" }
 minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }

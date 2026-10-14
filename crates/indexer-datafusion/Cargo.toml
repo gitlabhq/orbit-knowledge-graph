@@ -1,0 +1,15 @@
+[package]
+name = "indexer-datafusion"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+datafusion = { workspace = true }
+indexer = { path = "../indexer" }
+orbit-utils = { path = "../utils" }
+
+[lints]
+workspace = true

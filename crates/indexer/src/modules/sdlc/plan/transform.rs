@@ -39,7 +39,7 @@ pub(in crate::modules::sdlc) enum TransformSpec {
 }
 
 #[derive(Debug, Clone)]
-pub(in crate::modules::sdlc) struct Transformation {
+pub struct Transformation {
     pub sql: String,
     pub destination_table: String,
     pub dict_encode_columns: HashSet<String>,

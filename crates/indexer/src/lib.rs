@@ -81,6 +81,7 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
+    sql_transform: modules::sdlc::SqlTransformFactory,
 ) -> Result<(), IndexerError> {
     let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
@@ -162,6 +163,7 @@ pub async fn run(
             writer.clone(),
             analytics.clone(),
             modules::sdlc::PARTITION_MIN_ROWS,
+            sql_transform,
         )
         .await?;
     } else {

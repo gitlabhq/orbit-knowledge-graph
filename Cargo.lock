@@ -3941,7 +3941,6 @@ dependencies = [
  "clickhouse-client",
  "code-graph",
  "code-graph-incremental",
- "datafusion",
  "flate2",
  "futures",
  "gitaly-protos",
@@ -3978,6 +3977,17 @@ dependencies = [
  "tracing",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "indexer-datafusion"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "datafusion",
+ "indexer",
+ "orbit-utils",
 ]
 
 [[package]]
@@ -4119,6 +4129,7 @@ dependencies = [
  "gitlab-client",
  "health-check",
  "indexer",
+ "indexer-datafusion",
  "integration-testkit",
  "jsonschema",
  "jsonwebtoken",
@@ -5693,6 +5704,7 @@ dependencies = [
  "gitlab-client",
  "health-check",
  "indexer",
+ "indexer-datafusion",
  "jsonschema",
  "jsonwebtoken",
  "labkit",

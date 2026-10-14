@@ -4,9 +4,10 @@ mod transform;
 
 pub(in crate::modules::sdlc) use build::{Sizing, build_plans};
 pub(in crate::modules::sdlc) use extract::ExtractTemplate;
-pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec, Transformation};
+pub use transform::Transformation;
+pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec};
 
-pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
+pub const SOURCE_DATA_TABLE: &str = "source_data";
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};

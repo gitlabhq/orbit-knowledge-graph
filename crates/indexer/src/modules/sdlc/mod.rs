@@ -10,6 +10,9 @@ pub use partitioning::PARTITION_MIN_ROWS;
 mod plan;
 mod transform;
 
+pub use plan::{SOURCE_DATA_TABLE, Transformation};
+pub use transform::{BlockTransform, SqlTransformFactory, TableBatch};
+
 use std::sync::Arc;
 
 use ontology::EtlScope;
@@ -51,6 +54,7 @@ pub async fn register_handlers(
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     partition_min_rows: u64,
+    sql_transform: SqlTransformFactory,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
@@ -73,7 +77,7 @@ pub async fn register_handlers(
     )
     .map_err(HandlerInitError::new)?;
 
-    let mut transform_registry = transform::TransformRegistry::default();
+    let mut transform_registry = transform::TransformRegistry::new(sql_transform);
     transform::system_notes::register(
         &mut transform_registry,
         Arc::clone(&datalake),
@@ -82,15 +86,13 @@ pub async fn register_handlers(
     );
     let transform_registry = Arc::new(transform_registry);
 
-    let pipeline = Arc::new(
-        Pipeline::new(
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
-            metrics.clone(),
-            config.engine.datalake_retry.clone(),
-        )
-        .with_registry(Arc::clone(&transform_registry)),
-    );
+    let pipeline = Arc::new(Pipeline::new(
+        Arc::clone(&datalake),
+        Arc::clone(&checkpoint_store),
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+        Arc::clone(&transform_registry),
+    ));
 
     let global_policy = sdlc_dispatch_topic_policy()
         .with_optional_override(config.engine.topics.get(GLOBAL_HANDLER_TOPIC));

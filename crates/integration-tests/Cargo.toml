@@ -20,6 +20,7 @@ orbit-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
+indexer-datafusion = { path = "../indexer-datafusion" }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }

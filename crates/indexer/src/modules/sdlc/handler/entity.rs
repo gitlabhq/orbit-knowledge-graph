@@ -488,6 +488,7 @@ mod tests {
             Arc::clone(&checkpoint_store),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            crate::modules::sdlc::test_helpers::passthrough_registry(),
         ));
         let subscription = match scope {
             EtlScope::Global => GlobalIndexingRequest::subscription(),

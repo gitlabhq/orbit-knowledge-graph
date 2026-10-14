@@ -111,9 +111,15 @@ async fn main() -> anyhow::Result<()> {
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, serving, shutdown)
-                .await
-                .map_err(Into::into)
+            indexer::run(
+                &indexer_config,
+                ontology,
+                serving,
+                shutdown,
+                indexer_datafusion::sql_transform(),
+            )
+            .await
+            .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;

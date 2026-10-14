@@ -113,21 +113,15 @@ impl Pipeline {
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
+        registry: Arc<TransformRegistry>,
     ) -> Self {
         Self {
             datalake,
             checkpoint_store,
             metrics,
             retry_config,
-            registry: Arc::new(TransformRegistry::default()),
+            registry,
         }
-    }
-
-    /// Override the default (empty) registry with one carrying custom
-    /// transforms. `data_fusion` plans build inline and need no registry entry.
-    pub fn with_registry(mut self, registry: Arc<TransformRegistry>) -> Self {
-        self.registry = registry;
-        self
     }
 
     pub async fn run_plan(
@@ -457,7 +451,7 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::partitioning::PartitionAssignment;
-    use crate::modules::sdlc::test_helpers::test_metrics;
+    use crate::modules::sdlc::test_helpers::{passthrough_registry, test_metrics};
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
@@ -676,6 +670,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Test");
 
@@ -705,6 +700,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let result = pipeline
             .run_plan(
@@ -752,6 +748,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
 
         pipeline
@@ -811,6 +808,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         pipeline
             .run_plan(
@@ -838,6 +836,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Failing");
 
@@ -912,6 +911,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -950,6 +950,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1024,
             },
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -989,6 +990,7 @@ mod tests {
                 halving_initial_block_size: 4_096,
                 halving_min_block_size: 2_048,
             },
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -1069,6 +1071,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1_024,
             },
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -1104,6 +1107,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Test");
 
@@ -1184,6 +1188,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Test");
 
