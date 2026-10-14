@@ -1,4 +1,4 @@
-name: "Rust: deeply nested control flow and branch values link on the worker stack"
+name: "Rust: deeply nested control flow, branch values, and arguments link on the worker stack"
 fixtures:
   - path: Cargo.toml
     content: |
@@ -8,7 +8,7 @@ fixtures:
       edition = "2021"
   - path: src/lib.rs
     content:
-      - "fn target() {}\n\nfn nested_if(c: bool) {\n"
+      - "fn target() {}\n\nfn take(x: u8) {}\n\nfn nested_if(c: bool) {\n"
       - { repeat: 10000, text: "if c {\n" }
       - "fn innermost_if() {}\n"
       - { repeat: 10000, text: "}\n" }
@@ -18,7 +18,11 @@ fixtures:
       - { repeat: 10000, text: "loop {\n" }
       - "fn innermost_loop() {}\n"
       - { repeat: 10000, text: "}\n" }
-      - "target();\n}\n"
+      - "target();\n}\n\nfn parenthesized_argument() {\ntake(\n"
+      - { repeat: 50000, text: "(\n" }
+      - "1\n"
+      - { repeat: 50000, text: ")\n" }
+      - ");\n}\n"
 tests:
   - name: "each function calls its target after the nesting"
     query: |
@@ -39,3 +43,11 @@ tests:
       - { row_count: 2 }
       - { row: { owner: nested_if, nested: innermost_if } }
       - { row: { owner: nested_loop, nested: innermost_loop } }
+  - name: "a call with a deeply parenthesized argument reaches its target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'parenthesized_argument'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: take } }
