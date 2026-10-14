@@ -6,6 +6,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+const FRAMES_PER_BLOCK: usize = 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
 
@@ -25,6 +27,7 @@ pub enum Value {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 struct PhiNode {
     block: BlockId,
     variable: u32,
@@ -184,7 +187,9 @@ impl SsaEngine {
         {
             return value.clone();
         }
-        self.run(variable, Frame::Read(block))
+        let mut frames = std::mem::take(&mut self.frames);
+        let ret = self.descend(variable, block, &mut frames);
+        self.run(variable, frames, ret)
     }
 
     fn set(&mut self, variable: u32, block: BlockId, value: Value) {
@@ -194,11 +199,7 @@ impl SsaEngine {
             .insert(block, value);
     }
 
-    fn run(&mut self, variable: u32, start: Frame) -> Value {
-        let mut frames = std::mem::take(&mut self.frames);
-        frames.clear();
-        frames.push(start);
-        let mut ret: Option<Value> = None;
+    fn run(&mut self, variable: u32, mut frames: Vec<Frame>, mut ret: Option<Value>) -> Value {
         while let Some(frame) = frames.last_mut() {
             match frame {
                 Frame::Read(block) => {
@@ -289,10 +290,14 @@ impl SsaEngine {
         {
             return Some(value.clone());
         }
+        self.descend(variable, block, frames)
+    }
+
+    fn descend(&mut self, variable: u32, block: BlockId, frames: &mut Vec<Frame>) -> Option<Value> {
         if self.unsealed == 0 && !self.written.contains(&variable) {
             return Some(Value::Undefined);
         }
-        if frames.len() > 4 * self.blocks.len() + 4 {
+        if frames.len() > FRAMES_PER_BLOCK * (self.blocks.len() + 1) {
             return Some(Value::Opaque);
         }
         let node = &self.blocks[block.0 as usize];
@@ -343,13 +348,12 @@ impl SsaEngine {
     }
 
     fn add_phi_operands(&mut self, variable: u32, phi_id: PhiId) -> Value {
-        self.run(
-            variable,
-            Frame::Operands {
-                phi: phi_id,
-                next: 0,
-            },
-        )
+        let mut frames = std::mem::take(&mut self.frames);
+        frames.push(Frame::Operands {
+            phi: phi_id,
+            next: 0,
+        });
+        self.run(variable, frames, None)
     }
 
     fn add_operand(&mut self, phi_id: PhiId, val: Value) {
@@ -629,6 +633,12 @@ fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
 mod tests {
     use super::*;
 
+    const ORACLE_MAX_READ_DEPTH: usize = 1_000;
+
+    thread_local! {
+        static ORACLE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
     impl SsaEngine {
         fn oracle_seal_block(&mut self, block: BlockId) {
             if let Some(incomplete) = self.incomplete_phis.remove(&block) {
@@ -648,11 +658,16 @@ mod tests {
             {
                 return value.clone();
             }
-            // No unsealed block means no phi to create.
             if self.unsealed == 0 && !self.written.contains(&variable) {
                 return Value::Undefined;
             }
-            self.oracle_recursive(variable, block)
+            if ORACLE_DEPTH.get() >= ORACLE_MAX_READ_DEPTH {
+                return Value::Opaque;
+            }
+            ORACLE_DEPTH.set(ORACLE_DEPTH.get() + 1);
+            let val = self.oracle_recursive(variable, block);
+            ORACLE_DEPTH.set(ORACLE_DEPTH.get() - 1);
+            val
         }
 
         fn oracle_recursive(&mut self, variable: u32, block: BlockId) -> Value {
@@ -829,14 +844,20 @@ mod tests {
 
     fn random_cfg(seed: u64) -> (Vec<Vec<usize>>, Vec<Op>) {
         let mut state = seed | 1;
-        let n = 2 + (next(&mut state) % 40) as usize;
+        let spine = 2 + (next(&mut state) % 40) as usize;
+        let cycle = match next(&mut state) % 3 {
+            0 => 1 + (next(&mut state) % 4) as usize,
+            _ => 0,
+        };
+        let n = spine + cycle;
         let mut preds: Vec<Vec<usize>> = (0..n)
             .map(|i| match i {
                 0 => vec![],
+                _ if i >= spine => vec![spine + (i - spine + 1) % cycle],
                 _ => vec![(next(&mut state) % i as u64) as usize],
             })
             .collect();
-        for (i, block_preds) in preds.iter_mut().enumerate().skip(1) {
+        for (i, block_preds) in preds.iter_mut().enumerate().take(spine).skip(1) {
             match next(&mut state) % 6 {
                 0 => block_preds.push(i),
                 1 => block_preds.push((next(&mut state) % n as u64) as usize),
@@ -866,7 +887,15 @@ mod tests {
         (preds, ops)
     }
 
-    fn replay(preds: &[Vec<usize>], ops: &[Op], oracle: bool) -> (Vec<Vec<Value>>, usize) {
+    type Replay = (
+        Vec<Vec<Value>>,
+        Vec<PhiNode>,
+        Vec<SmallVec<[PhiId; 2]>>,
+        FxHashMap<u32, FxHashMap<BlockId, Value>>,
+        FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
+    );
+
+    fn replay(preds: &[Vec<usize>], ops: &[Op], oracle: bool) -> Replay {
         let mut ssa = SsaEngine::new();
         let ids: Vec<BlockId> = preds.iter().map(|_| ssa.add_block()).collect();
         for (i, block_preds) in preds.iter().enumerate() {
@@ -901,11 +930,26 @@ mod tests {
                 reads.push(read(&mut ssa, variable, id));
             }
         }
-        (reads, ssa.phis.len())
+        (
+            reads,
+            ssa.phis,
+            ssa.users,
+            ssa.current_def,
+            ssa.incomplete_phis,
+        )
     }
 
     #[test]
     fn iterative_reads_match_the_recursive_reads_on_random_cfgs() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(compare_random_cfgs)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn compare_random_cfgs() {
         for seed in 1..2_000u64 {
             let (preds, ops) = random_cfg(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
             assert_eq!(
