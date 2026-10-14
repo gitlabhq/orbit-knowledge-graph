@@ -15,6 +15,8 @@ use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
+const MAX_FIELD_COPIES: usize = 4_096;
+
 enum WorkItem {
     Visit(u32),
     ExitScope {
@@ -836,7 +838,12 @@ impl<'t> Fold<'t> {
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
+        let mut copied = 0;
         while let Some((target, sources)) = copies.pop() {
+            copied += 1;
+            if copied > MAX_FIELD_COPIES {
+                break;
+            }
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
                 return;
