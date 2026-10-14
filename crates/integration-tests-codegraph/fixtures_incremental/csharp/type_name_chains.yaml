@@ -1,0 +1,75 @@
+name: "C#: a property named like its type"
+
+fixtures:
+  - path: Src/ErrorContext.cs
+    content: |
+      namespace App;
+
+      public class ErrorContext
+      {
+          public void Handle() {}
+      }
+
+  - path: Src/ErrorEventArgs.cs
+    content: |
+      namespace App;
+
+      public class ErrorEventArgs
+      {
+          public ErrorContext ErrorContext { get; }
+
+          public void Report()
+          {
+              ErrorContext.Handle();
+              Target();
+          }
+
+          public void Target() {}
+      }
+
+  - path: Src/Brush.cs
+    content: |
+      using Paints;
+
+      namespace App;
+
+      public class Brush
+      {
+          public Color Color { get; }
+
+          public void Draw()
+          {
+              Color.Paint();
+          }
+      }
+
+  - path: Paints/Color.cs
+    content: |
+      namespace Paints;
+
+      public class Color
+      {
+          public void Paint() {}
+      }
+
+tests:
+  - name: "each property named like its type is a definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['ErrorContext', 'Color'] AND d.definition_type = 'Property'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: App.ErrorEventArgs.ErrorContext } }
+      - { row: { fqn: App.Brush.Color } }
+
+  - name: "a call on a property named like its type reaches the method of the type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['Report', 'Draw']
+      RETURN caller.name AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: Report, callee: App.ErrorContext.Handle } }
+      - { row: { caller: Report, callee: App.ErrorEventArgs.Target } }
+      - { row: { caller: Draw, callee: Paints.Color.Paint } }

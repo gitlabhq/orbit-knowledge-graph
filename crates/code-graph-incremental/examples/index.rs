@@ -33,6 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         batch_bytes: orbit_arrow::BATCH_BYTES,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| eprintln!("family finished")),
+        phase_started: Arc::new(|_, _, _| {}),
     };
     let selected_files =
         code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files).count();

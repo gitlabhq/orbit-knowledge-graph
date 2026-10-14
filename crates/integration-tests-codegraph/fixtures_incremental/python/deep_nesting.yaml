@@ -1,0 +1,33 @@
+name: "Python: deeply nested code links on the worker stack"
+
+fixtures:
+  - path: deep.py
+    content:
+      - "def target():\n    pass\n\n\ndef wrap(x):\n    return x\n\n\ndef inside_call():\n    wrap("
+      - { repeat: 10000, text: "wrap(" }
+      - "target()"
+      - { repeat: 10000, text: ")" }
+      - ")\n\n\ndef else_if(c):\n    if c:\n        pass\n"
+      - { repeat: 10000, text: "    elif c:\n        pass\n" }
+      - "    target()\n\n\ndef nested_call():\n    wrap("
+      - { repeat: 10000, text: "wrap(" }
+      - "0"
+      - { repeat: 10000, text: ")" }
+      - ")\n    target()\n\n\ndef nested_list():\n    x = "
+      - { repeat: 10000, text: "[" }
+      - "1"
+      - { repeat: 10000, text: "]" }
+      - "\n    target()\n\n\ndef nested_lambda():\n    f = "
+      - { repeat: 10000, text: "lambda: " }
+      - "0\n    target()\n"
+
+tests:
+  - name: "each function calls its target inside or after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - column_values:
+          field: caller
+          values: [inside_call, else_if, nested_call, nested_list, nested_lambda]

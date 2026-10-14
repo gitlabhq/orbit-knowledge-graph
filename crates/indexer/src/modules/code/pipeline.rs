@@ -199,6 +199,7 @@ pub(super) struct IndexingReport {
     pub stats: code_graph::v2::pipeline::PipelineStats,
     pub errors: Vec<code_graph::v2::pipeline::PipelineError>,
     pub skipped: Vec<code_graph::v2::error::SkippedFile>,
+    pub limited: Vec<code_graph::v2::error::SkippedFile>,
     pub faults: Vec<code_graph::v2::error::FaultedFile>,
 }
 
@@ -208,6 +209,7 @@ impl From<code_graph::v2::PipelineResult> for IndexingReport {
             stats: result.stats,
             errors: result.errors,
             skipped: result.skipped,
+            limited: Vec::new(),
             faults: result.faults,
         }
     }
@@ -680,6 +682,12 @@ impl CodeIndexer {
             batch_bytes: orbit_arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
+            phase_started: {
+                let span = span.clone();
+                Arc::new(move |family, phase, files| {
+                    span.in_scope(|| info!(family, phase, files, "code-graph phase started"));
+                })
+            },
         };
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| match repository {
@@ -792,12 +800,35 @@ impl CodeIndexer {
         for skipped in &result.skipped {
             self.metrics
                 .record_file_skipped(skipped.kind.as_metric_label(), &skipped.path);
-            debug!(
+            if skipped.path.is_empty() {
+                warn!(
+                    project_id = request.project_id,
+                    branch = %request.branch,
+                    reason = skipped.kind.as_metric_label(),
+                    detail = %skipped.detail,
+                    "cross-file resolution stopped early during code indexing"
+                );
+            } else {
+                debug!(
+                    project_id = request.project_id,
+                    branch = %request.branch,
+                    path = %skipped.path,
+                    reason = skipped.kind.as_metric_label(),
+                    "file skipped during code indexing"
+                );
+            }
+        }
+
+        for limited in &result.limited {
+            self.metrics
+                .record_file_skipped(limited.kind.as_metric_label(), &limited.path);
+            warn!(
                 project_id = request.project_id,
                 branch = %request.branch,
-                path = %skipped.path,
-                reason = skipped.kind.as_metric_label(),
-                "file skipped during code indexing"
+                path = %limited.path,
+                reason = limited.kind.as_metric_label(),
+                detail = %limited.detail,
+                "file reached a limit during code indexing and was indexed in part"
             );
         }
 

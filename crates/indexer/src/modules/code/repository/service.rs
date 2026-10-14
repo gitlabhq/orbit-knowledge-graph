@@ -129,11 +129,11 @@ pub mod test_utils {
         let mut tar_builder = tar::Builder::new(Vec::new());
         for (path, content) in files {
             let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
             header.set_size(content.len() as u64);
             header.set_mode(0o644);
-            header.set_cksum();
-            tar_builder.append(&header, &content[..]).unwrap();
+            tar_builder
+                .append_data(&mut header, path, &content[..])
+                .unwrap();
         }
         let tar_bytes = tar_builder.into_inner().unwrap();
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());

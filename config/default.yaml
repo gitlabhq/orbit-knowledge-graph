@@ -120,6 +120,7 @@ engine:
         max_file_size_bytes: 5000000
         max_files: 1000000
         max_total_bytes: 2000000000
+        max_repository_files: 2000000
         source_memory_budget_bytes: 67108864
         source_compress_spill: false
         worker_threads: 0
@@ -129,6 +130,9 @@ engine:
         per_file_walk_timeout_ms: 100
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
+        max_tree_depth: 4096
+        max_cross_file_names: 40000000
+        max_manifest_bytes: 67108864
         job_timeout_secs: 1500
         fetch_concurrency: 10
         write_channel_capacity: 8

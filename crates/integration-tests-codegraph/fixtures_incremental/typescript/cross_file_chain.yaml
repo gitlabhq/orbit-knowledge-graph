@@ -1,0 +1,46 @@
+name: "TypeScript: a function re-exported through a second module"
+
+fixtures:
+  - path: src/a.ts
+    content: |
+      export function helper() {}
+
+  - path: src/b.ts
+    content: |
+      export { helper } from './a';
+
+  - path: src/c.ts
+    content: |
+      import { helper } from './b';
+
+      export function run() {
+        helper();
+      }
+
+tests:
+  - name: "the function is defined in the first module"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/a.ts } }
+
+  - name: "a call through the re-export links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: src/a.ts } }
+
+  - name: "the import resolves to the definition"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/c.ts' AND i.identifier_name = 'helper'
+      RETURN d.file_path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: src/a.ts } }

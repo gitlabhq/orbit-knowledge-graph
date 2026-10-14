@@ -243,6 +243,7 @@ fn options() -> templates::Options {
         batch_bytes: orbit_arrow::BATCH_BYTES,
         cancelled: std::sync::Arc::new(|| false),
         family_finished: std::sync::Arc::new(|| {}),
+        phase_started: std::sync::Arc::new(|_, _, _| {}),
     }
 }
 
@@ -291,6 +292,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
                         finished.fetch_add(1, Ordering::SeqCst);
                     }
                 }),
+                phase_started: std::sync::Arc::new(|_, _, _| {}),
                 ..options()
             },
             &envelope(),

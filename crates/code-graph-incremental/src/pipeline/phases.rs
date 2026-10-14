@@ -53,6 +53,8 @@ fn workset(
         })
         .map(|file| file.path.to_string())
         .collect();
+    let cap = context.env.limits.max_manifest_bytes;
+    let mut manifest_bytes = 0u64;
     for file in repository.files().filter(|file| file.keeps()) {
         context.run.check()?;
         let path = file.path.as_ref();
@@ -64,6 +66,13 @@ fn workset(
             .iter()
             .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
         {
+            manifest_bytes = manifest_bytes.saturating_add(file.size);
+            if cap > 0 && manifest_bytes > cap {
+                let (observed, cap) = (manifest_bytes as usize, cap as usize);
+                let limited = Killed::limit("manifests", path, observed, cap);
+                context.report.limited.push(limited);
+                continue;
+            }
             match read(repository, path) {
                 Ok(content) => state.configs.push(SourceFile {
                     path: path.into(),
@@ -288,8 +297,15 @@ impl ItemPhase<SourceFile> for Parse {
         let budget = run
             .child("tree-sitter", &file.path, env.limits.file_parse_ms)
             .on_thread_cpu();
-        treesitter::parse_with_sentinel(&file.content, grammar, &env.lang, &file.path, &budget)
-            .map(Parsed)
+        treesitter::parse_with_sentinel(
+            &file.content,
+            grammar,
+            &env.lang,
+            &file.path,
+            &budget,
+            env.limits.max_tree_depth,
+        )
+        .map(Parsed)
     }
 }
 
@@ -374,8 +390,12 @@ impl ItemPhase<Canonical> for Link {
         run: &Sentinel,
         Canonical(tree): Canonical,
     ) -> Result<LinkedFile, Killed> {
-        let edges = linker::link(&tree, env, run)?;
-        Ok(LinkedFile { tree, edges })
+        let (edges, limited) = linker::link(&tree, env, run)?;
+        Ok(LinkedFile {
+            tree,
+            edges,
+            limited,
+        })
     }
 }
 
@@ -404,6 +424,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
+            context.report.limited.extend(file.limited);
             state.trees.push(file.tree);
             state.edges.extend(file.edges.into_iter().map(|mut e| {
                 e.from_tree = fi;
@@ -436,8 +457,11 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
                 _ if skipped.contains_key(path) => match skipped[path] {
                     "tree-sitter" => "skip_timeout_parse",
+                    "depth" => "skip_deeply_nested",
+                    "stack" => "skip_stack_limit",
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
+                    "edges" => "skip_too_many_edges",
                     _ => "skip_timeout_sentinel",
                 }
                 .into(),
@@ -525,6 +549,7 @@ impl Phase<DirtyGraph> for Resolve {
         for k in result.killed {
             context.skip(k);
         }
+        context.report.limited.extend(result.limited);
         Ok(Resolved { state, resolved })
     }
 }
@@ -552,15 +577,15 @@ impl Phase<Resolved> for Display {
             .map(|(fi, tree)| {
                 let rules = &env.rules_for(&tree.label).display_rules;
                 if rules.is_empty() {
-                    return tree;
+                    return Ok(tree);
                 }
                 let ctx = EdgeCtx {
                     tree_index: fi as u32,
                     edges: &edges,
                 };
-                pattern::apply_display(tree, &env.lang, rules, &ctx)
+                pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)
             })
-            .collect();
+            .collect::<Result<_, Killed>>()?;
         Ok(Displayed { state })
     }
 }
@@ -621,5 +646,106 @@ where
             })?;
         }
         Ok(Displayed { state })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::pipeline::Observer;
+    use crate::{Limits, templates};
+    use orbit_utils::vfs::{Decision, File, Pass, Vfs, sources::Directory};
+
+    struct KeepAll;
+
+    impl Pass for KeepAll {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Pending
+        }
+        fn content(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Keep(())
+        }
+    }
+
+    struct ArmOn(&'static str, Arc<AtomicUsize>);
+
+    impl Observer for ArmOn {
+        fn started(&mut self, phase: &str) {
+            if phase == self.0 {
+                self.1.store(1, Ordering::Relaxed);
+            }
+        }
+
+        fn finished(&mut self, phase: &str, _: Duration) {
+            if phase == self.0 {
+                self.1.store(0, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn cancelled_inside(
+        phase: &'static str,
+        lang: crate::treesitter::SupportLang,
+        files: &[(String, String)],
+        after: usize,
+    ) -> Result<(), Error> {
+        let repo = tempfile::tempdir().unwrap();
+        for (path, content) in files {
+            let path = repo.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let checks = Arc::new(AtomicUsize::new(0));
+        let counted = checks.clone();
+        let mut context = Context::new(&env, repository).observe(ArmOn(phase, checks));
+        context.run = context.run.with_cancellation(Arc::new(move || {
+            counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= after
+        }));
+        templates::index(context)
+            .and_then(|graph| graph.then(Display))
+            .map(|_| ())
+    }
+
+    #[test]
+    fn display_stops_when_the_run_is_cancelled() {
+        let files = [("main.py".to_string(), "def f():\n    pass\n".to_string())];
+        let displayed =
+            cancelled_inside("display", crate::treesitter::SupportLang::Python, &files, 2);
+        assert!(matches!(displayed, Err(Error::Killed(killed)) if killed.cancelled));
+    }
+
+    #[test]
+    fn cross_file_resolution_stops_when_the_run_is_cancelled_between_imports() {
+        let files: Vec<_> = (0..200)
+            .map(|file| {
+                (
+                    format!("Big/F{file}.cs"),
+                    format!("namespace Big;\npublic class C{file} {{}}\n"),
+                )
+            })
+            .collect();
+        let resolved = cancelled_inside(
+            "resolve",
+            crate::treesitter::SupportLang::CSharp,
+            &files,
+            20_000,
+        );
+        assert!(
+            matches!(resolved, Err(Error::Killed(killed)) if killed.cancelled && killed.label == "resolve")
+        );
     }
 }

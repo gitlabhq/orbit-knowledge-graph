@@ -1,10 +1,11 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::smallvec;
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
@@ -15,11 +16,49 @@ use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
+type WildcardImports = Rc<Vec<u32>>;
+
+const MAX_FIELD_COPIES: usize = 4_096;
+const MAX_FILE_EDGES: usize = 2_000_000;
+
+fn edge_limit(edges: &[Edge], path: &str) -> Result<(), Killed> {
+    if edges.len() <= MAX_FILE_EDGES {
+        return Ok(());
+    }
+    Err(Killed::limit("edges", path, edges.len(), MAX_FILE_EDGES))
+}
+
 enum WorkItem {
     Visit(u32),
     ExitScope {
         wildcards: usize,
         block: Option<BlockId>,
+    },
+    EnterArms {
+        branch: u32,
+        lhs: Option<u32>,
+    },
+    EnterArm {
+        arm: u32,
+        pre: BlockId,
+        lhs: Option<u32>,
+    },
+    ExitArm {
+        tail: u32,
+        lhs: Option<u32>,
+    },
+    JoinArms {
+        pre: BlockId,
+        lhs: Option<u32>,
+        first_exit: usize,
+    },
+    ExitLoop(BlockId),
+    ExitBinding {
+        binding: u32,
+        lhs: u32,
+        first_edge: usize,
+        declaration: bool,
+        branch: bool,
     },
 }
 
@@ -48,13 +87,14 @@ struct Fold<'t> {
     members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
-    wildcards: Vec<u32>,
+    wildcards: WildcardImports,
     tags: ReservedTags,
     config: &'t LinkConfig,
     syms: &'t crate::intern::Interner,
     run: &'t Sentinel,
     file: Sentinel,
     killed: Option<Killed>,
+    limited: Option<Killed>,
     def_stack: Vec<u32>,
     chain_seen: FxHashSet<u32>,
     obj_seen: FxHashSet<u32>,
@@ -62,10 +102,11 @@ struct Fold<'t> {
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
-    pending_calls: Vec<(Value, u32, u32, Vec<u32>)>,
+    pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, FxHashMap<u32, u32>)>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
+    arm_exits: Vec<BlockId>,
 }
 
 impl<'t> Fold<'t> {
@@ -79,20 +120,57 @@ impl<'t> Fold<'t> {
             if self.killed.is_some() {
                 return;
             }
-            if let Err(k) = self.run.check().and_then(|()| self.file.check()) {
+            if let Err(k) = self
+                .run
+                .check()
+                .and_then(|()| self.file.check())
+                .and_then(|()| edge_limit(&self.edges, &self.tree.label))
+            {
                 self.killed = Some(k);
                 return;
             }
             match item {
                 WorkItem::ExitScope { wildcards, block } => {
                     self.scopes.pop();
-                    self.wildcards.truncate(wildcards);
+                    if self.wildcards.len() > wildcards {
+                        Rc::make_mut(&mut self.wildcards).truncate(wildcards);
+                    }
                     if let Some(block) = block {
                         self.def_stack.pop();
                         self.cur = block;
                     }
                 }
                 WorkItem::Visit(i) => self.dispatch(self.tree.cursor(i), &mut stack),
+                WorkItem::EnterArms { branch, lhs } => {
+                    self.enter_arms(self.tree.cursor(branch), lhs, &mut stack)
+                }
+                WorkItem::EnterArm { arm, pre, lhs } => {
+                    self.enter_arm(self.tree.cursor(arm), pre, lhs, &mut stack)
+                }
+                WorkItem::ExitArm { tail, lhs } => self.exit_arm(self.tree.cursor(tail), lhs),
+                WorkItem::JoinArms {
+                    pre,
+                    lhs,
+                    first_exit,
+                } => {
+                    let exits = self.arm_exits.drain(first_exit..);
+                    let exits = exits.chain(lhs.is_none().then_some(pre));
+                    self.cur = self.ssa.add_sealed_join(exits);
+                }
+                WorkItem::ExitLoop(header) => self.cur = self.ssa.finish_loop(header, self.cur),
+                WorkItem::ExitBinding {
+                    binding,
+                    lhs,
+                    first_edge,
+                    declaration,
+                    branch,
+                } => self.exit_binding(
+                    self.tree.cursor(binding),
+                    lhs,
+                    first_edge,
+                    declaration,
+                    branch,
+                ),
             }
         }
     }
@@ -136,7 +214,7 @@ impl<'t> Fold<'t> {
                 self.handle_standalone_member(c);
             }
         } else if k == C::Binding {
-            if self.handle_binding(c) {
+            if self.handle_binding(c, stack) {
                 return;
             }
         } else if k == C::Scope {
@@ -159,10 +237,13 @@ impl<'t> Fold<'t> {
             return;
         } else if k == C::SsaBranch {
             let sink = self.value_sink.remove(&c.index());
-            self.handle_branch(c, sink);
+            Self::handle_branch(c, sink, stack);
             return;
         } else if k == C::SsaLoop {
-            self.handle_loop(c);
+            let (header, body) = self.ssa.begin_loop(self.cur);
+            self.cur = body;
+            stack.push(WorkItem::ExitLoop(header));
+            Self::push_children(c, stack);
             return;
         }
         if k == C::Import || k == C::ImportType || k == C::Def {
@@ -175,43 +256,65 @@ impl<'t> Fold<'t> {
         );
     }
 
-    fn handle_branch(&mut self, branch: Cursor<'t>, lhs: Option<u32>) {
-        for child in branch.children().filter(|c| !c.is(C::SsaArm)) {
-            self.run(vec![WorkItem::Visit(child.index())]);
-        }
-        let arms: Vec<Cursor<'t>> = branch.children().filter(|c| c.is(C::SsaArm)).collect();
-        if arms.is_empty() {
-            return;
-        }
-        let pre = self.cur;
-        let mut exit_blocks = Vec::new();
-        for arm in arms {
-            self.cur = self.ssa.add_sealed_successor(pre);
-            let tail = arm.tail_expr();
-            if let Some(lhs) = lhs.filter(|_| tail.is(C::SsaBranch)) {
-                self.value_sink.insert(tail.index(), lhs);
-            }
-            self.walk_children(arm);
-            if let Some(lhs) = lhs.filter(|_| !tail.is(C::SsaBranch) && !tail.is(C::SsaReturn)) {
-                let val = self.classify_tail(tail);
-                if val != Value::Opaque {
-                    self.ssa.write_variable(lhs, self.cur, val);
-                }
-                self.bind_fields(lhs, tail);
-            }
-            exit_blocks.push(self.cur);
-        }
-        if lhs.is_none() {
-            exit_blocks.push(pre);
-        }
-        self.cur = self.ssa.add_sealed_join(exit_blocks);
+    fn handle_branch(branch: Cursor<'t>, lhs: Option<u32>, stack: &mut Vec<WorkItem>) {
+        stack.push(WorkItem::EnterArms {
+            branch: branch.index(),
+            lhs,
+        });
+        stack.extend(
+            branch
+                .children_rev()
+                .filter(|c| !c.is(C::SsaArm))
+                .map(|c| WorkItem::Visit(c.index())),
+        );
     }
 
-    fn handle_loop(&mut self, c: Cursor<'t>) {
-        let (header, body) = self.ssa.begin_loop(self.cur);
-        self.cur = body;
-        self.walk_children(c);
-        self.cur = self.ssa.finish_loop(header, self.cur);
+    fn enter_arms(&mut self, branch: Cursor<'t>, lhs: Option<u32>, stack: &mut Vec<WorkItem>) {
+        let pre = self.cur;
+        let mut arms = branch.children_rev().filter(|c| c.is(C::SsaArm)).peekable();
+        if arms.peek().is_none() {
+            return;
+        }
+        stack.push(WorkItem::JoinArms {
+            pre,
+            lhs,
+            first_exit: self.arm_exits.len(),
+        });
+        stack.extend(arms.map(|arm| WorkItem::EnterArm {
+            arm: arm.index(),
+            pre,
+            lhs,
+        }));
+    }
+
+    fn enter_arm(
+        &mut self,
+        arm: Cursor<'t>,
+        pre: BlockId,
+        lhs: Option<u32>,
+        stack: &mut Vec<WorkItem>,
+    ) {
+        self.cur = self.ssa.add_sealed_successor(pre);
+        let tail = arm.tail_expr();
+        if let Some(lhs) = lhs.filter(|_| tail.is(C::SsaBranch)) {
+            self.value_sink.insert(tail.index(), lhs);
+        }
+        stack.push(WorkItem::ExitArm {
+            tail: tail.index(),
+            lhs,
+        });
+        Self::push_children(arm, stack);
+    }
+
+    fn exit_arm(&mut self, tail: Cursor<'t>, lhs: Option<u32>) {
+        if let Some(lhs) = lhs.filter(|_| !tail.is(C::SsaBranch) && !tail.is(C::SsaReturn)) {
+            let val = self.classify_tail(tail);
+            if val != Value::Opaque {
+                self.ssa.write_variable(lhs, self.cur, val);
+            }
+            self.bind_fields(lhs, tail);
+        }
+        self.arm_exits.push(self.cur);
     }
 
     fn handle_import(&mut self, c: Cursor<'t>) {
@@ -240,8 +343,9 @@ impl<'t> Fold<'t> {
             {
                 continue;
             }
-            self.wildcards
-                .extend((local == self.wildcard).then_some(n.index()));
+            if local == self.wildcard {
+                Rc::make_mut(&mut self.wildcards).push(n.index());
+            }
             let binding = self.declare_binding(n, local);
             self.ssa
                 .write_variable(binding, self.cur, Value::ImportRef(n.index()));
@@ -445,11 +549,8 @@ impl<'t> Fold<'t> {
             });
         if let Some(value) = value {
             let fallback =
-                if callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar) {
-                    self.wildcards.clone()
-                } else {
-                    Vec::new()
-                };
+                (callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar))
+                    .then(|| Rc::clone(&self.wildcards));
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -500,7 +601,7 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn handle_binding(&mut self, c: Cursor<'t>) -> bool {
+    fn handle_binding(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) -> bool {
         let field = self.member_binding(c).map(|(root, field)| {
             let key = self.key(BindingKey::Field(root, field));
             *self
@@ -527,13 +628,34 @@ impl<'t> Fold<'t> {
         if rhs.is_none() && c.child_sym(C::Declaration).is_some() {
             return true;
         }
-        if let Some(branch) = rhs.and_then(|r| r.child(C::SsaBranch)) {
-            self.handle_branch(branch, Some(lhs));
-        } else {
+        let branch = rhs.and_then(|r| r.child(C::SsaBranch));
+        stack.push(WorkItem::ExitBinding {
+            binding: c.index(),
+            lhs,
+            first_edge: self.edges.len(),
+            declaration,
+            branch: branch.is_some(),
+        });
+        if let Some(branch) = branch {
+            Self::handle_branch(branch, Some(lhs), stack);
+        } else if let Some(rhs) = rhs {
+            Self::push_children(rhs, stack);
+        }
+        true
+    }
+
+    fn exit_binding(
+        &mut self,
+        c: Cursor<'t>,
+        lhs: u32,
+        first_edge: usize,
+        declaration: bool,
+        branch: bool,
+    ) {
+        let rhs = c.child(C::Rhs);
+        if !branch {
             if let Some(rhs) = rhs {
-                let first = self.edges.len();
-                self.walk_children(rhs);
-                for edge in &mut self.edges[first..] {
+                for edge in &mut self.edges[first_edge..] {
                     if rhs.child(C::Member).is_some()
                         && edge.kind == EdgeKind::Imports
                         && edge.site.is_none()
@@ -591,7 +713,6 @@ impl<'t> Fold<'t> {
         if declaration && let Some((_, scope)) = self.scopes.last_mut() {
             scope.insert(c.sym(), lhs);
         }
-        true
     }
 
     fn read_value(&mut self, binding: u32) -> Value {
@@ -734,7 +855,15 @@ impl<'t> Fold<'t> {
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
+        let mut copied = 0;
         while let Some((target, sources)) = copies.pop() {
+            copied += 1;
+            if copied > MAX_FIELD_COPIES {
+                self.limited.get_or_insert_with(|| {
+                    Killed::limit("fields", &self.tree.label, copied, MAX_FIELD_COPIES)
+                });
+                break;
+            }
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
                 return;
@@ -836,7 +965,9 @@ impl<'t> Fold<'t> {
         if !self.obj_seen.insert(obj.index()) {
             return;
         }
-        self.resolve_obj_inner(obj, method, from);
+        stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
+            self.resolve_obj_inner(obj, method, from)
+        });
         self.obj_seen.remove(&obj.index());
     }
 
@@ -1002,7 +1133,7 @@ impl<'t> Fold<'t> {
         if !self.chain_seen.insert(c.index()) {
             return vec![];
         }
-        let out = self.lookup_chain_inner(c);
+        let out = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || self.lookup_chain_inner(c));
         self.chain_seen.remove(&c.index());
         self.chain_memo.insert(c.index(), out.clone());
         out
@@ -1092,7 +1223,7 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
+pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
     let (lang, config) = (&env.lang, &env.rules_for(&tree.label).config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
     let tags = ReservedTags::new(lang);
@@ -1112,13 +1243,14 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         members: RefCell::default(),
         ivars: RefCell::default(),
         supertypes: FxHashMap::default(),
-        wildcards: Vec::new(),
+        wildcards: Rc::default(),
         tags,
         config,
         syms: &lang.syms,
         run,
         file,
         killed: None,
+        limited: None,
         def_stack: Vec::new(),
         chain_seen: FxHashSet::default(),
         obj_seen: FxHashSet::default(),
@@ -1130,6 +1262,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         fields: FxHashMap::default(),
         scopes: vec![(root_label, FxHashMap::default())],
         keys: RefCell::default(),
+        arm_exits: Vec::new(),
     };
 
     f.predeclare(root);
@@ -1142,11 +1275,19 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
     f.ssa.remove_redundant_phi_sccs();
 
     for (value, from, site, fallback) in std::mem::take(&mut f.pending_calls) {
-        f.run.check().and_then(|()| f.file.check())?;
+        f.run
+            .check()
+            .and_then(|()| f.file.check())
+            .and_then(|()| edge_limit(&f.edges, &tree.label))?;
         let first = f.edges.len();
         let mut targets = f.ssa.resolve_value(&value);
         if targets.is_empty() {
-            targets.extend(fallback.into_iter().map(Value::ImportRef));
+            targets.extend(
+                fallback
+                    .iter()
+                    .flat_map(|w| w.iter())
+                    .map(|&w| Value::ImportRef(w)),
+            );
         }
         f.emit_targets(&targets, from);
         for edge in &mut f.edges[first..] {
@@ -1196,7 +1337,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
             edge.call_resolution = crate::tree::CallResolution::Reference;
         }
     }
-    Ok(f.edges)
+    Ok((f.edges, f.limited))
 }
 
 fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
