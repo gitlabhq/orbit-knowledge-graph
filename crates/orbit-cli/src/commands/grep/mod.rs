@@ -82,6 +82,7 @@ pub(crate) fn run(
     if options.fixed {
         terms = terms.iter().map(term::Term::fixed).collect();
     }
+    let mut notes: Vec<String> = Vec::new();
     let scan = match query.is_some() {
         true => {
             let matcher = term::matcher(&terms, &options).or_else(|_| {
@@ -90,7 +91,31 @@ pub(crate) fn run(
             })?;
             let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))?;
             let scope = crate::workspace::repo_relative_paths(&root, &paths);
-            let hits = scan::scan(&root, &scope, &matcher, &options)?;
+            let scope = resolve_missing(&root, scope, &mut notes);
+            let mut hits = scan::scan(&root, &scope, &matcher, &options)?;
+            if !scope.is_empty()
+                && options.output == Output::Lines
+                && !options.invert
+                && !hits.iter().any(|hit| !hit.context)
+            {
+                let mut level = scope.clone();
+                while let Some(parents) = parents(&level) {
+                    let wider = scan::scan(&root, &parents, &matcher, &options)?;
+                    if wider.iter().any(|hit| !hit.context) {
+                        let shown = match parents.is_empty() {
+                            true => "the whole repository".to_string(),
+                            false => parents.join(", "),
+                        };
+                        notes.push(format!(
+                            "{NOTE}0 matching lines in {}; showing matches in {shown}",
+                            scope.join(", ")
+                        ));
+                        hits = wider;
+                        break;
+                    }
+                    level = parents;
+                }
+            }
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();
@@ -133,31 +158,148 @@ pub(crate) fn run(
         header.push_str(&format!(" --kind {}", shown.join(",")));
     }
     header.push_str(&format!(" @ {}", backend.header()));
-    write!(
-        out,
-        "{}",
-        render::render(
-            &header,
+    let rendered = render::render(
+        &header,
+        &hits,
+        &alternatives,
+        &connections,
+        &edited,
+        &options,
+        render::lookup(
+            &backend.git().repo_path,
             &hits,
             &alternatives,
             &connections,
-            &edited,
             &options,
-            render::lookup(
-                &backend.git().repo_path,
-                &hits,
-                &alternatives,
-                &connections,
-                &options
-            )
-            .as_deref(),
-        )?
+        )
+        .as_deref(),
     )?;
+    match (options.output, rendered.split_once('\n')) {
+        (Output::Lines, Some((first, rest))) if !notes.is_empty() => {
+            write!(out, "{first}\n{}\n{rest}", notes.join("\n"))?
+        }
+        _ => {
+            for note in &notes {
+                eprintln!("orbit: {}", note.trim_start_matches(NOTE));
+            }
+            write!(out, "{rendered}")?
+        }
+    }
     out.flush()?;
     match hits.iter().any(|hit| !hit.context) {
         true => Ok(()),
         false => Err(NoMatches.into()),
     }
+}
+
+const NOTE: &str = "» ";
+
+/// The parent directories of a scope, deduplicated, or the whole repository (an empty scope)
+/// once every path is at the top. None after the whole repository.
+fn parents(scope: &[String]) -> Option<Vec<String>> {
+    if scope.is_empty() {
+        return None;
+    }
+    let mut up: Vec<String> = scope
+        .iter()
+        .filter_map(|path| {
+            path.trim_end_matches('/')
+                .rsplit_once('/')
+                .map(|(dir, _)| dir.to_string())
+        })
+        .collect();
+    if up.len() < scope.len() {
+        return Some(Vec::new());
+    }
+    up.sort();
+    up.dedup();
+    let kept: Vec<String> = up
+        .iter()
+        .filter(|path| {
+            !up.iter()
+                .any(|outer| outer != *path && path.starts_with(&format!("{outer}/")))
+        })
+        .cloned()
+        .collect();
+    Some(kept)
+}
+const PATH_CANDIDATES: usize = 3;
+
+/// Scope paths that do not exist are replaced by tracked directories or files with the same last
+/// segment, so a guessed prefix such as `pkg/kubectl/describe` still searches
+/// `staging/src/k8s.io/kubectl/pkg/describe`. Candidates sharing more of the guessed segments come
+/// first, then non-test paths, then shorter ones. Globs and paths with no candidate stay as written.
+fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> Vec<String> {
+    let root_text = format!("{}/", root.to_string_lossy().trim_end_matches('/'));
+    let scope: Vec<String> = scope
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(&root_text)
+                .map(str::to_string)
+                .unwrap_or(path)
+        })
+        .collect();
+    let missing = |path: &String| !path.contains(['*', '?', '[']) && !root.join(path).exists();
+    if !scope.iter().any(missing) {
+        return scope;
+    }
+    let tracked: Vec<String> = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .filter(|file| !file.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut resolved = Vec::new();
+    for path in scope {
+        if !missing(&path) {
+            resolved.push(path);
+            continue;
+        }
+        let segments: Vec<&str> = path
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .collect();
+        let Some(last) = segments.last().copied() else {
+            resolved.push(path);
+            continue;
+        };
+        let mut found: Vec<String> = tracked
+            .iter()
+            .filter_map(|file| {
+                let parts: Vec<&str> = file.split('/').collect();
+                let at = parts.iter().position(|part| *part == last)?;
+                Some(parts[..=at].join("/"))
+            })
+            .collect();
+        found.sort();
+        found.dedup();
+        let shared = |candidate: &str| {
+            let parts: Vec<&str> = candidate.split('/').collect();
+            segments.iter().filter(|s| parts.contains(s)).count()
+        };
+        found.sort_by_key(|c| (std::cmp::Reverse(shared(c)), is_test(c), c.len(), c.clone()));
+        found.truncate(PATH_CANDIDATES);
+        if found.is_empty() {
+            resolved.push(path);
+            continue;
+        }
+        notes.push(format!(
+            "{NOTE}{path} not found; searched {}",
+            found.join(", ")
+        ));
+        resolved.extend(found);
+    }
+    resolved
 }
 
 fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::Kinds> {
@@ -190,4 +332,83 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
         );
     }
     Ok(kinds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo(files: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for file in files {
+            let full = dir.path().join(file);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, "x\n").unwrap();
+        }
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        dir
+    }
+
+    #[test]
+    fn missing_paths_resolve_to_tracked_paths_with_the_same_last_segment() {
+        let dir = repo(&[
+            "staging/kubectl/pkg/describe/describe.go",
+            "staging/kubectl/pkg/cmd/describe/cmd.go",
+            "pkg/probe/request.go",
+            "staging/apiserver/pkg/audit/request.go",
+            "src/real.rs",
+        ]);
+        let mut notes = Vec::new();
+        let scope = resolve_missing(
+            dir.path(),
+            vec![
+                "pkg/kubectl/describe".into(),
+                "audit/request.go".into(),
+                "src/real.rs".into(),
+                "no/such".into(),
+            ],
+            &mut notes,
+        );
+        assert_eq!(
+            scope,
+            [
+                "staging/kubectl/pkg/describe",
+                "staging/kubectl/pkg/cmd/describe",
+                "staging/apiserver/pkg/audit/request.go",
+                "pkg/probe/request.go",
+                "src/real.rs",
+                "no/such",
+            ]
+        );
+        assert_eq!(
+            notes,
+            [
+                "» pkg/kubectl/describe not found; searched staging/kubectl/pkg/describe, staging/kubectl/pkg/cmd/describe",
+                "» audit/request.go not found; searched staging/apiserver/pkg/audit/request.go, pkg/probe/request.go",
+            ]
+        );
+    }
+
+    #[test]
+    fn parents_climb_one_directory_at_a_time_to_the_whole_repository() {
+        let start = vec![
+            "a/b/c.rs".to_string(),
+            "a/b/d.rs".to_string(),
+            "a/e/f".to_string(),
+        ];
+        let one = parents(&start).unwrap();
+        assert_eq!(one, ["a/b", "a/e"]);
+        assert_eq!(parents(&one).unwrap(), ["a"]);
+        assert_eq!(parents(&["a".to_string()]).unwrap(), Vec::<String>::new());
+        assert_eq!(parents(&[]), None);
+    }
 }
