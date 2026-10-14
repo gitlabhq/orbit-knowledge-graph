@@ -1,0 +1,71 @@
+name: "PHP: classes in one namespace and a use declaration across files"
+
+fixtures:
+  - path: src/End.php
+    content: |
+      <?php
+      namespace App;
+
+      class End
+      {
+          public static function stop() {}
+      }
+
+  - path: src/Middle.php
+    content: |
+      <?php
+      namespace App;
+
+      class Middle
+      {
+          public static function go()
+          {
+              End::stop();
+          }
+      }
+
+  - path: src/Start.php
+    content: |
+      <?php
+      namespace Client;
+
+      use App\Middle;
+
+      class Start
+      {
+          public function run()
+          {
+              Middle::go();
+          }
+      }
+
+tests:
+  - name: "each file defines its method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['stop', 'go', 'run']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { row: { name: stop, file: src/End.php } }
+      - { row: { name: go, file: src/Middle.php } }
+      - { row: { name: run, file: src/Start.php } }
+
+  - name: "calls through the namespace and the use declaration link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'stop']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: go, file: src/Middle.php } }
+      - { row: { caller: go, callee: stop, file: src/End.php } }
+
+  - name: "the use declaration resolves to the class"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/Start.php'
+      RETURN d.name AS target, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Middle, file: src/Middle.php } }

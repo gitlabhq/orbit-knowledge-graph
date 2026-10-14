@@ -1,0 +1,39 @@
+name: "C#: deeply nested code links on the worker stack"
+
+fixtures:
+  - path: Deep.cs
+    content:
+      - "namespace App;\n\npublic class Deep\n{\nstatic void Target() {}\nstatic int Wrap(int x) => x;\n\nvoid InsideIf(bool c) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - "Target();\n"
+      - { repeat: 10000, text: "}\n" }
+      - "}\n\nvoid NestedIf(bool c) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "Target();\n}\n\nvoid ElseIf(bool c) {\nif (c) {\n"
+      - { repeat: 10000, text: "} else if (c) {\n" }
+      - "}\nTarget();\n}\n\nvoid NestedLoop(bool c) {\n"
+      - { repeat: 10000, text: "while (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "Target();\n}\n\nvoid NestedTry() {\n"
+      - { repeat: 10000, text: "try {\n" }
+      - { repeat: 10000, text: "} catch {}\n" }
+      - "Target();\n}\n\nvoid NestedBlock() {\n"
+      - { repeat: 10000, text: "{\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "Target();\n}\n\nvoid NestedCall() {\nWrap("
+      - { repeat: 10000, text: "Wrap(" }
+      - "0"
+      - { repeat: 10000, text: ")" }
+      - ");\nTarget();\n}\n}\n"
+
+tests:
+  - name: "each function calls its target inside or after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'Target'
+      RETURN caller.name AS caller
+    assert:
+      - column_values:
+          field: caller
+          values: [InsideIf, NestedIf, ElseIf, NestedLoop, NestedTry, NestedBlock, NestedCall]

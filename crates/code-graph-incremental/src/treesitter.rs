@@ -1,8 +1,7 @@
 use std::ops::ControlFlow;
-use std::time::Duration;
 
 use crate::intern::Lang;
-use crate::sentinel::Killed;
+use crate::sentinel::{Killed, Stop};
 use crate::tree::{Node, Tree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, strum::IntoStaticStr)]
@@ -244,7 +243,8 @@ fn from_tree_sitter(
     kind_map: &[u16],
     field_map: &[u16],
     label: &str,
-) -> Tree {
+    max_depth: usize,
+) -> Option<Tree> {
     let ts_root = ts_tree.root_node();
     let mut cursor = ts_root.walk();
 
@@ -286,7 +286,7 @@ fn from_tree_sitter(
     let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
 
     if !cursor.goto_first_child() {
-        return tree;
+        return Some(tree);
     }
 
     loop {
@@ -318,6 +318,9 @@ fn from_tree_sitter(
 
         if cursor.goto_first_child() {
             parent_stack.push(nid);
+            if max_depth > 0 && parent_stack.len() > max_depth {
+                return None;
+            }
             continue;
         }
 
@@ -327,7 +330,7 @@ fn from_tree_sitter(
 
         loop {
             if !cursor.goto_parent() {
-                return tree;
+                return Some(tree);
             }
             parent_stack.pop();
             if cursor.goto_next_sibling() {
@@ -387,6 +390,7 @@ pub fn parse(
         lang,
         label,
         &crate::sentinel::Sentinel::disabled(),
+        0,
     )
 }
 
@@ -396,6 +400,7 @@ pub fn parse_with_sentinel(
     lang: &Lang,
     label: &str,
     sentinel: &crate::sentinel::Sentinel,
+    max_depth: usize,
 ) -> Result<Tree, Killed> {
     sentinel.check()?;
     CACHE.with(|cache| {
@@ -404,42 +409,63 @@ pub fn parse_with_sentinel(
         c.parser.reset();
         let mut stopped = None;
         let mut guard = parse_guard();
-        let mut progress = |state: &tree_sitter::ParseState| match sentinel.check() {
-            Ok(()) => guard(state.current_byte_offset()),
-            Err(error) => {
-                stopped = Some(error);
-                ControlFlow::Break(())
-            }
+        let mut progress = |state: &tree_sitter::ParseState| {
+            let stop = match sentinel.check() {
+                Ok(()) => match guard(state.current_byte_offset()) {
+                    ControlFlow::Continue(()) => return ControlFlow::Continue(()),
+                    ControlFlow::Break((reason, stop)) => Killed::stopped(reason, label, stop),
+                },
+                Err(error) => error,
+            };
+            stopped = Some(stop);
+            ControlFlow::Break(())
         };
-        let mut input = |offset: usize, _: tree_sitter::Point| &source.as_bytes()[offset..];
+        let mut input =
+            |offset: usize, _: tree_sitter::Point| source.as_bytes().get(offset..).unwrap_or(&[]);
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let ts_tree = c
             .parser
             .parse_with_options(&mut input, None, Some(options))
             .ok_or_else(|| {
-                stopped.unwrap_or(Killed {
-                    cancelled: false,
-                    label: "tree-sitter",
-                    path: label.to_string(),
-                    elapsed: Duration::ZERO,
-                    budget: Duration::ZERO,
-                })
+                stopped.unwrap_or_else(|| Killed::stopped("tree-sitter", label, Stop::Failed))
             })?;
         sentinel.check()?;
-        let tree = from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label);
+        let tree = from_tree_sitter(
+            source, &ts_tree, lang, &c.kinds, &c.fields, label, max_depth,
+        )
+        .ok_or_else(|| Killed::limit("depth", label, depth_of(&ts_tree), max_depth))?;
         sentinel.check()?;
         Ok(tree)
     })
 }
 
-const MAX_STALL: u64 = 100_000;
-const STACK_RED_ZONE: usize = 256 * 1024;
+const MAX_STALL: usize = 100_000;
+const PARSE_STACK_RESERVE: usize = 256 * 1024;
 
-fn parse_guard() -> impl FnMut(usize) -> ControlFlow<()> {
+fn depth_of(tree: &tree_sitter::Tree) -> usize {
+    let mut cursor = tree.walk();
+    let (mut depth, mut deepest) = (0, 0);
+    loop {
+        if cursor.goto_first_child() {
+            depth += 1;
+            deepest = deepest.max(depth);
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return deepest;
+            }
+            depth -= 1;
+        }
+    }
+}
+
+fn parse_guard() -> impl FnMut(usize) -> ControlFlow<(&'static str, Stop)> {
     let (mut last_offset, mut stalled) = (usize::MAX, 0);
     move |offset| {
-        if stacker::remaining_stack().is_some_and(|left| left < STACK_RED_ZONE) {
-            return ControlFlow::Break(());
+        if let Some(left) = stacker::remaining_stack().filter(|&left| left < PARSE_STACK_RESERVE) {
+            let reserve = PARSE_STACK_RESERVE;
+            return ControlFlow::Break(("stack", Stop::Below { left, reserve }));
         }
         if offset != last_offset {
             (last_offset, stalled) = (offset, 0);
@@ -447,7 +473,13 @@ fn parse_guard() -> impl FnMut(usize) -> ControlFlow<()> {
         }
         stalled += 1;
         match stalled > MAX_STALL {
-            true => ControlFlow::Break(()),
+            true => ControlFlow::Break((
+                "tree-sitter",
+                Stop::Reached {
+                    observed: stalled,
+                    cap: MAX_STALL,
+                },
+            )),
             false => ControlFlow::Continue(()),
         }
     }
@@ -460,6 +492,7 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use std::time::Duration;
 
     #[test]
     fn a_parse_stops_after_too_many_steps_without_progress() {
@@ -468,6 +501,57 @@ mod tests {
         assert!((0..MAX_STALL).all(|_| guard(0).is_continue()));
         assert!(guard(0).is_break());
         assert!(guard(1).is_continue());
+    }
+
+    #[test]
+    fn a_parse_near_the_end_of_the_stack_stops_as_a_stack_skip() {
+        let source = "def f(x):\n    return x\n".repeat(2_000);
+        let killed = std::thread::Builder::new()
+            .stack_size(224 * 1024)
+            .spawn(move || parse(&source, SupportLang::Python, &Lang::default(), "main.py").err())
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
+        assert_eq!(killed.label, "stack");
+        assert!(matches!(killed.stop, Some(Stop::Below { left, reserve }) if left < reserve));
+    }
+
+    #[test]
+    fn a_tree_far_past_the_depth_limit_stops_in_linear_time() {
+        let levels = 50_000;
+        let source = format!("{}{}", "{\n".repeat(levels), "}\n".repeat(levels));
+        let started = cpu_time::ThreadTime::now();
+        let killed = parse_with_sentinel(
+            &source,
+            SupportLang::JavaScript,
+            &Lang::default(),
+            "deep.js",
+            &crate::sentinel::Sentinel::disabled(),
+            10,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            matches!(killed.stop, Some(Stop::Reached { observed, cap: 10 }) if observed > levels)
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_tree_past_the_depth_limit_reports_its_real_depth() {
+        let source = format!("x = {}1{}\n", "[".repeat(50), "]".repeat(50));
+        let killed = parse_with_sentinel(
+            &source,
+            SupportLang::Python,
+            &Lang::default(),
+            "deep.py",
+            &crate::sentinel::Sentinel::disabled(),
+            10,
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(killed.stop, Some(Stop::Reached { observed, cap: 10 }) if observed > 50));
     }
 
     #[test]
@@ -480,9 +564,16 @@ mod tests {
             }));
         let lang = Lang::default();
         let source = "def example():\n    return 42\n".repeat(20000);
-        let error = parse_with_sentinel(&source, SupportLang::Python, &lang, "large.py", &sentinel)
-            .err()
-            .unwrap();
+        let error = parse_with_sentinel(
+            &source,
+            SupportLang::Python,
+            &lang,
+            "large.py",
+            &sentinel,
+            0,
+        )
+        .err()
+        .unwrap();
         assert_eq!(error.label, "tree-sitter");
         assert!(error.cancelled);
         assert_eq!(error.to_string(), "tree-sitter cancelled");

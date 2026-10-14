@@ -1,0 +1,36 @@
+name: "Swift: deeply nested code links on the worker stack"
+
+fixtures:
+  - path: Sources/App/Deep.swift
+    content:
+      - "func target() {}\nfunc wrap(_ x: Int) -> Int { x }\n\nfunc insideIf(_ c: Bool) {\n"
+      - { repeat: 10000, text: "if c {\n" }
+      - "target()\n"
+      - { repeat: 10000, text: "}\n" }
+      - "}\n\nfunc nestedIf(_ c: Bool) {\n"
+      - { repeat: 10000, text: "if c {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\nfunc elseIf(_ c: Bool) {\nif c {\n"
+      - { repeat: 10000, text: "} else if c {\n" }
+      - "}\ntarget()\n}\n\nfunc nestedLoop(_ c: Bool) {\n"
+      - { repeat: 10000, text: "while c {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\nfunc nestedDo() {\n"
+      - { repeat: 10000, text: "do {\n" }
+      - { repeat: 10000, text: "} catch {}\n" }
+      - "target()\n}\n\nfunc nestedCall() {\n_ = wrap("
+      - { repeat: 10000, text: "wrap(" }
+      - "0"
+      - { repeat: 10000, text: ")" }
+      - ")\ntarget()\n}\n"
+
+tests:
+  - name: "each function calls its target inside or after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - column_values:
+          field: caller
+          values: [insideIf, nestedIf, elseIf, nestedLoop, nestedDo, nestedCall]

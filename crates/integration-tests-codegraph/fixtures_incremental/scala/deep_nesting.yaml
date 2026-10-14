@@ -1,0 +1,39 @@
+name: "Scala: deeply nested code links on the worker stack"
+
+fixtures:
+  - path: src/main/scala/app/Deep.scala
+    content:
+      - "package app\n\nobject Deep {\ndef target(): Unit = ()\ndef wrap(x: Int): Int = x\n\ndef insideIf(c: Boolean): Unit = {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - "target()\n"
+      - { repeat: 10000, text: "}\n" }
+      - "}\n\ndef nestedIf(c: Boolean): Unit = {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\ndef elseIf(c: Boolean): Unit = {\nif (c) {\n"
+      - { repeat: 10000, text: "} else if (c) {\n" }
+      - "}\ntarget()\n}\n\ndef nestedLoop(c: Boolean): Unit = {\n"
+      - { repeat: 10000, text: "while (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\ndef nestedTry(): Unit = {\n"
+      - { repeat: 10000, text: "try {\n" }
+      - { repeat: 10000, text: "} catch { case _: Throwable => }\n" }
+      - "target()\n}\n\ndef nestedBlock(): Unit = {\n"
+      - { repeat: 10000, text: "{\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\ndef nestedCall(): Unit = {\nwrap("
+      - { repeat: 10000, text: "wrap(" }
+      - "0"
+      - { repeat: 10000, text: ")" }
+      - ")\ntarget()\n}\n}\n"
+
+tests:
+  - name: "each function calls its target inside or after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - column_values:
+          field: caller
+          values: [insideIf, nestedIf, elseIf, nestedLoop, nestedTry, nestedBlock, nestedCall]

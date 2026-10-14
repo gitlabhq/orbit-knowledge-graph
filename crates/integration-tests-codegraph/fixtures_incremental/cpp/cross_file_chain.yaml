@@ -1,0 +1,56 @@
+name: "C++: functions visible through a header that includes their header"
+
+fixtures:
+  - path: a.hpp
+    content: |
+      int helper();
+      namespace util {
+      int scaled();
+      }
+
+  - path: a.cpp
+    content: |
+      #include "a.hpp"
+      int helper() { return 1; }
+      namespace util {
+      int scaled() { return 2; }
+      }
+
+  - path: b.hpp
+    content: |
+      #include "a.hpp"
+
+  - path: c.cpp
+    content: |
+      #include "b.hpp"
+      int run() { return helper(); }
+      int run_scaled() { return util::scaled(); }
+
+tests:
+  - name: "the functions are defined in the first source file"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['helper', 'scaled'] AND d.file_path = 'a.cpp'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+
+  - name: "a call through the nested include links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: a.cpp } }
+
+  - name: "a namespace-qualified call through the nested include links to the definition"
+    # Known gap: a namespace-qualified call to a function in another file does not link, even through a direct include.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run_scaled'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: scaled, file: a.cpp } }

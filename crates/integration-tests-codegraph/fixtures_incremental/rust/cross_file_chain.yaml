@@ -1,0 +1,59 @@
+name: "Rust: a function re-exported with pub use"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "chain"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      mod a;
+      mod b;
+      mod c;
+
+  - path: src/a.rs
+    content: |
+      pub fn helper() {}
+
+  - path: src/b.rs
+    content: |
+      pub use crate::a::helper;
+
+  - path: src/c.rs
+    content: |
+      use crate::b::helper;
+
+      pub fn run() {
+          helper();
+      }
+
+tests:
+  - name: "the function is defined in the first module"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper' AND d.definition_type = 'Function'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/a.rs } }
+
+  - name: "a call through the re-export links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: src/a.rs } }
+
+  - name: "the use declaration resolves to the definition"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/c.rs' AND i.identifier_name = 'helper'
+      RETURN d.file_path AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: src/a.rs } }

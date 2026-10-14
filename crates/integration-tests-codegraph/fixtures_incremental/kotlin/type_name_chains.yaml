@@ -1,0 +1,53 @@
+name: "Kotlin: locals named like the names they read"
+
+fixtures:
+  - path: src/main/kotlin/app/Pair.kt
+    content: |
+      package app
+
+      operator fun <A : Comparable<A>, B : Comparable<B>> Pair<A, B>.compareTo(other: Pair<A, B>): Int {
+          val first = first.compareTo(other.first)
+          return if (first == 0) second.compareTo(other.second) else first
+      }
+
+  - path: src/main/kotlin/app/Builders.kt
+    content: |
+      package app
+
+      import kotlinx.coroutines.flow.flow
+      import kotlinx.coroutines.flow.toList
+      import kotlinx.coroutines.future.future
+
+      fun target() {}
+
+      suspend fun useFuture() {
+          val future = future { 42 }
+          future.await()
+          target()
+      }
+
+      suspend fun useFlow() {
+          val flow = flow<Int> { }
+          flow.toList()
+          target()
+      }
+
+tests:
+  - name: "each function is a definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['compareTo', 'useFuture', 'useFlow', 'target']
+      RETURN d.name AS name
+    assert:
+      - { row_count: 4 }
+
+  - name: "a function with a local named like the builder it calls still calls its target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 2 }
+      - column_values:
+          field: caller
+          values: [useFuture, useFlow]

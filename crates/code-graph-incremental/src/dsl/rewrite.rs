@@ -251,23 +251,24 @@ pub fn apply_display(
     lang: &Lang,
     rules: &[Rewrite],
     edge_ctx: &EdgeCtx,
-) -> Tree<Compact> {
+    run: &Sentinel,
+) -> Result<Tree<Compact>, Killed> {
     if rules.iter().all(|rule| matches!(rule.out, Out::Tag(..))) {
         let mut tree = t;
-        let _ = apply_rewrites_inner(
+        apply_rewrites_inner(
             &mut tree,
             lang,
             rules,
             true,
             Some(edge_ctx),
-            &[],
+            &[run],
             |_, _, _, _, _, _| false,
-        );
-        tree
+        )?;
+        Ok(tree)
     } else {
         let mut tree: Tree = t.into();
-        let _ = apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[]);
-        tree.into()
+        apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[run])?;
+        Ok(tree.into())
     }
 }
 
@@ -450,17 +451,23 @@ fn apply_structure(
 
 impl Tree {
     pub(crate) fn clone_within(&mut self, id: NodeId, parent: NodeId) -> NodeId {
-        let children: Vec<NodeId> = id.children(&self.storage.0).collect();
-        let copy = self.storage.0.new_node(*self.node(id));
-        if let Some(tags) = self.tags.get(&Tree::to_raw(id)) {
-            let tags = tags.clone();
-            self.tags.insert(Tree::to_raw(copy), tags);
+        let mut pending = vec![(id, parent)];
+        let mut root = None;
+        while let Some((id, parent)) = pending.pop() {
+            let copy = parent.append_value(*self.node(id), &mut self.storage.0);
+            if let Some(tags) = self.tags.get(&Tree::to_raw(id)) {
+                let tags = tags.clone();
+                self.tags.insert(Tree::to_raw(copy), tags);
+            }
+            pending.extend(
+                id.children(&self.storage.0)
+                    .rev()
+                    .filter(|&child| child != copy)
+                    .map(|child| (child, copy)),
+            );
+            root.get_or_insert(copy);
         }
-        parent.append(copy, &mut self.storage.0);
-        for child in children {
-            self.clone_within(child, copy);
-        }
-        copy
+        root.expect("the source node is copied first")
     }
 }
 
