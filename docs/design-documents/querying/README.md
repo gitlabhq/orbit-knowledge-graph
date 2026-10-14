@@ -51,7 +51,7 @@ The remote manifest uses line-oriented HTML placeholders to show where the local
 
 ### Named Queries
 
-Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. The 12 YAML definitions under `config/named_queries/` carry JSON Query DSL and GQL spellings of the same graph shape.
+Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. The 14 YAML definitions under `config/named_queries/` carry JSON Query DSL and GQL spellings of the same graph shape.
 
 The `named-queries` crate validates and embeds both spellings. JSON templates use `$binding` for trusted caller values and `$param` for client values. GQL templates use `binding`, `param`, `identifier`, and `integer` lookup functions. Each parameter has one JSON Schema and one example shared by both spellings.
 
