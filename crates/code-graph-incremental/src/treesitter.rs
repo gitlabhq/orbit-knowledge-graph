@@ -244,7 +244,8 @@ fn from_tree_sitter(
     kind_map: &[u16],
     field_map: &[u16],
     label: &str,
-) -> Tree {
+    max_depth: usize,
+) -> Option<Tree> {
     let ts_root = ts_tree.root_node();
     let mut cursor = ts_root.walk();
 
@@ -286,7 +287,7 @@ fn from_tree_sitter(
     let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
 
     if !cursor.goto_first_child() {
-        return tree;
+        return Some(tree);
     }
 
     loop {
@@ -318,6 +319,9 @@ fn from_tree_sitter(
 
         if cursor.goto_first_child() {
             parent_stack.push(nid);
+            if max_depth > 0 && parent_stack.len() > max_depth {
+                return None;
+            }
             continue;
         }
 
@@ -327,7 +331,7 @@ fn from_tree_sitter(
 
         loop {
             if !cursor.goto_parent() {
-                return tree;
+                return Some(tree);
             }
             parent_stack.pop();
             if cursor.goto_next_sibling() {
@@ -387,6 +391,7 @@ pub fn parse(
         lang,
         label,
         &crate::sentinel::Sentinel::disabled(),
+        0,
     )
 }
 
@@ -396,6 +401,7 @@ pub fn parse_with_sentinel(
     lang: &Lang,
     label: &str,
     sentinel: &crate::sentinel::Sentinel,
+    max_depth: usize,
 ) -> Result<Tree, Killed> {
     sentinel.check()?;
     CACHE.with(|cache| {
@@ -416,20 +422,25 @@ pub fn parse_with_sentinel(
         let ts_tree = c
             .parser
             .parse_with_options(&mut input, None, Some(options))
-            .ok_or_else(|| {
-                stopped.unwrap_or(Killed {
-                    cancelled: false,
-                    label: "tree-sitter",
-                    path: label.to_string(),
-                    elapsed: Duration::ZERO,
-                    budget: Duration::ZERO,
-                })
-            })?;
+            .ok_or_else(|| stopped.unwrap_or_else(|| guard_stop("tree-sitter", label)))?;
         sentinel.check()?;
-        let tree = from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label);
+        let tree = from_tree_sitter(
+            source, &ts_tree, lang, &c.kinds, &c.fields, label, max_depth,
+        )
+        .ok_or_else(|| guard_stop("depth", label))?;
         sentinel.check()?;
         Ok(tree)
     })
+}
+
+fn guard_stop(label: &'static str, path: &str) -> Killed {
+    Killed {
+        cancelled: false,
+        label,
+        path: path.to_string(),
+        elapsed: Duration::ZERO,
+        budget: Duration::ZERO,
+    }
 }
 
 const MAX_STALL: u64 = 100_000;
@@ -480,9 +491,16 @@ mod tests {
             }));
         let lang = Lang::default();
         let source = "def example():\n    return 42\n".repeat(20000);
-        let error = parse_with_sentinel(&source, SupportLang::Python, &lang, "large.py", &sentinel)
-            .err()
-            .unwrap();
+        let error = parse_with_sentinel(
+            &source,
+            SupportLang::Python,
+            &lang,
+            "large.py",
+            &sentinel,
+            0,
+        )
+        .err()
+        .unwrap();
         assert_eq!(error.label, "tree-sitter");
         assert!(error.cancelled);
         assert_eq!(error.to_string(), "tree-sitter cancelled");

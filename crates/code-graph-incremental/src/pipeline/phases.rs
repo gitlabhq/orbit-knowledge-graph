@@ -288,8 +288,15 @@ impl ItemPhase<SourceFile> for Parse {
         let budget = run
             .child("tree-sitter", &file.path, env.limits.file_parse_ms)
             .on_thread_cpu();
-        treesitter::parse_with_sentinel(&file.content, grammar, &env.lang, &file.path, &budget)
-            .map(Parsed)
+        treesitter::parse_with_sentinel(
+            &file.content,
+            grammar,
+            &env.lang,
+            &file.path,
+            &budget,
+            env.limits.max_tree_depth,
+        )
+        .map(Parsed)
     }
 }
 
@@ -436,6 +443,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
                 _ if skipped.contains_key(path) => match skipped[path] {
                     "tree-sitter" => "skip_timeout_parse",
+                    "depth" => "skip_deeply_nested",
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
                     _ => "skip_timeout_sentinel",

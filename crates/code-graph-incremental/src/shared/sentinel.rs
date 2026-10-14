@@ -14,6 +14,7 @@ pub struct Limits {
     pub file_link_ms: u64,
     pub file_resolve_ms: u64,
     pub total_ms: u64,
+    pub max_tree_depth: usize,
 }
 
 impl Limits {
@@ -25,6 +26,7 @@ impl Limits {
         file_link_ms: u64::MAX,
         file_resolve_ms: u64::MAX,
         total_ms: u64::MAX,
+        max_tree_depth: 0,
     };
 }
 

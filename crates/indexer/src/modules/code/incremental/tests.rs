@@ -158,6 +158,26 @@ async fn language_timings_exclude_files_beyond_max_files() {
 }
 
 #[tokio::test]
+async fn files_nested_past_the_default_depth_limit_are_skipped() {
+    let nested = format!(
+        "function nested(c) {{\n{}{}}}\n",
+        "if (c) {\n".repeat(2_000),
+        "}\n".repeat(2_000)
+    );
+    let files: &[(&str, &[u8])] = &[
+        ("root/nested.js", nested.as_bytes()),
+        ("root/flat.js", b"function flat() {}\n"),
+    ];
+    let limits = code_graph_incremental::Limits {
+        max_tree_depth: limits(&config()).max_tree_depth,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert_eq!(timings.skipped_paths, ["nested.js"]);
+    assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+}
+
+#[tokio::test]
 async fn language_timings_exclude_files_killed_by_the_parse_budget() {
     let files: &[(&str, &[u8])] = &[
         ("root/a.js", b"function a() {}\n"),
@@ -478,6 +498,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         ]
     );
     assert_eq!(mapped.max_files, configured.max_files);
+    assert_eq!(mapped.max_tree_depth, configured.max_tree_depth);
 
     let unlimited = limits(&CodeIndexingPipelineConfig {
         max_files: 0,
@@ -486,6 +507,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         per_file_walk_timeout_ms: 0,
         per_file_ssa_timeout_ms: 0,
         cross_file_resolve_timeout_ms: 0,
+        max_tree_depth: 0,
         ..configured
     });
     assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);

@@ -39,6 +39,7 @@ pub(super) fn limits(config: &CodeIndexingPipelineConfig) -> code_graph_incremen
         file_link_ms: budget(config.per_file_ssa_timeout_ms),
         file_resolve_ms: budget(config.per_file_timeout_ms),
         cross_file_resolve_ms: budget(config.cross_file_resolve_timeout_ms),
+        max_tree_depth: config.max_tree_depth,
         ..code_graph_incremental::Limits::UNLIMITED
     }
 }

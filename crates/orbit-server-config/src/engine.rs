@@ -255,6 +255,9 @@ pub struct CodeIndexingPipelineConfig {
     /// (import edges, call edges). Incremental engine:
     /// `cross_file_resolve_ms`. 0 = no timeout.
     pub cross_file_resolve_timeout_ms: u64,
+    /// Syntax tree depth above which the incremental engine skips a file as
+    /// deeply nested. 0 = no limit.
+    pub max_tree_depth: usize,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how

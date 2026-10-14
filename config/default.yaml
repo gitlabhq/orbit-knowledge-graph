@@ -129,6 +129,7 @@ engine:
         per_file_walk_timeout_ms: 100
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
+        max_tree_depth: 1024
         job_timeout_secs: 1500
         fetch_concurrency: 10
         write_channel_capacity: 8
