@@ -314,11 +314,27 @@ pub struct ColumnSpec {
     pub nullable: bool,
 }
 
+#[derive(Default)]
+struct Distinct {
+    values: usize,
+    bytes: usize,
+}
+
+impl Distinct {
+    fn add(&mut self, key: i32, value: &str) {
+        if key as usize == self.values {
+            self.values += 1;
+            self.bytes += value.len();
+        }
+    }
+}
+
 enum Col {
     Str(StringBuilder, bool),
     DictStr(
         arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
         bool,
+        Distinct,
     ),
     Int(Int64Builder, bool),
     Bool(BooleanBuilder, bool),
@@ -329,6 +345,7 @@ enum Col {
             arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
         >,
         bool,
+        Distinct,
     ),
 }
 
@@ -342,12 +359,12 @@ impl Col {
     fn len(&self) -> usize {
         match self {
             Self::Str(b, _) => b.len(),
-            Self::DictStr(b, _) => b.len(),
+            Self::DictStr(b, ..) => b.len(),
             Self::Int(b, _) => b.len(),
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
             Self::StrList(b, _) => b.len(),
-            Self::DictStrList(b, _) => b.len(),
+            Self::DictStrList(b, ..) => b.len(),
         }
     }
 
@@ -355,7 +372,8 @@ impl Col {
         match self {
             Self::Str(b, _) => b.values_slice().len(),
             Self::StrList(b, _) => b.values_ref().values_slice().len(),
-            Self::DictStrList(b, _) => b.values_ref().len(),
+            Self::DictStr(_, _, distinct) => distinct.bytes,
+            Self::DictStrList(b, _, distinct) => b.values_ref().len().max(distinct.bytes),
             _ => 0,
         }
     }
@@ -375,7 +393,7 @@ impl Col {
     fn finish(self) -> (DataType, bool, ArrayRef) {
         match self {
             Self::Str(mut b, nullable) => (DataType::Utf8, nullable, Arc::new(b.finish())),
-            Self::DictStr(mut b, nullable) => (
+            Self::DictStr(mut b, nullable, _) => (
                 DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
                 nullable,
                 Arc::new(b.finish()),
@@ -391,7 +409,7 @@ impl Col {
                 let arr = b.finish();
                 (arr.data_type().clone(), nullable, Arc::new(arr))
             }
-            Self::DictStrList(mut b, nullable) => {
+            Self::DictStrList(mut b, nullable, _) => {
                 let arr = b.finish();
                 (arr.data_type().clone(), nullable, Arc::new(arr))
             }
@@ -422,8 +440,9 @@ impl ColRef<'_> {
                 b.append_value(v);
                 Ok(())
             }
-            Col::DictStr(b, _) => {
-                b.append_value(v);
+            Col::DictStr(b, _, distinct) => {
+                let v = v.as_ref();
+                distinct.add(b.append(v)?, v);
                 Ok(())
             }
             other => Err(batch_err(format!(
@@ -486,10 +505,10 @@ impl ColRef<'_> {
                 b.append(true);
                 Ok(())
             }
-            Col::DictStrList(b, _) => {
+            Col::DictStrList(b, _, distinct) => {
                 let vals = b.values();
                 for v in values {
-                    vals.append_value(v);
+                    distinct.add(vals.append(v)?, v);
                 }
                 b.append(true);
                 Ok(())
@@ -511,9 +530,9 @@ impl ColRef<'_> {
                 }
                 Ok(())
             }
-            Col::DictStr(b, _) => {
+            Col::DictStr(b, _, distinct) => {
                 match v {
-                    Some(s) => b.append_value(s),
+                    Some(s) => distinct.add(b.append(s.as_ref())?, s.as_ref()),
                     None => b.append_null(),
                 }
                 Ok(())
@@ -588,6 +607,7 @@ impl BatchBuilder {
                         DICT_VALUES_HINT * 16,
                     ),
                     spec.nullable,
+                    Distinct::default(),
                 ),
                 ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
                 ColumnType::TimestampMicros => Col::Timestamp(
@@ -608,6 +628,7 @@ impl BatchBuilder {
                         cap,
                     ),
                     spec.nullable,
+                    Distinct::default(),
                 ),
             };
             index.insert(spec.name.clone(), names.len());
@@ -1125,6 +1146,44 @@ mod tests {
             vec!["a", "b"]
         );
         assert!(ArrowUtils::get_string_list(&batch, "missing", 0).is_empty());
+    }
+
+    #[test]
+    fn dictionary_values_count_against_the_batch_byte_limit() {
+        let specs = [
+            ColumnSpec {
+                name: "kind".into(),
+                col_type: ColumnType::DictStr,
+                nullable: true,
+            },
+            ColumnSpec {
+                name: "tags".into(),
+                col_type: ColumnType::DictStrList,
+                nullable: false,
+            },
+        ];
+        let mut builder = BatchBuilder::new(&specs, 0).unwrap();
+        let mut batches = 0;
+        for i in 0..100 {
+            let repeated = "r".repeat(1024);
+            let distinct = format!("{i:04}{}", "d".repeat(1020));
+            let kind = if i % 2 == 0 {
+                Some(distinct.as_str())
+            } else {
+                None
+            };
+            builder.col("kind").unwrap().push_opt_str(kind).unwrap();
+            builder
+                .col("tags")
+                .unwrap()
+                .push_str_list(&[&repeated, &distinct])
+                .unwrap();
+            if let Some(batch) = builder.take_if_over(10 * 1024).unwrap() {
+                assert!(batch.num_rows() <= 10);
+                batches += 1;
+            }
+        }
+        assert!(batches >= 9);
     }
 
     #[test]
