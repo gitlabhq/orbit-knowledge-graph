@@ -56,8 +56,8 @@ fn tree_digest(tree: &BTreeMap<String, Vec<u8>>) -> String {
 }
 
 /// Whether `path` still holds what setup wrote, as opposed to a directory created there after
-/// the record was left behind. A lone wrapper `SKILL.md` counts too: `glab skills update`
-/// writes one, possibly from another release, and it holds no user data.
+/// the record was left behind. A lone wrapper `SKILL.md` counts too when it only differs in its version, which is what
+/// `glab skills update` writes from another release.
 fn is_ours(path: &Path) -> bool {
     let Some(marker) = read_marker(path) else {
         return false;
@@ -68,14 +68,38 @@ fn is_ours(path: &Path) -> bool {
     tree_digest(&current) == marker.digest || is_wrapper_tree(&current)
 }
 
+/// A lone `SKILL.md` equal to this release's wrapper for either launcher, apart from its
+/// `version:` line. That is what `glab skills update` writes when glab ships another release.
 fn is_wrapper_tree(tree: &BTreeMap<String, Vec<u8>>) -> bool {
     let [(path, contents)] = tree.iter().collect::<Vec<_>>()[..] else {
         return false;
     };
-    path == MANIFEST
-        && String::from_utf8_lossy(contents)
-            .lines()
-            .any(|line| line.trim() == "source-path: skills/orbit-wrapper")
+    if path != MANIFEST {
+        return false;
+    }
+    let current = mask_version(&String::from_utf8_lossy(contents));
+    [spec::DIRECT_LAUNCHER, spec::GLAB_LAUNCHER]
+        .into_iter()
+        .filter_map(|launcher| crate::skill::wrapper_tree_for(launcher).ok())
+        .filter_map(|wrapper| wrapper.get(MANIFEST).cloned())
+        .any(|manifest| mask_version(&String::from_utf8_lossy(&manifest)) == current)
+}
+
+fn mask_version(manifest: &str) -> String {
+    let mut delimiters = 0;
+    manifest
+        .split('\n')
+        .map(|line| {
+            if line == "---" {
+                delimiters += 1;
+            }
+            match delimiters == 1 && line.starts_with("version:") {
+                true => "version:",
+                false => line,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn marker_path(skill_root: &Path) -> PathBuf {

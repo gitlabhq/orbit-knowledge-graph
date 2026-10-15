@@ -1004,6 +1004,31 @@ mod tests {
     }
 
     #[test]
+    fn an_edited_wrapper_is_backed_up_on_setup_and_kept_on_uninstall() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        let manifest = skills.join("orbit/SKILL.md");
+        install_with_mcp(&["codex"], dir.path());
+        let edited = format!(
+            "{}Always use project X.\n",
+            std::fs::read_to_string(&manifest).unwrap()
+        );
+
+        std::fs::write(&manifest, &edited).unwrap();
+        uninstall_named(&["codex"], dir.path());
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), edited);
+
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::write(&manifest, &edited).unwrap();
+        install_with_mcp(&["codex"], dir.path());
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup/SKILL.md.orbit-backup"))
+                .unwrap(),
+            edited
+        );
+    }
+
+    #[test]
     fn a_finder_file_does_not_count_as_a_change() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
