@@ -258,7 +258,10 @@ pub struct CodeIndexingPipelineConfig {
     pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
     /// (import edges, call edges). Incremental engine:
-    /// `cross_file_resolve_ms`. 0 = no timeout.
+    /// `cross_file_resolve_ms`. On a timeout the language family keeps its
+    /// per-file graph, the cross-file edges of the waves that finished, and
+    /// the part of the last wave that finished, which depends on thread
+    /// scheduling. 0 = no timeout.
     pub cross_file_resolve_timeout_ms: u64,
     /// Syntax tree depth above which the incremental engine skips a file as
     /// deeply nested. 0 = no limit.

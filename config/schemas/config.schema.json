@@ -613,7 +613,7 @@
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
-          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. 0 = no timeout.",
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. On a timeout the language family keeps its\nper-file graph, the cross-file edges of the waves that finished, and\nthe part of the last wave that finished, which depends on thread\nscheduling. 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
