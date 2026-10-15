@@ -342,6 +342,64 @@ impl Handler for SlotReleasingHandler {
     }
 }
 
+struct PanicOnceHandler {
+    inner: TestHandler,
+    panicked: AtomicBool,
+}
+
+#[async_trait]
+impl Handler for PanicOnceHandler {
+    fn name(&self) -> &str {
+        "panic-once-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        test_subscription()
+    }
+
+    fn requires_worker_pool(&self) -> bool {
+        false
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        if !self.panicked.swap(true, Ordering::SeqCst) {
+            panic!("intentional panic before the work permit is released");
+        }
+        self.inner.handle(context, message).await
+    }
+}
+
+#[tokio::test]
+async fn a_panicking_handler_returns_its_work_permit() {
+    let context = TestContext::new().await;
+    let broker = context.create_broker().await;
+    let handler = PanicOnceHandler {
+        inner: TestHandler {
+            writer: context.create_writer(),
+        },
+        panicked: AtomicBool::new(false),
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+
+    context.publish_event(&broker, 1, "panics").await;
+    context.publish_event(&broker, 2, "runs").await;
+    run_engine_with(
+        engine,
+        orbit_server_config::EngineConfiguration {
+            max_concurrent_workers: Some(1),
+            ..indexer::testkit::test_engine_configuration()
+        },
+        Duration::from_secs(4),
+    )
+    .await;
+
+    assert_eq!(
+        context.query_count().await,
+        1,
+        "the second message must get the only work permit after the first handler panicked"
+    );
+}
+
 #[tokio::test]
 async fn a_released_work_slot_admits_the_next_message() {
     let context = TestContext::new().await;
