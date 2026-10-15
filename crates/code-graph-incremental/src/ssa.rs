@@ -428,8 +428,7 @@ impl SsaEngine {
         let phi_val = Value::Phi(phi_id);
         let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
         phi_users.retain(|user| {
-            *user != phi_id
-                && self.replaced[user.0 as usize].is_none()
+            self.replaced[user.0 as usize].is_none()
                 && self.phis[user.0 as usize].operands.contains(&phi_val)
         });
         phi_users.sort_unstable_by_key(|user| user.0);
