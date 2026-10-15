@@ -42,3 +42,4 @@ physical:
       expect:
         - (CTE _ (_))
         - (Scan Table(gl_edge) ...)
+        - (Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) AND (f.traversal_path = b.traversal_path) (_) (_))

@@ -5,11 +5,12 @@ use anyhow::{Context, Result};
 
 use super::components;
 use super::spec::{self, Agent};
-use super::{Component, Options, Target};
+use super::{Component, Options, SkillRequest, Target};
 
 pub(super) struct Selection {
     pub(super) agents: Vec<Agent>,
     pub(super) components: BTreeSet<Component>,
+    pub(super) skill: SkillRequest,
 }
 
 impl Selection {
@@ -27,6 +28,7 @@ impl Selection {
         Ok(Selection {
             agents,
             components: options.components.clone(),
+            skill: options.skill.clone(),
         })
     }
 
@@ -44,7 +46,11 @@ impl Selection {
         } else {
             agents_named(&options.agents)?
         };
-        Ok(Selection { agents, components })
+        Ok(Selection {
+            agents,
+            components,
+            skill: SkillRequest::default(),
+        })
     }
 
     pub(super) fn selected_agent_names(&self) -> Vec<String> {
@@ -57,7 +63,7 @@ impl Selection {
     }
 }
 
-fn agents_named(names: &[String]) -> Result<Vec<Agent>> {
+pub(super) fn agents_named(names: &[String]) -> Result<Vec<Agent>> {
     let unique: BTreeSet<&String> = names.iter().collect();
     unique
         .into_iter()

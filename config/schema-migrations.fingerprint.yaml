@@ -88,7 +88,7 @@ sources:
   nodes/packages/dependency.yaml: 3e82e649bc4951c0ab254772a292a8a7ca267b427b679f7addc062bbaeec7a0b
   nodes/packages/package.yaml: ee4de01811ee9bf14761158a12288ca5dd7ab421860117a0346703038227edf6
   nodes/packages/package_file.sql.j2: 4472d28726b4714b0e615ebe030a3ff4778796c95d3c83cbf7a4ea2a9c298f4f
-  nodes/packages/package_file.yaml: fc1e564bfddd3b9bc84055da88d1e8d5c10b8e0278c2aff77080b4b7a749f765
+  nodes/packages/package_file.yaml: e511aadb9ff5a56c9a7ba0f6d192ee82b6bb3784a0f21a6b01172f1b0035a58a
   nodes/plan/label.yaml: 2851644743386ee707aa207e4a9234c8351ade7dd812e25bbd086beb2cf9699c
   nodes/plan/milestone.yaml: 81833910c8b278ee8ff049ddbbe22fed7f44d753b57e5e4fcf63275f87f1dca5
   nodes/plan/work_item.yaml: 0aa0b808f346eec03b77f06b83321df74164886b3def6d0b8323e5adeff1e00d
@@ -135,7 +135,7 @@ ddl:
   gl_milestone: e61e5cc57a450c11bbb7be2009928fb44d6c0621a1a898d9804cfbf4e3e8bb9e
   gl_note: b1949e57c5fb4ac706b10730c8809d7a68ba545f7391834177ba7337e6280f89
   gl_package: b74a41531dfceb06e4988eec4f5661cc44d41f9b6a1e682acfa9ed50ebb1b15d
-  gl_package_file: 253721cdf5d96815b5758f14b07136d30cdd8d360907fff8280a695eed61e933
+  gl_package_file: 87875c230e953b1bf48ab10e2d8465f18f65c5706a33c9e619403434eb88325b
   gl_pipeline: b64046eeab3eb490490ec9426db532fb9fbb4df5d124b2fe8850429c68246e3b
   gl_project: 8448a00c1da91e191a409074d7795588a96c33faa6084edad700680976e7122a
   gl_runner: f43051d1a97911b61e1deeee6286d2419f007c9f02fe154fde3e2a85fb3bb293

@@ -157,7 +157,7 @@ The token cache (`crates/gitlab-client/src/cc_token.rs`) refreshes inline on the
 - It schedules the next refresh 30 minutes (plus up to 30 seconds of jitter) before the token's `exp`. The synced token lives for days, so each pod usually calls Rails about once per token lifetime.
 - A fetch can fail with an HTTP error, a non-200 status, or a malformed JWT. If a cached token already exists, a failure keeps serving it and blocks further Rails calls for 60 seconds. The same 60-second limit applies to a token Rails returns already close to expiry, so it doesn't cause a fetch per event. Before any token has ever been fetched, there is nothing to rate-limit around, so every call retries immediately.
 - While the cached token is still valid, the fetch is capped at 15 seconds, matching labkit's own OIDC token source. Otherwise a hung Rails would stall the whole billing send loop, not just this refresh. With no cached token, or only an expired one, there's nothing to protect by giving up early. The collector would reject the expired token anyway, so the fetch waits out `GitlabClient`'s own timeouts instead.
-- If the cached token has expired and Rails still cannot supply a new one, the cache sends the expired token anyway. The GitLab-hosted collector rejects it with `401`, so the error is visible on GitLab's hosted collector instead of failing silently on the customer's instance.
+- If the cached token has expired and Rails still cannot supply a new one, the cache sends the expired token anyway. The GitLab-hosted collector rejects it with `401`, so the error is visible on the hosted collector instead of failing silently on the customer's instance.
 
 For the equivalent OIDC pattern in Go, see the [labkit-go proof of concept](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468) and the [server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106).
 
@@ -804,7 +804,7 @@ The controls that apply to GKG billing code fall into three categories:
 
 1. **Isolate billing code.** Billing event emission lives in a dedicated crate, `crates/orbit-billing/`, with a single `Claims` to `BillingInputs` conversion seam at `crates/orbit-server/src/billing_adapter.rs`. The authoring rules for this boundary are in `docs/dev/sox-billing-boundary.md`. This keeps CODEOWNERS scoping practical and the SOX audit surface small.
 2. **Set up CODEOWNERS.** `.gitlab/CODEOWNERS` requires approval from designated billing code owners on the billing crate and the adapter seam. Satisfies PC.2 (change approval) and LA.4 (privileged access).
-3. **Finalize SOX scope.** The detailed control scoping is tracked in [orbit/knowledge-graph#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507) and ADR 013.
+3. **Finalize SOX scope.** The detailed control scoping is tracked in [orbit/knowledge-graph#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507) and [ADR 020](020_billing_sox_scope.md).
 
 ---
 

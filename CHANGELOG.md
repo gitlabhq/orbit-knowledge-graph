@@ -1,3 +1,43 @@
+## [0.144.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.143.0...v0.144.0) (2026-10-15)
+
+### Features
+
+* **cli:** install one orbit skill as a wrapper or the full tree ([e4552d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e4552d9cc6ad8e8d888b84e037743b7c4fc19059)) by Dmitry Gruzd
+* **named-queries:** add expand_merge_request and expand_work_item ([f255a71](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f255a71c33c0e6730bf89c77fa0481160f5e632b)) by Dmitry Gruzd
+
+### Fixes
+
+* **indexer:** retry 429/502/503/504 archive errors instead of marking repos empty ([345c97c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/345c97cdb9bfb13574c98aa5ec67e24144139ad9)) by Dmitry Gruzd
+
+### Other
+
+* **billing:** add ADR 020 for SOX scoping of billing emission ([24fa08c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24fa08cfda6c96f7182a0126506463e854f07d72)) by Sharmad Nachnolkar
+* **indexer:** deny clippy panic lints on the data path ([54da1a9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/54da1a9856b6545461d46f825a4552c607fa60a3)) by Dmitry Gruzd
+
+## [0.143.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.142.0...v0.143.0) (2026-10-15)
+
+### Features
+
+* remove plaintext live and ready probes ([afd6c51](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/afd6c51c298031d3c6b6eaa4e9b1b5b53cc98565)) by Bohdan Parkhomchuk
+* **storage:** add variant routing and backend planning ([bdc13fc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bdc13fc900500697bac32b27a9baccd3814e8cac)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** add the blank lines that the YAML lint needs to the package-file fixture ([1b939ad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1b939ad1aeaa15f841e419b2f07b7dec15dd9439)) by michaelangeloio
+* **ci:** match the new orbit grep output in the local CLI smoke test ([9871b09](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9871b094547a9c2235e99a49f433bf61e5055705)) by michaelangeloio
+* **code-graph-incremental:** stop crash inputs from taking down the code indexer ([bd8d5b8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bd8d5b892c905b0098f9a45d9e91cdd27e8d1d70)) by Michael Angelo Rivera
+* **compiler:** balance auth paths and enable package-file FK ([8897b94](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8897b94c8360679d3212e6b7803a8756c89995a6)) by Michael Usachenko
+
+### Performance
+
+* **build:** cut cold dev builds and unit-test rebuilds ([99885eb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/99885eb58d8d9f97f7a845d1300df08f16c2b26c)) by Michael Angelo Rivera
+
+### Other
+
+* **linting:** lint the layout of the YAML test suites ([a304ef8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a304ef820bbe9286cc7c3ff5a69f4cc7843d41e9)) by Michael Angelo Rivera
+* **named-queries:** drop the hardcoded named query count test ([c2f7c35](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c2f7c355e3f4cfc3f186017b59fdb6ba63d3fc90)) by Aaron Algutifan
+* **orbit-perf:** stop the load test from sending production analytics ([12ccdb2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/12ccdb24bc4ec07afd222e64434e062da595168c)) by Michael Angelo Rivera
+
 ## [0.142.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.141.0...v0.142.0) (2026-10-14)
 
 ### Features

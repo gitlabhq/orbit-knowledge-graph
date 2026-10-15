@@ -939,14 +939,23 @@ impl Ontology {
         Ok(())
     }
 
-    #[must_use]
-    /// Requires `validate_single_table_edge_routes`; use `edge_tables_for_relationship` for split routes.
-    pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
-        self.edges
+    pub fn edge_table_for_relationship(
+        &self,
+        relationship_kind: &str,
+    ) -> Result<&str, OntologyError> {
+        let mut tables = self
+            .edges
             .get(relationship_kind)
-            .and_then(|variants| variants.first())
-            .map(|edge| edge.destination_table.as_str())
-            .unwrap_or(&self.default_edge_table)
+            .into_iter()
+            .flatten()
+            .map(|edge| edge.destination_table.as_str());
+        let table = tables.next().unwrap_or(&self.default_edge_table);
+        if !tables.all(|candidate| candidate == table) {
+            return Err(OntologyError::Validation(format!(
+                "ambiguous table route for '{relationship_kind}'"
+            )));
+        }
+        Ok(table)
     }
 
     #[must_use]

@@ -731,17 +731,51 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         filters: &[InputFilter],
     ) -> Result<()> {
         let model = self.model.get();
-        let edge_table = input.relationships[index]
-            .types
-            .first()
-            .and_then(|kind| model.relationship_table(kind))
-            .unwrap_or_else(|| model.default_edge_table());
-        let data_type = model.table_column_type(edge_table, prop).ok_or_else(|| {
-            QueryError::Validation(format!(
-                "relationship[{index}] filter on unknown edge column \"{prop}\" \
-                 (table \"{edge_table}\" does not have this column)"
-            ))
-        })?;
+        if prop.starts_with('_') {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] filter on private edge column \"{prop}\""
+            )));
+        }
+        let relationship = &input.relationships[index];
+        let from = input
+            .node(&relationship.from)
+            .and_then(|node| node.entity.as_deref());
+        let to = input
+            .node(&relationship.to)
+            .and_then(|node| node.entity.as_deref());
+        let mut edge_tables = Vec::new();
+        if relationship.hops.max == 1
+            && let Some((from, to)) = from.zip(to)
+        {
+            if relationship.direction != crate::input::Direction::Incoming {
+                edge_tables.extend(model.relationship_tables_between(
+                    &relationship.types,
+                    from,
+                    to,
+                ));
+            }
+            if relationship.direction != crate::input::Direction::Outgoing {
+                edge_tables.extend(model.relationship_tables_between(
+                    &relationship.types,
+                    to,
+                    from,
+                ));
+            }
+        }
+        if edge_tables.is_empty() {
+            edge_tables = model.relationship_tables(&relationship.types);
+        }
+        let mut types = edge_tables
+            .iter()
+            .map(|table| model.table_column_type(table, prop));
+        let data_type = types.next().flatten();
+        let Some(data_type) =
+            data_type.filter(|first| types.all(|data_type| data_type == Some(*first)))
+        else {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] filter on unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
+            )));
+        };
         for filter in filters {
             check_condition_column(("", prop), filter)?;
             if filter.rhs_column.is_some() {

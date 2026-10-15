@@ -194,17 +194,20 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
                 else {
                     continue;
                 };
-                let edge_table = ontology
-                    .edge_table_for_relationship(&mapping.label)
-                    .to_string();
                 tables_by_emitting_node.insert(
                     node.name.clone(),
                     prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
                 );
-                kinds_by_group
-                    .entry((node.name.clone(), edge_table, emitting_node_id_column))
-                    .or_default()
-                    .push(mapping.label.clone());
+                for edge_table in ontology.edge_tables_for_relationship(&mapping.label) {
+                    kinds_by_group
+                        .entry((
+                            node.name.clone(),
+                            edge_table.to_string(),
+                            emitting_node_id_column,
+                        ))
+                        .or_default()
+                        .push(mapping.label.clone());
+                }
             }
         }
     }

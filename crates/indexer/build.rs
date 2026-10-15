@@ -1,3 +1,9 @@
+#![allow(
+    clippy::panic,
+    clippy::expect_used,
+    reason = "build scripts fail the build by panicking; there is no runtime data path"
+)]
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;

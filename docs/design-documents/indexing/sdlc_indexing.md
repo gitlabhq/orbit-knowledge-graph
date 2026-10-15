@@ -120,7 +120,7 @@ The transformation from CDC data to the graph schema is handled by the ETL Index
 ##### Core components
 
 - `gkg-indexer`: The ETL pipeline for GitLab SDLC data.
-- `gkg-webserver`: The gRPC and HTTP interface to query Orbit.
+- `gkg-webserver`: The gRPC interface to query Orbit.
 - `NATS JetStream`: The message broker for Orbit.
 - `NATS KV`: The key-value store for Orbit.
 - `ClickHouse`: The OLAP database for GitLab and Orbit.

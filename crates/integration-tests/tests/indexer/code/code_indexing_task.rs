@@ -6,7 +6,7 @@ use chrono::{TimeZone, Utc};
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::handler::Handler;
 use indexer::modules::code::{
-    ClickHouseStaleDataCleaner, StaleDataCleaner, config::CodeTableNames,
+    ClickHouseStaleDataCleaner, CodeCheckpointStore, StaleDataCleaner, config::CodeTableNames,
 };
 use indexer::testkit::MockLockService;
 use indexer::topic::CodeIndexingTaskRequest;
@@ -146,6 +146,64 @@ async fn incremental_flag_records_language_timing_metrics() {
     assert_eq!(
         by_language("gkg.indexer.code.language.bytes"),
         BTreeMap::from([("python".to_string(), 55), ("javascript".to_string(), 27)])
+    );
+}
+
+#[tokio::test]
+async fn incremental_flag_counts_listed_entries_dropped_past_the_file_limit() {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+    let exporter = InMemoryMetricExporter::default();
+    let provider = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(exporter.clone()).build())
+        .build();
+    opentelemetry::global::set_meter_provider(provider.clone());
+    enable_incremental("1/2803/");
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    let icons: Vec<String> = (0..10).map(|i| format!("assets/icon{i}.png")).collect();
+    let mut files = vec![
+        ("src/a.js", "export function a() {}\n"),
+        ("src/b.js", "import { a } from './a';\na();\n"),
+    ];
+    files.extend(icons.iter().map(|path| (path.as_str(), "png")));
+    mock.add_project(2803, "main", &files);
+    let mut config = indexer::testkit::test_pipeline_configuration();
+    config.max_repository_files = 3;
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
+    let handler = deps.code_indexing_task_handler();
+    index_code(&handler, &clickhouse, 2803, "first", 1, "1/2803/").await;
+    provider.force_flush().unwrap();
+
+    let metrics = exporter.get_finished_metrics().unwrap();
+    let skipped_by_reason: BTreeMap<String, u64> = metrics
+        .iter()
+        .flat_map(|resource| resource.scope_metrics())
+        .flat_map(|scope| scope.metrics())
+        .filter(|metric| metric.name() == "gkg.indexer.code.archive.entries.skipped")
+        .flat_map(|metric| match metric.data() {
+            AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                .data_points()
+                .map(|point| {
+                    let reason = point
+                        .attributes()
+                        .find(|kv| kv.key.as_str() == "reason")
+                        .map(|kv| kv.value.to_string())
+                        .unwrap();
+                    (reason, point.value())
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(
+        skipped_by_reason.get("file_limit"),
+        Some(&7),
+        "listed-only entries past the file limit need a skip reason, got {skipped_by_reason:?}"
     );
 }
 
@@ -446,8 +504,8 @@ async fn indexes_calls_and_extends_edges() {
     // Both edges land in gl_code_edge per ontology routing
     // (the schema version prefix is added at runtime).
     let ontology = integration_testkit::load_ontology();
-    let calls_table = ontology.edge_table_for_relationship("CALLS");
-    let extends_table = ontology.edge_table_for_relationship("EXTENDS");
+    let calls_table = ontology.edge_table_for_relationship("CALLS").unwrap();
+    let extends_table = ontology.edge_table_for_relationship("EXTENDS").unwrap();
     assert!(
         calls_table.ends_with("gl_code_edge"),
         "CALLS must route to gl_code_edge, got {calls_table}"
@@ -990,13 +1048,14 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
     let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
     let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
-    // Writes are buffered, so the handler acks; the deferred flush fails, the project's commit is
-    // marked failed (never checkpointed), and the backfill sweep re-indexes it.
-    failing_handler
+    let error = failing_handler
         .handle(context, envelope)
         .await
-        .expect("buffered handler acks even when the deferred write will fail");
-    let _ = failing_handler.flush().await;
+        .expect_err("a task whose buffered rows never land must fail so NATS redelivers it");
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Processing(_)),
+        "unexpected error: {error}"
+    );
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_file_not_active(&clickhouse, project_id, "src/Other.java").await;
@@ -1004,6 +1063,165 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "failed reindex must not advance the checkpoint"
+    );
+}
+
+#[tokio::test]
+async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
+    let project_id: i64 = 61;
+    let traversal_path = "1/61/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let config = indexer::testkit::test_pipeline_configuration();
+    let buffer_tick = config.write_buffer_age();
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
+    let handler = deps.code_indexing_task_handler();
+
+    let started = std::time::Instant::now();
+    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("indexing succeeds");
+    let elapsed = started.elapsed();
+
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1),
+        "the checkpoint must be written before the handler returns"
+    );
+    assert!(
+        elapsed < buffer_tick,
+        "the job must flush its own rows instead of waiting {buffer_tick:?} for the tick; took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold() {
+    let project_id: i64 = 64;
+    let traversal_path = "1/64/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    mock.set_archive_status(
+        project_id,
+        Some(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let handler = &handler;
+    let fail_once = move |attempt: u32| async move {
+        let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+        envelope.attempt = attempt;
+        handler
+            .handle(handler_context_redelivered(attempt < 5), envelope)
+            .await
+            .expect_err("the archive endpoint keeps failing")
+    };
+
+    for cycle in 1..=5i64 {
+        for attempt in 1..=5 {
+            let error = fail_once(attempt).await;
+            assert!(
+                matches!(error, indexer::handler::HandlerError::Processing(_)),
+                "cycle {cycle}, attempt {attempt}: {error}"
+            );
+        }
+        assert_eq!(
+            attempts(&clickhouse, traversal_path, project_id).await,
+            [cycle],
+            "each exhausted cycle keeps one attempt; the redelivered ones give theirs back"
+        );
+    }
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS],
+        "the project is parked at the sweep's threshold"
+    );
+}
+
+#[tokio::test]
+async fn a_lost_lock_does_not_refund_over_the_new_holders_attempt() {
+    let project_id: i64 = 66;
+    let traversal_path = "1/66/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_slow_archive(project_id, "main");
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_secs(3));
+    let locks = Arc::new(MockLockService::new());
+
+    let new_holder = {
+        let locks = Arc::clone(&locks);
+        let store = Arc::clone(&deps.checkpoint_store);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            locks.steal_leases();
+            let mut checkpoint = indexer::modules::code::CodeCheckpoint::new(
+                TraversalPath::new_unchecked(traversal_path),
+                project_id,
+                "main",
+            );
+            checkpoint.attempts = 7;
+            store.save(&checkpoint).await.expect("new holder's start");
+        })
+    };
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let error = handler
+        .handle(
+            handler_context_with_lock_service(locks).with_redelivery(true),
+            envelope,
+        )
+        .await
+        .expect_err("a lost lock cancels the run");
+    assert!(
+        matches!(
+            error,
+            indexer::handler::HandlerError::Processing(_)
+                | indexer::handler::HandlerError::Backpressure(_)
+        ),
+        "unexpected error: {error}"
+    );
+    new_holder.await.expect("new holder");
+
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [7],
+        "a run that lost its lock must not refund over the new holder's checkpoint"
     );
 }
 
@@ -1082,7 +1300,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
             "SELECT source_id FROM {} \
              WHERE relationship_kind = 'DEFINES' \
              AND source_id IN (SELECT id FROM {} WHERE project_id = {project_id})",
-            ontology.edge_table_for_relationship("DEFINES"),
+            ontology.edge_table_for_relationship("DEFINES").unwrap(),
             t("gl_definition")
         ))
         .await;
@@ -1093,7 +1311,103 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
-async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
+async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
+    let project_id: i64 = 7;
+    let traversal_path = "1/7/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let max_attempts = indexer::modules::code::code_indexing_task_topic_policy()
+        .max_attempts
+        .expect("the code topic sets max_attempts");
+    for delivery in 1..=max_attempts {
+        let status = if delivery % 2 == 1 {
+            axum::http::StatusCode::BAD_GATEWAY
+        } else {
+            axum::http::StatusCode::TOO_MANY_REQUESTS
+        };
+        mock.set_archive_status(project_id, Some(status));
+        let mut envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+        envelope.attempt = delivery;
+        let result = handler.handle(handler_context(), envelope).await;
+        assert!(
+            matches!(&result, Err(indexer::handler::HandlerError::Processing(msg)) if msg.contains("overloaded")),
+            "{status} on a backfill task must nack as overload, got {result:?}"
+        );
+    }
+
+    let spent = attempts(&clickhouse, traversal_path, project_id).await;
+    assert_eq!(spent, [1], "a whole dispatch of overload costs one attempt");
+    assert!(
+        spent[0] < indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS,
+        "the dispatcher must still re-send the project after CODE_RETRY_AFTER"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None,
+        "overload must not write an indexed-empty checkpoint"
+    );
+
+    mock.set_archive_status(project_id, None);
+    let envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the redelivered task indexes once the endpoint recovers");
+    deps.pipeline.flush().await.expect("flush");
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
+}
+
+#[tokio::test]
+async fn an_empty_archive_on_a_redelivered_attempt_is_not_checkpointed() {
+    let project_id: i64 = 67;
+    let traversal_path = "1/67/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_empty_archive(project_id, "main");
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let error = handler
+        .handle(handler_context_redelivered(true), envelope)
+        .await
+        .expect_err("an empty archive for a commit that exists waits for the next delivery");
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Processing(_)),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+}
+
+#[tokio::test]
+async fn an_empty_archive_on_the_last_delivery_is_checkpointed_empty() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";
 
@@ -1108,34 +1422,72 @@ async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    for _ in 0..2 {
-        let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-        let result = handler.handle(handler_context(), envelope).await;
-        assert!(
-            result.is_err(),
-            "a push-dispatched task hitting an empty archive must nack for retry, got {result:?}"
-        );
-    }
-
-    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [2]);
-    assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
-        None
-    );
-
-    mock.replace_archive(project_id, &[("src/Main.java", "public class Main {}")]);
     let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     handler
-        .handle(handler_context(), envelope)
+        .handle(handler_context_redelivered(true), envelope)
         .await
-        .expect("the next delivery indexes the project");
-    deps.pipeline.flush().await.expect("flush");
+        .expect_err("earlier deliveries keep the redelivery window open");
 
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 5;
+    handler
+        .handle(handler_context_redelivered(false), envelope)
+        .await
+        .expect(
+            "the last delivery checkpoints the project as indexed-empty instead of dead-lettering",
+        );
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(11)
     );
     assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+
+    mock.replace_archive(project_id, &[("src/Main.java", "public class Main {}")]);
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 12, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the next task indexes the project");
+
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(12)
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
+async fn a_transiently_empty_archive_is_retried_before_the_download_gives_up() {
+    let project_id: i64 = 65;
+    let traversal_path = "1/65/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_transient_empty_archive(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+        1,
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the download retry sees the archive once Gitaly serves it");
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
 }
 
 async fn attempts(
@@ -1412,7 +1764,7 @@ async fn edges_from_directories_that_no_longer_exist(
     clickhouse: &integration_testkit::TestContext,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \
@@ -1456,7 +1808,7 @@ async fn insert_stale_canary_edge(
     source_id: i64,
 ) {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     // The shared edge table carries no project column, so the cleanup resolves
     // ownership through the code node tables. A canary sourced from anything
     // other than a real directory id would fall outside the predicate.
@@ -1475,7 +1827,7 @@ async fn count_canary_edges(
     source_id: i64,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT target_id FROM {edge_table} FINAL \
@@ -1727,7 +2079,7 @@ async fn assert_contains_edge_between_directory_and_file(
     file_path: &str,
 ) {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS").unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT e.source_id FROM {edge_table} AS e FINAL \
@@ -1797,7 +2149,9 @@ async fn count_active_edges(
     relationship_kind: &str,
 ) -> usize {
     let ontology = integration_testkit::load_ontology();
-    let edge_table = ontology.edge_table_for_relationship(relationship_kind);
+    let edge_table = ontology
+        .edge_table_for_relationship(relationship_kind)
+        .unwrap();
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \

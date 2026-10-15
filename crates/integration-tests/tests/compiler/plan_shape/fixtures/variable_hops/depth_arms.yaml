@@ -34,8 +34,8 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (_) (_) (_))
+        - (Union ALL AS e0 (_) (_) (_))
         - (Project 3 AS depth, ... (_))
     emitted:
       expect:
-        - (Project _orbit_edge_0.path_nodes AS hop_e0_path_nodes, ... (_))
+        - (Project e0.path_nodes AS hop_e0_path_nodes, ... (_))

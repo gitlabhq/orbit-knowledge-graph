@@ -18,7 +18,6 @@ pub fn build_views(storage: &Relational<ClickHouse>) -> Result<Vec<View>, DataMo
     for join in storage.joins() {
         views.extend(denormalized_feeding_views(join, storage)?);
     }
-
     Ok(views)
 }
 

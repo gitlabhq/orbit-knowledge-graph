@@ -44,14 +44,14 @@ mod tests {
     fn reordered_tables_retain_source_columns_and_dependencies() {
         let model = ClickHouseDataModel::derive(overlay_ontology("reordered_edges")).unwrap();
         let layouts = model.backend().equivalent_layouts("gl_code_edge");
-        assert_eq!(layouts, ["gl_code_edge_by_target"]);
+        assert!(layouts.is_empty());
         let storage = model.layout().schema();
         let source = storage.table("gl_code_edge").unwrap();
-        let copy = storage.table(layouts[0]).unwrap();
+        let copy = storage.table("gl_code_edge_by_target").unwrap();
         assert_eq!(copy.columns.len(), source.columns.len());
         assert_eq!(copy.sort_key[1], "target_id");
         assert_eq!(
-            storage.dependencies()[layouts[0]],
+            storage.dependencies()["gl_code_edge_by_target"],
             std::collections::BTreeSet::from(["gl_code_edge".to_string()])
         );
     }

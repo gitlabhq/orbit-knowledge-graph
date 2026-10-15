@@ -1,0 +1,18 @@
+name: Bounded wildcard hops retain their default-table plan
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"ImportedSymbol","node_ids":[1]},{"id":"b","entity":"ImportedSymbol"}],"relationships":[{"type":"*","from":"a","to":"b","hops":[1,3]}]}
+  gql: |
+    MATCH (a:ImportedSymbol {id: 1})-[*1..3]->(b:ImportedSymbol) RETURN a, b
+
+logical:
+  expect: ["(EdgeScan * a->b AS e0 HOPS 1..3)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Scan Table(gl_edge) ...)"]
+  duckdb:
+    planned:
+      expect: ["(Scan Table(gl_edge) ...)"]
