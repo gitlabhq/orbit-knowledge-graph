@@ -1140,7 +1140,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
-async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
+async fn an_empty_archive_with_a_commit_sha_retries_once_then_checkpoints_empty() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";
 
@@ -1155,34 +1155,43 @@ async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    for _ in 0..2 {
-        let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-        let result = handler.handle(handler_context(), envelope).await;
-        assert!(
-            result.is_err(),
-            "a push-dispatched task hitting an empty archive must nack for retry, got {result:?}"
-        );
-    }
-
-    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [2]);
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let result = handler.handle(handler_context(), envelope).await;
+    assert!(
+        result.is_err(),
+        "the first delivery of a push-dispatched task hitting an empty archive must nack for one retry, got {result:?}"
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [1]);
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         None
     );
 
-    mock.replace_archive(project_id, &[("src/Main.java", "public class Main {}")]);
-    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 2;
     handler
         .handle(handler_context(), envelope)
         .await
-        .expect("the next delivery indexes the project");
-    deps.pipeline.flush().await.expect("flush");
-
+        .expect("a second empty archive is a permanent outcome, checkpointed as indexed-empty");
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(11)
     );
     assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+
+    mock.replace_archive(project_id, &[("src/Main.java", "public class Main {}")]);
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 12, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the next task indexes the project");
+
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(12)
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
 }
 
 async fn attempts(
@@ -2128,6 +2137,7 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         task_id: 1,
         commit_sha: Some("abc123".to_string()),
+        attempt: 1,
         checkpoint: indexer::modules::code::CodeCheckpoint::new(
             TraversalPath::new_unchecked(traversal_path),
             project_id,

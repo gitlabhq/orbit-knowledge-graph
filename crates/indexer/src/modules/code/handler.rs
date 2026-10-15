@@ -354,6 +354,7 @@ impl CodeIndexingTaskHandler {
             traversal_path: request.traversal_path.clone(),
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
+            attempt,
             checkpoint: checkpoint.clone(),
         };
         let cancel = CancellationToken::new();
