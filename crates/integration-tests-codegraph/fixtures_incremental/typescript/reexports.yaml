@@ -1,5 +1,6 @@
 name: "TypeScript: re-exports"
 pipeline: js
+
 fixtures:
   - path: models.ts
     content: |

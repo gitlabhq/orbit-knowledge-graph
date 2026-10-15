@@ -1,10 +1,8 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -12,97 +10,83 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
-    LinkedFile, Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths,
-    Sources, State, Workset,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase, Labelled,
+    LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
+    Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::file_tree::ProjectTree;
-use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Edge, Tag, Tree};
+use crate::tree::{Edge, Storage, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
 
-impl Phase<Sources> for Prepare {
+impl Phase<()> for Prepare {
     type Output = Workset<SourcePaths>;
 
     fn name(&self) -> Cow<'static, str> {
         "prepare".into()
     }
 
-    fn run(self, context: &mut Context, sources: Sources) -> Result<Self::Output, Error> {
-        let Sources { root, entries } = sources;
-        Ok(workset(
-            context.env,
-            State::new(context.env),
-            root,
-            entries,
-            FxHashSet::default(),
-        ))
+    fn run(self, context: &mut Context, _: ()) -> Result<Self::Output, Error> {
+        workset(context, State::new(context.env), FxHashSet::default())
     }
 }
 
-/// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `root` when a worker takes them. Everything else is listed now:
-/// manifests for the resolver, and every file as a `File` row.
+fn read(repository: &orbit_utils::vfs::Vfs<()>, path: &str) -> std::io::Result<String> {
+    String::from_utf8(repository.read(path)?.to_vec())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 fn workset(
-    env: &Env,
-    state: State,
-    root: PathBuf,
-    entries: Vec<FileInventoryEntry>,
+    context: &mut Context,
+    mut state: State,
     dirty: FxHashSet<u32>,
-) -> Workset<SourcePaths> {
-    let manifest_names = &env.resolve.config.parse_files;
-    let is_manifest = |path: &str| {
-        let name = path.rsplit('/').next().unwrap_or(path);
-        manifest_names.iter().any(|pf| pf.name == name)
-    };
-    let mut listed = Listed::default();
-    let mut candidates = Vec::new();
-    for entry in entries {
-        let FileInventoryEntry {
-            path,
-            size,
-            decision,
-            label,
-        } = entry;
-        let manifest = decision != Decision::ListOnly && is_manifest(&path);
-        let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        let content = manifest
-            .then(|| std::fs::read_to_string(root.join(&path)).ok())
-            .flatten();
-        let reason = match (decision, label.skip) {
-            (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
-            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
-            _ => FileReason::None,
-        };
-        if let Some(content) = content {
-            listed.manifests.push(SourceFile {
-                path: path.clone(),
-                content,
-            });
-        }
-        if decision == Decision::Parse && in_family {
-            listed.candidates.insert(path.clone(), size);
-            candidates.push(path);
-        } else {
-            listed.files.push((path, size, reason));
+) -> Result<Workset<SourcePaths>, Error> {
+    let repository = &context.repository;
+    let paths: Vec<_> = super::candidates(repository, context.env.limits.max_files)
+        .filter(|file| {
+            SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
+        })
+        .map(|file| file.path.to_string())
+        .collect();
+    let cap = context.env.limits.max_manifest_bytes;
+    let mut manifest_bytes = 0u64;
+    for file in repository.files().filter(|file| file.keeps()) {
+        context.run.check()?;
+        let path = file.path.as_ref();
+        if context
+            .env
+            .resolve
+            .config
+            .parse_files
+            .iter()
+            .any(|entry| path.rsplit('/').next() == Some(entry.name.as_str()))
+        {
+            manifest_bytes = manifest_bytes.saturating_add(file.size);
+            if cap > 0 && manifest_bytes > cap {
+                let (observed, cap) = (manifest_bytes as usize, cap as usize);
+                let limited = Killed::limit("manifests", path, observed, cap);
+                context.report.limited.push(limited);
+                continue;
+            }
+            match read(repository, path) {
+                Ok(content) => state.configs.push(SourceFile {
+                    path: path.into(),
+                    content,
+                }),
+                Err(_) => context.report.unread_files.push(path.into()),
+            }
         }
     }
-    Workset {
+    Ok(Workset {
         state,
-        items: SourcePaths {
-            root,
-            paths: candidates,
-        },
+        items: SourcePaths { paths },
         dirty,
-        listed,
-    }
+    })
 }
 
 /// Incremental index: removed and modified files leave the graph, edges and
@@ -118,23 +102,18 @@ impl Phase<ReindexInput> for Remap {
     }
 
     fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
-        let ReindexInput {
-            mut state,
-            root,
-            changes,
-        } = input;
+        let ReindexInput { mut state, removed } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
-        let dirty_labels: FxHashSet<&str> = changes
-            .removed
+        let dirty_labels: FxHashSet<&str> = removed
             .iter()
             .map(String::as_str)
-            .chain(changes.changed.iter().map(|f| f.path.as_str()))
+            .chain(context.repository.files().map(|f| f.path.as_ref()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        Ok(workset(context.env, state, root, changes.changed, dirty))
+        workset(context, state, dirty)
     }
 }
 
@@ -216,40 +195,54 @@ where
             state,
             items,
             dirty,
-            listed,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
-        let (outcomes, timings): (Vec<_>, Vec<_>) = items
-            .into_parallel()
+        let outcomes: Vec<_> = items
+            .into_parallel(&context.repository)
             .map(|item| {
+                let item = item?;
                 let path = item.label().to_string();
+                let bytes = item.bytes();
                 let started = Instant::now();
                 let outcome = phase.run(env, run, item);
-                (outcome, (path, started.elapsed()))
+                Ok((outcome, path, bytes, started.elapsed()))
             })
-            .unzip();
+            .collect();
         context.run.check()?;
-        let phase_name = self.0.name();
-        context
-            .report
-            .files
-            .extend(timings.into_iter().map(|(path, elapsed)| FileTiming {
-                path,
-                phase: phase_name.to_string(),
-                elapsed,
-            }));
         let mut items = Vec::with_capacity(outcomes.len());
         for outcome in outcomes {
+            let (outcome, path, bytes, elapsed) = match outcome {
+                Ok(result) => result,
+                Err(path) => {
+                    context.report.unread_files.push(path);
+                    continue;
+                }
+            };
             match outcome {
-                Ok(v) => items.push(v),
-                Err(k) => context.skip(k),
+                Ok(v) => {
+                    let stats = context.report.files.entry(path).or_insert(FileStats {
+                        language: env.lang_id,
+                        bytes: 0,
+                        parse: Duration::ZERO,
+                        resolve: Duration::ZERO,
+                    });
+                    stats.bytes += bytes;
+                    stats.parse += elapsed;
+                    items.push(v);
+                }
+                Err(k) => {
+                    // Guard: a killed file must not keep an entry from an earlier phase.
+                    context.report.files.remove(&path);
+                    context.skip(k);
+                }
             }
         }
+        context.report.unread_files.sort_unstable();
+        context.report.unread_files.dedup();
         Ok(Workset {
             state,
             items,
             dirty,
-            listed,
         })
     }
 }
@@ -258,23 +251,34 @@ where
 /// pulled one item at a time as workers free up.
 pub trait IntoParallel {
     type Item: Send;
-    fn into_parallel(self) -> impl ParallelIterator<Item = Self::Item>;
+    fn into_parallel(
+        self,
+        repository: &orbit_utils::vfs::Vfs<()>,
+    ) -> impl ParallelIterator<Item = Result<Self::Item, String>>;
 }
 
 impl<T: Send> IntoParallel for Vec<T> {
     type Item = T;
-    fn into_parallel(self) -> impl ParallelIterator<Item = T> {
-        self.into_par_iter()
+    fn into_parallel(
+        self,
+        _: &orbit_utils::vfs::Vfs<()>,
+    ) -> impl ParallelIterator<Item = Result<T, String>> {
+        self.into_par_iter().map(Ok)
     }
 }
 
 impl IntoParallel for SourcePaths {
     type Item = SourceFile;
-    fn into_parallel(self) -> impl ParallelIterator<Item = SourceFile> {
-        self.paths.into_par_iter().filter_map(move |path| {
-            let content = std::fs::read_to_string(self.root.join(&path)).ok()?;
-            Some(SourceFile { path, content })
-        })
+    fn into_parallel(
+        self,
+        repository: &orbit_utils::vfs::Vfs<()>,
+    ) -> impl ParallelIterator<Item = Result<SourceFile, String>> {
+        self.paths
+            .into_par_iter()
+            .map(move |path| match read(repository, &path) {
+                Ok(content) => Ok(SourceFile { path, content }),
+                Err(_) => Err(path),
+            })
     }
 }
 
@@ -288,9 +292,20 @@ impl ItemPhase<SourceFile> for Parse {
         "parse".into()
     }
 
-    fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
+    fn run(&self, env: &Env, run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
-        treesitter::parse(&file.content, grammar, &env.lang, &file.path).map(Parsed)
+        let budget = run
+            .child("tree-sitter", &file.path, env.limits.file_parse_ms)
+            .on_thread_cpu();
+        treesitter::parse_with_sentinel(
+            &file.content,
+            grammar,
+            &env.lang,
+            &file.path,
+            &budget,
+            env.limits.max_tree_depth,
+        )
+        .map(Parsed)
     }
 }
 
@@ -310,7 +325,8 @@ impl ItemPhase<Parsed> for Rewrite {
         run: &Sentinel,
         Parsed(mut tree): Parsed,
     ) -> Result<Rewritten, Killed> {
-        let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
+        let budget =
+            Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms).on_thread_cpu();
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
@@ -331,14 +347,31 @@ impl ItemPhase<Rewritten> for Canonicalize {
 
     fn run(
         &self,
-        _env: &Env,
+        env: &Env,
         _run: &Sentinel,
         Rewritten(mut tree): Rewritten,
     ) -> Result<Canonical, Killed> {
         tree.prune();
-        tree.compact();
+        for id in tree.preorder() {
+            let sym = tree.sym_of(id, &env.lang);
+            tree.node_mut(id).sym = sym;
+        }
+        let key = crate::tags::ReservedTags::new(&env.lang).original_source_path;
+        let imports: Vec<_> = tree
+            .root()
+            .descendants()
+            .filter_map(|node| {
+                Some((
+                    node.index(),
+                    node.child_sym(crate::canonical::Canonical::SourcePath)?,
+                ))
+            })
+            .collect();
+        for (node, path) in imports {
+            tree.set_tag(node, key, path);
+        }
         tree.source = std::sync::Arc::from("");
-        Ok(Canonical(tree))
+        Ok(Canonical(tree.compact_and_remap()))
     }
 }
 
@@ -357,8 +390,12 @@ impl ItemPhase<Canonical> for Link {
         run: &Sentinel,
         Canonical(tree): Canonical,
     ) -> Result<LinkedFile, Killed> {
-        let edges = linker::link(&tree, env, run)?;
-        Ok(LinkedFile { tree, edges })
+        let (edges, limited) = linker::link(&tree, env, run)?;
+        Ok(LinkedFile {
+            tree,
+            edges,
+            limited,
+        })
     }
 }
 
@@ -383,11 +420,11 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             mut state,
             items,
             mut dirty,
-            listed,
         } = input;
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
+            context.report.limited.extend(file.limited);
             state.trees.push(file.tree);
             state.edges.extend(file.edges.into_iter().map(|mut e| {
                 e.from_tree = fi;
@@ -395,48 +432,54 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 e
             }));
         }
-        let Listed {
-            manifests,
-            files,
-            mut candidates,
-        } = listed;
-        for manifest in manifests {
-            state.configs.retain(|c| c.path != manifest.path);
-            state.configs.push(manifest);
-        }
         let lang = &context.env.lang;
-        for (path, size, reason) in files {
-            state
-                .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+        let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
+        let skipped: FxHashMap<_, _> = context
+            .report
+            .skipped
+            .iter()
+            .map(|file| (file.path.as_str(), file.label))
+            .collect();
+        let unread: FxHashSet<_> = context
+            .report
+            .unread_files
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let mut unparsed = Vec::new();
+        for file in context
+            .repository
+            .files()
+            .filter(|file| !parsed.contains(file.path.as_ref()))
+        {
+            let path = file.path.as_ref();
+            let reason = match file.decision() {
+                orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
+                _ if skipped.contains_key(path) => match skipped[path] {
+                    "tree-sitter" => "skip_timeout_parse",
+                    "depth" => "skip_deeply_nested",
+                    "stack" => "skip_stack_limit",
+                    "rewrite" => "skip_timeout_walk",
+                    "link" => "skip_timeout_ssa",
+                    "edges" => "skip_too_many_edges",
+                    _ => "skip_timeout_sentinel",
+                }
+                .into(),
+                _ if unread.contains(path) => "fault_file_read".into(),
+                _ => String::new(),
+            };
+            unparsed.push(Tree::unparsed(lang, path, file.size, &reason).into());
         }
-        for tree in &state.trees {
-            candidates.remove(&tree.label);
-        }
-        for killed in &context.report.skipped {
-            if let Some(size) = candidates.remove(&killed.path) {
-                let reason = crate::inventory::timeout(killed.label);
-                state.trees.push(Tree::unparsed(
-                    lang,
-                    &killed.path,
-                    size,
-                    &reason.to_string(),
-                ));
-            }
-        }
-        for (path, size) in candidates {
-            let reason = FileReason::Fault(FileFault::FileRead);
-            state
-                .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
-        }
+        state.trees.extend(unparsed);
         Ok(DirtyGraph { state, dirty })
     }
 }
 
 /// Cross-file resolution over the dirty files. A file that overruns its
-/// resolve budget keeps its intra-file edges and is reported. Manifest files
-/// join the project tree so the resolver can read module roots from them.
+/// resolve budget keeps its intra-file edges and is reported. A family that
+/// overruns keeps the edges resolved so far, is reported, and resolves in
+/// full on the next run. Manifest files join the project tree so the
+/// resolver can read module roots from them.
 pub struct Resolve;
 
 impl Phase<DirtyGraph> for Resolve {
@@ -449,19 +492,11 @@ impl Phase<DirtyGraph> for Resolve {
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
         let DirtyGraph { mut state, dirty } = input;
         let env = context.env;
-        let paths: Vec<&str> = state
-            .trees
-            .iter()
-            .map(|t| t.label.as_str())
-            .chain(state.configs.iter().map(|f| f.path.as_str()))
-            .collect();
-        let walk = ProjectTree::build(
-            &env.lang,
-            &env.resolve.config,
-            &env.resolve.stages,
-            &paths,
-            Some(&state.configs),
-        );
+        let resolve_budget =
+            context
+                .run
+                .child("resolve", "", context.env.limits.cross_file_resolve_ms);
+        let walk = state.project_tree(env);
         let tree_by_path: FxHashMap<&str, usize> = state
             .trees
             .iter()
@@ -487,35 +522,35 @@ impl Phase<DirtyGraph> for Resolve {
             &env.lang,
             &dirty,
             env.lang_id,
-            &walk.prefixes,
+            &walk.lookup,
             &env.resolve.config,
-            &walk.aliases,
+            &walk.entrypoints,
             env,
-            &context.run,
+            &resolve_budget,
         )?;
+        context.run.check()?;
         for rsp in &result.resolved_source_paths {
-            let nid = state.trees[rsp.fi as usize].to_id(rsp.node);
-            state.trees[rsp.fi as usize].node_mut(nid).sym = rsp.sym;
+            state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
-        context
-            .report
-            .files
-            .extend(
-                result
-                    .file_timings
-                    .into_iter()
-                    .map(|(fi, elapsed)| FileTiming {
-                        path: state.trees[fi as usize].label.clone(),
-                        phase: "resolve".to_string(),
-                        elapsed,
-                    }),
-            );
+        // Only files parsed in this run have an entry.
+        let mut resolved = Vec::with_capacity(result.file_timings.len());
+        for (fi, elapsed) in result.file_timings {
+            resolved.push(fi);
+            if let Some(stats) = context
+                .report
+                .files
+                .get_mut(state.trees[fi as usize].label.as_str())
+            {
+                stats.resolve += elapsed;
+            }
+        }
         for k in result.killed {
             context.skip(k);
         }
-        Ok(Resolved { state })
+        context.report.limited.extend(result.limited);
+        Ok(Resolved { state, resolved })
     }
 }
 
@@ -532,24 +567,25 @@ impl Phase<Resolved> for Display {
     fn run(
         self,
         context: &mut Context,
-        Resolved { mut state }: Resolved,
+        Resolved { mut state, .. }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
-        for (fi, tree) in state.trees.iter_mut().enumerate() {
-            let ctx = EdgeCtx {
-                tree_index: fi as u32,
-                edges: &edges,
-            };
-            let _ = pattern::apply_rewrites_with_edges(
-                tree,
-                &env.lang,
-                &env.rules_for(&tree.label).display_rules,
-                true,
-                &ctx,
-                &[],
-            );
-        }
+        state.trees = std::mem::take(&mut state.trees)
+            .into_iter()
+            .enumerate()
+            .map(|(fi, tree)| {
+                let rules = &env.rules_for(&tree.label).display_rules;
+                if rules.is_empty() {
+                    return Ok(tree);
+                }
+                let ctx = EdgeCtx {
+                    tree_index: fi as u32,
+                    edges: &edges,
+                };
+                pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)
+            })
+            .collect::<Result<_, Killed>>()?;
         Ok(Displayed { state })
     }
 }
@@ -568,7 +604,19 @@ impl Phase<Displayed> for Export<'_> {
     }
 
     fn run(self, context: &mut Context, Displayed { state }: Displayed) -> Result<Exported, Error> {
-        let tables = export::export(&state, &context.env.lang, self.ontology, &self.envelope)?;
+        let tables = export::export(
+            &state.trees,
+            &state.edges,
+            &context.env.lang,
+            &export::ExportPlan::from_config(
+                &context.env.export_config,
+                self.ontology,
+                &context.env.lang,
+            )?,
+            &self.envelope,
+            true,
+            &|_| true,
+        )?;
         Ok(Exported { state, tables })
     }
 }
@@ -598,5 +646,106 @@ where
             })?;
         }
         Ok(Displayed { state })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::pipeline::Observer;
+    use crate::{Limits, templates};
+    use orbit_utils::vfs::{Decision, File, Pass, Vfs, sources::Directory};
+
+    struct KeepAll;
+
+    impl Pass for KeepAll {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Pending
+        }
+        fn content(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Keep(())
+        }
+    }
+
+    struct ArmOn(&'static str, Arc<AtomicUsize>);
+
+    impl Observer for ArmOn {
+        fn started(&mut self, phase: &str) {
+            if phase == self.0 {
+                self.1.store(1, Ordering::Relaxed);
+            }
+        }
+
+        fn finished(&mut self, phase: &str, _: Duration) {
+            if phase == self.0 {
+                self.1.store(0, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn cancelled_inside(
+        phase: &'static str,
+        lang: crate::treesitter::SupportLang,
+        files: &[(String, String)],
+        after: usize,
+    ) -> Result<(), Error> {
+        let repo = tempfile::tempdir().unwrap();
+        for (path, content) in files {
+            let path = repo.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let checks = Arc::new(AtomicUsize::new(0));
+        let counted = checks.clone();
+        let mut context = Context::new(&env, repository).observe(ArmOn(phase, checks));
+        context.run = context.run.with_cancellation(Arc::new(move || {
+            counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= after
+        }));
+        templates::index(context)
+            .and_then(|graph| graph.then(Display))
+            .map(|_| ())
+    }
+
+    #[test]
+    fn display_stops_when_the_run_is_cancelled() {
+        let files = [("main.py".to_string(), "def f():\n    pass\n".to_string())];
+        let displayed =
+            cancelled_inside("display", crate::treesitter::SupportLang::Python, &files, 2);
+        assert!(matches!(displayed, Err(Error::Killed(killed)) if killed.cancelled));
+    }
+
+    #[test]
+    fn cross_file_resolution_stops_when_the_run_is_cancelled_between_imports() {
+        let files: Vec<_> = (0..200)
+            .map(|file| {
+                (
+                    format!("Big/F{file}.cs"),
+                    format!("namespace Big;\npublic class C{file} {{}}\n"),
+                )
+            })
+            .collect();
+        let resolved = cancelled_inside(
+            "resolve",
+            crate::treesitter::SupportLang::CSharp,
+            &files,
+            20_000,
+        );
+        assert!(
+            matches!(resolved, Err(Error::Killed(killed)) if killed.cancelled && killed.label == "resolve")
+        );
     }
 }

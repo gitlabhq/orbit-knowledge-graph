@@ -46,9 +46,10 @@ Components Inside the Module
        separate type).  Auth via traversal_path filter injection.  Semi-Join
        Pushdown, edge-centric traversal, keyset pagination.
    * - **gRPC Server**
-     - Tonic (+ Axum)
+     - Tonic
      - gRPC service (11 RPCs) consumed by the Rails monolith; the only HTTP
-       endpoints are the ``/live`` and ``/ready`` health probes.  The public
+       endpoints are the probe server routes ``/-/liveness``, ``/-/readiness``
+       and ``/-/metrics``.  The public
        REST API (``/api/v4/orbit/*``) and MCP surface live in Rails and proxy
        to this gRPC service.  JWT auth; metrics via OpenTelemetry.
    * - **Orbit Dashboard**

@@ -377,6 +377,12 @@ impl Default for NodeEntity {
     }
 }
 
+impl NodeEntity {
+    pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
+        self.fields.iter().filter(|field| !field.hidden)
+    }
+}
+
 impl fmt::Display for NodeEntity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Node({})", self.name)
@@ -465,6 +471,7 @@ pub struct DenormalizedProperty {
     /// Values are stored as `"key:value"` tokens in the array.
     pub tag_key: String,
     pub enum_values: Option<BTreeMap<i64, String>>,
+    pub nullable: bool,
 }
 
 impl fmt::Display for EdgeEntity {
@@ -554,6 +561,7 @@ pub struct Field {
     /// Defaults to false. When true, non-admin users cannot select or
     /// filter on this field.
     pub admin_only: bool,
+    pub hidden: bool,
     /// Filter selectivity hint for the query planner. Low-selectivity columns
     /// (enums, booleans) match most rows and should not trigger narrowing CTEs.
     /// High-selectivity columns (IDs, paths, names) narrow effectively.
@@ -581,6 +589,7 @@ impl Default for Field {
             like_allowed: true,
             filterable: true,
             admin_only: false,
+            hidden: false,
             selectivity: FieldSelectivity::High,
             description: None,
             traversal_path_lookup: None,
@@ -701,22 +710,6 @@ impl fmt::Display for DataType {
             DataType::DateTime => write!(f, "DateTime"),
             DataType::Enum => write!(f, "Enum"),
             DataType::Uuid => write!(f, "Uuid"),
-        }
-    }
-}
-
-impl DataType {
-    #[must_use]
-    pub fn to_json_schema_type(self) -> &'static str {
-        match self {
-            DataType::String
-            | DataType::Date
-            | DataType::DateTime
-            | DataType::Enum
-            | DataType::Uuid => "string",
-            DataType::Int => "integer",
-            DataType::Float => "number",
-            DataType::Bool => "boolean",
         }
     }
 }

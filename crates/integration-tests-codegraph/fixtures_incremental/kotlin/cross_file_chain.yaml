@@ -1,0 +1,52 @@
+name: "Kotlin: classes in one package call each other across files"
+
+fixtures:
+  - path: src/main/kotlin/app/End.kt
+    content: |
+      package app
+
+      class End {
+          fun stop() {}
+      }
+
+  - path: src/main/kotlin/app/Middle.kt
+    content: |
+      package app
+
+      class Middle {
+          fun go() {
+              End().stop()
+          }
+      }
+
+  - path: src/main/kotlin/app/Start.kt
+    content: |
+      package app
+
+      class Start {
+          fun run() {
+              Middle().go()
+          }
+      }
+
+tests:
+  - name: "each file defines its method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['stop', 'go', 'run']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: app.End.stop } }
+      - { row: { fqn: app.Middle.go } }
+      - { row: { fqn: app.Start.run } }
+
+  - name: "calls in one package link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'stop']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: go, file: src/main/kotlin/app/Middle.kt } }
+      - { row: { caller: go, callee: stop, file: src/main/kotlin/app/End.kt } }

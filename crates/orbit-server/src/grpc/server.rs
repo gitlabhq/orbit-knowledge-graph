@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
+use clickhouse_client::ArrowClickHouseClient;
+use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
 use tonic::transport::Server as TonicServer;
@@ -28,7 +29,7 @@ impl GrpcServer {
     pub fn new(
         validator: Arc<JwtValidator>,
         active_schema: Arc<ActiveSchema>,
-        clickhouse_config: &ClickHouseConfiguration,
+        client: ArrowClickHouseClient,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
         grpc_config: GrpcConfig,
@@ -37,7 +38,7 @@ impl GrpcServer {
         let service = OrbitServiceImpl::new(
             validator,
             active_schema,
-            clickhouse_config,
+            client,
             cluster_health,
             grpc_config.stream_timeout_secs,
             analytics_config,

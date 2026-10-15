@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
@@ -9,14 +10,28 @@ use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tag, Tree};
 
 pub struct WalkResult {
-    pub prefixes: Vec<String>,
-    pub aliases: Vec<(String, String)>,
+    pub entrypoints: Vec<(String, String)>,
+    pub lookup: LookupConfig,
     /// Per file: the tags rules put on it and on its ancestor directories,
     /// nearest first, plus `source_root_rel`, its path below the nearest source root.
     pub file_tags: Vec<(String, Vec<Tag>)>,
     /// Every key a file tag can carry, so a reused tree can drop the ones
     /// that no longer apply before this run's are set.
     pub tag_keys: Vec<u32>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct LookupConfig {
+    pub prefixes: Vec<String>,
+    pub aliases: Vec<ImportAlias>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ImportAlias {
+    pub pattern: String,
+    pub replacement: String,
+    pub if_exists: bool,
+    pub scope: Option<u32>,
 }
 
 pub struct ProjectTree<'a> {
@@ -27,7 +42,7 @@ pub struct ProjectTree<'a> {
     files: Option<&'a [SourceFile]>,
     tree: Tree,
     prefixes: Vec<String>,
-    aliases: Vec<(String, String)>,
+    aliases: Vec<ImportAlias>,
 }
 
 impl<'a> ProjectTree<'a> {
@@ -78,8 +93,8 @@ impl<'a> ProjectTree<'a> {
         let tag_keys = pt.tag_keys();
         if stages.is_empty() && config.lookup_from.is_empty() && config.parse_files.is_empty() {
             return WalkResult {
-                prefixes: vec![],
-                aliases: vec![],
+                entrypoints: vec![],
+                lookup: LookupConfig::default(),
                 file_tags: vec![],
                 tag_keys,
             };
@@ -89,9 +104,22 @@ impl<'a> ProjectTree<'a> {
         pt.collect_aliases();
         pt.collect_prefixes();
         let file_tags = pt.collect_file_tags();
+        let entrypoints = pt
+            .tree
+            .root()
+            .descendants()
+            .filter(|node| node.is(C::Dir))
+            .filter_map(|directory| {
+                let path = directory.child_sym(C::SourcePath)?;
+                Some((pt.node_path(directory), lang.syms.resolve(path).to_string()))
+            })
+            .collect();
         WalkResult {
-            prefixes: pt.prefixes,
-            aliases: pt.aliases,
+            entrypoints,
+            lookup: LookupConfig {
+                prefixes: pt.prefixes,
+                aliases: pt.aliases,
+            },
             file_tags,
             tag_keys,
         }
@@ -121,43 +149,50 @@ impl<'a> ProjectTree<'a> {
             .map(|f| (f.path.as_str(), f.content.as_str()))
             .collect();
 
-        let mut children: FxHashMap<String, FxHashSet<(String, bool)>> = FxHashMap::default();
+        let mut kids: Vec<FxHashSet<(&str, bool)>> = vec![FxHashSet::default()];
+        let mut dirs: FxHashMap<(usize, &str), usize> = FxHashMap::default();
         for &path in self.paths {
             let parts: Vec<&str> = path.split(PATH_SEP).filter(|p| !p.is_empty()).collect();
-            for i in 0..parts.len() {
-                let parent = parts[..i].join(PATH_SEP);
+            let mut dir = 0;
+            for (i, &part) in parts.iter().enumerate() {
                 let is_file = i == parts.len() - 1;
-                children
-                    .entry(parent)
-                    .or_default()
-                    .insert((parts[i].to_string(), is_file));
+                kids[dir].insert((part, is_file));
+                if !is_file {
+                    let next = kids.len();
+                    dir = *dirs.entry((dir, part)).or_insert(next);
+                    if dir == next {
+                        kids.push(FxHashSet::default());
+                    }
+                }
             }
         }
-        let children_map: FxHashMap<String, Vec<(String, bool)>> = children
+        let kids: Vec<Vec<(&str, bool)>> = kids
             .into_iter()
-            .map(|(parent, kids)| {
+            .map(|kids| {
                 let mut kids: Vec<_> = kids.into_iter().collect();
                 kids.sort();
-                (parent, kids)
+                kids
             })
             .collect();
 
-        self.add_children("", self.tree.root, &children_map, &file_contents);
+        self.add_children(&dirs, &kids, &file_contents);
     }
 
     fn add_children(
         &mut self,
-        parent_path: &str,
-        parent_nid: indextree::NodeId,
-        children_map: &FxHashMap<String, Vec<(String, bool)>>,
+        dirs: &FxHashMap<(usize, &str), usize>,
+        kids: &[Vec<(&str, bool)>],
         file_contents: &FxHashMap<&str, &str>,
     ) {
-        let Some(kids) = children_map.get(parent_path) else {
-            return;
-        };
-        let kids = kids.clone();
-        for (segment, is_file) in &kids {
-            let kind: u16 = if *is_file { C::File } else { C::Dir }.into();
+        let mut path: Vec<&str> = Vec::new();
+        let mut stack = vec![(0, self.tree.root, 0)];
+        while let Some((dir, parent_nid, next)) = stack.pop() {
+            let Some(&(segment, is_file)) = kids[dir].get(next) else {
+                path.pop();
+                continue;
+            };
+            stack.push((dir, parent_nid, next + 1));
+            let kind: u16 = if is_file { C::File } else { C::Dir }.into();
             let sym = self.lang.syms.intern(segment);
             let nid = self.tree.append(
                 parent_nid,
@@ -168,29 +203,16 @@ impl<'a> ProjectTree<'a> {
                     ..Default::default()
                 },
             );
-            if *is_file {
-                if let Some(spec) = self
-                    .config
-                    .parse_files
-                    .iter()
-                    .find(|pf| pf.name == *segment)
-                {
-                    let full_path = if parent_path.is_empty() {
-                        segment.clone()
-                    } else {
-                        format!("{parent_path}{PATH_SEP}{segment}")
-                    };
+            if is_file {
+                if let Some(spec) = self.config.parse_files.iter().find(|pf| pf.name == segment) {
+                    let full_path = path.iter().chain([&segment]).join(PATH_SEP);
                     if let Some(content) = file_contents.get(full_path.as_str()) {
                         inline_config(content, &spec.format, nid, &mut self.tree, self.lang);
                     }
                 }
             } else {
-                let child_path = if parent_path.is_empty() {
-                    segment.clone()
-                } else {
-                    format!("{parent_path}{PATH_SEP}{segment}")
-                };
-                self.add_children(&child_path, nid, children_map, file_contents);
+                path.push(segment);
+                stack.push((dirs[&(dir, segment)], nid, 0));
             }
         }
     }
@@ -251,17 +273,35 @@ impl<'a> ProjectTree<'a> {
             .tree
             .root()
             .fold_tree(Vec::new(), |aliases, cursor, _w| {
-                if !cursor.is(C::Alias) || cursor.sym() == 0 {
-                    return;
-                }
-                if let Some(val) = cursor.children().find(|c| c.is(C::Str) && c.sym() != 0) {
-                    aliases.push((
-                        self.lang.syms.resolve(cursor.sym()).to_string(),
-                        self.lang.syms.resolve(val.sym()).to_string(),
-                    ));
+                if cursor.is(C::Alias) && cursor.sym() != 0 {
+                    if let Some(val) = cursor.child_sym(C::Str) {
+                        aliases.push(ImportAlias {
+                            pattern: self.lang.syms.resolve(cursor.sym()).to_owned(),
+                            replacement: self.lang.syms.resolve(val).to_owned(),
+                            if_exists: false,
+                            scope: cursor.child_sym(C::Scope),
+                        });
+                    }
+                } else if self.config.lookup_from.contains(&cursor.kind())
+                    && cursor.sym_opt().is_some()
+                    && let Some(file) = cursor.parent().filter(|node| node.is(C::File))
+                    && let Some(directory) = file.parent()
+                {
+                    aliases.push(ImportAlias {
+                        pattern: "*".into(),
+                        replacement: format!(
+                            "{}/{}/*",
+                            self.node_path(directory),
+                            self.lang.syms.resolve(cursor.sym())
+                        )
+                        .trim_start_matches('/')
+                        .to_owned(),
+                        if_exists: true,
+                        scope: cursor.child_sym(C::Scope),
+                    });
                 }
             });
-        aliases.sort_by_key(|(key, _)| std::cmp::Reverse(key.len()));
+        aliases.sort_by_key(|alias| (alias.if_exists, std::cmp::Reverse(alias.pattern.len())));
         self.aliases = aliases;
     }
 
@@ -487,5 +527,25 @@ fn emit_json_value(
             );
         }
         serde_json::Value::Null => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_under_many_directories_builds_on_a_small_stack() {
+        let path = format!("{}notes.txt", "d/".repeat(5_000));
+        let nodes = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                let lang = Lang::new();
+                ProjectTree::directory_tree(&lang, &[path.as_str()]).len()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(nodes, 5_002);
     }
 }

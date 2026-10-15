@@ -1,5 +1,5 @@
 use arrow::array::StringArray;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -11,7 +11,9 @@ static ONTOLOGY: LazyLock<ontology::Ontology> =
     LazyLock::new(|| ontology::Ontology::load_embedded().expect("embedded ontology should load"));
 
 pub(crate) fn edge_table(relationship_kind: &str) -> String {
-    t(ONTOLOGY.edge_table_for_relationship(relationship_kind))
+    t(ONTOLOGY
+        .edge_table_for_relationship(relationship_kind)
+        .unwrap())
 }
 
 pub async fn assert_node_count(ctx: &TestContext, table: &str, expected: usize) {

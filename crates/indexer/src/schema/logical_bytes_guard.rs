@@ -43,12 +43,12 @@ mod tests {
     #[test]
     fn every_ontology_column_type_has_byte_counting_coverage() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
         for table in &schema.tables {
             for column in &table.columns {
                 let arrow_type = clickhouse_type_string_to_arrow(&column.column_type);
                 assert!(
-                    orbit_utils::arrow::has_logical_byte_size(&arrow_type),
+                    orbit_arrow::has_logical_byte_size(&arrow_type),
                     "table '{}' column '{}' has type '{}' (arrow {arrow_type:?}) with no \
                      logical-byte-size rule; extend the counting rules in \
                      crates/utils/src/arrow_logical_bytes.rs",

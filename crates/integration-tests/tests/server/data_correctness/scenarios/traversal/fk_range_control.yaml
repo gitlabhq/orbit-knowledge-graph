@@ -1,0 +1,16 @@
+description: Pinned FK target returns data when its ID range matches
+
+query:
+  gql: |
+    MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1})
+    WHERE u.id >= 1 AND u.id <= 1
+    RETURN v.id, mr.id, u.id
+
+expect:
+  node_count: 3
+  nodes:
+    User: { ids: [1, 2] }
+    MergeRequest: { ids: [2000] }
+  edges:
+    APPROVED: [[2, 2000]]
+    AUTHORED: [[1, 2000]]

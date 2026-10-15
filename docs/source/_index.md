@@ -88,7 +88,7 @@ flowchart LR
     accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI or connect an AI agent through the stdio MCP server.
 
     Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB\n~/.gitlab/orbit/graph.duckdb")]
+    CLI --> DB[("DuckDB\n~/.gitlab/orbit/local/")]
     DB --> Query[CLI query]
     DB --> MCP[stdio MCP server]
 ```
@@ -118,7 +118,7 @@ GitLab Orbit indexes two categories of data:
 
 GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
 
-[Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
+[Full indexing coverage](compare-local-remote.md#indexed-data) | [Schema reference](remote/schema.md)
 
 ## Get started
 

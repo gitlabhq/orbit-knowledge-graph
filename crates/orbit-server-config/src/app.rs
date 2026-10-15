@@ -35,7 +35,6 @@ pub const EMBEDDED_DEFAULTS: &str = include_str!(concat!(env!("CONFIG_DIR"), "/d
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AppConfig {
-    pub bind_address: SocketAddr,
     pub grpc_bind_address: SocketAddr,
     pub jwt_clock_skew_secs: u64,
     pub health_check_url: Option<String>,
@@ -47,8 +46,6 @@ pub struct AppConfig {
     pub gitlab: GitlabConfig,
     pub schedule: ScheduleConfig,
     pub health_check: HealthCheckConfig,
-    pub indexer_health_bind_address: SocketAddr,
-    pub dispatcher_health_bind_address: SocketAddr,
     pub metrics: MetricsConfig,
     pub probe_server: ProbeServerConfig,
     pub tls: TlsConfig,

@@ -1,0 +1,29 @@
+description: Shortest paths use an edge whose current version is live
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [99012]
+      group: [99013]
+      project: [99014]
+  extra_seed:
+    gl_user:
+      - { id: 99012, username: path_user }
+    gl_group:
+      - { id: 99013, traversal_path: "1/100/", name: path_group }
+    gl_project:
+      - { id: 99014, traversal_path: "1/100/99014/", name: path_project }
+    gl_edge:
+      - { traversal_path: "1/100/", source_id: 99012, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99013, target_kind: Group, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/99014/", source_id: 99013, source_kind: Group, relationship_kind: CONTAINS, target_id: 99014, target_kind: Project }
+
+query:
+  gql: |
+    MATCH path = ANY SHORTEST (u:User {id: 99012})-[:MEMBER_OF|CONTAINS*1..2]->(p:Project {id: 99014})
+    RETURN path
+
+expect:
+  path_count: 1
+  path_edges:
+    - [{ from: User, from_id: 99012, type: MEMBER_OF, to: Group, to_id: 99013 }, { from: Group, from_id: 99013, type: CONTAINS, to: Project, to_id: 99014 }]

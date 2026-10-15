@@ -1,6 +1,6 @@
 # Query corpus
 
-A categorized set of GKG query-DSL queries used to exercise the query engine.
+A categorized set of Orbit JSON queries used to exercise the query engine.
 Each YAML file groups queries by origin suite; every entry is self-describing:
 
 ```yaml
@@ -11,7 +11,7 @@ mrs_open_in_project:
   suite: sdlc                # origin grouping (one file per suite)
   expect: rows               # optional: rows (default) | empty | error
   query: |
-    { ...inline GKG DSL JSON... }
+    { ...inline Orbit query JSON... }
 ```
 
 `category` is the query *shape* and is independent of which file the entry lives
@@ -20,7 +20,7 @@ in. Two placeholder kinds keep the queries portable across environments:
 | Placeholder | Meaning |
 |---|---|
 | `"$sample"` / `"$sample:N"` | a node's `node_ids`, bound to real ids at run time |
-| `{{TOKEN}}` | a literal id / full_path, substituted from a caller-supplied map |
+| `{{TOKEN}}` | a literal ID or `full_path`, substituted from a caller-supplied map |
 
 `expect` records intent:
 
@@ -32,13 +32,20 @@ in. Two placeholder kinds keep the queries portable across environments:
 
 ## Validation
 
-The `corpus_smoke` integration test (`crates/integration-tests/tests/server/corpus_smoke.rs`,
-run as its own CI job) spins up ClickHouse with the ontology-generated graph
-schema and runs every query here through compile + execute, asserting each one
-runs without error (`expect: error` entries must fail). It does not check result
-correctness, only that the queries stay runnable against the current schema.
+The `corpus_smoke` test (`crates/integration-tests/tests/server/corpus_smoke.rs`)
+runs in the `corpus-smoke-test` CI job. It starts ClickHouse with the graph schema
+from the ontology. Then it compiles and runs three families of queries:
 
-Run locally with Docker: `mise test:integration:corpus`.
+- every entry in this directory, as JSON. An `expect: error` entry must fail.
+- every named query in `config/named_queries`, in JSON and in GQL.
+- every `json orbit-query` and `gql orbit-query` code block in the root Markdown files,
+  `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`.
+
+The test also fails on Orbit query JSON in an unmarked `json` or shell code block,
+and on a code block with no closing fence. It does not check result correctness.
+
+Run it locally with Docker: `mise test:integration:corpus`. See
+[Query corpus and executable docs](../../../docs/design-documents/testing.md#query-corpus-and-executable-docs).
 
 ## `raw_sql_ab.yaml`
 

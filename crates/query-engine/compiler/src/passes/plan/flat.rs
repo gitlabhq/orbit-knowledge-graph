@@ -1,4 +1,4 @@
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 use std::collections::HashSet;
 
 use ontology::constants::{
@@ -14,14 +14,14 @@ use super::HydrationStrategy;
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
 
-struct FlatBuilder<'a, M: QueryDataModel + ?Sized> {
+struct FlatBuilder<'a, M: OrbitQueryModel + ?Sized> {
     facts: &'a PlanningContext<'a, M>,
     definitions: Vec<(String, PhysicalPlan)>,
     filtered: HashSet<String>,
-    tagged: HashSet<(String, String)>,
+    tagged: HashSet<(String, String, usize)>,
 }
 
-pub(super) fn plan<M: QueryDataModel + ?Sized>(
+pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
     facts: &PlanningContext<'_, M>,
 ) -> Result<ExecutionPlan> {
     FlatBuilder {
@@ -33,13 +33,17 @@ pub(super) fn plan<M: QueryDataModel + ?Sized>(
     .build()
 }
 
-impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
     fn build(mut self) -> Result<ExecutionPlan> {
         let mut source: Option<PhysicalSource> = None;
-        let mut cascades = Vec::new();
+        let mut cascades: Vec<Option<PhysicalPlan>> = Vec::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
             let membership = self.filter_keys(index)?;
-            let cascade = self.cascade(index, cascades.last().and_then(Option::as_ref));
+            let upstream = hop
+                .join_prev
+                .as_ref()
+                .and_then(|join| cascades[join.prev_index].as_ref());
+            let cascade = self.cascade(index, upstream);
             let edge = self.edge(index, membership, cascade.as_ref())?;
             source = Some(match source {
                 Some(previous) => {
@@ -50,8 +54,8 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     previous.inner_join(
                         edge,
                         (
-                            Column::new(&join.prev_alias, &join.prev_col),
-                            Column::new(format!("e{index}"), &join.curr_col),
+                            Column::new(&self.facts.hops[join.prev_index].alias, &join.prev_col),
+                            Column::new(&hop.alias, &join.curr_col),
                         ),
                     )
                 }
@@ -67,12 +71,8 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         };
         if !self.facts.aggregate() {
             for (index, hop) in self.facts.hops.iter().enumerate() {
-                let edge = format!("e{index}");
-                let prefix = if hop.max_hops > 1 {
-                    format!("hop_{edge}")
-                } else {
-                    edge.clone()
-                };
+                let edge = hop.alias.clone();
+                let prefix = hop.column_prefix(index);
                 plan.outputs.extend(
                     [
                         (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
@@ -85,14 +85,14 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     .map(|(column, suffix)| {
                         Projection::new(
                             OutputValue::Column(Column::new(&edge, column)),
-                            format!("{prefix}_{suffix}"),
+                            format!("{prefix}{suffix}"),
                         )
                     }),
                 );
                 if hop.max_hops > 1 {
                     plan.outputs.push(Projection::new(
                         OutputValue::Column(Column::new(&edge, PATH_NODES_COLUMN)),
-                        format!("{prefix}_{PATH_NODES_COLUMN}"),
+                        format!("{prefix}{PATH_NODES_COLUMN}"),
                     ));
                 }
             }
@@ -109,7 +109,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 else {
                     continue;
                 };
-                let edge = &format!("e{index}");
+                let edge = &hop.alias;
                 let joined = node.hydration != HydrationStrategy::Skip
                     && !(node.hydration == HydrationStrategy::FilterOnly
                         && self.filtered.contains(alias));
@@ -122,7 +122,9 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 if !joined {
                     continue;
                 }
-                let membership = if node.hydration == HydrationStrategy::Join && node.use_narrowing
+                let membership = if node.hydration == HydrationStrategy::Join
+                    && node.use_narrowing
+                    && hop.max_hops == 1
                 {
                     let scan_alias = format!("{edge}n");
                     let mut predicates = self.facts.edge_predicates(&scan_alias, hop, false);
@@ -202,7 +204,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     self.definitions.push((name.clone(), keys));
                 }
                 if first || !filter_only {
-                    predicates.push(key_membership(&format!("e{index}"), column, name));
+                    predicates.push(key_membership(&hop.alias, column, name));
                 }
             }
         }
@@ -215,7 +217,10 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             .join_prev
             .as_ref()
             .filter(|_| hop.cascade_anchor && index > 0)?;
-        let previous = &self.facts.hops[index - 1];
+        let previous = &self.facts.hops[join.prev_index];
+        if previous.max_hops > 1 {
+            return None;
+        }
         let selective =
             [&previous.from_node, &previous.to_node]
                 .into_iter()
@@ -228,7 +233,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         if !selective && upstream.is_none() {
             return None;
         }
-        let alias = format!("{}p", join.prev_alias);
+        let alias = format!("e{}p", join.prev_index);
         let mut predicates =
             self.facts
                 .filtered_edge_predicates(&alias, previous, &mut HashSet::new());
@@ -251,17 +256,16 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         cascade: Option<&PhysicalPlan>,
     ) -> Result<PhysicalSource> {
         let hop = &self.facts.hops[index];
-        let alias = format!("e{index}");
-        let scan = |final_| PhysicalSource::Scan {
-            table: hop.edge_table.clone(),
-            alias: alias.clone(),
-            final_,
-            relationship: Some(hop.input_index),
-        };
+        let alias = hop.alias.clone();
+        let scan = |final_| PhysicalSource::edge(hop, &alias, final_);
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
-        if !multi_hop && !dedup && self.facts.aggregate() {
-            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
+        if !multi_hop
+            && !dedup
+            && self.facts.aggregate()
+            && let Some(table) = hop.single_edge_table()
+        {
+            let sort_key = self.facts.latest_row_key(table)?;
             let mut predicates = self
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
@@ -279,10 +283,9 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 .cascade(hop, &alias, cascade)
         } else if dedup {
             let (start, end) = hop.direction.edge_columns();
-            let narrow_inside = self
-                .facts
-                .model
-                .table_sort_key(&hop.edge_table)
+            let narrow_inside = hop
+                .single_edge_table()
+                .and_then(|table| self.facts.model.table_sort_key(table))
                 .is_some_and(|keys| keys.iter().take(4).any(|key| key == start || key == end));
             let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {
@@ -301,7 +304,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 scoped.filter(outside).cascade(hop, &alias, cascade)
             }
         } else {
-            scan(false).filter(membership).cascade(hop, &alias, cascade)
+            scan(true).filter(membership).cascade(hop, &alias, cascade)
         };
         let mut predicates = if multi_hop {
             Vec::new()

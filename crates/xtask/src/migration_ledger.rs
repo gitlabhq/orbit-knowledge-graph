@@ -12,6 +12,7 @@ use ontology::archive::OntologyArchive;
 use ontology::migrations::{
     self, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope, derive_scope,
 };
+use orbit_migrations::snapshot_check::{VerifiedSnapshot, verify_committed_snapshot};
 
 const DEFAULT_BASE: &str = "origin/main";
 
@@ -30,14 +31,6 @@ fn ledger_path() -> PathBuf {
 
 fn fingerprint_path() -> PathBuf {
     config_dir().join(migrations::FINGERPRINT_FILE)
-}
-
-fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
-    Fingerprints {
-        sources: migrations::source_fingerprints(),
-        ddl: orbit_migrations::fingerprint::ddl_fingerprints(ontology),
-        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(ontology),
-    }
 }
 
 fn read_committed_fingerprints() -> Result<Option<Fingerprints>> {
@@ -164,35 +157,10 @@ fn split_scope_into_ledger_fields(scope: MigrationScope) -> (LedgerScope, BTreeS
 
 pub fn check(base: Option<String>) -> Result<()> {
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = current_fingerprints(&ontology);
-
-    let committed = read_committed_fingerprints()?.ok_or_else(|| {
-        anyhow!(
-            "fingerprint snapshot {} is missing. {REMEDIATION}",
-            fingerprint_path().display()
-        )
-    })?;
-
     let schema_version = orbit_versions::VERSIONS.schema;
-    let ledger = read_ledger()?;
-
-    migrations::verify_snapshot(&ontology, &current, &committed, &ledger, schema_version)
-        .map_err(|e| anyhow!(e))?;
-
-    let archive_path = OntologyArchive::path(&config_dir(), schema_version);
-    let archive_bytes = fs::read(&archive_path).with_context(|| {
-        format!(
-            "reading {}. Run `mise schema:snapshot` to recreate a missing archive.",
-            archive_path.display()
-        )
-    })?;
-
-    let archive = OntologyArchive::from_bytes(schema_version, &archive_bytes)?;
-    let current_sources = migrations::embedded_sources();
-
-    if !archive.matches_sources(&current_sources) {
-        bail!("ontology archive is stale. {REMEDIATION}");
-    }
+    let VerifiedSnapshot { committed, ledger } =
+        verify_committed_snapshot(&ontology, &config_dir(), schema_version)
+            .map_err(|e| anyhow!(e))?;
 
     if let Some(base) = base {
         check_under_declaration(&ontology, &committed, &ledger, schema_version, &base)?;
@@ -275,7 +243,7 @@ pub fn bump(
     }
 
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = current_fingerprints(&ontology);
+    let current = orbit_migrations::fingerprint::current_fingerprints(&ontology)?;
 
     let Some(committed) = read_committed_fingerprints()? else {
         return write_initial_snapshot(&ontology, &current);
@@ -410,7 +378,7 @@ pub fn bump(
 
 pub fn snapshot() -> Result<()> {
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = current_fingerprints(&ontology);
+    let current = orbit_migrations::fingerprint::current_fingerprints(&ontology)?;
     let committed = read_committed_fingerprints()?.ok_or_else(|| {
         anyhow!(
             "fingerprint snapshot {} is missing. Run `mise schema:bump` to create it.",

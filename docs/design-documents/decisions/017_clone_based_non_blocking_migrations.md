@@ -48,7 +48,7 @@ by `mise schema:bump`:
 - `scope: code`: the code-graph tables and their edge table.
 
 A human may widen an entry but never narrow it below the fingerprint-snapshot
-drift; `migration-ledger-check` (CI) and the `orbit-server` build script enforce
+drift; `migration-ledger-check` (CI) and an `orbit-server` unit test enforce
 that floor. A migration across several versions unions their scopes via
 `MigrationLedger::resolve_migration_scope_between`, widening to `Full` on any gap
 or backward range.
@@ -108,7 +108,7 @@ The prefix layout is already a blue-green split. The active version keeps servin
 queries and streaming updates from its `v<N>_` tables while the migrating version
 fills its own set. Promotion flips reads over in one step. The two run side by
 side down to their NATS streams and locks, which are version-segmented.
-`/ready` holds the new pods out of rotation until their version is active (see
+`/-/readiness` holds the new pods out of rotation until their version is active (see
 [`schema_management.md`](../schema_management.md) and
 [`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)).
 

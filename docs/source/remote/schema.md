@@ -38,7 +38,7 @@ glab orbit ontology
 
 | Node type | Description | Key properties |
 |-----------|-------------|----------------|
-| `Group` | GitLab group or subgroup | `id`, `full_path`, `name`, `visibility`, `traversal_path` |
+| `Group` | GitLab group or subgroup | `id`, `full_path`, `name`, `visibility` |
 | `Project` | GitLab project and repository | `id`, `full_path`, `name`, `visibility`, `archived`, `star_count` |
 | `User` | GitLab user account | `id`, `username`, `email`, `name`, `state`, `is_admin` |
 | `Note` | Comment or annotation on any GitLab object | `id`, `note`, `noteable_type`, `noteable_id`, `internal`, `confidential` |
@@ -102,5 +102,4 @@ is an integer. This prevents precision loss in JavaScript clients for values abo
 - `content` fields on `Definition` and `File` nodes contain the full source text of the
 definition or file. These fields are available for agent tools that need to hydrate file
 content without making separate API calls to GitLab.
-- All nodes include a `traversal_path` property used for authorization
-filtering. Query results are automatically scoped to entities the requesting user can access.
+- Query results are automatically scoped to entities the requesting user can access.

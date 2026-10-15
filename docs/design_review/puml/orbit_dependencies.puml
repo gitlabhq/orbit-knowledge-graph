@@ -10,7 +10,7 @@ rectangle "Orbit Module" as orbit #E8F4FD {
   component "SDLC Indexer" as sdlc
   component "Code Indexer" as code
   component "Query Engine" as qe
-  component "HTTP/gRPC Server" as http
+  component "gRPC Server" as http
 }
 
 rectangle "Orbit Depends On" as deps #FFE0B2 {

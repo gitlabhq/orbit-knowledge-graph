@@ -22,7 +22,7 @@ Core tasks:
 | Task | Command |
 |---|---|
 | Build | `mise build` |
-| Unit + fast tests | `mise test:fast` |
+| Unit tests (no Docker) | `mise test:fast` |
 | Lint | `mise lint:code` |
 | Apply lint fixes | `mise lint:code:fix` |
 | Validate doc changes | `mise lint:docs` |
@@ -31,14 +31,9 @@ For the full local setup (GDK, ClickHouse, NATS), see [Local development](docs/d
 
 ## Testing
 
-```shell
-mise test:fast         # Unit tests and fast integration tests (no Docker required)
-mise test:integration  # Full integration suite (requires Docker)
-mise test:cli          # CLI integration tests: concurrency and worktrees
-```
+`mise test:fast` runs the unit tests with no Docker. `mise test:integration` runs the container tests. On macOS, start Docker for them with `colima start gkg --memory 12`.
 
-`mise test:integration` spins up ClickHouse via Docker testcontainers — make sure Docker is running
-before using it.
+For all test layers, the CI jobs, and where to add a test, see [Testing](docs/design-documents/testing.md).
 
 ## Linting
 
@@ -63,6 +58,10 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Design documents describe the current system. Update the owning document under
   `docs/design-documents/` in the same MR as a behavior change.
 - Rewrite or remove stale text instead of preserving history.
+- Keep `README.md` a front page: what GitLab Orbit is, the quickstart, and links.
+  Put lists such as languages, entity types, and commands only in the page that
+  owns them, and link to that page. Link to repository files by relative path, so
+  the `check_docs_markdown` CI job checks each link.
 - When you add, move, or remove an owning guide, update its pointers in the
   byte-identical `AGENTS.md` and `CLAUDE.md` files.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain

@@ -1,4 +1,5 @@
 name: "Scala: two mixed-in traits emit every candidate"
+
 fixtures:
   - path: Shapes.scala
     content: |

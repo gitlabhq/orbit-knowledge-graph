@@ -1,15 +1,8 @@
-// External-service metrics: HTTP autoinstrumentation, Siphon, NATS, Rails KG.
+// External-service metrics: gRPC autoinstrumentation, Siphon, NATS, Rails Orbit.
 // These are emitted by other services so they can't live in the Rust catalog;
 // kind / labels / description are spelled out here.
 
 {
-  GKG_HTTP: [
-    { name: 'http_server_request_duration_seconds', kind: 'histogram', labels: ['http_route', 'http_response_status_code', 'http_request_method'], description: 'HTTP server request latency (autoinstrumentation).' },
-    { name: 'http_server_active_requests', kind: 'gauge', labels: ['http_route', 'http_request_method'], description: 'In-flight HTTP server requests.' },
-    { name: 'http_server_request_body_size_bytes', kind: 'histogram', labels: ['http_route'], description: 'HTTP request body size.' },
-    { name: 'http_server_response_body_size_bytes', kind: 'histogram', labels: ['http_route'], description: 'HTTP response body size.' },
-  ],
-
   GKG_GRPC: [
     { name: 'rpc_server_duration_seconds', kind: 'histogram', labels: ['rpc_service', 'rpc_method', 'rpc_grpc_status_code'], description: 'gRPC server request latency.' },
     { name: 'rpc_server_active_requests', kind: 'gauge', labels: ['rpc_service', 'rpc_method'], description: 'In-flight gRPC server requests.' },
@@ -39,8 +32,8 @@
   ],
 
   RAILS_KG_REQUEST: [
-    { name: 'gitlab_knowledge_graph_grpc_duration_seconds', kind: 'histogram', labels: ['method', 'status'], description: 'Rails → GKG gRPC call latency.' },
-    { name: 'gitlab_knowledge_graph_grpc_errors_total', kind: 'counter', labels: ['method', 'code'], description: 'Rails → GKG gRPC error count.' },
+    { name: 'gitlab_knowledge_graph_grpc_duration_seconds', kind: 'histogram', labels: ['method', 'status'], description: 'Rails → Orbit gRPC call latency.' },
+    { name: 'gitlab_knowledge_graph_grpc_errors_total', kind: 'counter', labels: ['method', 'code'], description: 'Rails → Orbit gRPC error count.' },
     { name: 'gitlab_knowledge_graph_redaction_duration_seconds', kind: 'histogram', labels: [], description: 'Rails-side redaction time.' },
     { name: 'gitlab_knowledge_graph_redaction_batch_size', kind: 'histogram', labels: [], description: 'Rails-side redaction batch size.' },
     { name: 'gitlab_knowledge_graph_redaction_filtered_count', kind: 'histogram', labels: [], description: 'Rows filtered by redaction per request.' },

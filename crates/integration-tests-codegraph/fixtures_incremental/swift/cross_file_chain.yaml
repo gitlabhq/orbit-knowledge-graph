@@ -1,0 +1,48 @@
+name: "Swift: types in one module call each other across files"
+
+fixtures:
+  - path: Sources/App/End.swift
+    content: |
+      struct End {
+          func stop() {}
+      }
+
+  - path: Sources/App/Middle.swift
+    content: |
+      struct Middle {
+          func go() {
+              End().stop()
+          }
+      }
+
+  - path: Sources/App/Start.swift
+    content: |
+      struct Start {
+          func run() {
+              Middle().go()
+          }
+      }
+
+tests:
+  - name: "each file defines its method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['stop', 'go', 'run']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: End.stop } }
+      - { row: { fqn: Middle.go } }
+      - { row: { fqn: Start.run } }
+
+  - name: "calls in one module link across files"
+    # Known gap: Swift calls do not link across files; the same calls in one file link.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'stop']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: go, file: Sources/App/Middle.swift } }
+      - { row: { caller: go, callee: stop, file: Sources/App/End.swift } }

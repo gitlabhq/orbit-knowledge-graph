@@ -8,10 +8,11 @@ use lasso::Key;
 use smallvec::SmallVec;
 
 use crate::env::Env;
+use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::sentinel::Limits;
-use crate::tree::{Edge, Node, Tag, Tree};
+use crate::tree::{Compact, CompactNode, Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;
 
 pub struct SourceFile {
@@ -26,7 +27,7 @@ impl From<(String, String)> for SourceFile {
 }
 
 pub struct State {
-    pub trees: Vec<Tree>,
+    pub trees: Vec<Tree<Compact>>,
     pub edges: Vec<Edge>,
     pub resolver: Resolver,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
@@ -34,6 +35,22 @@ pub struct State {
 }
 
 impl State {
+    pub(crate) fn project_tree(&self, env: &Env) -> WalkResult {
+        let paths: Vec<_> = self
+            .trees
+            .iter()
+            .map(|tree| tree.label.as_str())
+            .chain(self.configs.iter().map(|file| file.path.as_str()))
+            .collect();
+        ProjectTree::build(
+            &env.lang,
+            &env.resolve.config,
+            &env.resolve.stages,
+            &paths,
+            Some(&self.configs),
+        )
+    }
+
     pub fn new(env: &Env) -> Self {
         Self {
             trees: Vec::new(),
@@ -104,6 +121,7 @@ const NONE: u32 = u32::MAX;
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SnapshotNode {
+    pub id: u32,
     pub kind: u16,
     pub field: u16,
     pub sym: u32,
@@ -125,19 +143,14 @@ pub struct TreeSnapshot {
     pub tags: Vec<(u32, Vec<Tag>)>,
 }
 
-impl From<&Tree> for TreeSnapshot {
-    fn from(tree: &Tree) -> Self {
-        let ids: Vec<indextree::NodeId> = tree.root.descendants(&tree.arena).collect();
-        let id_to_pos: rustc_hash::FxHashMap<indextree::NodeId, u32> = ids
-            .iter()
-            .enumerate()
-            .map(|(i, &id)| (id, i as u32))
-            .collect();
-        let mut nodes = Vec::with_capacity(ids.len());
-        for &id in &ids {
-            let n = tree.arena[id].get();
-            let parent = id.parent(&tree.arena).map_or(NONE, |p| id_to_pos[&p]);
+impl From<&Tree<Compact>> for TreeSnapshot {
+    fn from(tree: &Tree<Compact>) -> Self {
+        let mut nodes = Vec::with_capacity(tree.len() as usize);
+        for id in std::iter::once(tree.root()).chain(tree.root().descendants()) {
+            let n = id.node();
+            let parent = id.parent().map_or(NONE, |p| p.index());
             nodes.push(SnapshotNode {
+                id: id.index(),
                 kind: n.kind,
                 field: n.field,
                 sym: n.sym,
@@ -165,33 +178,24 @@ impl From<&Tree> for TreeSnapshot {
     }
 }
 
-impl From<TreeSnapshot> for Tree {
+impl From<TreeSnapshot> for Tree<Compact> {
     fn from(snap: TreeSnapshot) -> Self {
         if snap.nodes.is_empty() {
-            return Tree::new(Node::default());
+            return Tree::new(Node::default()).into();
         }
-        let first = &snap.nodes[0];
-        let mut tree = Tree::with_capacity(
-            snap.nodes.len(),
-            Node {
-                kind: first.kind,
-                field: first.field,
-                sym: first.sym,
-                start: first.start,
-                end: first.end,
-                start_row: first.start_row,
-                start_col: first.start_col,
-                end_row: first.end_row,
-                end_col: first.end_col,
-                synth: first.synth,
-                named: first.named,
-            },
-        );
-        let mut id_map = vec![tree.root];
-        for sn in &snap.nodes[1..] {
-            let parent = id_map[sn.parent as usize];
-            let id = tree.append(
-                parent,
+        let slots = snap
+            .nodes
+            .iter()
+            .map(|node| node.id as usize)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let root = snap.nodes[0].id;
+        let mut arena: Vec<_> = (0..slots)
+            .map(|id| CompactNode::new(Node::default(), id as u32))
+            .collect();
+        for sn in &snap.nodes {
+            arena[sn.id as usize] = CompactNode::new(
                 Node {
                     kind: sn.kind,
                     field: sn.field,
@@ -205,14 +209,25 @@ impl From<TreeSnapshot> for Tree {
                     synth: sn.synth,
                     named: sn.named,
                 },
+                sn.parent,
             );
-            id_map.push(id);
         }
-        tree.label = snap.label;
-        for (node, tags) in snap.tags {
-            tree.tags.insert(node, SmallVec::from_vec(tags));
+        for sn in snap.nodes {
+            if sn.parent != NONE {
+                CompactNode::link(&mut arena, sn.parent, sn.id);
+            }
         }
-        tree
+        Self {
+            storage: Compact(arena),
+            root,
+            label: snap.label,
+            tags: snap
+                .tags
+                .into_iter()
+                .map(|(node, tags)| (node, SmallVec::from_vec(tags)))
+                .collect(),
+            source: std::sync::Arc::from(""),
+        }
     }
 }
 
@@ -258,7 +273,7 @@ struct Header {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 8;
+pub const SNAPSHOT_VERSION: u32 = 15;
 
 type Error = rkyv::rancor::BoxedError;
 
@@ -333,20 +348,24 @@ impl State {
         }
         let mut buf = rkyv::util::AlignedVec::new();
         let header: Header = read_frame(&mut input, &mut buf)?;
-        let limits = Limits::load().map_err(io::Error::other)?;
-        let env =
-            Env::with_lang(lang_id, Lang::from(header.lang), limits).map_err(io::Error::other)?;
+        let env = Env::with_lang(lang_id, Lang::from(header.lang), Limits::UNLIMITED)
+            .map_err(io::Error::other)?;
         let mut trees = Vec::with_capacity(header.trees as usize);
         for _ in 0..header.trees {
             let tree: TreeSnapshot = read_frame(&mut input, &mut buf)?;
             trees.push(tree.into());
         }
-        let state = State {
+        let mut state = State {
             trees,
             edges: header.edges,
             resolver: Resolver::from_snapshot(header.resolver, &env.lang),
             configs: header.configs.into_iter().map(Into::into).collect(),
         };
+        let walk = state.project_tree(&env);
+        state
+            .resolver
+            .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
+        state.resolver.lookup = walk.lookup;
         Ok((env, state))
     }
 }

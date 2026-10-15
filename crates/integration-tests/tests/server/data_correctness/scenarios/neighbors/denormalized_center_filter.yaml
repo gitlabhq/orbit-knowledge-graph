@@ -1,0 +1,27 @@
+description: Neighbor center filters use tags written by the selected relationship
+
+config:
+  redaction:
+    allow:
+      user: [99002]
+      merge_request: [99000]
+  extra_seed:
+    gl_user:
+      - { id: 99002, username: filter_user }
+    gl_merge_request:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, state: opened, title: approved }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99000, target_kind: MergeRequest, target_tags: ["state:opened"] }
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest {id: 99000, state: 'opened'})<-[:APPROVED]-(neighbor)
+    RETURN neighbor
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest: { ids: [99000], filters: { state: opened } }
+    User: { ids: [99002] }
+  edges:
+    APPROVED: [[99002, 99000]]

@@ -107,7 +107,7 @@ This deployment approach ensures memory usage and compute remain separate.
 |------------|--------------------|---------------------|
 | Runs on your machine | {{< yes >}} | {{< no >}} |
 | Runs on GitLab infrastructure | {{< no >}} | {{< yes >}} |
-| Graph storage | DuckDB file at `~/.orbit/graph.duckdb` | Managed ClickHouse |
+| Graph storage | Revision databases and a separate manifest under `~/.gitlab/orbit/local/` | Managed ClickHouse |
 | Storage you set up | {{< no >}} | {{< no >}} |
 | Network connection required to query | {{< no >}} | {{< yes >}} |
 | GitLab instance required | {{< no >}} | {{< yes >}} |

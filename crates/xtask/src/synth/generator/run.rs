@@ -465,14 +465,8 @@ impl Generator {
                     .unwrap_or(0);
 
                 if count > 0 {
-                    let batches = self.generate_root_entities_streaming(
-                        node,
-                        org_id,
-                        count,
-                        &mut registry,
-                        &mut rng,
-                        edge_writer,
-                    )?;
+                    let batches =
+                        self.generate_root_entities_streaming(node, org_id, count, &mut registry)?;
                     data.nodes
                         .entry(real_type.to_string())
                         .or_default()
@@ -684,8 +678,6 @@ impl Generator {
         org_id: u32,
         count: usize,
         registry: &mut EntityRegistry,
-        _rng: &mut impl Rng,
-        _edge_writer: &mut StreamingEdgeWriter,
     ) -> Result<Vec<RecordBatch>> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::with_seed(

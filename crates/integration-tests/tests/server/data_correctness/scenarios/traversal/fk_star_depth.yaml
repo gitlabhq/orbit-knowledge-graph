@@ -1,0 +1,13 @@
+description: Single FK relationship retains variable hop count
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED*2]->(mr:MergeRequest)
+    RETURN u.id, mr.id
+
+expect:
+  node_count: 0
+  nodes:
+    User: { ids: [] }
+    MergeRequest: { ids: [] }
+  edge_count: { AUTHORED: 0 }

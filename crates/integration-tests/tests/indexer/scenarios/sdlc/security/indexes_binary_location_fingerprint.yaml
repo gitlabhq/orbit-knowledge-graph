@@ -2,6 +2,7 @@ description: >
   location_fingerprint is a Postgres bytea; rows holding a raw 20-byte SHA1
   (invalid UTF-8) must not poison the Arrow batch. The binary row is hex-encoded
   on extract; a text row passes through unchanged.
+
 scope: { namespace: 100 }
 
 seed:

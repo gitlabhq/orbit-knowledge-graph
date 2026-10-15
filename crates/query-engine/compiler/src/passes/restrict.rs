@@ -17,17 +17,9 @@ use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 
-fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
-    input
-        .nodes
-        .iter()
-        .find(|n| n.id == node_id)
-        .and_then(|n| n.entity.as_deref())
-}
-
 fn enforce_aggregation_scope(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let is_scoped = |entity: &str| model.entity_has_traversal_path(entity);
 
@@ -86,7 +78,7 @@ fn enforce_aggregation_scope(
 
 fn enforce_traversal_path_filters(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
@@ -198,13 +190,13 @@ fn validate_traversal_path_within_scope(
 /// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
 fn stamp_edge_scope_proofs(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
     crate::scope::derive_scope_proofs(input, model)
 }
 
 fn admin_only(
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     entity: &str,
     property: &str,
 ) -> bool {
@@ -213,7 +205,7 @@ fn admin_only(
 
 pub fn restrict(
     input: &mut Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
     enforce_traversal_path_filters(input, model, security_ctx)?;
@@ -252,7 +244,7 @@ pub fn restrict(
     }
 
     if let Some(ob) = &input.order_by
-        && let Some(entity) = entity_of(input, &ob.node)
+        && let Some(entity) = input.entity_of(&ob.node)
         && admin_only(model, entity, &ob.property)
     {
         return Err(QueryError::Restrict(format!(
@@ -265,7 +257,7 @@ pub fn restrict(
         let Some(prop) = agg.expr.property() else {
             continue;
         };
-        let Some(entity) = entity_of(input, agg.expr.node()) else {
+        let Some(entity) = input.entity_of(agg.expr.node()) else {
             continue;
         };
         if admin_only(model, entity, prop) {
@@ -276,7 +268,7 @@ pub fn restrict(
     }
 
     for (node, property) in crate::input::property_groups(&input.aggregation.group_by) {
-        let Some(entity) = entity_of(input, node) else {
+        let Some(entity) = input.entity_of(node) else {
             continue;
         };
         if admin_only(model, entity, property) {
@@ -294,7 +286,7 @@ pub fn restrict(
         for filters in node.filters.values() {
             for filter in filters {
                 if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
-                    && let Some(rhs_entity) = entity_of(input, rhs_node)
+                    && let Some(rhs_entity) = input.entity_of(rhs_node)
                     && admin_only(model, rhs_entity, rhs_prop)
                 {
                     return Err(QueryError::Restrict(format!(
@@ -305,9 +297,9 @@ pub fn restrict(
         }
     }
 
-    for jp in &input.join_predicates {
-        for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
-            if let Some(entity) = entity_of(input, node_id)
+    for predicate in input.conditions() {
+        for (node_id, prop) in predicate.node_properties() {
+            if let Some(entity) = input.entity_of(node_id)
                 && admin_only(model, entity, prop)
             {
                 return Err(QueryError::Restrict(format!(

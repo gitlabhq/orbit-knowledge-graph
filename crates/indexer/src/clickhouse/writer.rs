@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::ClickHouseConfiguration;
+use clickhouse_client::ArrowClickHouseClient;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -23,9 +22,6 @@ pub enum WriteError {
 
     #[error("connection error: {0}")]
     Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
-
-    #[error("invalid configuration: {0}")]
-    InvalidConfiguration(String),
 }
 
 impl From<RetryExhausted> for WriteError {
@@ -53,28 +49,23 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
-    pub fn new(
-        configuration: ClickHouseConfiguration,
-        metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, WriteError> {
-        configuration
-            .validate()
-            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client();
-        Ok(Self {
+    pub fn new(client: ArrowClickHouseClient, metrics: Arc<EngineMetrics>) -> Self {
+        Self {
             client,
             metrics,
             noop: false,
-        })
+        }
     }
 
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
         Self {
             client: orbit_server_config::AppConfig::embedded_defaults()
                 .graph
-                .build_client(),
+                .build_client("graph"),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }
@@ -101,7 +92,7 @@ impl ClickHouseWriter {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
         let bytes: u64 = batches
             .iter()
-            .map(|batch| match orbit_utils::arrow::logical_byte_size(batch) {
+            .map(|batch| match orbit_arrow::logical_byte_size(batch) {
                 Ok(n) => n,
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
@@ -294,6 +285,7 @@ async fn drain(
                     buf.batches.push(batch);
                     buf.tokens.push(token);
                     if buf.rows >= limits.max_rows {
+                        #[expect(clippy::unwrap_used, reason = "key was just inserted by `entry().or_default()` above")]
                         let buf = pending.remove(&table).unwrap();
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
@@ -312,6 +304,7 @@ async fn drain(
                     .map(|(table, _)| table.clone())
                     .collect();
                 for table in ripe {
+                    #[expect(clippy::unwrap_used, reason = "keys come from `pending` itself and are removed once each")]
                     let buf = pending.remove(&table).unwrap();
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
@@ -328,6 +321,7 @@ async fn drain(
 }
 
 /// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
+#[expect(clippy::expect_used, reason = "the write semaphore is never closed")]
 fn spawn_write(
     writes: &mut JoinSet<()>,
     sem: &Arc<tokio::sync::Semaphore>,

@@ -24,6 +24,7 @@ async fn item_counts() {
         security_manager_gets_vulnerability_count,
         role_on_another_path_does_not_expose_the_entity,
         missing_table_degrades_to_zero,
+        counts_rows_written_after_the_previous_count,
     );
 }
 
@@ -131,4 +132,23 @@ async fn missing_table_degrades_to_zero(ctx: &TestContext) {
 
     assert_eq!(counts["MergeRequest"], 0);
     assert_eq!(counts["Project"], 0);
+}
+
+async fn counts_rows_written_after_the_previous_count(ctx: &TestContext) {
+    let db = ctx.fork("item_counts_rows_written_later").await;
+    let insert_group = |id: i64| {
+        format!(
+            "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
+             ({id}, 'Group {id}', 'public', '1/950/{id}/')",
+            t("gl_group")
+        )
+    };
+    db.execute(&insert_group(9500)).await;
+
+    let before = count(&db, &admin_context(), &["1/950/"]).await;
+    db.execute(&insert_group(9501)).await;
+    let after = count(&db, &admin_context(), &["1/950/"]).await;
+
+    assert_eq!(before["Group"], 1);
+    assert_eq!(after["Group"], 2);
 }

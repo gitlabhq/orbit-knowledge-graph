@@ -5,26 +5,26 @@ use std::collections::{HashMap, HashSet};
 
 use crate::input::{
     Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
-    PropertyRef, QueryType,
+    PredicateTarget, PropertyRef, QueryType,
 };
 use crate::passes::cursor;
+use crate::query_limits::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 
-use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
-use super::{QueryParser, Rule, invalid};
+use super::ast::{Limit, Name, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
+use super::{ParsedQuery, QueryParser, Rule, invalid};
 
-pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
+pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
+        variable_length: HashSet::new(),
         path: None,
         neighbor: None,
         aliases: HashMap::new(),
     };
     lowering.pattern(query.pattern)?;
-    for predicate in query.predicates {
-        lowering.predicate(predicate)?;
-    }
+    lowering.predicates(query.predicates)?;
     lowering.promote_ids()?;
     lowering.classify()?;
     lowering.project(query.projections)?;
@@ -39,12 +39,18 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
                 after,
             });
             lowering.input.options.include_debug_sql = query.debug;
-            return Ok((lowering.input, statement_hash(source, span)));
+            return Ok(ParsedQuery {
+                query_hash: statement_hash(source, span),
+                input: lowering.input,
+            });
         }
         None => {}
     };
     lowering.input.options.include_debug_sql = query.debug;
-    Ok((lowering.input, 0))
+    Ok(ParsedQuery {
+        input: lowering.input,
+        query_hash: 0,
+    })
 }
 
 fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
@@ -63,6 +69,7 @@ fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
 struct Lowering {
     input: Input,
     edges: HashMap<String, usize>,
+    variable_length: HashSet<String>,
     path: Option<String>,
     neighbor: Option<String>,
     aliases: HashMap<String, Option<PropertyRef>>,
@@ -136,6 +143,12 @@ impl Lowering {
             }
             return Ok(id);
         }
+        if self.input.nodes.len() == MAX_NODES_CAP {
+            return Err(invalid(
+                pattern.span,
+                &format!("a query declares at most {MAX_NODES_CAP} nodes"),
+            ));
+        }
         let mut node = InputNode {
             id: id.clone(),
             entity: pattern.label.map(|label| label.value),
@@ -174,6 +187,10 @@ impl Lowering {
                 ),
             ));
         }
+        let variable = relationship
+            .variable
+            .as_ref()
+            .map(|alias| alias.value.clone());
         if let Some(alias) = relationship.variable
             && (self.input.nodes.iter().any(|n| n.id == alias.value)
                 || self.path.as_ref() == Some(&alias.value)
@@ -194,6 +211,11 @@ impl Lowering {
         if let Some(range) = relationship.range {
             edge.hops = hop_range(range)?;
         }
+        if edge.hops.max > 1
+            && let Some(variable) = variable
+        {
+            self.variable_length.insert(variable);
+        }
         if let Some(map) = relationship.properties {
             if edge.hops.max > 1 && !map.entries.is_empty() {
                 return Err(invalid(
@@ -204,6 +226,41 @@ impl Lowering {
             Self::map_filters(map.entries, &mut edge.filters);
         }
         self.input.relationships.push(edge);
+        Ok(())
+    }
+
+    fn relationship_index(&self, span: pest::Span<'_>, variable: &Name<'_>) -> Result<usize> {
+        let name = &variable.value;
+        if let Some(index) = self.edges.get(name) {
+            return Ok(*index);
+        }
+        let kind = if self.neighbor.as_ref() == Some(name)
+            || self.input.nodes.iter().any(|n| &n.id == name)
+        {
+            "a node"
+        } else if self.path.as_ref() == Some(name) {
+            "a path"
+        } else {
+            return Err(invalid(span, &format!("undefined variable {name}")));
+        };
+        Err(invalid(
+            span,
+            &format!(
+                "type() takes a relationship variable, such as r in -[r]->, but {name} is {kind}"
+            ),
+        ))
+    }
+
+    fn one_hop(&self, span: pest::Span<'_>, variable: &Name<'_>) -> Result<()> {
+        let name = &variable.value;
+        if self.variable_length.contains(name) {
+            return Err(invalid(
+                span,
+                &format!(
+                    "{name} has a variable length and binds a list; type({name}) and RETURN {name} need a one-hop relationship, so list the types in the pattern instead, such as -[{name}:CLOSES|MENTIONS*1..3]->"
+                ),
+            ));
+        }
         Ok(())
     }
 
@@ -240,6 +297,7 @@ impl Lowering {
             if edge.direction != Direction::Outgoing
                 || edge.hops.min != 1
                 || !edge.filters.is_empty()
+                || self.input.references(&PredicateTarget::Relationship(0))
             {
                 return Err(QueryError::Validation("path finding supports outgoing paths starting at one hop, without relationship predicates".into()));
             }
@@ -260,6 +318,10 @@ impl Lowering {
                 || self.input.nodes[0].entity.is_none()
                 || edge.hops != HopRange::default()
                 || !edge.filters.is_empty()
+                || self
+                    .input
+                    .references(&PredicateTarget::Node(far.id.clone()))
+                || self.input.references(&PredicateTarget::Relationship(0))
             {
                 return Err(QueryError::Validation("neighbors requires one labeled center and an unfiltered, unlabeled endpoint at one hop".into()));
             }
@@ -320,7 +382,7 @@ fn is_type_shaped(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     fn hash(query: &str) -> u64 {
-        super::super::parse_with_hash(query).unwrap().1
+        super::super::parse_with_hash(query).unwrap().query_hash
     }
 
     #[test]

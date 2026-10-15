@@ -95,7 +95,7 @@ impl ActiveSchema {
             let next_change = match self.install_version(loader, target).await {
                 Ok(()) => changes.try_next().await?,
                 Err(error) => {
-                    warn!(%error, "active schema unavailable; retrying");
+                    warn!(error = %format_args!("{error:#}"), "active schema unavailable; retrying");
                     tokio::select! {
                         change = changes.try_next() => change?,
                         _ = sleep(retry_backoff) => continue,
@@ -210,7 +210,7 @@ impl SnapshotLoader {
             self.catalog.load(version).await?.load_ontology()?
         };
         let ontology = Arc::new(ontology.with_schema_version_prefix(&table_prefix(version)));
-        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)
+        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)?
             .table_names()
             .into_iter()
             .map(String::from)

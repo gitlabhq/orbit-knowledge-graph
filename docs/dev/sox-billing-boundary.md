@@ -38,7 +38,8 @@ Two hard gates protect this boundary:
 - **CODEOWNERS** (`.gitlab/CODEOWNERS`). The `[SOX Billing]` section routes
   the billing crate, adapter, and related paths to `@gitlab-org/orbit/team`.
   Changes to those paths require code-owner approval on protected `main`.
-- **The `billing-boundary-check` CI job.** It fails when a workspace crate
+- **The `billing-boundary-check` CI job.** It runs
+  `crates/integration-tests/tests/billing_boundary.rs` and fails when a workspace crate
   other than `orbit-server` declares a direct dependency on `orbit-billing`.
   It does not detect new imports within `orbit-server` or re-exports.
 

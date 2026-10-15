@@ -4,7 +4,7 @@ use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 use super::context::PlanningContext;
 use super::{Hydration, Plan};
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 const PREFIX_SET_PATH_THRESHOLD: usize = 256;
 
@@ -61,7 +61,7 @@ fn path_filter(
     )
 }
 
-pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
+pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
     context: PlanningContext<'_, M>,
     options: HydrationCompileOptions,
 ) -> Result<Plan<Hydration>> {

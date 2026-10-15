@@ -1,4 +1,5 @@
 name: Single node retains its filter and requested projection
+
 query:
   json: |
     {
@@ -8,9 +9,11 @@ query:
     }
   gql: |
     MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
+
 logical:
   expect:
     - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
+
 physical:
   clickhouse:
     planned:
@@ -29,4 +32,4 @@ physical:
       exact: |
         (Project f.id AS f_id, f.path AS f_path
           (Filter f.language = 'rust', f._deleted = false
-            (Deduplicate Final (Scan Table(gl_file) AS f))))
+            (Scan Table(gl_file) AS f)))

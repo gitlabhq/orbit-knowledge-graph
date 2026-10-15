@@ -1,5 +1,6 @@
 name: "Next.js router matrix expansion"
 pipeline: js
+
 fixtures:
   - path: jsconfig.json
     content: |

@@ -1,0 +1,21 @@
+name: ID ranges prevent pinned FK target elimination
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"v","entity":"User","node_ids":[2]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":3}}],"relationships":[{"type":"APPROVED","from":"v","to":"mr"},{"type":"AUTHORED","from":"u","to":"mr"}]}
+  gql: |
+    MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1})
+    WHERE u.id >= 2 AND u.id <= 3
+    RETURN v, mr, u
+
+logical:
+  expect:
+    - (Filter u.id IN [1], u.id >= 2, u.id <= 3 (NodeScan User AS u))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter _orbit_edge_1.source_id >= 2, _orbit_edge_1.source_id <= 3, _orbit_edge_1.source_id = 1 (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)))
+      reject:
+        - (Filter mr.author_id = 1, ... (_))

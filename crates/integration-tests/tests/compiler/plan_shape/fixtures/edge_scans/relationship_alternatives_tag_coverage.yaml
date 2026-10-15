@@ -1,0 +1,25 @@
+name: Covered relationship alternatives share denormalized tag filtering
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[99002]},{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"relationships":[{"type":["AUTHORED","APPROVED"],"from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
+  gql: |
+    MATCH (u:User {id: 99002})-[:AUTHORED|APPROVED]->(mr:MergeRequest {state: 'opened'})
+    RETURN count(mr) AS n
+
+logical:
+  expect:
+    - (Aggregate COUNT(mr) AS n (_))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter _orbit_edge_0.target_tags HAS ANY ['state:opened'], ... (Scan Table(gl_edge) AS _orbit_edge_0))
+      reject:
+        - (Scan Table(gl_merge_request) ...)
+    emitted:
+      expect:
+        - (Filter ArrayContains(_orbit_edge_0.target_tags, 'state:opened'), ... (Bind _orbit_edge_0 (_)))
+      reject:
+        - (Scan Table(gl_merge_request) ...)

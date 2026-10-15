@@ -402,6 +402,7 @@ impl Context {
                     Ok(format!("{table} AS {alias}"))
                 }
             }
+            TableRef::Cte { name, alias } => Ok(format!("{name} AS {alias}")),
             TableRef::Join {
                 join_type,
                 left,
@@ -923,7 +924,7 @@ mod tests {
                     from: TableRef::scan("gl_project", "p"),
                     union_all: vec![Query {
                         select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
-                        from: TableRef::scan("path_cte", "c"),
+                        from: TableRef::cte("path_cte", "c"),
                         ..Default::default()
                     }],
                     ..Default::default()
@@ -932,7 +933,7 @@ mod tests {
                 materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
-            from: TableRef::scan("path_cte", "r"),
+            from: TableRef::cte("path_cte", "r"),
             limit: Some(10),
             ..Default::default()
         };

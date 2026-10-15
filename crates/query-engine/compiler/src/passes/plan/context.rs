@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use crate::error::{QueryError, Result};
 use crate::input::{Input, InputNode, QueryType};
 
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
-use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
+use super::{
+    Aggregation, DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan, QueryPlan, Traversal,
+};
 
-pub(super) struct PlanningContext<'a, M: QueryDataModel + ?Sized> {
+pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
     pub input: &'a Input,
     pub model: &'a M,
     pub hops: Vec<Hop>,
@@ -17,7 +19,21 @@ pub(super) struct PlanningContext<'a, M: QueryDataModel + ?Sized> {
     pub node_edge_mappings: HashMap<String, (String, String)>,
 }
 
-impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
+    pub fn finish_execution(mut self, execution: ExecutionPlan) -> QueryPlan {
+        for binding in &execution.bindings {
+            self.node_edge_mappings
+                .entry(binding.node.clone())
+                .or_insert_with(|| (binding.alias.clone(), binding.column.clone()));
+        }
+        if self.aggregate() {
+            let result = self.aggregation(&execution);
+            QueryPlan::Aggregation(self.finish(Aggregation { execution, result }))
+        } else {
+            QueryPlan::Traversal(self.finish(Traversal { execution }))
+        }
+    }
+
     pub fn finish<T>(self, operation: T) -> Plan<T> {
         Plan {
             nodes: self.nodes,
@@ -78,5 +94,18 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                     "table '{table}' has no sort key for latest-row resolution"
                 ))
             })
+    }
+}
+
+impl<'a, M: OrbitQueryModel + ?Sized> PlanningContext<'a, M> {
+    pub(super) fn new(input: &'a Input, model: &'a M) -> Self {
+        Self {
+            input,
+            model,
+            hops: Vec::new(),
+            nodes: HashMap::new(),
+            denormalized: HashMap::new(),
+            node_edge_mappings: HashMap::new(),
+        }
     }
 }

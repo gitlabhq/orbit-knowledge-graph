@@ -40,8 +40,8 @@ mod tests {
     #[tokio::test]
     async fn wires_batches_and_context_into_query_result() {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
+            Field::new("_orbit_p_id", DataType::Int64, false),
+            Field::new("_orbit_p_type", DataType::Utf8, false),
         ]));
         let batch = RecordBatch::try_new(
             schema,

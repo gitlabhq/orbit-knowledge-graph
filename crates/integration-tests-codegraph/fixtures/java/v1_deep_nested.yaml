@@ -1,4 +1,5 @@
 name: "Java v1 parity — deep nested class resolution"
+
 fixtures:
   - path: com/example/helpers/Helpers.java
     content: |
@@ -10,6 +11,7 @@ fixtures:
               public void innerInnerDoHelp() { super.innerDoHelp(); }
           }
       }
+
   - path: com/example/edgecases/ResolveTypeFailingOnNestedChild.java
     content: |
       package com.example.edgecases;

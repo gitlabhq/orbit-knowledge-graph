@@ -29,7 +29,7 @@ const (
 
 // Controls output serialization across all data RPCs.
 // RAW returns structured JSON for programmatic consumers (dashboard, CLI).
-// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
+// LLM returns compact TOON text optimized for token budgets.
 // GQL returns query results as a text table of graph patterns such as
 // (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 2}). Only ExecuteQuery
 // honors it; other RPCs treat it as RAW.
@@ -89,7 +89,7 @@ type FormatName int32
 
 const (
 	FormatName_FORMAT_NAME_RAW  FormatName = 0
-	FormatName_FORMAT_NAME_GOON FormatName = 1
+	FormatName_FORMAT_NAME_TOON FormatName = 1
 	FormatName_FORMAT_NAME_GQL  FormatName = 2
 )
 
@@ -97,12 +97,12 @@ const (
 var (
 	FormatName_name = map[int32]string{
 		0: "FORMAT_NAME_RAW",
-		1: "FORMAT_NAME_GOON",
+		1: "FORMAT_NAME_TOON",
 		2: "FORMAT_NAME_GQL",
 	}
 	FormatName_value = map[string]int32{
 		"FORMAT_NAME_RAW":  0,
-		"FORMAT_NAME_GOON": 1,
+		"FORMAT_NAME_TOON": 1,
 		"FORMAT_NAME_GQL":  2,
 	}
 )
@@ -561,7 +561,7 @@ func (*ExecuteQueryMessage_Error) isExecuteQueryMessage_Content() {}
 type ExecuteQueryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM: GOON text; GQL: graph pattern table
+	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
 	QueryType     QueryType              `protobuf:"varint,3,opt,name=query_type,json=queryType,proto3,enum=orbit.v1.QueryType" json:"query_type,omitempty"`
 	Language      QueryLanguage          `protobuf:"varint,4,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -3910,12 +3910,13 @@ func (x *GetIndexingStatusResponse) GetStatuses() []*NamespaceIndexingStatus {
 }
 
 type NamespaceIndexingStatus struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	TraversalPath string                  `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"`
-	Phase         IndexingPhase           `protobuf:"varint,2,opt,name=phase,proto3,enum=orbit.v1.IndexingPhase" json:"phase,omitempty"`
-	Domains       []*DomainIndexingStatus `protobuf:"bytes,3,rep,name=domains,proto3" json:"domains,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState  `protogen:"open.v1"`
+	TraversalPath   string                  `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"`
+	Phase           IndexingPhase           `protobuf:"varint,2,opt,name=phase,proto3,enum=orbit.v1.IndexingPhase" json:"phase,omitempty"`
+	Domains         []*DomainIndexingStatus `protobuf:"bytes,3,rep,name=domains,proto3" json:"domains,omitempty"`
+	LastCompletedAt *string                 `protobuf:"bytes,4,opt,name=last_completed_at,json=lastCompletedAt,proto3,oneof" json:"last_completed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *NamespaceIndexingStatus) Reset() {
@@ -3967,6 +3968,13 @@ func (x *NamespaceIndexingStatus) GetDomains() []*DomainIndexingStatus {
 		return x.Domains
 	}
 	return nil
+}
+
+func (x *NamespaceIndexingStatus) GetLastCompletedAt() string {
+	if x != nil && x.LastCompletedAt != nil {
+		return *x.LastCompletedAt
+	}
+	return ""
 }
 
 type DomainIndexingStatus struct {
@@ -4480,11 +4488,13 @@ const file_orbit_proto_rawDesc = "" +
 	"\x18GetIndexingStatusRequest\x12'\n" +
 	"\x0ftraversal_paths\x18\x01 \x03(\tR\x0etraversalPaths\"Z\n" +
 	"\x19GetIndexingStatusResponse\x12=\n" +
-	"\bstatuses\x18\x01 \x03(\v2!.orbit.v1.NamespaceIndexingStatusR\bstatuses\"\xa9\x01\n" +
+	"\bstatuses\x18\x01 \x03(\v2!.orbit.v1.NamespaceIndexingStatusR\bstatuses\"\xf0\x01\n" +
 	"\x17NamespaceIndexingStatus\x12%\n" +
 	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x12-\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x17.orbit.v1.IndexingPhaseR\x05phase\x128\n" +
-	"\adomains\x18\x03 \x03(\v2\x1e.orbit.v1.DomainIndexingStatusR\adomains\"\xa1\x01\n" +
+	"\adomains\x18\x03 \x03(\v2\x1e.orbit.v1.DomainIndexingStatusR\adomains\x12/\n" +
+	"\x11last_completed_at\x18\x04 \x01(\tH\x00R\x0flastCompletedAt\x88\x01\x01B\x14\n" +
+	"\x12_last_completed_at\"\xa1\x01\n" +
 	"\x14DomainIndexingStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12-\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x17.orbit.v1.IndexingPhaseR\x05phase\x129\n" +
@@ -4507,7 +4517,7 @@ const file_orbit_proto_rawDesc = "" +
 	"\n" +
 	"FormatName\x12\x13\n" +
 	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
-	"\x10FORMAT_NAME_GOON\x10\x01\x12\x13\n" +
+	"\x10FORMAT_NAME_TOON\x10\x01\x12\x13\n" +
 	"\x0fFORMAT_NAME_GQL\x10\x02*6\n" +
 	"\tQueryType\x12\x13\n" +
 	"\x0fQUERY_TYPE_JSON\x10\x00\x12\x14\n" +
@@ -4785,6 +4795,7 @@ func file_orbit_proto_init() {
 		(*GetGraphStatusResponse_FormattedText)(nil),
 	}
 	file_orbit_proto_msgTypes[51].OneofWrappers = []any{}
+	file_orbit_proto_msgTypes[54].OneofWrappers = []any{}
 	file_orbit_proto_msgTypes[55].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

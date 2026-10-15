@@ -42,7 +42,7 @@ static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -69,7 +69,7 @@ pub fn apply_security_context(
 fn apply_to_query(
     q: &mut Query,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
@@ -126,19 +126,12 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 /// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
 /// namespace to only the user's authorized paths.
 fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
-    let first = iter.next().expect("paths is non-empty (caller checks)");
-    iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
-}
-
-pub(crate) fn collect_node_aliases(
-    table_ref: &TableRef,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Vec<String> {
-    collect_aliased_tables(table_ref, model)
-        .into_iter()
-        .map(|(a, _)| a)
-        .collect()
+    Expr::or_all(
+        paths
+            .iter()
+            .map(|path| Some(starts_with_expr(alias, path.as_str()))),
+    )
+    .expect("paths is non-empty (caller checks)")
 }
 
 /// Collect `(alias, table)` pairs for every scan that should receive a
@@ -146,7 +139,7 @@ pub(crate) fn collect_node_aliases(
 /// minimum role before building the `startsWith(...)` predicate.
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<(String, String)> {
     let mut aliases = Vec::new();
     visit_relations(table_ref, &mut |relation| {
@@ -163,7 +156,7 @@ pub(crate) fn collect_aliased_tables(
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
 fn should_apply_security_filter(
     table: &str,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> bool {
     let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
         Regex::new(&format!(
@@ -194,7 +187,10 @@ mod tests {
 
     fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        collect_node_aliases(table, model.as_ref())
+        collect_aliased_tables(table, model.as_ref())
+            .into_iter()
+            .map(|(alias, _)| alias)
+            .collect()
     }
 
     fn applies(table: &str, ontology: &Ontology) -> bool {
@@ -262,7 +258,7 @@ mod tests {
 
     #[test]
     fn many_paths_uses_or_chain() {
-        let paths: Vec<TraversalPath> = (0..200u64)
+        let paths: Vec<TraversalPath> = (0..1000u64)
             .map(|i| TraversalPath::from(format!("1/{i}/")))
             .collect();
         let refs: Vec<&TraversalPath> = paths.iter().collect();
@@ -276,6 +272,18 @@ mod tests {
             dbg.contains("StartsWith"),
             "should produce startsWith predicates: {dbg}"
         );
+        assert!(or_depth(&expr) <= 11, "OR tree is too deep: {dbg}");
+    }
+
+    fn or_depth(expr: &Expr) -> usize {
+        match expr {
+            Expr::BinaryOp {
+                op: Op::Or,
+                left,
+                right,
+            } => 1 + or_depth(left).max(or_depth(right)),
+            _ => 1,
+        }
     }
 
     #[test]

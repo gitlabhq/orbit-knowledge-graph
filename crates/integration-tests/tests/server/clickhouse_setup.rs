@@ -47,7 +47,7 @@ fn client_as(
         password: Some(password.to_string()),
         ..ctx.config.clone()
     }
-    .build_client()
+    .build_client("graph")
 }
 
 async fn assert_fails_with(client: &ArrowClickHouseClient, sql: &str, code: &str) {

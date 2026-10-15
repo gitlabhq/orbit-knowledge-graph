@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arrow::array::StringArray;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 
 use super::format::{Row, Seed, SeedSettings};
@@ -283,8 +283,7 @@ async fn insert_rows(
         panic!("{location}: table '{table}' does not exist in the test database")
     });
 
-    let mut groups: BTreeMap<Vec<String>, Vec<Row>> = BTreeMap::new();
-    for mut row in rows {
+    let rows = rows.into_iter().map(|mut row| {
         for column in row.keys() {
             assert!(
                 table_columns.contains(column),
@@ -299,29 +298,18 @@ async fn insert_rows(
                 DEFAULT_REPLICATED_AT.into(),
             );
         }
-        groups
-            .entry(row.keys().cloned().collect())
-            .or_default()
-            .push(row);
-    }
+        row
+    });
 
-    for (column_names, group_rows) in groups {
+    for (column_names, group_rows) in group_by_columns(rows) {
         let quoted_columns: Vec<String> = column_names.iter().map(|c| format!("`{c}`")).collect();
         if settings.is_empty() {
-            let values: Vec<String> = group_rows
-                .iter()
-                .map(|row| {
-                    let rendered: Vec<String> = column_names
-                        .iter()
-                        .map(|c| render_value(&row[c], location))
-                        .collect();
-                    format!("({})", rendered.join(", "))
-                })
-                .collect();
-            ctx.execute(&format!(
-                "INSERT INTO {table} ({}) VALUES {}",
-                quoted_columns.join(", "),
-                values.join(", ")
+            ctx.execute(&values_insert(
+                table,
+                &quoted_columns,
+                &column_names,
+                &group_rows,
+                location,
             ))
             .await;
         } else {
@@ -337,6 +325,43 @@ async fn insert_rows(
             .await;
         }
     }
+}
+
+pub(crate) fn group_by_columns(
+    rows: impl IntoIterator<Item = Row>,
+) -> BTreeMap<Vec<String>, Vec<Row>> {
+    let mut groups: BTreeMap<Vec<String>, Vec<Row>> = BTreeMap::new();
+    for row in rows {
+        groups
+            .entry(row.keys().cloned().collect())
+            .or_default()
+            .push(row);
+    }
+    groups
+}
+
+pub(crate) fn values_insert(
+    table: &str,
+    quoted_columns: &[String],
+    column_names: &[String],
+    rows: &[Row],
+    location: &str,
+) -> String {
+    let values: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let rendered: Vec<String> = column_names
+                .iter()
+                .map(|c| render_value(&row[c], location))
+                .collect();
+            format!("({})", rendered.join(", "))
+        })
+        .collect();
+    format!(
+        "INSERT INTO {table} ({}) VALUES {}",
+        quoted_columns.join(", "),
+        values.join(", ")
+    )
 }
 
 /// `seed_settings` inserts go through JSONEachRow because some settings only

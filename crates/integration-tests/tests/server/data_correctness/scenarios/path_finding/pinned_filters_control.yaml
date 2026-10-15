@@ -1,0 +1,13 @@
+description: Pinned path endpoints return a path when their additional filter matches
+
+query:
+  gql: |
+    MATCH p = ANY SHORTEST (u:User {id: 1, username: 'alice'})-[:MEMBER_OF*1..2]->(g:Group {id: 100})
+    RETURN p
+
+expect:
+  path_count: 1
+  nodes:
+    User: { filters: { username: alice } }
+  path_edges:
+    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }]

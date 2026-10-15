@@ -18,6 +18,7 @@ pub struct CodeTableNames {
 
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
+        ontology.validate_single_table_edge_routes()?;
         let code_node_types: HashSet<&str> = ontology
             .nodes()
             .filter(|node| node.domain == CODE_DOMAIN)
@@ -92,6 +93,19 @@ impl CodeTableNames {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_split_relationship_routes() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/variant_routes"
+        ))
+        .unwrap();
+        assert!(
+            matches!(CodeTableNames::from_ontology(&ontology), Err(OntologyError::Validation(message))
+            if message.contains("relationship 'CALLS' has split table routes"))
+        );
+    }
 
     #[test]
     fn edge_tables_only_contain_code_relevant_tables() {

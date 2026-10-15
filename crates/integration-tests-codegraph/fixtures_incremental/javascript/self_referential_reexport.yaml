@@ -1,5 +1,6 @@
 name: "JavaScript self-referential re-export termination"
 pipeline: js
+
 fixtures:
   - path: tsconfig.json
     content: |

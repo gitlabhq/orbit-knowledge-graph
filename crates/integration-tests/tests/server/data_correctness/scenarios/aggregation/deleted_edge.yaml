@@ -1,0 +1,22 @@
+description: Latest-row aggregation cannot filter tombstones before deduplication
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_user:
+      - { id: 99002, username: audit_user }
+    gl_merge_request:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, title: audit_mr }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99000, target_kind: MergeRequest, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99000, target_kind: MergeRequest, _version: "2026-01-02 00:00:00", _deleted: true }
+
+query:
+  gql: |
+    MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
+    RETURN count(mr) AS n
+
+expect:
+  skip_requirements: ["node_ids"]
+  row_count: 1
+  row_values: [{ n: 0 }]

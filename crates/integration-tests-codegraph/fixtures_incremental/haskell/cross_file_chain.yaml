@@ -1,0 +1,47 @@
+name: "Haskell: a function re-exported through a second module"
+
+fixtures:
+  - path: src/A.hs
+    content: |
+      module A (helper) where
+
+      helper :: Int
+      helper = 1
+
+  - path: src/B.hs
+    content: |
+      module B (module A) where
+
+      import A
+
+  - path: src/C.hs
+    content: |
+      module C (run) where
+
+      import B
+
+      run :: Int
+      run = helper
+
+tests:
+  - name: "the function is defined in the first module"
+    # Known gap: Haskell has no extraction rules in langs/, so the engine emits no definitions for it.
+    skip: true
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/A.hs } }
+
+  - name: "a reference through the re-export links to the definition"
+    # Known gap: Haskell has no extraction rules in langs/, so the engine emits no definitions for it.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: src/A.hs } }

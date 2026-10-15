@@ -1,4 +1,5 @@
 name: "Rust: precision and resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -161,6 +162,15 @@ fixtures:
       }
 
 tests:
+  - name: "imported macro invocations do not become external function calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['external_imported_calls', 'qualified_external_imported_calls']
+        AND sym.import_path IN ['tracing::info', 'serde_json::json', 'external_macros']
+      RETURN caller.name AS caller, sym.import_path AS path
+    assert:
+      - { empty: true }
+
   - name: "module aliases resolve callable paths"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -168,7 +178,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
+      - { row: { src: "src/lib.rs", tgt: "src/lib.rs" } }
 
   - name: "local closure shadowing does not create a bogus local edge"
     query: |
@@ -187,19 +197,15 @@ tests:
       - { empty: true }
 
   - name: "external imported Rust calls target imported symbols"
-    # Known gap: Imported-symbol rows for external crates differ from the old pipeline.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_imported_calls'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, name, alias
     assert:
-      - { row_count: 4 }
+      - { row_count: 2 }
       - { row: { caller: "external_imported_calls", path: "external_actions::do_work", name: "do_work", alias: null } }
       - { row: { caller: "external_imported_calls", path: "external_actions::renamed", name: "renamed", alias: "renamed_work" } }
-      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json", alias: null } }
-      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
 
   - name: "local callable shadowing does not target imported symbols"
     query: |
@@ -209,16 +215,15 @@ tests:
     assert:
       - { empty: true }
 
-  - name: "function-scoped Rust imports only affect their own function"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
+  - name: "function-scoped imports stay local while out-of-scope calls use the wildcard"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY caller
     assert:
-      - { row_count: 2 }
+      - { row_count: 3 }
+      - { row: { caller: "scoped_import_out_of_scope", path: "external_actions", name: "*" } }
       - { row: { caller: "another_scoped_import_user", path: "other_external_actions::scoped", name: "scoped" } }
       - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
 
@@ -234,18 +239,15 @@ tests:
       - { row: { caller: "top_level_import_user", path: "top_level_actions::shared", name: "shared" } }
 
   - name: "qualified Rust external imports target imported symbols"
-    # Known gap: Some enum variant, record and extern definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'qualified_external_imported_calls'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, alias
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: null } }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: "actions" } }
-      - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
     query: |
@@ -281,9 +283,9 @@ tests:
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { row_count: 3 }
-      - { row: { caller: external_only, path: 'std::mem', name: size_of } }
-      - { row: { caller: explicit_std_import_user, path: 'core::mem::align_of', name: align_of } }
-      - { row: { caller: explicit_std_import_user, path: 'std::mem::size_of', name: size_of } }
+      - { row: { caller: external_only, path: "std::mem", name: size_of } }
+      - { row: { caller: explicit_std_import_user, path: "core::mem::align_of", name: align_of } }
+      - { row: { caller: explicit_std_import_user, path: "std::mem::size_of", name: size_of } }
 
   - name: "a call only a wildcard import can supply targets that import"
     query: |
@@ -292,7 +294,7 @@ tests:
       RETURN sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { row_count: 1 }
-      - { row: { path: external_actions, name: '*' } }
+      - { row: { path: external_actions, name: "*" } }
 
   - name: "associated functions stored in fn pointers still resolve"
     query: |
@@ -301,7 +303,7 @@ tests:
       RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', fqn: 'dep::Service::new', type: 'Function' } }
+      - { row: { src: "src/lib.rs", fqn: "dep::Service::new", type: "Function" } }
 
   - name: "generic trait-bound method calls resolve to the trait method"
     query: |
@@ -310,7 +312,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::Pinger::trait_ping', type: 'Method' } }
+      - { row: { fqn: "dep::Pinger::trait_ping", type: "Method" } }
 
   - name: "generic trait-bound default calls resolve to the trait default method"
     query: |
@@ -319,7 +321,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::Pinger::defaulted', type: 'Method' } }
+      - { row: { fqn: "dep::Pinger::defaulted", type: "Method" } }
 
   - name: "trait default bodies still resolve their internal calls"
     query: |
@@ -328,7 +330,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::helper', type: 'Function' } }
+      - { row: { fqn: "dep::helper", type: "Function" } }
 
   - name: "inherent methods still resolve on concrete receivers"
     query: |
@@ -337,4 +339,4 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::Service::inherent_ping', type: 'Method' } }
+      - { row: { fqn: "dep::Service::inherent_ping", type: "Method" } }

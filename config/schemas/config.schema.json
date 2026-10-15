@@ -3,9 +3,6 @@
   "title": "AppConfig",
   "type": "object",
   "properties": {
-    "bind_address": {
-      "type": "string"
-    },
     "grpc_bind_address": {
       "type": "string"
     },
@@ -44,12 +41,6 @@
     "health_check": {
       "$ref": "#/$defs/HealthCheckConfig"
     },
-    "indexer_health_bind_address": {
-      "type": "string"
-    },
-    "dispatcher_health_bind_address": {
-      "type": "string"
-    },
     "metrics": {
       "$ref": "#/$defs/MetricsConfig"
     },
@@ -83,7 +74,6 @@
   },
   "additionalProperties": false,
   "required": [
-    "bind_address",
     "grpc_bind_address",
     "jwt_clock_skew_secs",
     "nats",
@@ -94,8 +84,6 @@
     "gitlab",
     "schedule",
     "health_check",
-    "indexer_health_bind_address",
-    "dispatcher_health_bind_address",
     "metrics",
     "probe_server",
     "tls",
@@ -553,15 +541,30 @@
           "minimum": 0
         },
         "max_files": {
+          "description": "Most files parsed per repository; the rest stay `File` nodes. 0 = no limit.",
           "type": "integer",
           "format": "uint",
           "minimum": 0
         },
         "max_total_bytes": {
-          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.",
+          "description": "Archive entry bytes, counted before the content filter, above which a\nrepository is skipped entirely (indexed empty, then checkpointed). Bounds\nper-repo disk so fetch/index concurrency can rise without exhausting the\npod volume. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
+        },
+        "max_repository_files": {
+          "description": "Files that pass the content filter above which a repository is skipped\nentirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,\noversize, symlinks) do not count; past the same number they get no File\nrow and are counted as skipped. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "source_memory_budget_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source_compress_spill": {
+          "type": "boolean"
         },
         "worker_threads": {
           "type": "integer",
@@ -574,28 +577,49 @@
           "minimum": 0
         },
         "per_file_timeout_ms": {
-          "description": "Global per-file resolution timeout in milliseconds.\nApplied to all languages unless the language's own DSL rules\nspecify a different value. 0 = no global timeout.",
+          "description": "Per-file watchdog in milliseconds. The legacy engine applies it to\nper-file resolution in every language, and to the whole file in\nlanguages without per-phase budgets (JS, TS, and Rust). The\nincremental engine applies the per-phase budgets to every language\nand passes this one as `file_resolve_ms`, in thread CPU time.\n0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "per_file_parse_timeout_ms": {
+          "description": "Thread CPU budget in milliseconds for the tree-sitter parse of one\nfile. Incremental engine: `file_parse_ms`. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "per_file_walk_timeout_ms": {
+          "description": "Thread CPU budget in milliseconds for the AST walk of one file.\nIncremental engine: `file_rewrite_ms`, the rewrite stages. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "per_file_ssa_timeout_ms": {
+          "description": "Thread CPU budget in milliseconds for the SSA pass of one file.\nIncremental engine: `file_link_ms`, the linker fold. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
-          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). 0 = no timeout.",
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. 0 = no timeout.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_tree_depth": {
+          "description": "Syntax tree depth above which the incremental engine skips a file as\ndeeply nested. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_cross_file_names": {
+          "description": "Names that cross-file resolution may make visible across all files of\none language family before it stops as an overrun. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_manifest_bytes": {
+          "description": "Manifest bytes (package.json, Cargo.toml, and the like) that one language\nfamily reads for resolution. A manifest past the limit is not read, keeps\nits File row, and is counted as too_many_manifest_bytes. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -678,6 +702,9 @@
         "max_file_size_bytes",
         "max_files",
         "max_total_bytes",
+        "max_repository_files",
+        "source_memory_budget_bytes",
+        "source_compress_spill",
         "worker_threads",
         "max_concurrent_languages",
         "per_file_timeout_ms",
@@ -685,6 +712,9 @@
         "per_file_walk_timeout_ms",
         "per_file_ssa_timeout_ms",
         "cross_file_resolve_timeout_ms",
+        "max_tree_depth",
+        "max_cross_file_names",
+        "max_manifest_bytes",
         "job_timeout_secs",
         "fetch_concurrency",
         "write_channel_capacity",
@@ -1512,9 +1542,12 @@
     "FeaturesConfig": {
       "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",
       "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/FeatureScope"
-      }
+      "properties": {
+        "code_graph_incremental": {
+          "$ref": "#/$defs/FeatureScope"
+        }
+      },
+      "additionalProperties": false
     },
     "FeatureScope": {
       "description": "A feature flag scoped to root namespaces: `enabled` toggles it, an empty\n`namespaces` list means every namespace, otherwise only those ids.",

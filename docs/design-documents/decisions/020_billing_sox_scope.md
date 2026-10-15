@@ -69,7 +69,7 @@ These components live outside `orbit-billing` but can change billing correctness
 | **Tracker and quota startup** | Validates configuration, constructs the tracker and quota service, wires them into the service, and drains queued events at shutdown. Changes can disable emission or quota enforcement, prevent startup, or lose queued events. |
 | **Pipeline security gate** | Controls whether the pipeline proceeds far enough to reach `finish()`. |
 | **Billing configuration and defaults** | Define emission and quota enablement, endpoint selection, authentication modes, and other settings that affect billing delivery and quota enforcement. |
-| **Billing delivery authentication** | Fetches and refreshes the Cloud Connector token used to authenticate billing-event delivery. Changes can prevent delivery without modifying the billing crate. |
+| **Billing delivery token cache** | Controls caching and refresh of the Cloud Connector token used to authenticate billing-event delivery. Changes can prevent delivery without modifying the billing crate. |
 
 ### Out of scope (intentionally)
 

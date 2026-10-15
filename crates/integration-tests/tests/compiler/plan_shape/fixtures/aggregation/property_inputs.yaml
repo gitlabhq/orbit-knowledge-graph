@@ -1,4 +1,5 @@
 name: Property aggregation keeps grouping and measure inputs off the node projection
+
 query:
   json: |
     {
@@ -11,10 +12,12 @@ query:
   gql: |
     MATCH (d:Definition) WHERE d.id IN [1, 2]
     RETURN d.name, count(d) AS n LIMIT 5
+
 logical:
   expect:
     - (Filter d.id IN [1, 2] (NodeScan Definition AS d))
     - (Aggregate group d.name AS d_name, COUNT(d) AS n (_))
+
 physical:
   clickhouse:
     planned:
@@ -27,7 +30,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Project (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS d))))
+        - (Project (Filter ... (Scan Table(gl_definition) AS d)))
         - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
     emitted:
       expect:

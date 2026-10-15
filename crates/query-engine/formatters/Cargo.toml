@@ -10,6 +10,7 @@ testutils = []
 
 [dependencies]
 orbit-utils = { path = "../../utils" }
+orbit-arrow = { path = "../../utils/arrow" }
 orbit-versions = { path = "../../orbit-versions" }
 indexmap = { workspace = true }
 shared = { path = "../shared" }
@@ -19,12 +20,10 @@ serde = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
+toon-format = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
-insta = { workspace = true }
-proptest = { workspace = true }
-rand = { workspace = true }
 
 [lints]
 workspace = true

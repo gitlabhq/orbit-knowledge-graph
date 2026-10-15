@@ -1,0 +1,25 @@
+name: "Rust: fields assigned their own owner link without exponential copies"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "self_field_copies"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content:
+      - "fn target() {}\n\nfn self_fields(mut a: Node) {\n"
+      - { repeat: 40, text: "a.x = a;\na.y = a;\n" }
+      - "target();\n}\n"
+
+tests:
+  - name: "a function that copies an owner into its own fields still calls its target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'self_fields'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: target } }

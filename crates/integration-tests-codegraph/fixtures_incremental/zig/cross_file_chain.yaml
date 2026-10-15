@@ -1,0 +1,40 @@
+name: "Zig: a function reached through a chain of @import"
+
+fixtures:
+  - path: src/a.zig
+    content: |
+      pub fn helper() void {}
+
+  - path: src/b.zig
+    content: |
+      pub const a = @import("a.zig");
+
+  - path: src/c.zig
+    content: |
+      const b = @import("b.zig");
+
+      pub fn run() void {
+          b.a.helper();
+      }
+
+tests:
+  - name: "each file defines its function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['helper', 'run']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { name: helper, file: src/a.zig } }
+      - { row: { name: run, file: src/c.zig } }
+
+  - name: "a call through the imported namespaces links to the definition"
+    # Known gap: Zig calls through an @import namespace do not link, even with a direct import.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: src/a.zig } }

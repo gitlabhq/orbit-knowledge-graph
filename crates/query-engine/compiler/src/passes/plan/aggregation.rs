@@ -1,11 +1,10 @@
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use super::helpers::requested_columns;
 use crate::input::{
     AggExpr, AggFunction, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
 
-use super::HydrationStrategy;
 use super::context::PlanningContext;
 use super::physical::{ExecutionPlan, PhysicalSource};
 use super::requirements::{Column, Predicate};
@@ -30,7 +29,7 @@ pub struct AggregationPlan {
     pub order: Option<InputAggSort>,
 }
 
-impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
         let mut source = &execution.source;
@@ -99,7 +98,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                         !self
                             .nodes
                             .get(&target.node)
-                            .is_some_and(|node| node.hydration == HydrationStrategy::Skip)
+                            .is_some_and(|node| node.hydration == super::HydrationStrategy::Skip)
                     })
                     .map(|property| Column::new(&target.node, property)),
                 AggExpr::Sum(property)

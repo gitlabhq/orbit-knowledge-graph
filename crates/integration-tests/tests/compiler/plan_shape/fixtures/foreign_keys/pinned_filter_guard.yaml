@@ -1,0 +1,21 @@
+name: Additional filters prevent pinned FK target elimination
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"v","entity":"User","node_ids":[2]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1],"filters":{"username":"nonexistent"}}],"relationships":[{"type":"APPROVED","from":"v","to":"mr"},{"type":"AUTHORED","from":"u","to":"mr"}]}
+  gql: |
+    MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1, username: 'nonexistent'})
+    RETURN v, mr, u
+
+logical:
+  expect:
+    - (Filter u.id IN [1], u.username = 'nonexistent' (NodeScan User AS u))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (CTE _filter_u (Project u.id AS id (_)))
+        - (Filter _orbit_edge_1.source_id IN _filter_u.id, ... (_))
+      reject:
+        - (Filter mr.author_id = 1, ... (_))

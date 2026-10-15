@@ -1,0 +1,13 @@
+description: User aliases do not collide with generated edge aliases
+
+query:
+  gql: |
+    MATCH (e0:Definition {id: 12000})-[:CALLS]->(b:Definition)
+    RETURN e0.name, b.name
+
+expect:
+  node_count: 2
+  nodes:
+    Definition: { ids: [12000, 12001] }
+  edges:
+    CALLS: [[12000, 12001]]

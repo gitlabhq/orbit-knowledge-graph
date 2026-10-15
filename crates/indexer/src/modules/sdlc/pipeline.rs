@@ -22,8 +22,8 @@ use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
 use crate::durability::{RunDurability, WriteDurability};
+use orbit_arrow::batch_slice_bytes;
 use orbit_server_config::DatalakeRetryConfig;
-use orbit_utils::arrow::batch_slice_bytes;
 
 const MAX_RETRIES: u32 = 3;
 
@@ -113,21 +113,15 @@ impl Pipeline {
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
+        registry: Arc<TransformRegistry>,
     ) -> Self {
         Self {
             datalake,
             checkpoint_store,
             metrics,
             retry_config,
-            registry: Arc::new(TransformRegistry::default()),
+            registry,
         }
-    }
-
-    /// Override the default (empty) registry with one carrying custom
-    /// transforms. `data_fusion` plans build inline and need no registry entry.
-    pub fn with_registry(mut self, registry: Arc<TransformRegistry>) -> Self {
-        self.registry = registry;
-        self
     }
 
     pub async fn run_plan(
@@ -175,12 +169,15 @@ impl Pipeline {
             stats.scanned_rows += page.scan_stats.scanned_rows;
             stats.scanned_bytes += page.scan_stats.scanned_bytes;
 
-            cursor = cursor.advance(
-                page.batches
-                    .last()
-                    .expect("non-empty page has a last block"),
-                &plan.sort_key,
-            )?;
+            #[expect(
+                clippy::expect_used,
+                reason = "a page that reached this point is non-empty, so it has a last block"
+            )]
+            let last_block = page
+                .batches
+                .last()
+                .expect("non-empty page has a last block");
+            cursor = cursor.advance(last_block, &plan.sort_key)?;
             let has_more = rows_in_page >= base_query.batch_size() || page.truncated;
             base_query.set_batch_size(next_page_limit(
                 base_query.batch_size(),
@@ -220,6 +217,10 @@ impl Pipeline {
             }
 
             {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
                 let mut observer = context.observer.lock().unwrap();
                 observer.extracted(rows_in_page, bytes_in_page);
             }
@@ -228,6 +229,10 @@ impl Pipeline {
             let drain_writes = async {
                 while let Some(report) = write_futures.next().await {
                     let report = report?;
+                    #[expect(
+                        clippy::unwrap_used,
+                        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                    )]
                     let mut observer = context.observer.lock().unwrap();
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
@@ -301,6 +306,10 @@ impl Pipeline {
             .record_watermark_lag(&plan.name, &window.target);
 
         {
+            #[expect(
+                clippy::unwrap_used,
+                reason = "mutex poisoning means another thread already panicked; propagating is intended"
+            )]
             let mut observer = context.observer.lock().unwrap();
             observer.record_datalake_read(stats.read_rows, stats.read_bytes);
             observer.record_datalake_scan(stats.scanned_rows, stats.scanned_bytes);
@@ -457,7 +466,7 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::partitioning::PartitionAssignment;
-    use crate::modules::sdlc::test_helpers::test_metrics;
+    use crate::modules::sdlc::test_helpers::{passthrough_registry, test_metrics};
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
@@ -676,6 +685,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Test");
 
@@ -705,6 +715,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let result = pipeline
             .run_plan(
@@ -752,6 +763,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
 
         pipeline
@@ -811,6 +823,7 @@ mod tests {
             store.clone(),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         pipeline
             .run_plan(
@@ -838,6 +851,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Failing");
 
@@ -912,6 +926,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -950,6 +965,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1024,
             },
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -989,6 +1005,7 @@ mod tests {
                 halving_initial_block_size: 4_096,
                 halving_min_block_size: 2_048,
             },
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -1069,6 +1086,7 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1_024,
             },
+            passthrough_registry(),
         );
 
         let plan = simple_plan("Test");
@@ -1104,6 +1122,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Test");
 
@@ -1184,6 +1203,7 @@ mod tests {
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
         );
         let plan = simple_plan("Test");
 

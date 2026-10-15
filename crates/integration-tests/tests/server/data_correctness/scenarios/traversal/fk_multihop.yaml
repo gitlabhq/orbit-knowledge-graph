@@ -1,0 +1,13 @@
+description: FK optimization preserves exact hop count
+
+query:
+  gql: |
+    MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED*2]-(u:User {id: 1})
+    RETURN v.id, mr.id, u.id
+
+expect:
+  node_count: 0
+  nodes:
+    User: { ids: [] }
+    MergeRequest: { ids: [] }
+  edge_count: { APPROVED: 0, AUTHORED: 0 }

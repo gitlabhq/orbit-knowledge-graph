@@ -14,15 +14,15 @@ use compiler::{
     InputNode, QueryType,
 };
 use ontology::{DataType, Ontology};
-use orbit_utils::arrow::{ArrowUtils, ColumnValue};
+use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
 use types::QueryResult;
 
 pub use crate::content::PropertyMap;
 
-/// Tries the PK column first (`_gkg_{alias}_pk`), falling back to the
-/// redaction ID column (`_gkg_{alias}_id`).
+/// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
+/// redaction ID column (`_orbit_{alias}_id`).
 pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
     let pk_col = primary_key_column(&template.node_alias);
     let id_col = redaction_id_column(&template.node_alias);
@@ -38,7 +38,7 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids
 }
 
-/// Reads the `_gkg_{alias}_tp` column emitted by the enforce pass.
+/// Reads the `_orbit_{alias}_tp` column emitted by the enforce pass.
 pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<TraversalPath> {
     let tp_col = traversal_path_column(alias);
     let mut paths: Vec<TraversalPath> = result
@@ -117,7 +117,7 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     }
 }
 
-/// `{alias}_props` arrives as a JSON object of strings, so Bool and DateTime fields are re-typed from the ontology.
+/// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
 pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
@@ -193,6 +193,8 @@ pub fn parse_hydration_batches(
 fn typed_string(cv: ColumnValue, data_type: Option<&DataType>) -> ColumnValue {
     match data_type {
         Some(DataType::Bool) => cv.coerce::<bool>().map_or(cv, ColumnValue::Bool),
+        Some(DataType::Int) => cv.coerce::<i64>().map_or(cv, ColumnValue::Int64),
+        Some(DataType::Float) => cv.coerce::<f64>().map_or(cv, ColumnValue::Float64),
         Some(DataType::DateTime) => cv
             .as_string()
             .and_then(|s| ColumnValue::parse_datetime(s))

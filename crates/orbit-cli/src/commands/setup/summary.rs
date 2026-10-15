@@ -8,7 +8,7 @@ use super::index_repo::IndexOutcome;
 use super::plan::Plan;
 use super::spec::{self, Agent};
 use crate::commands::index::{example_repository_path, grep_command_line, index_command_line};
-use crate::tui::Choice;
+use crate::tui::{Choice, align_columns};
 
 pub(super) fn join_component_labels(components: &BTreeSet<Component>) -> String {
     components
@@ -138,19 +138,6 @@ pub(super) fn format_removed_files_per_component(report: &Report) -> String {
         }
         (*component, files.join(", "))
     }))
-}
-
-fn align_columns<'a>(rows: impl Iterator<Item = (&'a str, String)>) -> String {
-    let rows: Vec<(&str, String)> = rows.collect();
-    let width = rows
-        .iter()
-        .map(|(name, _)| name.chars().count())
-        .max()
-        .unwrap_or_default();
-    rows.iter()
-        .map(|(name, detail)| format!("{name:<width$}   {detail}"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn group_outcomes_by_component(report: &Report) -> Vec<(&str, Vec<&Outcome>)> {

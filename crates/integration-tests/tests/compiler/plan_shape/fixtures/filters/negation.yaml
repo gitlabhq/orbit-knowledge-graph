@@ -1,0 +1,33 @@
+cases:
+  - name: "A NOT tree on a query without relationships binds into that node's scan"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","id_range":{"start":1,"end":10},"not":{"id":{"in":[3,4]}},"columns":["name"]}]}
+      gql: |
+        MATCH (d:Definition)
+        WHERE d.id >= 1 AND d.id <= 10 AND NOT d.id IN [3, 4]
+        RETURN d.name
+    logical:
+      expect: ["(Filter NOT (d.id IN [3, 4]) (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter NOT (d.id IN [3, 4]), d.id >= 1, d.id <= 10, d._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS d)))
+
+  - name: A complemented NOT becomes an ordinary node filter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition","filters":{"name":{"ne":"skip"}},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
+        WHERE NOT b.name = 'skip'
+        RETURN b.name
+    logical:
+      expect:
+        - "(Filter b.name != 'skip' (NodeScan Definition AS b))"
+      reject: ["(Filter NOT (b.name = 'skip') (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter b.name != 'skip', ... (_))"]

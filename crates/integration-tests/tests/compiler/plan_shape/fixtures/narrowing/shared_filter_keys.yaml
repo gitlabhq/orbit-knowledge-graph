@@ -1,4 +1,5 @@
 name: A shared filter-only node defines authoritative keys on its first hop
+
 query:
   json: |
     {
@@ -16,9 +17,11 @@ query:
   gql: |
     MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition {name: 'helper'})-[:CALLS]->(c:Definition)
     RETURN a.id, b.id, c.id
+
 logical:
   expect:
     - (Filter a.id IN [12000] (NodeScan Definition AS a))
+
 physical:
   clickhouse:
     planned:
@@ -32,10 +35,11 @@ physical:
         - pattern: (CTE $shared (_))
           count: 1
       reject:
-        - (Filter e1.source_id IN $shared.id, ... (_))
+        - (Filter _orbit_edge_1.source_id IN $shared.id, ... (_))
   duckdb:
     planned:
       ctes:
-        exact_order: [_filter_a, _filter_b]
+        absent: true
       expect:
-        - (Filter e1.source_id IN _filter_b.id, ... (_))
+        - (Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))
+      reject: ["(SemiJoin ... (_) (_))"]

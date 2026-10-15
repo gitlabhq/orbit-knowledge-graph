@@ -11,9 +11,10 @@ pub mod traversal;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use std::collections::{BTreeMap, HashMap};
 
+use super::plan::edge_chain::Hop;
 use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
@@ -68,28 +69,6 @@ impl NodeBinding {
         };
         identity
     }
-
-    fn property(&self, property: &str) -> Result<Expr> {
-        let Self::Values {
-            identity,
-            table_alias,
-            ..
-        } = self
-        else {
-            return Err(QueryError::Lowering(
-                "projected result has no node-table properties".into(),
-            ));
-        };
-        if property == DEFAULT_PRIMARY_KEY {
-            return Ok(identity.clone());
-        }
-        table_alias
-            .as_ref()
-            .map(|alias| Expr::col(alias, property))
-            .ok_or_else(|| {
-                QueryError::Lowering(format!("property '{property}' has no visible node table"))
-            })
-    }
 }
 
 #[derive(Clone)]
@@ -97,6 +76,7 @@ pub struct LoweredEdge {
     pub column_prefix: String,
     pub path_column: Option<String>,
     pub rel_types: Vec<String>,
+    pub relationship: usize,
 }
 
 pub struct LoweredQuery {
@@ -184,13 +164,28 @@ impl EmitOutput {
     }
 }
 
+fn multi_type_edge_types(node: &Node, hops: &[Hop]) -> Vec<Expr> {
+    let Node::Query(query) = node else {
+        return Vec::new();
+    };
+    hops.iter()
+        .enumerate()
+        .filter(|(_, hop)| {
+            hop.max_hops == 1
+                && (hop.rel_types.len() > 1
+                    || crate::passes::normalize::is_wildcard(&hop.rel_types))
+        })
+        .filter_map(|(index, hop)| traversal::edge_type(query, hop, index))
+        .collect()
+}
+
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
-    let mut node = match plan {
+    let node = match plan {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            traversal::emit_traversal(input, output)
+            traversal::emit_traversal(input, output, &plan.hops)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
@@ -207,44 +202,17 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
     }?;
 
-    if !input.join_predicates.is_empty()
-        && let Node::Query(q) = &mut node
-    {
-        let column = |alias: &str, property: &str| -> Result<Expr> {
-            nodes
-                .get(alias)
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!("node '{alias}' has no lowered binding"))
-                })?
-                .property(property)
-        };
-        for jp in &input.join_predicates {
-            let pred = sql::comparison(
-                column(&jp.lhs_node, &jp.lhs_prop)?,
-                jp.op,
-                column(&jp.rhs_node, &jp.rhs_prop)?,
-            )?;
-            q.where_clause = Some(match q.where_clause.take() {
-                Some(existing) => Expr::and(existing, pred),
-                None => pred,
-            });
-        }
-    }
-
     let edges = plan
         .hops()
         .iter()
         .enumerate()
         .map(|(index, hop)| {
-            let prefix = if hop.max_hops > 1 {
-                format!("hop_e{index}_")
-            } else {
-                format!("e{index}_")
-            };
+            let prefix = hop.column_prefix(index);
             LoweredEdge {
                 path_column: (hop.max_hops > 1).then(|| format!("{prefix}path_nodes")),
                 column_prefix: prefix,
                 rel_types: hop.rel_types.clone(),
+                relationship: hop.input_index,
             }
         })
         .collect();
@@ -296,7 +264,9 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             })
             .collect::<BTreeMap<_, _>>()
             .into_values()
-            .map(|identity| OrderExpr::asc(identity.clone()))
+            .cloned()
+            .chain(multi_type_edge_types(&node, &plan.hops))
+            .map(OrderExpr::asc)
             .collect(),
     };
     Ok(LoweredQuery {

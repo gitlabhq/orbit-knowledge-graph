@@ -1,4 +1,5 @@
 name: "Elixir: lexical alias ownership"
+
 fixtures:
   - path: shadow/main.ex
     content: |
@@ -20,6 +21,7 @@ fixtures:
           Target.ping()
         end
       end
+
   - path: control/main.ex
     content: |
       defmodule First do
@@ -33,6 +35,7 @@ fixtures:
           Target.ping()
         end
       end
+
 tests:
   - name: "Inner aliases do not replace outer module aliases"
     query: |

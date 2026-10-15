@@ -1,0 +1,19 @@
+name: Wildcard two-hop paths retain relationships for intermediate kinds
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project","node_ids":[1000]}],"relationships":[{"type":"*","from":"u","to":"p","hops":[2,2]}]}
+  gql: |
+    MATCH (u:User {id: 1})-[*2]->(p:Project {id: 1000}) RETURN u, p
+
+logical:
+  expect:
+    - (NodeScan User AS u)
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Scan Table(gl_edge) ...)
+      reject:
+        - (Filter e1.relationship_kind IN ['CONTAINS', 'CREATOR', 'MEMBER_OF'], ... (_))

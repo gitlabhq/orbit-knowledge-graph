@@ -1,0 +1,14 @@
+description: Direct FK relationships remain available when one hop is requested
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    RETURN u.id, mr.id
+
+expect:
+  node_count: 3
+  nodes:
+    User: { ids: [1] }
+    MergeRequest: { ids: [2000, 2001] }
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]

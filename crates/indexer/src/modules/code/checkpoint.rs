@@ -6,8 +6,8 @@ use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
+use orbit_arrow::ArrowUtils;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
-use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 use thiserror::Error;
 

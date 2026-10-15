@@ -10,6 +10,9 @@ pub use partitioning::PARTITION_MIN_ROWS;
 mod plan;
 mod transform;
 
+pub use plan::{SOURCE_DATA_TABLE, Transformation};
+pub use transform::{BlockTransform, SqlTransformFactory, TableBatch};
+
 use std::sync::Arc;
 
 use ontology::EtlScope;
@@ -17,7 +20,7 @@ use ontology::EtlScope;
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
-use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::clickhouse::ClickHouseClients;
 
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
@@ -43,18 +46,24 @@ pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "handler wiring takes each collaborator explicitly"
+)]
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    clients: &ClickHouseClients,
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     partition_min_rows: u64,
+    sql_transform: SqlTransformFactory,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
-    let datalake_client = Arc::new(config.datalake.build_client());
-    let graph_client = Arc::new(config.graph.build_client());
+    let datalake_client = Arc::new(clients.datalake.clone());
+    let graph_client = Arc::new(clients.graph.clone());
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(datalake_client));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
@@ -72,7 +81,7 @@ pub async fn register_handlers(
     )
     .map_err(HandlerInitError::new)?;
 
-    let mut transform_registry = transform::TransformRegistry::default();
+    let mut transform_registry = transform::TransformRegistry::new(sql_transform);
     transform::system_notes::register(
         &mut transform_registry,
         Arc::clone(&datalake),
@@ -81,15 +90,13 @@ pub async fn register_handlers(
     );
     let transform_registry = Arc::new(transform_registry);
 
-    let pipeline = Arc::new(
-        Pipeline::new(
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
-            metrics.clone(),
-            config.engine.datalake_retry.clone(),
-        )
-        .with_registry(Arc::clone(&transform_registry)),
-    );
+    let pipeline = Arc::new(Pipeline::new(
+        Arc::clone(&datalake),
+        Arc::clone(&checkpoint_store),
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+        Arc::clone(&transform_registry),
+    ));
 
     let global_policy = sdlc_dispatch_topic_policy()
         .with_optional_override(config.engine.topics.get(GLOBAL_HANDLER_TOPIC));

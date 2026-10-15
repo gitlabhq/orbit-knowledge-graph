@@ -1,9 +1,12 @@
 name: grep
-version: 1.12.0
-short: Search local definition names, paths, and bodies
+version: 2.1.2
+short: Search every line in local code, tests, config, and docs
 description: >-
-  Search local definition names, paths, and bodies with one query: quote `a|b|c` for OR
-  alternatives, each requiring all searchable terms.
-  Single tokens must also match literally, ignoring case; this is FTS, not regex.
-  Results rank exact names before name/path hits and body mentions; pass
-  `Definition:<id>` or `path:start-end` to `context` for source and relationships.
+  Search every line in local code, tests, config, and docs, like ripgrep.
+  Matching ignores case, `_`, and `-`; quote `a|b|c` for OR alternatives.
+  Each file is one row with its matching lines grouped under their enclosing
+  `Kind name:start-end ←callers →callees`. Files that define a term come first,
+  then code, tests, and config or docs. A definition the query names prints
+  first with its source. Pass paths as with rg; rg and grep flags such as
+  -A, -l, -w, and -g work. `--kind` takes definition kinds such as
+  `Class,Method`, or `File` and `Directory` to list where matches are.

@@ -1,0 +1,23 @@
+description: Variable-hop scans do not resurrect deleted edge versions
+
+config:
+  security:
+    paths: ["1/100/1000/"]
+  unmerged_seed: true
+  extra_seed:
+    gl_definition:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: caller, fqn: caller }
+      - { id: 99001, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: callee, fqn: callee }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition, _version: "2026-01-02 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 99001, target_kind: Definition }
+
+query:
+  gql: |
+    MATCH (a:Definition {id: 99000})-[:CALLS*2]->(b:Definition {id: 99001})
+    RETURN a.id, b.id
+
+expect:
+  skip_requirements: ["node_ids", "relationship:CALLS"]
+  node_count: 0

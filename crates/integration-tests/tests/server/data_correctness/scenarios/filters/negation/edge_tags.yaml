@@ -1,0 +1,125 @@
+config:
+  extra_seed:
+    gl_edge:
+      - traversal_path: 1/100/
+        source_id: 5
+        source_kind: User
+        relationship_kind: MEMBER_OF
+        target_id: 100
+        target_kind: Group
+        source_tags: ["state:active"]
+        target_tags: []
+      - traversal_path: 1/100/
+        source_id: 77
+        source_kind: User
+        relationship_kind: MEMBER_OF
+        target_id: 100
+        target_kind: Group
+        source_tags: ["state:blocked"]
+        target_tags: []
+
+cases:
+  - name: all_memberships
+    description: Group 100 has five membership edges. The edge for user 5 has a state:active tag, but the user row says blocked. The edge for user 77 has no user row. The positive and negated scenarios in this directory split these five edges.
+    query:
+      gql: |
+        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 5 }
+
+  - name: joined_all_memberships
+    description: The u.username filter joins the user table, so the dangling user 77 drops out and four memberships remain. The joined positive and negated scenarios in this directory split these four.
+    query:
+      gql: |
+        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+        WHERE u.username IS NOT NULL
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      skip_requirements: ["filter:username"]
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 4 }
+
+  - name: joined_negated
+    description: With the user table joined, NOT reads u.state from the same row and tag as its positive twin, so the two counts add up to all four memberships. Only the mismatched user 5 matches.
+    query:
+      gql: |
+        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+        WHERE u.username IS NOT NULL AND NOT (r.source_id < 70 AND u.state = 'active')
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      skip_requirements: ["filter:username"]
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 1 }
+
+  - name: joined_positive
+    description: With the user table joined, the positive twin reads u.state from the user row and from the edge tag, so the mismatched user 5 does not match.
+    query:
+      gql: |
+        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+        WHERE u.username IS NOT NULL AND r.source_id < 70 AND u.state = 'active'
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      skip_requirements: ["filter:username", "filter:state"]
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 3 }
+
+  - name: negated
+    description: NOT reads the same edge tag as its positive twin, so the two counts add up to all five memberships. Only the dangling user 77 matches.
+    query:
+      gql: |
+        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+        WHERE NOT (r.source_id < 70 AND u.state = 'active')
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 1 }
+
+  - name: positive
+    description: The positive twin reads u.state from the edge tag, so it counts the mismatched user 5 and skips the dangling user 77.
+    query:
+      gql: |
+        MATCH (u:User)-[r:MEMBER_OF]->(g:Group {id: 100})
+        WHERE r.source_id < 70 AND u.state = 'active'
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      skip_requirements: ["filter:state"]
+      groups:
+        g:
+          entity: Group
+          ids: [100]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 4 }

@@ -6,7 +6,7 @@ use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 fn build_cleanup_task(context: &TestContext) -> TableCleanup {
     let ontology = ontology::Ontology::load_embedded().unwrap();
     TableCleanup::new(
-        context.config.build_client(),
+        context.config.build_client("graph"),
         &ontology,
         ScheduledTaskMetrics::new(),
         orbit_server_config::AppConfig::embedded_defaults()
@@ -14,6 +14,7 @@ fn build_cleanup_task(context: &TestContext) -> TableCleanup {
             .tasks
             .table_cleanup,
     )
+    .unwrap()
 }
 
 async fn seed_user(context: &TestContext, id: i64) {

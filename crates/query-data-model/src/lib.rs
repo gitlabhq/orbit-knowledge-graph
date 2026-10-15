@@ -1,17 +1,26 @@
+pub mod authz;
 mod derive;
 mod error;
 pub mod generic;
 pub mod implementations;
+pub mod layout;
+pub mod models;
+pub use layout::{Layout, Mapping, Relational, RelationalBackend};
 
+pub use authz::gitlab::{EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy};
+pub use authz::trusted::TrustedLocalCatalog;
 pub use error::DataModelError;
 pub use generic::{
-    DataModel, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
-    Endpoint, Entity, EntityId, ForeignKey, GraphCatalog, PathColumn, Property, PropertyId,
-    PropertyRealization, QueryAuthorizationCatalog, QueryBackendCatalog, QueryDataModel,
-    Relationship, RelationshipId, RelationshipRoute, RelationshipVariant, RelationshipVariantId,
-    TraversalPathLookup,
+    DataModel, Entity, EntityId, GraphCatalog, Property, PropertyId, Relationship, RelationshipId,
+    RelationshipVariant, RelationshipVariantId,
 };
-pub use implementations::{EntityAuthConfig, GitLabAuthzCatalog, TrustedLocalCatalog};
+pub use layout::relational::{
+    MaterializedJoin, MaterializedNode, MaterializedRelationship, VariantRoute,
+};
 
-pub type ClickHouseDataModel = DataModel<implementations::ClickHouseCatalog, GitLabAuthzCatalog>;
-pub type DuckDbDataModel = DataModel<implementations::DuckDbCatalog, TrustedLocalCatalog>;
+pub use layout::relational::RelationalMapping;
+pub use layout::relational::{
+    DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
+    ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
+};
+pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};

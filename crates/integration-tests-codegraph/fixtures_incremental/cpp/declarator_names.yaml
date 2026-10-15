@@ -10,6 +10,7 @@ fixtures:
       int &ref_return(int a) { return a; }
       int attributed(int a) [[deprecated]] { return a; }
       void (__cdecl mscall)(int a) { }
+
   - path: members.cpp
     content: |
       int Foo::bar(int a) { return a; }
@@ -17,6 +18,7 @@ fixtures:
       int A::B::deep(int a) { return a; }
       bool Foo::operator==(const Foo& o) const { return true; }
       Foo::~Foo() {}
+
   - path: conversions.cpp
     content: |
       class InlineConv {

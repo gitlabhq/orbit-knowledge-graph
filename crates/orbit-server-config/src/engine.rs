@@ -224,23 +224,52 @@ impl EntityHandlerConfig {
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
+    /// Most files parsed per repository; the rest stay `File` nodes. 0 = no limit.
     pub max_files: usize,
-    /// Post-filter retained bytes above which a repository is skipped entirely
-    /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
-    /// concurrency can rise without exhausting the pod volume. 0 = no limit.
+    /// Archive entry bytes, counted before the content filter, above which a
+    /// repository is skipped entirely (indexed empty, then checkpointed). Bounds
+    /// per-repo disk so fetch/index concurrency can rise without exhausting the
+    /// pod volume. 0 = no limit.
     pub max_total_bytes: u64,
+    /// Files that pass the content filter above which a repository is skipped
+    /// entirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,
+    /// oversize, symlinks) do not count; past the same number they get no File
+    /// row and are counted as skipped. 0 = no limit.
+    pub max_repository_files: usize,
+    pub source_memory_budget_bytes: u64,
+    pub source_compress_spill: bool,
     pub worker_threads: usize,
     pub max_concurrent_languages: usize,
-    /// Global per-file resolution timeout in milliseconds.
-    /// Applied to all languages unless the language's own DSL rules
-    /// specify a different value. 0 = no global timeout.
+    /// Per-file watchdog in milliseconds. The legacy engine applies it to
+    /// per-file resolution in every language, and to the whole file in
+    /// languages without per-phase budgets (JS, TS, and Rust). The
+    /// incremental engine applies the per-phase budgets to every language
+    /// and passes this one as `file_resolve_ms`, in thread CPU time.
+    /// 0 = no limit.
     pub per_file_timeout_ms: u64,
+    /// Thread CPU budget in milliseconds for the tree-sitter parse of one
+    /// file. Incremental engine: `file_parse_ms`. 0 = no limit.
     pub per_file_parse_timeout_ms: u64,
+    /// Thread CPU budget in milliseconds for the AST walk of one file.
+    /// Incremental engine: `file_rewrite_ms`, the rewrite stages. 0 = no limit.
     pub per_file_walk_timeout_ms: u64,
+    /// Thread CPU budget in milliseconds for the SSA pass of one file.
+    /// Incremental engine: `file_link_ms`, the linker fold. 0 = no limit.
     pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
-    /// (import edges, call edges). 0 = no timeout.
+    /// (import edges, call edges). Incremental engine:
+    /// `cross_file_resolve_ms`. 0 = no timeout.
     pub cross_file_resolve_timeout_ms: u64,
+    /// Syntax tree depth above which the incremental engine skips a file as
+    /// deeply nested. 0 = no limit.
+    pub max_tree_depth: usize,
+    /// Names that cross-file resolution may make visible across all files of
+    /// one language family before it stops as an overrun. 0 = no limit.
+    pub max_cross_file_names: usize,
+    /// Manifest bytes (package.json, Cargo.toml, and the like) that one language
+    /// family reads for resolution. A manifest past the limit is not read, keeps
+    /// its File row, and is counted as too_many_manifest_bytes. 0 = no limit.
+    pub max_manifest_bytes: u64,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how

@@ -60,11 +60,11 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
 
 fn node_ref_to_json(node: &NodeRef) -> Value {
     let mut obj = serde_json::Map::new();
-    obj.insert("id".to_string(), json!(node.id.to_string()));
-    obj.insert("entity_type".to_string(), json!(node.entity_type));
     for (key, value) in &node.properties {
         obj.insert(key.clone(), column_value_to_json(value));
     }
+    obj.insert("id".to_string(), json!(node.id.to_string()));
+    obj.insert("entity_type".to_string(), json!(node.entity_type));
     Value::Object(obj)
 }
 
@@ -75,14 +75,14 @@ mod tests {
     use arrow::buffer::OffsetBuffer;
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use orbit_utils::arrow::ColumnValue;
+    use orbit_arrow::ColumnValue;
     use std::sync::Arc;
     use types::QueryResult;
 
     fn make_test_result() -> (QueryResult, ResultContext) {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
+            Field::new("_orbit_p_id", DataType::Int64, false),
+            Field::new("_orbit_p_type", DataType::Utf8, false),
         ]));
         let batch = RecordBatch::try_new(
             schema,
@@ -131,7 +131,7 @@ mod tests {
         let list_array = ListArray::new(list_field, offsets, Arc::new(struct_array), None);
 
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_path", list_array.data_type().clone(), true),
+            Field::new("_orbit_path", list_array.data_type().clone(), true),
             Field::new("depth", DataType::Int64, false),
         ]));
         let batch = RecordBatch::try_new(
@@ -149,6 +149,12 @@ mod tests {
         for node in result.rows_mut()[0].dynamic_nodes_mut() {
             node.properties
                 .insert("name".to_string(), ColumnValue::String("test".to_string()));
+            node.properties
+                .insert("id".to_string(), ColumnValue::Int64(node.id));
+            node.properties.insert(
+                "type".to_string(),
+                ColumnValue::String("Ci::Build".to_string()),
+            );
         }
 
         let json = row_to_json(&result.rows()[0], &ctx);
@@ -164,5 +170,6 @@ mod tests {
             "Project"
         );
         assert_eq!(first.get("name").unwrap().as_str().unwrap(), "test");
+        assert_eq!(first.get("type").unwrap().as_str().unwrap(), "Ci::Build");
     }
 }

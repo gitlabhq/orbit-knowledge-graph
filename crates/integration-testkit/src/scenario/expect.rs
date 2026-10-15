@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use arrow::record_batch::RecordBatch;
-use orbit_utils::arrow::{ArrowUtils, ColumnValue};
+use orbit_arrow::{ArrowUtils, ColumnValue};
 
 use super::DispatchedMessage;
 use super::format::{DispatchExpect, EdgeExpect, Expect, Matcher, NodeExpect, RowMatcher};

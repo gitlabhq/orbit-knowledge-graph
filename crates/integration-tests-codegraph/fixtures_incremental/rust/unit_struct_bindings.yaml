@@ -1,4 +1,5 @@
 name: "Rust: unit struct bindings use declarations"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -6,6 +7,7 @@ fixtures:
       name = "unit_struct_bindings"
       version = "0.1.0"
       edition = "2021"
+
   - path: src/lib.rs
     content: |
       mod dep;
@@ -81,6 +83,7 @@ fixtures:
       fn external_reference() {
           let value = Unknown;
       }
+
   - path: src/dep.rs
     content: |
       pub struct imported_lowercase;
@@ -92,6 +95,7 @@ fixtures:
       pub fn ImportedCallback() {}
 
       pub struct ImportedTuple(pub i32);
+
 tests:
   - name: "Unit declarations do not execute their own initializer"
     query: |
@@ -100,6 +104,7 @@ tests:
       RETURN caller.name, target.name
     assert:
       - { empty: true }
+
   - name: "Unit struct method targets do not depend on capitalization"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -110,6 +115,7 @@ tests:
       - { row_count: 2 }
       - { row: { caller: lowercase_receiver, target: ping } }
       - { row: { caller: uppercase_receiver, target: pong } }
+
   - name: "Copying uppercase function values does not call them"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -117,6 +123,7 @@ tests:
       RETURN caller.name AS caller, callee.name AS target
     assert:
       - { empty: true }
+
   - name: "Calling an uppercase function alias resolves its declaration"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -125,6 +132,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { target: Callback } }
+
   - name: "Local unit construction requires a unit struct declaration"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -135,6 +143,7 @@ tests:
       - { row_count: 2 }
       - { row: { target: lowercase } }
       - { row: { target: Uppercase } }
+
   - name: "Imported unit constructors and callable values use their declarations"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -145,6 +154,7 @@ tests:
       - { row: { caller: imported_receiver, target: imported_lowercase } }
       - { row: { caller: imported_receiver, target: imported_ping } }
       - { row: { caller: imported_alias_call, target: ImportedCallback } }
+
   - name: "Unresolved imported references do not become calls"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:ImportedSymbol)

@@ -4,6 +4,15 @@
 # typing, new, member and this-calls, control flow.
 
 config:
+  stdlib: [{ module: java, precedence: runtime }, { module: scala }, { module: javax }, { module: jdk },
+      { module: scala/Predef, availability: implicit, symbols: [assert, assume, classOf,
+          identity, implicitly, locally, print, printf, println, require,
+          summon, synchronized, valueOf] },
+      { module: scala/math, symbols: [abs, acos, asin, atan, atan2, cbrt, ceil,
+          cos, cosh, exp, expm1, floor, hypot, log, log10, log1p, max, min,
+          pow, random, rint, round, signum, sin, sinh, sqrt, tan, tanh,
+          toDegrees, toRadians, ulp] }
+    ]
   resolve:
     lookup_from:
       - __source_root

@@ -21,6 +21,11 @@ impl Column {
 
 #[derive(Clone)]
 pub enum Predicate {
+    Boolean(crate::input::BooleanExpression<Box<Predicate>>),
+    ColumnsEqual {
+        left: Column,
+        right: Column,
+    },
     Property {
         column: Column,
         filter: InputFilter,
@@ -42,6 +47,10 @@ pub enum Predicate {
     EntityKind {
         column: Column,
         entity: String,
+    },
+    ColumnEq {
+        left: Column,
+        right: Column,
     },
     RelationshipKinds {
         alias: String,
@@ -85,12 +94,7 @@ impl Projection {
 }
 
 pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
-    Predicate::Property {
-        column: Column::new(alias, property),
-        filter: bound.filter.clone(),
-        data_type: bound.data_type,
-        in_sort_key: bound.in_sort_key,
-    }
+    bound.at(Column::new(alias, property))
 }
 
 pub fn id_list(alias: &str, column: &str, ids: &[i64]) -> Predicate {
@@ -128,6 +132,7 @@ pub fn node_predicates(node: &NodePlan) -> Vec<Predicate> {
         .iter()
         .map(|(property, filter)| property_filter(&node.alias, property, filter))
         .collect();
+    predicates.extend(node.predicates.iter().cloned());
     if !node.node_ids.is_empty() {
         predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
     }
@@ -155,4 +160,35 @@ pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
             )
         })
         .collect()
+}
+
+pub(super) fn edge_outputs(hop: &super::Hop, alias: &str) -> Vec<Projection> {
+    use crate::constants::*;
+    let prefix = if hop.max_hops > 1 {
+        format!("hop_{alias}")
+    } else {
+        alias.into()
+    };
+    let mut outputs: Vec<_> = [
+        (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
+        (SOURCE_ID_COLUMN, EDGE_SRC_SUFFIX),
+        (SOURCE_KIND_COLUMN, EDGE_SRC_TYPE_SUFFIX),
+        (TARGET_ID_COLUMN, EDGE_DST_SUFFIX),
+        (TARGET_KIND_COLUMN, EDGE_DST_TYPE_SUFFIX),
+    ]
+    .into_iter()
+    .map(|(column, suffix)| {
+        Projection::new(
+            OutputValue::Column(Column::new(alias, column)),
+            format!("{prefix}_{suffix}"),
+        )
+    })
+    .collect();
+    if hop.max_hops > 1 {
+        outputs.push(Projection::new(
+            OutputValue::Column(Column::new(alias, PATH_NODES_COLUMN)),
+            format!("{prefix}_{PATH_NODES_COLUMN}"),
+        ));
+    }
+    outputs
 }

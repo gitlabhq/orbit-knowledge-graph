@@ -9,6 +9,8 @@ use crate::scenario::Seed;
 #[serde(deny_unknown_fields)]
 pub struct QueryScenario {
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub config: ScenarioConfig,
@@ -20,6 +22,7 @@ pub struct QueryScenario {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
+    pub ontology_overlay: Option<String>,
     #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
@@ -28,6 +31,8 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
+    #[serde(default)]
+    pub duckdb: bool,
 }
 
 /// Either a preset name (string) or an inline value.
@@ -151,6 +156,10 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
+    #[serde(default)]
+    pub gql_columns: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub gql_column_names: Vec<String>,
     /// Assertions across ALL pages combined. The runner collects node IDs
     /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
