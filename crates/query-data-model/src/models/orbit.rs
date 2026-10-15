@@ -49,6 +49,10 @@ pub trait OrbitQueryModel {
     fn query_backend(&self) -> &Self::BackendCatalog;
     fn query_authorization(&self) -> &Self::AuthorizationCatalog;
 
+    fn supports_deferred_node_loading(&self) -> bool {
+        self.query_backend().supports_deferred_node_loading()
+    }
+
     fn entity(&self, name: &str) -> Option<&Entity> {
         self.graph().entity_named(name)
     }

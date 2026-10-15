@@ -98,7 +98,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                         !self
                             .nodes
                             .get(&target.node)
-                            .is_some_and(|node| node.hydration == super::HydrationStrategy::Skip)
+                            .is_some_and(|node| node.access == super::NodeAccess::Identity)
                     })
                     .map(|property| Column::new(&target.node, property)),
                 AggExpr::Sum(property)

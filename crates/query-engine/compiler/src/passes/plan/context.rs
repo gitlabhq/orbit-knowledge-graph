@@ -45,28 +45,11 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             source: root.source,
             outputs: root.outputs,
             bindings: vec![BindingSource::table(&node.alias)],
-            definitions: vec![],
         })
     }
 
     pub fn aggregate(&self) -> bool {
         self.input.query_type == QueryType::Aggregation
-    }
-
-    pub fn node(&self, alias: &str) -> Result<&NodePlan> {
-        self.nodes
-            .get(alias)
-            .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
-    }
-
-    pub fn node_sort_key(&self, node: &NodePlan) -> Result<&[String]> {
-        let table = node
-            .table
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        self.model
-            .table_sort_key(table)
-            .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))
     }
 
     pub fn latest_row_key(&self, table: &str) -> Result<&[String]> {

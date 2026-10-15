@@ -276,7 +276,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     )
                 }),
             );
-            definitions(&plan.operation.execution, tree)
+            tree
         }
         QueryPlan::Neighbors(plan) => {
             let operation = &plan.operation;
@@ -435,7 +435,7 @@ fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
 }
 
 fn execution_tree(execution: &ExecutionPlan) -> Tree {
-    definitions(execution, execution_source(execution))
+    execution_source(execution)
 }
 
 fn execution_source(execution: &ExecutionPlan) -> Tree {
@@ -444,23 +444,6 @@ fn execution_source(execution: &ExecutionPlan) -> Tree {
         planned_projections(&execution.outputs),
         vec![physical_source(&execution.source)],
     )
-}
-
-fn definitions(execution: &ExecutionPlan, source: Tree) -> Tree {
-    if execution.definitions.is_empty() {
-        source
-    } else {
-        Tree::node(
-            Operator::With,
-            "",
-            execution
-                .definitions
-                .iter()
-                .map(|(name, keys)| Tree::node(Operator::Cte, name, vec![physical_tree(keys)]))
-                .chain([source])
-                .collect(),
-        )
-    }
 }
 
 fn physical_tree(plan: &PhysicalPlan) -> Tree {

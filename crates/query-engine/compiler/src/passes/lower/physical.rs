@@ -1,5 +1,5 @@
 use super::sql::latest_row_dedup;
-use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 
 use super::requirements::{column, predicate, projections};
@@ -11,11 +11,7 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
         from: source.from,
         where_parts: source.predicates,
         select: projections(&plan.outputs),
-        ctes: plan
-            .definitions
-            .iter()
-            .map(|(name, keys)| Cte::new(name, query(keys)))
-            .collect(),
+        ctes: vec![],
         nodes: plan
             .bindings
             .iter()

@@ -20,13 +20,8 @@ logical:
 physical:
   clickhouse:
     planned:
-      bind:
-        - (CTE $users (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
       expect:
-        - (Filter mr.author_id IN $users.id, ... (_))
-      occurrences:
-        - pattern: (CTE $users (_))
-          count: 1
+        - (SemiJoin mr.author_id IN subquery (_) (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
       reject:
         - (Scan Table(gl_edge) ...)
-        - (CTE $users (Project ... (Filter ... (Scan Table(gl_user) AS u))))
+        - (CTE ... (_))

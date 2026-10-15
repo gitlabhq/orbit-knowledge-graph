@@ -1,7 +1,4 @@
-use super::requirements::{
-    Column, OutputValue, Predicate, Projection, id_list, node_outputs, node_predicates,
-    property_filter,
-};
+use super::requirements::{Column, OutputValue, Predicate, Projection, node_outputs, node_predicates};
 use crate::error::{QueryError, Result};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, SOURCE_TAGS_COLUMN,
@@ -12,11 +9,11 @@ use super::{Hop, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
-    pub definitions: Vec<(String, PhysicalPlan)>,
     pub outputs: Vec<Projection>,
     pub bindings: Vec<BindingSource>,
 }
 
+#[derive(Clone)]
 pub struct BindingSource {
     pub node: String,
     pub alias: String,
@@ -40,14 +37,6 @@ impl BindingSource {
             column: DEFAULT_PRIMARY_KEY.into(),
             joined: true,
         }
-    }
-}
-
-pub(super) fn key_membership(alias: &str, column: &str, name: String) -> Predicate {
-    Predicate::Membership {
-        column: Column::new(alias, column),
-        definition: name,
-        key: DEFAULT_PRIMARY_KEY.into(),
     }
 }
 
@@ -161,46 +150,12 @@ impl PhysicalSource {
             }
         }
     }
-
-    pub(super) fn cascade(self, hop: &Hop, alias: &str, upstream: Option<&PhysicalPlan>) -> Self {
-        match upstream {
-            Some(keys) => Self::KeyFilter {
-                value: Column::new(
-                    alias,
-                    &hop.join_prev.as_ref().expect("cascade join").curr_col,
-                ),
-                keys: Box::new(keys.clone()),
-                input: Box::new(self),
-            },
-            None => self,
-        }
-    }
-
-    pub(super) fn edge_keys(
-        hop: &Hop,
-        alias: &str,
-        predicates: Vec<Predicate>,
-        upstream: Option<&PhysicalPlan>,
-    ) -> Self {
-        let source = Self::edge(hop, alias, false).filter(predicates);
-        source.cascade(hop, alias, upstream)
-    }
 }
 
 impl PhysicalPlan {
-    pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Predicate>) -> Result<Self> {
-        Self::keys(node, column, false, extra)
-    }
-
-    pub fn filtered_keys(node: &NodePlan, column: &str) -> Result<Self> {
-        Self::keys(node, column, true, vec![])
-    }
-
-    fn keys(node: &NodePlan, column: &str, final_: bool, extra: Vec<Predicate>) -> Result<Self> {
-        let mut predicates = node_predicates(node);
-        predicates.extend(extra);
+    pub fn exact_keys(node: &NodePlan, column: &str) -> Result<Self> {
         Ok(Self {
-            source: PhysicalSource::node(node, final_)?.filter(predicates),
+            source: PhysicalSource::node(node, true)?.filter(node_predicates(node)),
             outputs: vec![Projection::new(
                 OutputValue::Column(Column::new(&node.alias, column)),
                 DEFAULT_PRIMARY_KEY,
@@ -210,47 +165,11 @@ impl PhysicalPlan {
 
     pub fn node_scan(
         node: &NodePlan,
-        narrowing: Option<Predicate>,
-        sort_key: &[String],
     ) -> Result<Self> {
-        let mut source = PhysicalSource::node(node, narrowing.is_none())?;
-        if let Some(narrowing) = narrowing {
-            if sort_key.is_empty() {
-                return Err(QueryError::Lowering(format!(
-                    "node '{}' has no latest-row key",
-                    node.alias
-                )));
-            }
-            let mut predicates = vec![narrowing];
-            predicates.extend(
-                node.filters
-                    .iter()
-                    .filter(|(_, filter)| filter.in_sort_key && filter.filter.rhs_column.is_none())
-                    .map(|(column, filter)| property_filter(&node.alias, column, filter)),
-            );
-            if sort_key.iter().any(|column| column == DEFAULT_PRIMARY_KEY) {
-                if !node.node_ids.is_empty() {
-                    predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
-                }
-                if let Some(range) = &node.id_range {
-                    predicates.push(Predicate::IdRange {
-                        column: Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
-                        start: range.start,
-                        end: range.end,
-                    });
-                }
-            }
-            source = PhysicalSource::Latest {
-                aggregate_condition: vec![],
-                sort_key: sort_key.to_vec(),
-                alias: node.alias.clone(),
-                input: Box::new(source.filter(predicates)),
-            };
-        }
         Ok(Self {
             source: PhysicalSource::Scope {
                 alias: node.alias.clone(),
-                input: Box::new(source.filter(node_predicates(node))),
+                input: Box::new(PhysicalSource::node(node, true)?.filter(node_predicates(node))),
             },
             outputs: node_outputs(node),
         })

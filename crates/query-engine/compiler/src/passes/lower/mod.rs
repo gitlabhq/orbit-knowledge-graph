@@ -6,16 +6,15 @@ pub mod pathfinding;
 mod physical;
 mod requirements;
 pub(crate) mod sql;
-pub mod traversal;
 
 use crate::ast::*;
+use crate::constants::EDGE_TYPE_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use std::collections::{BTreeMap, HashMap};
 
-use super::plan::edge_chain::Hop;
-use super::plan::{Plan, QueryPlan};
+use super::plan::{Hop, Plan, QueryPlan};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
@@ -123,9 +122,10 @@ impl EmitOutput {
                     traversal_path: None,
                 },
                 _ if input.query_type == QueryType::Aggregation
-                    && plan.nodes.get(&source.0).is_some_and(|holder| {
-                        holder.hydration == super::plan::HydrationStrategy::FilterOnly
-                    })
+                    && plan
+                        .nodes
+                        .get(&source.0)
+                        .is_some_and(|holder| holder.access == super::plan::NodeAccess::SemiJoin)
                     && !node_group_ids(&input.aggregation.group_by)
                         .any(|alias| alias == node.id) =>
                 {
@@ -175,8 +175,45 @@ fn multi_type_edge_types(node: &Node, hops: &[Hop]) -> Vec<Expr> {
                 && (hop.rel_types.len() > 1
                     || crate::passes::normalize::is_wildcard(&hop.rel_types))
         })
-        .filter_map(|(index, hop)| traversal::edge_type(query, hop, index))
+        .filter_map(|(index, hop)| edge_type(query, hop, index))
         .collect()
+}
+
+fn edge_type(query: &Query, hop: &Hop, index: usize) -> Option<Expr> {
+    query
+        .selected(&format!("{}{}", hop.column_prefix(index), EDGE_TYPE_SUFFIX))
+        .cloned()
+}
+
+fn emit_traversal(input: &Input, output: EmitOutput, hops: &[Hop]) -> Result<Node> {
+    let mut query = output.into_query(vec![], vec![], vec![], input.limit);
+    query.order_by = match (&input.order_by, &input.relationship_return.sort) {
+        (Some(order), _) => vec![ordered(
+            Expr::col(&order.node, &order.property),
+            order.direction,
+        )],
+        (None, Some(sort)) => {
+            let edge_type = hops
+                .iter()
+                .enumerate()
+                .find(|(_, hop)| hop.input_index == sort.relationship)
+                .and_then(|(index, hop)| edge_type(&query, hop, index))
+                .ok_or_else(|| {
+                    QueryError::Lowering("sorted relationship has no edge type column".into())
+                })?;
+            vec![ordered(edge_type, sort.direction)]
+        }
+        (None, None) => Vec::new(),
+    };
+    Ok(Node::Query(Box::new(query)))
+}
+
+fn ordered(expr: Expr, direction: OrderDirection) -> OrderExpr {
+    if direction == OrderDirection::Desc {
+        OrderExpr::desc(expr)
+    } else {
+        OrderExpr::asc(expr)
+    }
 }
 
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
@@ -185,7 +222,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            traversal::emit_traversal(input, output, &plan.hops)
+            emit_traversal(input, output, &plan.hops)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;

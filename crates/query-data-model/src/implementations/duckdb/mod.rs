@@ -32,6 +32,10 @@ pub struct DuckDbBindings {
 }
 
 impl RelationalMapping for DuckDbBindings {
+    fn supports_deferred_node_loading(&self) -> bool {
+        false
+    }
+
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variants.get(variant.index())
     }

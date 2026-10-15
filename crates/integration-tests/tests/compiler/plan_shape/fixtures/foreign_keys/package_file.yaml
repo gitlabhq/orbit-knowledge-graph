@@ -10,6 +10,8 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON p.id = f.package_id (Bind f (_)) (Bind p (_)))
+        - (Filter f.package_id = 8001 (Bind f (_)))
+        - (Project f.file_name AS f_file_name, ... (_))
       reject:
         - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_package) ...)

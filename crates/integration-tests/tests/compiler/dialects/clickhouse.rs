@@ -1778,12 +1778,16 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username";
     let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
     assert!(
-        compiled.base.sql.contains("_narrow_u"),
+        compiled
+            .base
+            .sql
+            .contains("gl_user AS u FINAL")
+            && compiled.base.sql.contains("ON (u.id = n.author_id)"),
         "AUTHORED should resolve to the FK plan: {}",
         compiled.base.sql
     );
     assert!(
-        compiled.base.sql.contains("n.author_id AS e0_src"),
+        compiled.base.sql.contains("u.id AS e0_src"),
         "edge source must be the User side: {}",
         compiled.base.sql
     );

@@ -109,6 +109,9 @@ impl DenormalizedCatalog {
 }
 
 pub trait RelationalMapping: Send + Sync {
+    fn supports_deferred_node_loading(&self) -> bool {
+        true
+    }
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute>;
     fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
         Vec::new()

@@ -1,27 +1,22 @@
 pub mod aggregation;
-mod conditions;
 mod context;
-pub mod edge_chain;
-pub(crate) mod edge_predicates;
-pub mod fk;
-mod flat;
 pub(crate) mod helpers;
-mod hops;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 pub mod physical;
 pub mod requirements;
+pub mod traversal;
 
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::OrbitQueryModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
+pub use traversal::{Hop, NodeAccess, NodePlan};
 
 #[derive(Clone)]
 pub struct BoundFilter {
@@ -208,7 +203,7 @@ pub fn plan_clickhouse(
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, true, table_scans)
+    plan(input, model, hydration_options, table_scans)
 }
 
 pub fn plan_duckdb(
@@ -217,14 +212,13 @@ pub fn plan_duckdb(
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false, table_scans)
+    plan(input, model, hydration_options, table_scans)
 }
 
 fn plan<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
-    use_fk_elision: bool,
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
@@ -240,7 +234,7 @@ where
     };
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            edge_chain::plan(context, use_fk_elision, table_scans)
+            traversal::plan(context, table_scans)
         }
         QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
         QueryType::PathFinding => {
