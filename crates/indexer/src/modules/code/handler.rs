@@ -404,6 +404,21 @@ impl CodeIndexingTaskHandler {
                     ),
                 ))
             }
+            Err(IndexError::MemoryExceeded { used, limit }) => {
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    used,
+                    limit,
+                    "code indexing job cancelled under pod memory pressure"
+                );
+                Err(JOB_TIMEOUT_RETRY.global_failure(
+                    attempt,
+                    format!(
+                        "code indexing job cancelled under pod memory pressure ({used} of {limit} bytes in use)"
+                    ),
+                ))
+            }
             Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
                 "no indexing lane within {}s",
                 waited.as_secs()

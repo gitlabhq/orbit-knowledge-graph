@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
+use super::memory::{MemoryWatchdog, Pressure};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
 use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
@@ -72,6 +73,7 @@ enum Fetched {
 
 pub enum IndexError {
     BudgetExceeded { budget: Duration },
+    MemoryExceeded { used: u64, limit: u64 },
     Overloaded(GitlabClientError),
     NoLane { waited: Duration },
     Failed(HandlerError),
@@ -249,6 +251,7 @@ pub struct CodeIndexer {
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     inflight: Arc<AtomicUsize>,
+    memory: Arc<MemoryWatchdog>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
@@ -295,6 +298,7 @@ impl CodeIndexer {
             checkpoint_store,
             stale_data_cleaner,
             inflight: Arc::new(AtomicUsize::new(0)),
+            memory: MemoryWatchdog::for_this_process(),
             metrics,
             table_names,
             ontology,
@@ -365,6 +369,9 @@ impl CodeIndexer {
         let lane = self
             .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
             .await?;
+        let memory = self
+            .memory
+            .register(repository.source_bytes(), cancel.clone());
 
         let indexed = clock
             .run(self.index_fetched(
@@ -376,6 +383,9 @@ impl CodeIndexer {
                 cancel.clone(),
             ))
             .await;
+        if let Some(Pressure { used, limit }) = memory.exceeded() {
+            return Err(IndexError::MemoryExceeded { used, limit });
+        }
         let run = match indexed {
             Some(result) => result.map_err(IndexError::Failed)?,
             None => {

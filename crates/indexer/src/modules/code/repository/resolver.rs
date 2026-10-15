@@ -128,6 +128,17 @@ pub enum Repository {
 }
 
 impl Repository {
+    pub(in crate::modules::code) fn source_bytes(&self) -> u64 {
+        match self {
+            Repository::Extracted(repository) => repository
+                .file_inventory
+                .iter()
+                .map(|entry| entry.size)
+                .sum(),
+            Repository::IncrementalEngine(repository) => repository.usage().bytes,
+        }
+    }
+
     pub(in crate::modules::code) fn parseable_files(&self) -> usize {
         let detected =
             |path: &str| code_graph::v2::config::detect_language_from_path(path).is_some();
