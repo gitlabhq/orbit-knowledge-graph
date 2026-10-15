@@ -31,9 +31,11 @@ impl orbit_utils::vfs::Pass for FixturePolicy {
     }
 }
 
-use super::assertions::{TestCase, TestSuite};
+use super::assertions::{SkippedFile, TestCase, TestSuite};
 use super::runner::create_test_db;
-use super::validator::{Failure, load_suite, report, run_suite, write_fixtures, write_suite_files};
+use super::validator::{
+    Failure, load_suite, report, run_suite, workspace_root, write_fixtures, write_suite_files,
+};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     if let Some(pipeline) = suite.pipeline.as_deref().filter(|p| *p != "generic") {
@@ -60,6 +62,45 @@ fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     }
 }
 
+fn suite_limits(suite: &TestSuite) -> Limits {
+    match suite.limits.as_deref() {
+        None | Some("unlimited") => Limits::UNLIMITED,
+        Some("default") => default_limits(),
+        Some(other) => panic!("suite {:?}: unknown limits {other:?}", suite.name),
+    }
+}
+
+/// The production budgets, read from the same file the server reads.
+fn default_limits() -> Limits {
+    let path = workspace_root().join("config/default.yaml");
+    let text = std::fs::read_to_string(&path).expect("config/default.yaml");
+    let config: serde_json::Value =
+        orbit_utils::yaml::from_str(&text).expect("config/default.yaml parses");
+    let pipeline = &config["engine"]["handlers"]["code-indexing-task"]["pipeline"];
+    let field = |name: &str| {
+        pipeline[name]
+            .as_u64()
+            .unwrap_or_else(|| panic!("config/default.yaml: pipeline.{name} is not a number"))
+    };
+    let budget = |name: &str| match field(name) {
+        0 => u64::MAX,
+        ms => ms,
+    };
+    Limits {
+        max_files: field("max_files") as usize,
+        file_parse_ms: budget("per_file_parse_timeout_ms"),
+        file_rewrite_ms: budget("per_file_walk_timeout_ms"),
+        file_link_ms: budget("per_file_ssa_timeout_ms"),
+        file_resolve_ms: budget("per_file_timeout_ms"),
+        cross_file_resolve_ms: budget("cross_file_resolve_timeout_ms"),
+        max_tree_depth: field("max_tree_depth") as usize,
+        max_cross_file_names: field("max_cross_file_names") as usize,
+        max_manifest_bytes: field("max_manifest_bytes"),
+        max_file_edges: field("max_file_edges") as usize,
+        ..Limits::UNLIMITED
+    }
+}
+
 pub fn run_incremental_suite(yaml: &str) {
     rayon::ThreadPoolBuilder::new()
         .stack_size(templates::WORKER_STACK_BYTES)
@@ -79,7 +120,7 @@ fn index_and_check(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
+    let env = Env::with_limits(lang_id, suite_limits(&suite)).expect("rules compile");
 
     let repository = Arc::new(
         orbit_utils::vfs::Vfs::load(
@@ -92,7 +133,7 @@ fn index_and_check(yaml: &str) {
     );
     let graph =
         templates::index(Context::new(&env, repository)).expect("suite exceeded the total budget");
-    let (mut state, mut failures) = check(graph, &ontology, &suite.tests);
+    let (mut state, mut failures) = check(graph, &ontology, &suite.tests, &suite.skipped);
     let mut env = env;
 
     for step in &suite.steps {
@@ -122,7 +163,7 @@ fn index_and_check(yaml: &str) {
         );
         let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
             .expect("suite exceeded the total budget");
-        let (next, step_failures) = check(graph, &ontology, &step.tests);
+        let (next, step_failures) = check(graph, &ontology, &step.tests, &[]);
         state = next;
         failures.extend(step_failures);
     }
@@ -135,12 +176,28 @@ fn check(
     graph: Pipeline<'_, Resolved>,
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
+    skipped: &[SkippedFile],
 ) -> (State, Vec<Failure>) {
-    let skipped = &graph.context().report.skipped;
-    assert!(
-        skipped.is_empty(),
-        "files exceeded their budget: {skipped:?}"
-    );
+    {
+        let mut expected: Vec<&SkippedFile> = skipped.iter().collect();
+        expected.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+        let mut found: Vec<(&str, &str)> = graph
+            .context()
+            .report
+            .skipped
+            .iter()
+            .map(|killed| (killed.path.as_str(), killed.label.as_ref()))
+            .collect();
+        found.sort_unstable();
+        let matched = found.len() == expected.len()
+            && found.iter().zip(&expected).all(|((path, label), file)| {
+                *path == file.path && file.label.as_deref().is_none_or(|want| want == *label)
+            });
+        assert!(
+            matched,
+            "files the budgets skipped: {found:?}, expected {expected:?}"
+        );
+    }
     let envelope = Envelope::new([
         ("project_id", Scalar::Int(1)),
         ("branch", Scalar::Str("main")),
@@ -161,8 +218,10 @@ fn check(
         fixtures: Vec::new(),
         fixture_dir: None,
         trace: false,
+        limits: None,
+        skipped: Vec::new(),
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
-    (displayed.state, run_suite(&suite, &db, ontology))
+    (displayed.state, run_suite(&suite, &db, ontology, true))
 }
