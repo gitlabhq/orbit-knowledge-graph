@@ -204,8 +204,8 @@ For every agent it configures, `orbit setup`:
   and the skill embedded in the binary otherwise. The directory name stays
   `orbit` in both cases. Setup records which agents use the directory in a
   `.orbit-managed` file beside it, not inside it, so under `glab orbit` the
-  directory matches what `glab skills install` writes. A different `orbit` skill already there is
-  renamed to `orbit.orbit-backup`, with its `SKILL.md` renamed to
+  directory matches what `glab skills install` writes. A different `orbit` skill already there, or one whose files changed since
+  setup wrote them, is renamed to `orbit.orbit-backup`, with its `SKILL.md` renamed to
   `SKILL.md.orbit-backup` so it stops loading. Setup also removes the
   `orbit-cli` skill and link that earlier releases installed, including the real
   copy they wrote where symlinks fail. `glab skills update orbit` replaces the
@@ -247,7 +247,7 @@ orbit uninstall
 It lists the detected agents that have GitLab Orbit installed in that scope.
 Name agents to target only those. It removes what `orbit setup` wrote and leaves
 the rest of each file untouched. Setup records the skill directory it writes in a `.orbit-managed` file beside
-it, and uninstall removes only directories listed there. Agents share that
+it, and uninstall removes only directories listed there that still hold what setup wrote. Agents share that
 directory, so uninstalling one agent keeps it, and reports which agents still
 use it, until the last of them is removed. It also removes the `orbit-cli`
 skill that earlier releases installed, but only the files that match this release when

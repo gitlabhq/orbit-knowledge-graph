@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::json;
 use super::{
@@ -34,6 +35,41 @@ pub(super) struct Skill<'a> {
 struct Marker {
     kind: SkillKind,
     agents: BTreeSet<String>,
+    /// Digest of the tree setup wrote, to tell it from a directory put there since.
+    #[serde(default)]
+    digest: String,
+}
+
+fn tree_digest(tree: &BTreeMap<String, Vec<u8>>) -> String {
+    let mut hasher = Sha256::new();
+    for (path, contents) in tree {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update((contents.len() as u64).to_le_bytes());
+        hasher.update(contents);
+    }
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Whether `path` still holds what setup wrote (or the wrapper `glab skills update` writes in
+/// its place), as opposed to a directory created there after the record was left behind.
+fn is_ours(path: &Path) -> bool {
+    let Some(marker) = read_marker(path) else {
+        return false;
+    };
+    let Some(current) = read_tree(path) else {
+        return false;
+    };
+    let digest = tree_digest(&current);
+    digest == marker.digest
+        || [spec::DIRECT_LAUNCHER, spec::GLAB_LAUNCHER]
+            .into_iter()
+            .filter_map(|launcher| crate::skill::wrapper_tree_for(launcher).ok())
+            .any(|wrapper| tree_digest(&wrapper) == digest)
 }
 
 fn marker_path(skill_root: &Path) -> PathBuf {
@@ -45,6 +81,7 @@ fn read_marker(skill_root: &Path) -> Option<Marker> {
     Some(serde_json::from_str(&contents).unwrap_or(Marker {
         kind: SkillKind::Wrapper,
         agents: BTreeSet::new(),
+        digest: String::new(),
     }))
 }
 
@@ -326,6 +363,7 @@ fn write_skill_files(
     let marker = Marker {
         kind,
         agents: owners,
+        digest: tree_digest(tree),
     };
     // A tree identical to ours (for example one `glab skills install` wrote) is adopted as is.
     if read_tree(skill_root).is_some_and(|current| current == *tree) {
@@ -342,13 +380,13 @@ fn write_skill_files(
     Ok(())
 }
 
-/// Clears `path` for a new install. What `orbit setup` wrote is replaced; anything else is
+/// Clears `path` for a new install. What `orbit setup` wrote, unchanged, is replaced; anything else is
 /// renamed to a sibling whose `SKILL.md` no longer loads, so the user's files survive.
 fn make_room(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
     };
-    if !metadata.is_dir() || marker_path(path).exists() {
+    if !metadata.is_dir() || is_ours(path) {
         remove_path(path)?;
         let _ = std::fs::remove_file(marker_path(path));
         return Ok(());
@@ -459,6 +497,13 @@ fn release_skill_files(
         }
         return Ok(());
     };
+    if exists && !is_ours(skill_root) {
+        report.note(
+            label,
+            "kept (changed since orbit setup wrote it; delete it by hand)",
+        );
+        return Ok(());
+    }
     marker.agents.retain(|owner| !agents.contains(owner));
     if !marker.agents.is_empty() {
         write_marker(skill_root, &marker)?;

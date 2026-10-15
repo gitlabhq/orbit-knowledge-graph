@@ -101,7 +101,10 @@ fn write_glab_stub(dir: &std::path::Path, body: &str) {
 
 fn hermetic_orbit(cache: &tempfile::TempDir, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
-    command.args(args).env("XDG_CACHE_HOME", cache.path());
+    command
+        .args(args)
+        .env("XDG_CACHE_HOME", cache.path())
+        .env("HOME", cache.path().join("home"));
     command.env("PATH", PATH_WITHOUT_GLAB);
     for key in [
         "ORBIT_API_BASE_URL",

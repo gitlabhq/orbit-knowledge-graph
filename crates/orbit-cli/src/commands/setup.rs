@@ -926,6 +926,39 @@ mod tests {
     }
 
     #[test]
+    fn a_skill_recreated_by_hand_is_backed_up_even_when_the_record_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::remove_dir_all(skills.join("orbit")).unwrap();
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
+
+        uninstall_named(&["codex"], dir.path());
+        assert!(skills.join("orbit/notes.md").is_file());
+
+        install_with_mcp(&["codex"], dir.path());
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup/notes.md")).unwrap(),
+            "mine\n"
+        );
+        assert!(skills.join("orbit/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn a_skill_edited_after_setup_is_backed_up_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(skills.join("orbit.orbit-backup/notes.md").is_file());
+        assert!(!skills.join("orbit/notes.md").exists());
+    }
+
+    #[test]
     fn the_wrapper_stays_when_no_agent_needs_the_full_skill() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["claude", "codex"], dir.path());
