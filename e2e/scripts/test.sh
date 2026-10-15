@@ -8,7 +8,7 @@ INDEXING_BUDGET_MULTIPLIER="${E2E_INDEXING_BUDGET_MULTIPLIER:-1}"
 SETUP_MARGIN_SECONDS=600
 POLL_INTERVAL=3
 
-budgets() { grep -hoE "(Start Indexing Budget|Scaled Timeout) +[0-9]+" "$@" | awk '{ print $NF }'; }
+budgets() { grep -hoE "(Start Indexing Budget|Scaled Timeout) +[0-9]+" "$@" | awk '{ print $NF }' || true; }
 SMOKE_BUDGET_SECONDS=$(budgets "$E2E_DIR/tests/01_setup_and_smoke.robot" | awk '{ s += $1 } END { print s + 0 }')
 SUITE_BUDGET_SECONDS=$(budgets "$E2E_DIR"/tests/*.robot | sort -n | tail -1)
 TIMEOUT_SECONDS=$(awk -v smoke="$SMOKE_BUDGET_SECONDS" -v suite="$SUITE_BUDGET_SECONDS" \
