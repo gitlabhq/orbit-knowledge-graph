@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::locking::{LockError, LockRevision, LockService};
+use crate::locking::{LockError, LockHeld, LockRevision, LockService};
 use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
@@ -305,26 +305,26 @@ impl MockLockService {
 #[async_trait]
 impl LockService for MockLockService {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
-        Ok(self.try_acquire_renewable(key, ttl).await?.is_some())
+        Ok(self.try_acquire_renewable(key, ttl).await?.is_ok())
     }
 
     async fn try_acquire_renewable(
         &self,
         key: &str,
         _ttl: Duration,
-    ) -> Result<Option<LockRevision>, LockError> {
+    ) -> Result<Result<LockRevision, LockHeld>, LockError> {
         let mut held = self.held.lock();
         let mut expires_at = self.expires_at.lock();
-        let expired = expires_at
+        let time_left = expires_at
             .get(key)
-            .is_some_and(|at| *at <= tokio::time::Instant::now());
-        if held.contains_key(key) && !expired {
-            Ok(None)
+            .map(|at| at.saturating_duration_since(tokio::time::Instant::now()));
+        if held.contains_key(key) && time_left != Some(Duration::ZERO) {
+            Ok(Err(LockHeld { time_left }))
         } else {
             expires_at.remove(key);
             let revision = self.bump_revision();
             held.insert(key.to_string(), revision);
-            Ok(Some(revision))
+            Ok(Ok(revision))
         }
     }
 
@@ -357,17 +357,6 @@ impl LockService for MockLockService {
     async fn release(&self, key: &str) -> Result<(), LockError> {
         self.held.lock().remove(key);
         Ok(())
-    }
-
-    async fn time_left(&self, key: &str) -> Result<Option<Duration>, LockError> {
-        if !self.is_held(key) {
-            return Ok(None);
-        }
-        Ok(self
-            .expires_at
-            .lock()
-            .get(key)
-            .map(|at| at.saturating_duration_since(tokio::time::Instant::now())))
     }
 }
 

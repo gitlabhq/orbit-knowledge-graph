@@ -290,8 +290,9 @@ mod tests {
             &self,
             _key: &str,
             _ttl: Duration,
-        ) -> Result<Option<crate::locking::LockRevision>, LockError> {
-            Ok(Some(0))
+        ) -> Result<Result<crate::locking::LockRevision, crate::locking::LockHeld>, LockError>
+        {
+            Ok(Ok(0))
         }
         async fn renew(
             &self,
@@ -303,9 +304,6 @@ mod tests {
         }
         async fn release(&self, _key: &str) -> Result<(), LockError> {
             Ok(())
-        }
-        async fn time_left(&self, _key: &str) -> Result<Option<Duration>, LockError> {
-            Ok(None)
         }
     }
 

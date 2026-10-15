@@ -308,20 +308,14 @@ impl CodeIndexingTaskHandler {
         context: &HandlerContext,
         key: &str,
     ) -> Result<LockGuard, HandlerError> {
-        if let Some(guard) = LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
+        let held = match LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         {
-            return Ok(guard);
-        }
-        let time_left = match context.lock_service.time_left(key).await {
-            Ok(time_left) => time_left.unwrap_or_default(),
-            Err(error) => {
-                warn!(lock_key = %key, %error, "lock expiry read failed; deferring for a full lease");
-                self.lock_ttl
-            }
+            Ok(guard) => return Ok(guard),
+            Err(held) => held,
         };
-        let delay = time_left + self.renew_interval();
+        let delay = held.time_left.unwrap_or(self.lock_ttl) + self.renew_interval();
         warn!(lock_key = %key, ?delay, "code indexing deferred: lock held by another indexer");
         Err(HandlerError::Deferred {
             reason: format!("lock {key} held by another indexer"),
