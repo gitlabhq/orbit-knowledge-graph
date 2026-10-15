@@ -238,9 +238,8 @@ fn cgroup_from(cgroups: &str, root: &Path) -> Cgroup {
     let relative = |path: &str| path.trim_start_matches('/').to_owned();
     let v2 = v2.map(|path| root.join(relative(path)));
     match (v2, v1) {
-        (Some(dir), v1) if dir.join("memory.max").exists() || v1.is_none() => {
-            Cgroup { dir, v1: false }
-        }
+        (Some(dir), None) => Cgroup { dir, v1: false },
+        (Some(dir), Some(_)) if dir.join("memory.max").exists() => Cgroup { dir, v1: false },
         (_, Some(path)) => Cgroup {
             dir: root.join("memory").join(relative(path)),
             v1: true,
