@@ -946,6 +946,75 @@ impl Ontology {
             .collect()
     }
 
+    pub fn table_writers(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut writers = BTreeMap::<String, BTreeSet<String>>::new();
+        let mut mapped_variants = BTreeSet::new();
+
+        for node in self.nodes() {
+            writers
+                .entry(node.destination_table.clone())
+                .or_default()
+                .insert(node.name.clone());
+            for mapping in node
+                .pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+            {
+                for route in self.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(node.name.clone());
+                }
+            }
+        }
+
+        for (kind, pipeline) in self.edge_etl_configs() {
+            for mapping in pipeline.transform.edges() {
+                for route in self.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(kind.to_string());
+                }
+            }
+        }
+
+        for derived in self.derived_entities() {
+            for kind in &derived.emits {
+                for route in self.get_edge(kind).into_iter().flatten() {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(derived.name.clone());
+                }
+            }
+        }
+
+        for route in self.edges() {
+            if mapped_variants.contains(&edge_variant_key(route)) {
+                continue;
+            }
+            let writer = self
+                .get_node(&route.source_kind)
+                .filter(|node| node.pipelines.is_empty())
+                .or_else(|| {
+                    self.get_node(&route.target_kind)
+                        .filter(|node| node.pipelines.is_empty())
+                })
+                .map_or(&route.relationship_kind, |node| &node.name);
+            writers
+                .entry(route.destination_table.clone())
+                .or_default()
+                .insert(writer.clone());
+        }
+
+        writers
+    }
+
     pub fn edge_tables_for_relationship(&self, relationship_kind: &str) -> BTreeSet<&str> {
         if self.edges.get(relationship_kind).is_some_and(Vec::is_empty) {
             return BTreeSet::from([self.default_edge_table.as_str()]);
@@ -1761,6 +1830,14 @@ fn node_ref_matches(node_ref: &NodeRef, node_kind: &str) -> bool {
         NodeRefKind::Literal(literal) => literal == node_kind,
         NodeRefKind::Derived { .. } => true,
     }
+}
+
+fn edge_variant_key(edge: &EdgeEntity) -> (String, String, String) {
+    (
+        edge.relationship_kind.clone(),
+        edge.source_kind.clone(),
+        edge.target_kind.clone(),
+    )
 }
 
 impl fmt::Display for Ontology {

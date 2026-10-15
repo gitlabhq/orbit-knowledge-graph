@@ -246,7 +246,17 @@ impl crate::Relational<ClickHouse> {
                 source: declaration.source.clone(),
             });
         }
-        let relationship_tables: BTreeMap<_, BTreeSet<_>> = ontology
+        let edge_routes = ontology
+            .edges()
+            .map(|edge| EdgeRoute {
+                relationship: edge.relationship_kind.clone(),
+                source: edge.source_kind.clone(),
+                target: edge.target_kind.clone(),
+                table: edge.destination_table.clone(),
+                foreign_key: edge.fk_column.clone(),
+            })
+            .collect();
+        let relationship_tables = ontology
             .edge_names()
             .map(|kind| {
                 (
@@ -259,97 +269,7 @@ impl crate::Relational<ClickHouse> {
                 )
             })
             .collect();
-        let edge_routes = ontology
-            .edges()
-            .map(|edge| EdgeRoute {
-                relationship: edge.relationship_kind.clone(),
-                source: edge.source_kind.clone(),
-                target: edge.target_kind.clone(),
-                table: edge.destination_table.clone(),
-                foreign_key: edge.fk_column.clone(),
-            })
-            .collect();
-        let mut writers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        let mut mapped_variants = BTreeSet::new();
-        for node in ontology.nodes() {
-            writers
-                .entry(node.destination_table.clone())
-                .or_default()
-                .insert(node.name.clone());
-            for mapping in node
-                .pipelines
-                .iter()
-                .flat_map(|pipeline| pipeline.transform.edges())
-            {
-                for route in ontology.edge_routes_for_mapping(mapping) {
-                    mapped_variants.insert((
-                        route.relationship_kind.clone(),
-                        route.source_kind.clone(),
-                        route.target_kind.clone(),
-                    ));
-                    writers
-                        .entry(route.destination_table.clone())
-                        .or_default()
-                        .insert(node.name.clone());
-                }
-            }
-        }
-        for (kind, pipeline) in ontology.edge_etl_configs() {
-            for mapping in pipeline.transform.edges() {
-                for route in ontology.edge_routes_for_mapping(mapping) {
-                    mapped_variants.insert((
-                        route.relationship_kind.clone(),
-                        route.source_kind.clone(),
-                        route.target_kind.clone(),
-                    ));
-                    writers
-                        .entry(route.destination_table.clone())
-                        .or_default()
-                        .insert(kind.to_string());
-                }
-            }
-        }
-        for derived in ontology.derived_entities() {
-            for kind in &derived.emits {
-                for table in relationship_tables.get(kind).into_iter().flatten() {
-                    writers
-                        .entry(table.clone())
-                        .or_default()
-                        .insert(derived.name.clone());
-                }
-                if let Some(variants) = ontology.get_edge(kind) {
-                    mapped_variants.extend(variants.iter().map(|route| {
-                        (
-                            route.relationship_kind.clone(),
-                            route.source_kind.clone(),
-                            route.target_kind.clone(),
-                        )
-                    }));
-                }
-            }
-        }
-        for route in ontology.edges() {
-            let variant = (
-                route.relationship_kind.clone(),
-                route.source_kind.clone(),
-                route.target_kind.clone(),
-            );
-            if !mapped_variants.contains(&variant) {
-                let writer = ontology
-                    .get_node(&route.source_kind)
-                    .filter(|node| node.pipelines.is_empty())
-                    .or_else(|| {
-                        ontology
-                            .get_node(&route.target_kind)
-                            .filter(|node| node.pipelines.is_empty())
-                    })
-                    .map_or(&route.relationship_kind, |node| &node.name);
-                writers
-                    .entry(route.destination_table.clone())
-                    .or_default()
-                    .insert(writer.clone());
-            }
-        }
+        let writers = ontology.table_writers();
         Ok(Self {
             tables,
             metadata: Metadata {
