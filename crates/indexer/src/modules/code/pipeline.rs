@@ -303,7 +303,10 @@ impl CodeIndexer {
             checkpoint_store,
             stale_data_cleaner,
             inflight: Arc::new(AtomicUsize::new(0)),
-            memory: MemoryWatchdog::for_this_process(metrics.clone()),
+            memory: MemoryWatchdog::for_this_process(
+                metrics.clone(),
+                pipeline_config.memory_kill_percent,
+            ),
             metrics,
             table_names,
             ontology,
@@ -319,6 +322,11 @@ impl CodeIndexer {
     /// Derived inflight cap for the engine listen loop: a download can pre-fetch ahead of
     /// every indexing lane. Returns `None` when any limit is unbounded (0), so the global
     /// default applies.
+    pub fn with_memory_watchdog(mut self, memory: Arc<MemoryWatchdog>) -> Self {
+        self.memory = memory;
+        self
+    }
+
     pub fn max_inflight(&self) -> Option<usize> {
         let small = self.pipeline_config.small_indexing_slots();
         let big = self.pipeline_config.big_indexing_slots();
@@ -357,6 +365,7 @@ impl CodeIndexer {
     ) -> Result<IndexOutcome, IndexError> {
         let budget = self.pipeline_config.job_timeout();
         let mut clock = WorkClock::new(budget);
+        let _holds_memory = self.memory.hold();
 
         // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
         let Some(fetched) = clock.run(self.fetch_repository(context, request)).await else {
@@ -371,7 +380,6 @@ impl CodeIndexer {
 
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
-        let _holds_memory = self.memory.hold();
         let memory = self
             .memory
             .register(repository.source_bytes(), cancel.clone());

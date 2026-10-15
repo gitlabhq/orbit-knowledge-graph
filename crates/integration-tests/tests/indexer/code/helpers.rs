@@ -16,8 +16,8 @@ use gitlab_client::GitlabClient;
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexer,
-    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    CodeIndexingTaskHandler, LocalRepositoryCache, MemoryWatchdog, RailsRepositoryService,
+    RepositoryService, config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
@@ -67,6 +67,26 @@ impl CodeIndexingDeps {
         pipeline_config: CodeIndexingPipelineConfig,
         ontology: ontology::Ontology,
     ) -> Self {
+        Self::build(mock, clickhouse, pipeline_config, ontology, None)
+    }
+
+    pub fn new_with_memory_watchdog(
+        mock: &MockGitlabServer,
+        clickhouse: &TestContext,
+        pipeline_config: CodeIndexingPipelineConfig,
+        watchdog: Arc<MemoryWatchdog>,
+    ) -> Self {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        Self::build(mock, clickhouse, pipeline_config, ontology, Some(watchdog))
+    }
+
+    fn build(
+        mock: &MockGitlabServer,
+        clickhouse: &TestContext,
+        pipeline_config: CodeIndexingPipelineConfig,
+        ontology: ontology::Ontology,
+        watchdog: Option<Arc<MemoryWatchdog>>,
+    ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client("graph"));
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
@@ -102,7 +122,7 @@ impl CodeIndexingDeps {
             Arc::new(indexer::metrics::EngineMetrics::new()),
         ));
 
-        let pipeline = Arc::new(CodeIndexer::new(
+        let pipeline = CodeIndexer::new(
             resolver,
             writer,
             Arc::clone(&checkpoint_store) as _,
@@ -111,7 +131,11 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             pipeline_config,
-        ));
+        );
+        let pipeline = Arc::new(match watchdog {
+            Some(watchdog) => pipeline.with_memory_watchdog(watchdog),
+            None => pipeline,
+        });
 
         Self {
             pipeline,

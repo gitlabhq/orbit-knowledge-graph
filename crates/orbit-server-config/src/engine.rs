@@ -281,6 +281,10 @@ pub struct CodeIndexingPipelineConfig {
     /// per-file parse memory, which is 50 to 190 times the file size, to the
     /// budget instead of the worker count. 0 = no limit.
     pub max_inflight_source_bytes: u64,
+    /// Share of the pod's cgroup memory limit, in percent, at which the
+    /// indexer cancels the in-flight code job with the most source bytes so
+    /// the kernel does not kill the whole pod. 0 = off.
+    pub memory_kill_percent: u64,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how

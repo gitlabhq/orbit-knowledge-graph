@@ -636,6 +636,12 @@
           "format": "uint64",
           "minimum": 0
         },
+        "memory_kill_percent": {
+          "description": "Share of the pod's cgroup memory limit, in percent, at which the\nindexer cancels the in-flight code job with the most source bytes so\nthe kernel does not kill the whole pod. 0 = off.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "job_timeout_secs": {
           "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.",
           "type": "integer",
@@ -729,6 +735,7 @@
         "max_manifest_bytes",
         "max_file_edges",
         "max_inflight_source_bytes",
+        "memory_kill_percent",
         "job_timeout_secs",
         "fetch_concurrency",
         "write_channel_capacity",

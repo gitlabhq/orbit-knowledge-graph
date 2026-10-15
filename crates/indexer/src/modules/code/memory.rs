@@ -13,7 +13,6 @@ use tracing::{info, warn};
 
 use super::metrics::CodeMetrics;
 
-const KILL_AT_PERCENT: u128 = 90;
 const INTERVAL: Duration = Duration::from_millis(100);
 const UNREADABLE_SAMPLES_BEFORE_GIVING_UP: u32 = 10;
 /// cgroup v1 reports "no limit" as a value near i64::MAX; at or above this
@@ -49,6 +48,12 @@ pub struct Cgroup {
     v1: bool,
 }
 
+impl Cgroup {
+    pub fn v2(dir: PathBuf) -> Self {
+        Self { dir, v1: false }
+    }
+}
+
 struct Job {
     id: u64,
     bytes: u64,
@@ -58,6 +63,7 @@ struct Job {
 
 pub struct MemoryWatchdog {
     cgroup: Cgroup,
+    kill_at_percent: u64,
     metrics: CodeMetrics,
     jobs: Mutex<Vec<Job>>,
     holding: Arc<AtomicUsize>,
@@ -95,13 +101,16 @@ impl Drop for Registration {
 }
 
 impl MemoryWatchdog {
-    pub fn for_this_process(metrics: CodeMetrics) -> Arc<Self> {
-        Self::new(own_cgroup(), metrics)
+    /// `kill_at_percent` of the cgroup limit triggers a cancellation; 0 turns
+    /// the watchdog off.
+    pub fn for_this_process(metrics: CodeMetrics, kill_at_percent: u64) -> Arc<Self> {
+        Self::new(own_cgroup(), metrics, kill_at_percent)
     }
 
-    pub fn new(cgroup: Cgroup, metrics: CodeMetrics) -> Arc<Self> {
+    pub fn new(cgroup: Cgroup, metrics: CodeMetrics, kill_at_percent: u64) -> Arc<Self> {
         Arc::new(Self {
             cgroup,
+            kill_at_percent,
             metrics,
             jobs: Mutex::new(Vec::new()),
             holding: Arc::new(AtomicUsize::new(0)),
@@ -124,7 +133,7 @@ impl MemoryWatchdog {
             cancel,
             killed: killed.clone(),
         });
-        if !self.watching.swap(true, Ordering::AcqRel) {
+        if self.kill_at_percent > 0 && !self.watching.swap(true, Ordering::AcqRel) {
             tokio::spawn(Self::watch(Arc::downgrade(self)));
         }
         Registration {
@@ -179,7 +188,10 @@ impl MemoryWatchdog {
     /// At most one cancellation per sample; returns the kill and the victim's
     /// repository bytes when a job was cancelled.
     fn tick(&self, pressure: Pressure) -> Option<(MemoryKill, u64)> {
-        if u128::from(pressure.used) * 100 < u128::from(pressure.limit) * KILL_AT_PERCENT {
+        if self.kill_at_percent == 0
+            || u128::from(pressure.used) * 100
+                < u128::from(pressure.limit) * u128::from(self.kill_at_percent)
+        {
             return None;
         }
         let jobs = self.jobs();
@@ -311,7 +323,17 @@ mod tests {
     }
 
     fn watchdog(dir: &tempfile::TempDir) -> Arc<MemoryWatchdog> {
-        MemoryWatchdog::new(v2(dir), CodeMetrics::new())
+        MemoryWatchdog::new(v2(dir), CodeMetrics::new(), 90)
+    }
+
+    #[tokio::test]
+    async fn zero_percent_turns_the_watchdog_off() {
+        let dir = cgroup("1000", 1000);
+        let watchdog = MemoryWatchdog::new(v2(&dir), CodeMetrics::new(), 0);
+        let only = CancellationToken::new();
+        let _job = watchdog.register(7, only.clone());
+        assert_eq!(watchdog.tick(pressure(&dir)), None);
+        assert!(!only.is_cancelled());
     }
 
     fn pressure(dir: &tempfile::TempDir) -> Pressure {
