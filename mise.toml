@@ -35,6 +35,8 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
+# Rebuild-and-run loop for Caproni edit mode (scripts/dev/caproni-edit-mode.sh).
+watchexec = "2.8.0"
 "sccache" = "0.13.0"
 "zig" = "0.15.2"
 clickhouse = "26.3.41.4-lts"
@@ -128,6 +130,10 @@ description = "Run unit tests (--lib, plus the xtask and orbit binaries; no inte
 [tasks."test:local"]
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
+
+[tasks."test:scripts"]
+run = "for t in scripts/dev/tests/*_test.sh; do bash \"$t\" || exit 1; done"
+description = "Run the shell tests for the local development scripts (no cluster needed)"
 
 [tasks."test:plan-shape"]
 run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
