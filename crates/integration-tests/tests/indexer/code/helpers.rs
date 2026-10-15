@@ -40,6 +40,7 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
+    pub shutdown: tokio_util::sync::CancellationToken,
     cache_dir: tempfile::TempDir,
 }
 
@@ -102,6 +103,7 @@ impl CodeIndexingDeps {
             Arc::new(indexer::metrics::EngineMetrics::new()),
         ));
 
+        let shutdown = tokio_util::sync::CancellationToken::new();
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,
@@ -111,6 +113,7 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             pipeline_config,
+            shutdown.clone(),
         ));
 
         Self {
@@ -119,6 +122,7 @@ impl CodeIndexingDeps {
             checkpoint_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
+            shutdown,
             cache_dir,
         }
     }
@@ -155,6 +159,7 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             config,
+            self.shutdown.clone(),
         ));
         CodeIndexingTaskHandler::new(
             pipeline,

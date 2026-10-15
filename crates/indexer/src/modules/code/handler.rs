@@ -550,6 +550,7 @@ mod tests {
                 table_names,
                 Arc::new(ontology),
                 crate::testkit::builders::test_pipeline_configuration(),
+                tokio_util::sync::CancellationToken::new(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(
