@@ -842,6 +842,47 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn losing_the_lock_while_queued_for_an_archive_slot_stops_the_wait() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
+        for slot in 0..config.archive_tenant_budget {
+            ctx.mock_locks
+                .set_lock(&crate::modules::code::repository::slot_key(None, slot));
+        }
+        ctx.mock_locks.steal_leases();
+
+        let started = tokio::time::Instant::now();
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(config.archive_lease_max_wait_secs)
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("the started attempt is saved");
+        assert_eq!(
+            checkpoint.attempts, 1,
+            "a run that lost its lock must not write a refund over a new holder"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_saturated_archive_budget_backs_off_quickly_without_counting_an_attempt() {
         let ctx = TestContext::new();
         ctx.mock_repo.set_archive(

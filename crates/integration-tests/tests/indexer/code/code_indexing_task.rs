@@ -2412,7 +2412,7 @@ async fn disk_is_clean_after_a_timed_out_job(incremental: bool) {
 #[derive(Debug, PartialEq)]
 enum CancelledRun {
     FailedProcessing,
-    RefundedBackpressure,
+    Backpressure,
     Other,
 }
 
@@ -2480,9 +2480,7 @@ async fn run_with_cancelled_token(
         Err(indexer::modules::code::IndexError::Failed(
             indexer::handler::HandlerError::Processing(_),
         )) => CancelledRun::FailedProcessing,
-        Err(indexer::modules::code::IndexError::NoLane { .. }) => {
-            CancelledRun::RefundedBackpressure
-        }
+        Err(indexer::modules::code::IndexError::NoLane { .. }) => CancelledRun::Backpressure,
         _ => CancelledRun::Other,
     };
     (outcome, clickhouse, deps)
@@ -2505,12 +2503,12 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
     );
 }
 
-async fn cancelled_lease_wait_is_refunded_backpressure(incremental: bool) {
+async fn cancelled_lease_wait_is_backpressure(incremental: bool) {
     let (outcome, clickhouse, _deps) = run_with_cancelled_token(incremental, true).await;
     assert_eq!(
         outcome,
-        CancelledRun::RefundedBackpressure,
-        "a lost project lock must stop the lease wait and requeue without an attempt"
+        CancelledRun::Backpressure,
+        "a lost project lock must stop the lease wait and return NoLane"
     );
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, "993/993/", 993, "main").await,
@@ -2523,5 +2521,5 @@ both_engines! {
     heartbeat_keeps_a_slow_job_alive_and_indexes_it,
     disk_is_clean_after_a_timed_out_job,
     cancelled_run_that_finishes_writes_no_checkpoint,
-    cancelled_lease_wait_is_refunded_backpressure,
+    cancelled_lease_wait_is_backpressure,
 }
