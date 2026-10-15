@@ -288,10 +288,23 @@ impl TestContext {
 }
 
 async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
+    run_engine_with(
+        engine,
+        indexer::testkit::test_engine_configuration(),
+        duration,
+    )
+    .await;
+}
+
+async fn run_engine_with(
+    engine: Arc<Engine>,
+    configuration: orbit_server_config::EngineConfiguration,
+    duration: Duration,
+) {
     let engine_handle = engine.clone();
     let task = tokio::spawn(async move {
         engine_handle
-            .run(&indexer::testkit::test_engine_configuration())
+            .run(&configuration)
             .await
             .expect("engine failed");
     });
@@ -299,6 +312,66 @@ async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
     tokio::time::sleep(duration).await;
     engine.stop();
     task.await.expect("engine task panicked");
+}
+
+struct SlotReleasingHandler {
+    inner: TestHandler,
+    peers: Arc<tokio::sync::Barrier>,
+}
+
+#[async_trait]
+impl Handler for SlotReleasingHandler {
+    fn name(&self) -> &str {
+        "slot-releasing-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        test_subscription()
+    }
+
+    fn requires_worker_pool(&self) -> bool {
+        false
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        context.work.release();
+        tokio::time::timeout(Duration::from_secs(2), self.peers.wait())
+            .await
+            .map_err(|_| HandlerError::Processing("the next message never started".into()))?;
+        self.inner.handle(context, message).await
+    }
+}
+
+#[tokio::test]
+async fn a_released_work_slot_admits_the_next_message() {
+    let context = TestContext::new().await;
+    let broker = context.create_broker().await;
+    let peers = Arc::new(tokio::sync::Barrier::new(2));
+    let handler = SlotReleasingHandler {
+        inner: TestHandler {
+            writer: context.create_writer(),
+        },
+        peers,
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+
+    context.publish_event(&broker, 1, "first").await;
+    context.publish_event(&broker, 2, "second").await;
+    run_engine_with(
+        engine,
+        orbit_server_config::EngineConfiguration {
+            max_concurrent_workers: Some(1),
+            ..indexer::testkit::test_engine_configuration()
+        },
+        Duration::from_secs(4),
+    )
+    .await;
+
+    assert_eq!(
+        context.query_count().await,
+        2,
+        "both messages must run while the first only waits"
+    );
 }
 
 fn create_engine(broker: Arc<NatsBroker>, handler: Box<dyn Handler>) -> Arc<Engine> {

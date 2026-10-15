@@ -201,11 +201,16 @@ impl Engine {
             .subscribe(&subscription, runtime.metrics.clone())
             .await?;
         let mut inflight = tokio::task::JoinSet::new();
+        let work = Arc::new(tokio::sync::Semaphore::new(max_inflight));
+        let mut permit = None;
 
         loop {
             tokio::select! {
                 _ = self.cancel.cancelled() => break,
-                Some(message) = messages.next(), if inflight.len() < max_inflight => {
+                acquired = work.clone().acquire_owned(), if permit.is_none() => {
+                    permit = acquired.ok();
+                }
+                Some(message) = messages.next(), if permit.is_some() => {
                     let message = message?;
                     let progress = message.progress_notifier();
                     let span = tracing::info_span!(
@@ -217,7 +222,8 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
-                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress),
+                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress)
+                            .with_work_slot(permit.take()),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),
@@ -963,8 +969,8 @@ mod tests {
 
     /// Validates the backpressure mechanism in the listen loop.
     ///
-    /// The select loop guards message consumption with `if inflight.len() < max_inflight`.
-    /// Without this guard, all messages are pulled immediately and queued on the
+    /// The select loop pulls a message only while it holds a `max_inflight` work permit.
+    /// Without this gate, all messages are pulled immediately and queued on the
     /// worker pool semaphore — causing NATS ack_wait timeouts and infinite redelivery.
     #[tokio::test]
     async fn listen_loop_caps_inflight_to_max() {

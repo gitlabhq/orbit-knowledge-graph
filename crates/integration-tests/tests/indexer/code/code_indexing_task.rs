@@ -990,13 +990,14 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
     let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
     let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
-    // Writes are buffered, so the handler acks; the deferred flush fails, the project's commit is
-    // marked failed (never checkpointed), and the backfill sweep re-indexes it.
-    failing_handler
+    let error = failing_handler
         .handle(context, envelope)
         .await
-        .expect("buffered handler acks even when the deferred write will fail");
-    let _ = failing_handler.flush().await;
+        .expect_err("a task whose buffered rows never land must fail so NATS redelivers it");
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Processing(_)),
+        "unexpected error: {error}"
+    );
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_file_not_active(&clickhouse, project_id, "src/Other.java").await;
@@ -1004,6 +1005,52 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "failed reindex must not advance the checkpoint"
+    );
+}
+
+#[tokio::test]
+async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
+    let project_id: i64 = 61;
+    let traversal_path = "1/61/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let config = indexer::testkit::test_pipeline_configuration();
+    let buffer_tick = config.write_buffer_age();
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
+    let handler = deps.code_indexing_task_handler();
+
+    let started = std::time::Instant::now();
+    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("indexing succeeds");
+    let elapsed = started.elapsed();
+
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1),
+        "the checkpoint must be written before the handler returns"
+    );
+    assert!(
+        elapsed < buffer_tick,
+        "the job must flush its own rows instead of waiting {buffer_tick:?} for the tick; took {elapsed:?}"
     );
 }
 

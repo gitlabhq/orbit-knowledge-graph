@@ -48,7 +48,7 @@ impl ProgressObserver for NatsHeartbeat {
 }
 
 pub enum IndexOutcome {
-    /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
+    /// Every row landed in ClickHouse and the project is checkpointed.
     Indexed { rows_written: u64 },
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
@@ -108,6 +108,7 @@ impl WorkClock {
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
+    done: tokio::sync::Notify,
     request: IndexingRequest,
     indexed_at: DateTime<Utc>,
     store: Arc<dyn CodeCheckpointStore>,
@@ -131,8 +132,23 @@ impl ProjectCommit {
                 project_id = self.request.project_id,
                 "a buffered write failed; skipping checkpoint so the project is re-indexed",
             );
-            return;
+        } else {
+            self.checkpoint().await;
         }
+        self.done.notify_one();
+    }
+
+    async fn durable(&self) -> Result<(), HandlerError> {
+        self.done.notified().await;
+        if self.failed.load(Ordering::Acquire) {
+            return Err(HandlerError::Processing(
+                "buffered rows did not land; retrying the task".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn checkpoint(&self) {
         let mut checkpoint = self.request.checkpoint.clone();
         // A first index into this schema version (backfill or new project) has no
         // checkpointed prior snapshot to tombstone, so skip the FINAL-scan cleanup.
@@ -165,11 +181,14 @@ impl ProjectCommit {
                 task_id = checkpoint.last_task_id,
                 "completed code indexing"
             ),
-            Err(e) => warn!(
-                project_id = checkpoint.project_id,
-                error = %e,
-                "failed to checkpoint code indexing; project will be re-indexed",
-            ),
+            Err(e) => {
+                warn!(
+                    project_id = checkpoint.project_id,
+                    error = %e,
+                    "failed to checkpoint code indexing; project will be re-indexed",
+                );
+                self.failed.store(true, Ordering::Release);
+            }
         }
     }
 }
@@ -348,16 +367,26 @@ impl CodeIndexer {
                 cancel.clone(),
             ))
             .await;
-        match indexed {
-            Some(result) => result.map_err(IndexError::Failed),
+        let run = match indexed {
+            Some(result) => result.map_err(IndexError::Failed)?,
             None => {
                 // The blocking parse outlives the dropped future; cancel makes it bail.
                 cancel.cancel();
-                Err(IndexError::BudgetExceeded {
+                return Err(IndexError::BudgetExceeded {
                     budget: budget.unwrap_or_default(),
-                })
+                });
             }
-        }
+        };
+
+        context.work.release();
+        self.writer
+            .start_flush()
+            .await
+            .map_err(|e| IndexError::Failed(HandlerError::Processing(e.to_string())))?;
+        run.commit.durable().await.map_err(IndexError::Failed)?;
+        Ok(IndexOutcome::Indexed {
+            rows_written: run.rows_written,
+        })
     }
 
     async fn fetch_repository(&self, request: &IndexingRequest) -> Result<Fetched, HandlerError> {
@@ -482,7 +511,7 @@ impl CodeIndexer {
         _lane: Option<OwnedSemaphorePermit>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<IndexOutcome, HandlerError> {
+    ) -> Result<IndexedRun, HandlerError> {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
@@ -497,11 +526,9 @@ impl CodeIndexer {
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
-        run.commit.release();
+        run.commit.clone().release();
 
-        Ok(IndexOutcome::Indexed {
-            rows_written: run.rows_written,
-        })
+        Ok(run)
     }
 
     #[allow(
@@ -619,6 +646,7 @@ impl CodeIndexer {
         let commit = Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
+            done: tokio::sync::Notify::new(),
             request: request.clone(),
             indexed_at,
             store: self.checkpoint_store.clone(),
@@ -928,6 +956,7 @@ mod tests {
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
+            done: tokio::sync::Notify::new(),
             request: IndexingRequest {
                 project_id: 7,
                 branch: "main".into(),
@@ -1038,6 +1067,37 @@ mod tests {
                 .is_none(),
             "a failed flush must leave the project un-checkpointed for re-indexing",
         );
+    }
+
+    #[tokio::test]
+    async fn durable_resolves_once_the_checkpoint_is_saved() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store.clone(), cleaner, inflight.clone(), 1);
+
+        commit.clone().on_flushed();
+        commit.clone().release();
+        commit.durable().await.expect("every part landed");
+        assert!(
+            store
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .await
+                .unwrap()
+                .is_some(),
+        );
+    }
+
+    #[tokio::test]
+    async fn durable_fails_when_a_part_failed() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store, cleaner, inflight.clone(), 1);
+
+        commit.clone().on_failed();
+        commit.clone().release();
+        assert!(commit.durable().await.is_err());
     }
 
     async fn work_for(secs: u64) {

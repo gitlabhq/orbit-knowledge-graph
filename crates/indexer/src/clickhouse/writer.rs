@@ -169,7 +169,7 @@ type Token = Arc<dyn FlushToken>;
 
 enum Msg {
     Submit(String, RecordBatch, Token),
-    Flush(tokio::sync::oneshot::Sender<()>),
+    Flush(Option<tokio::sync::oneshot::Sender<()>>),
 }
 
 /// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
@@ -227,10 +227,17 @@ impl BufferedWriter {
     pub async fn flush(&self) -> Result<(), WriteError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx
-            .send(Msg::Flush(tx))
+            .send(Msg::Flush(Some(tx)))
             .await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))?;
         rx.await
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+    }
+
+    pub async fn start_flush(&self) -> Result<(), WriteError> {
+        self.tx
+            .send(Msg::Flush(None))
+            .await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
 }
@@ -275,8 +282,10 @@ async fn drain(
                     for (table, buf) in std::mem::take(&mut pending) {
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
-                    while writes.join_next().await.is_some() {}
-                    let _ = ack.send(());
+                    if let Some(ack) = ack {
+                        while writes.join_next().await.is_some() {}
+                        let _ = ack.send(());
+                    }
                 }
                 Some(Msg::Submit(table, batch, token)) => {
                     let buf = pending.entry(table.clone()).or_default();
