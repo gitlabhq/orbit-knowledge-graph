@@ -1,4 +1,4 @@
-name: Incoming FK self-relationship retains the physical holder
+name: Incoming self-relationships keep stored edge orientation
 query:
   json: |
     {
@@ -19,9 +19,8 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON canceled.auto_canceled_by_id = canceling.id (_) (_))
-        - (Deduplicate Final (Scan Table(gl_pipeline) AS canceled))
-        - (Project canceled.id AS e0_src, canceling.id AS e0_dst, ... (_))
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+        - (Filter _orbit_edge_0.target_tags HAS ANY ['status:success'], ... (_))
+        - (Project _orbit_edge_0.source_id AS e0_src, _orbit_edge_0.target_id AS e0_dst, ... (_))
       reject:
         - (Join ON canceled.id = canceling.auto_canceled_by_id (_) (_))
-        - (Scan Table(gl_ci_edge) ...)

@@ -1,4 +1,4 @@
-name: Filter-only FK target exports keys from an authoritative filtered scan
+name: Filtered endpoints join current nodes to the edge relation
 query:
   json: |
     {
@@ -21,7 +21,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (SemiJoin mr.author_id IN subquery (_) (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+        - (Join ON u.id = _orbit_edge_0.source_id (_) (Bind u (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+        - (Scan Table(gl_edge) AS _orbit_edge_0)
       reject:
-        - (Scan Table(gl_edge) ...)
         - (CTE ... (_))

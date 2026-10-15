@@ -1772,28 +1772,6 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
 }
 
 #[test]
-fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#;
-    let orbit_query =
-        "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username";
-    let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
-    assert!(
-        compiled
-            .base
-            .sql
-            .contains("gl_user AS u FINAL")
-            && compiled.base.sql.contains("ON (n.author_id = u.id)"),
-        "AUTHORED should resolve to the FK plan: {}",
-        compiled.base.sql
-    );
-    assert!(
-        compiled.base.sql.contains("u.id AS e0_src"),
-        "edge source must be the User side: {}",
-        compiled.base.sql
-    );
-}
-
-#[test]
 fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();

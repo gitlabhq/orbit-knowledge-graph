@@ -66,9 +66,6 @@ pub fn bind_filter(
         filter,
         property: property_id,
         data_type,
-        selectivity: property_id
-            .map(|property| model.property_selectivity(property))
-            .unwrap_or_default(),
         in_sort_key,
     }
 }

@@ -156,19 +156,20 @@ Family explain views include neighbor access and routes, path frontier depths an
 Hydration fixtures use ordinary JSON/GQL node selectors plus an internal `hydration` setup block with `dynamic`, `path_segment_budget`, and alias-keyed `paths`.
 The harness applies that setup after normalization; hydration remains unavailable as a user query type.
 
-Each edge-chain emitter builds node bindings as it emits scans and joins.
-Each binding contains the graph identity, visible table alias, and hydration path expression when available.
-Lowering resolves elided endpoints through their emitted holders or pinned literals.
-Filtering CTEs do not make a node table visible in the result query block.
-Result enforcement consumes these bindings instead of searching the SQL tree for aliases.
-It still adds required authorization scans and projects redaction columns.
+Traversal and aggregation build one logical relation for each relationship
+occurrence. Each relation reads its routed stored edge tables. Shared node
+bindings compose those relations in one chain or branch. The planner joins a
+current node row when a query consumes canonical node data.
+
+Result enforcement consumes physical node bindings instead of searching the
+SQL tree for aliases. It still adds required authorization scans and projects
+redaction columns.
 Neighbors emits direction-specific redaction columns in its own query arms.
 Its projected binding carries only an identity needed for an additional role scan, when required.
 Property comparisons and cursor identities reuse the resolved node bindings.
-Lowering rejects identities that have neither a visible source nor an elided pinned value.
-FK hop elision retains elevated-role targets for authorization scans.
-It also retains multi-ID targets when projection, grouping, property aggregation, or ordering needs their values.
-Ungrouped aggregations can still elide targets used only as filters.
+Lowering rejects identities without a visible physical source. The planner
+retains current node reads for properties, grouping, sorting, conditions, and
+policy provenance.
 
 | # | Pass | Responsibility |
 |---|---|---|
@@ -188,46 +189,49 @@ Ungrouped aggregations can still elide targets used only as filters.
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
-The planner emits ClickHouse SQL similar to these patterns:
+The planner emits ClickHouse SQL similar to these patterns. The
+[planner optimization coverage](planner_optimization_coverage.md) inventory
+maps representative GQL queries to complete pseudocode shapes.
 
 - One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
-- Multi-selector traversals: chained JOINs/CTEs with DISTINCT frontiers between selectors to avoid blow-ups. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
+- Multi-selector traversals: stored edge relations compose through shared node bindings. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
 - Path finding: bounded expansion over the routed edge tables, with `path.max_depth` capped independently at 3.
 - Reverse hops: filter the edge table on `target_id`, supported by its target ID bloom filter.
 - Alternate relationship types: a query's relationship types may span multiple physical edge tables, or use a wildcard. In that case the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups. Property groups keep the grouped alias table-backed, so security filters and latest-row checks apply before aggregation.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. This applies when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
-- Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
-- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison. FK hop removal keeps relationships needed by these comparisons.
-- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`. They then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates. The compiler does not build a same-table center candidate that only repeats the center node's own filters.
+- Derived-table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. Current node scans use this shape when they carry canonical filters.
+- Exact endpoint metadata: a node filter can run on edge tags when every selected relationship variant carries that property.
+- Canonical node reads: uncovered filters and consumed properties join the current node row directly.
+- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
-These choices preserve factorization. Each hop operates on a compact frontier and prunes the next edge scan via semi‑joins. This mirrors Kùzu’s accumulate → semijoin → probe execution.
+Selective fixed chains define the first edge relation once. A distinct endpoint
+frontier narrows the next edge scan without replacing the original match rows.
+Declared equivalent layouts provide deterministic source- or target-oriented
+access when the selected endpoint is known.
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL`. Hydration arms and narrowed node joins instead dedup with `LIMIT 1 BY <sort_key>`. This preserves the same latest-non-deleted semantics while keeping column pruning and projections (see the Hydration row below):
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness through `FINAL` or an explicit latest-row operation:
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
 | Single-node traversal | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
-| Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
-| FK candidate CTEs | Non-`FINAL` ID or FK prefilter plus a latest-row recheck | Candidates can include stale matches. The target scan selects the latest version before rechecking filters. |
-| Edge narrowing CTEs | Non-`FINAL` edge-endpoint ID frontier | Narrows joined node scans to IDs the edges reach |
+| Canonical endpoint reads | Node table scan with `FINAL` | Supplies current filters and properties that exact edge metadata does not cover. |
 | Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
-| Main query node scans and broad node joins | Node table scan with `FINAL` | Keeps traversal, FK center, aggregation, and single-node lookup semantics consistent |
-| Narrowed node joins | Candidate-ID and sort-key filters before `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`; other node filters and `_deleted = false` outside | Sort-key values are the same for every version of a row, so those filters keep primary-key pruning. Mutable filters and deleted checks run after deduplication. |
-| Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
+| Main query node scans and joins | Node table scan with `FINAL` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
+| Fixed and variable stored-edge scans | Edge table scan with `FINAL`, then `_deleted = false` | Prevents a newer edge tombstone from exposing an older live edge. |
+| Single-relation aggregation | Non-`FINAL` scan with `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC` | Resolves current edge rows before evaluating the aggregate condition. |
 
 Filter placement rules for node `FINAL` scans:
 
 - **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the `FINAL` scan so ClickHouse can still use primary-key pruning where supported.
 - **Mutable filters** (`state`, `status`, `draft`) also evaluate against the `FINAL` scan, preventing stale row versions from matching.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
-- **Candidate CTEs** may over-select because they are only a performance prefilter. The target scan resolves the latest row before re-applying node filters and `_deleted = false`.
-- **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
+- **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.
+- **Pinned endpoint IDs** remain predicates on the edge relation and any required current node read.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 

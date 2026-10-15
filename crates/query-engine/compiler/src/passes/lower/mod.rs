@@ -14,7 +14,7 @@ use crate::input::*;
 use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use std::collections::{BTreeMap, HashMap};
 
-use super::plan::{Hop, Plan, QueryPlan};
+use super::plan::{EdgeRelation, Plan, QueryPlan};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
@@ -121,16 +121,6 @@ impl EmitOutput {
                     table_alias: None,
                     traversal_path: None,
                 },
-                _ if input.query_type == QueryType::Aggregation
-                    && plan
-                        .nodes
-                        .get(&source.0)
-                        .is_some_and(|holder| holder.access == super::plan::NodeAccess::SemiJoin)
-                    && !node_group_ids(&input.aggregation.group_by)
-                        .any(|alias| alias == node.id) =>
-                {
-                    NodeBinding::Filtered
-                }
                 _ => {
                     return Err(QueryError::Lowering(format!(
                         "node '{}' has no emitted identity",
@@ -164,11 +154,12 @@ impl EmitOutput {
     }
 }
 
-fn multi_type_edge_types(node: &Node, hops: &[Hop]) -> Vec<Expr> {
+fn multi_type_edge_types(node: &Node, relations: &[EdgeRelation]) -> Vec<Expr> {
     let Node::Query(query) = node else {
         return Vec::new();
     };
-    hops.iter()
+    relations
+        .iter()
         .enumerate()
         .filter(|(_, hop)| {
             hop.max_hops == 1
@@ -179,13 +170,17 @@ fn multi_type_edge_types(node: &Node, hops: &[Hop]) -> Vec<Expr> {
         .collect()
 }
 
-fn edge_type(query: &Query, hop: &Hop, index: usize) -> Option<Expr> {
+fn edge_type(query: &Query, relation: &EdgeRelation, index: usize) -> Option<Expr> {
     query
-        .selected(&format!("{}{}", hop.column_prefix(index), EDGE_TYPE_SUFFIX))
+        .selected(&format!(
+            "{}{}",
+            relation.column_prefix(index),
+            EDGE_TYPE_SUFFIX
+        ))
         .cloned()
 }
 
-fn emit_traversal(input: &Input, output: EmitOutput, hops: &[Hop]) -> Result<Node> {
+fn emit_traversal(input: &Input, output: EmitOutput, relations: &[EdgeRelation]) -> Result<Node> {
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
         (Some(order), _) => vec![ordered(
@@ -193,7 +188,7 @@ fn emit_traversal(input: &Input, output: EmitOutput, hops: &[Hop]) -> Result<Nod
             order.direction,
         )],
         (None, Some(sort)) => {
-            let edge_type = hops
+            let edge_type = relations
                 .iter()
                 .enumerate()
                 .find(|(_, hop)| hop.input_index == sort.relationship)
@@ -222,7 +217,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            emit_traversal(input, output, &plan.hops)
+            emit_traversal(input, output, &plan.relations)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
@@ -240,7 +235,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     }?;
 
     let edges = plan
-        .hops()
+        .relations()
         .iter()
         .enumerate()
         .map(|(index, hop)| {
@@ -302,7 +297,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             .collect::<BTreeMap<_, _>>()
             .into_values()
             .cloned()
-            .chain(multi_type_edge_types(&node, &plan.hops))
+            .chain(multi_type_edge_types(&node, &plan.relations))
             .map(OrderExpr::asc)
             .collect(),
     };

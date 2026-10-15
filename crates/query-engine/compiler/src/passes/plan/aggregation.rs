@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use query_data_model::OrbitQueryModel;
 
 use super::helpers::requested_columns;
@@ -8,6 +10,7 @@ use crate::input::{
 use super::context::PlanningContext;
 use super::physical::{ExecutionPlan, PhysicalSource};
 use super::requirements::{Column, Predicate};
+use super::{Aggregation, QueryPlan, edge_relation};
 
 #[derive(Clone, PartialEq)]
 pub struct Group {
@@ -29,6 +32,23 @@ pub struct AggregationPlan {
     pub order: Option<InputAggSort>,
 }
 
+pub(super) fn plan<M>(
+    context: PlanningContext<'_, M>,
+    table_scans: &HashSet<String>,
+) -> crate::error::Result<QueryPlan>
+where
+    M: OrbitQueryModel + ?Sized,
+{
+    let planned = edge_relation::plan(context, table_scans)?;
+    let result = planned.context.aggregation(&planned.execution);
+    Ok(QueryPlan::Aggregation(planned.context.finish(
+        Aggregation {
+            execution: planned.execution,
+            result,
+        },
+    )))
+}
+
 impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
@@ -40,10 +60,11 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     ..
                 } => break aggregate_condition.clone(),
                 PhysicalSource::Join { left, .. } => source = left,
-                PhysicalSource::Filter { input, .. }
-                | PhysicalSource::Scope { input, .. }
-                | PhysicalSource::KeyFilter { input, .. } => source = input,
+                PhysicalSource::Filter { input, .. } | PhysicalSource::Scope { input, .. } => {
+                    source = input
+                }
                 PhysicalSource::Scan { .. } | PhysicalSource::Union { .. } => break vec![],
+                PhysicalSource::Use { .. } => break vec![],
             }
         };
         let mut plan = AggregationPlan {
@@ -94,12 +115,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                 AggExpr::Count(target) => target
                     .property
                     .as_ref()
-                    .filter(|_| {
-                        !self
-                            .nodes
-                            .get(&target.node)
-                            .is_some_and(|node| node.access == super::NodeAccess::Identity)
-                    })
+                    .filter(|_| self.nodes.get(&target.node).is_some_and(|node| node.joined))
                     .map(|property| Column::new(&target.node, property)),
                 AggExpr::Sum(property)
                 | AggExpr::Avg(property)

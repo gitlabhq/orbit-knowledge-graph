@@ -1,5 +1,6 @@
 pub mod aggregation;
 mod context;
+mod edge_relation;
 pub(crate) mod helpers;
 pub mod hydration;
 pub mod neighbors;
@@ -13,17 +14,16 @@ use std::collections::{HashMap, HashSet};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
+pub use edge_relation::{EdgeRelation, NodePlan};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::OrbitQueryModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-pub use traversal::{Hop, NodeAccess, NodePlan};
 
 #[derive(Clone)]
 pub struct BoundFilter {
     pub filter: InputFilter,
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
-    pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
 }
 
@@ -40,7 +40,7 @@ impl BoundFilter {
 
 pub struct Plan<T> {
     pub nodes: HashMap<String, NodePlan>,
-    pub hops: Vec<Hop>,
+    pub relations: Vec<EdgeRelation>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     pub operation: T,
@@ -55,10 +55,10 @@ pub enum QueryPlan {
 }
 
 impl QueryPlan {
-    pub fn hops(&self) -> &[Hop] {
+    pub fn relations(&self) -> &[EdgeRelation] {
         match self {
-            Self::Traversal(plan) => &plan.hops,
-            Self::Aggregation(plan) => &plan.hops,
+            Self::Traversal(plan) => &plan.relations,
+            Self::Aggregation(plan) => &plan.relations,
             _ => &[],
         }
     }
@@ -228,14 +228,13 @@ where
         input,
         model,
         nodes: HashMap::new(),
-        hops: Vec::new(),
+        relations: Vec::new(),
         denormalized: HashMap::new(),
         node_edge_mappings: HashMap::new(),
     };
     match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => {
-            traversal::plan(context, table_scans)
-        }
+        QueryType::Traversal => traversal::plan(context, table_scans),
+        QueryType::Aggregation => aggregation::plan(context, table_scans),
         QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
         QueryType::PathFinding => {
             pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)

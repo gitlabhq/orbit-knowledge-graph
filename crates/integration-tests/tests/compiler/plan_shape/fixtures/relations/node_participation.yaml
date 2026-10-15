@@ -1,5 +1,5 @@
 cases:
-- name: Stored aggregation filters an endpoint with an exact semi-join
+- name: Stored aggregation joins an uncovered current endpoint filter
   query:
     json: |
       {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"title":{"starts_with":"Fix"}}}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
@@ -13,9 +13,9 @@ cases:
     clickhouse:
       planned:
         expect:
-        - (SemiJoin _orbit_edge_0.target_id IN subquery (_) (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+        - (Join ON mr.id = _orbit_edge_0.target_id (_) (Bind mr (Filter starts_with(mr.title, 'Fix'), mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
         reject: ["(CTE ... (_))"]
-- name: FK endpoint IDs and ranges remain visible on the current node join
+- name: Endpoint IDs and ranges remain visible on the edge relation
   query:
     json: |
       {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","node_ids":[1000,1001],"id_range":{"start":1000,"end":1001},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
@@ -29,8 +29,8 @@ cases:
     clickhouse:
       planned:
         expect:
-        - (Join ON mr.project_id = p.id (_) (Bind p (Filter p.id IN [1000, 1001], p.id >= 1000, p.id <= 1001, ... (_))))
-        reject: ["(Scan Table(gl_edge) ...)"]
+        - (Filter _orbit_edge_0.target_id IN [1000, 1001], _orbit_edge_0.target_id >= 1000, _orbit_edge_0.target_id <= 1001, ... (_))
+        - (Scan Table(gl_edge) AS _orbit_edge_0)
 - name: Nullable aggregate properties retain current node rows and arguments
   query:
     json: |

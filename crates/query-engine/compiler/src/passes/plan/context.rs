@@ -6,12 +6,12 @@ use crate::error::{QueryError, Result};
 use crate::input::{Input, InputNode, QueryType};
 
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
-use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
+use super::{DenormalizedKey, DenormalizedProperty, EdgeRelation, NodePlan, Plan};
 
 pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
     pub input: &'a Input,
     pub model: &'a M,
-    pub hops: Vec<Hop>,
+    pub relations: Vec<EdgeRelation>,
     pub nodes: HashMap<String, NodePlan>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
@@ -21,7 +21,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn finish<T>(self, operation: T) -> Plan<T> {
         Plan {
             nodes: self.nodes,
-            hops: self.hops,
+            relations: self.relations,
             denormalized: self.denormalized,
             node_edge_mappings: self.node_edge_mappings,
             operation,
@@ -42,8 +42,9 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
         let root = PhysicalPlan::single_node(node)?;
         Ok(ExecutionPlan {
-            source: root.source,
-            outputs: root.outputs,
+            source: root.into_source(),
+            subplans: vec![],
+            outputs: super::requirements::node_outputs(node),
             bindings: vec![BindingSource::table(&node.alias)],
         })
     }

@@ -439,19 +439,50 @@ fn execution_tree(execution: &ExecutionPlan) -> Tree {
 }
 
 fn execution_source(execution: &ExecutionPlan) -> Tree {
-    Tree::node(
+    let source = Tree::node(
         Operator::Project,
         planned_projections(&execution.outputs),
         vec![physical_source(&execution.source)],
-    )
+    );
+    if execution.subplans.is_empty() {
+        source
+    } else {
+        Tree::node(
+            Operator::With,
+            "",
+            execution
+                .subplans
+                .iter()
+                .map(|subplan| {
+                    Tree::node(
+                        Operator::Cte,
+                        format!("_orbit_subplan_{}", subplan.id.0),
+                        vec![physical_tree(&subplan.plan)],
+                    )
+                })
+                .chain([source])
+                .collect(),
+        )
+    }
 }
 
 fn physical_tree(plan: &PhysicalPlan) -> Tree {
-    Tree::node(
-        Operator::Project,
-        planned_projections(&plan.outputs),
-        vec![physical_source(&plan.source)],
-    )
+    match plan {
+        PhysicalPlan::Project { source, outputs } => Tree::node(
+            Operator::Project,
+            planned_projections(outputs),
+            vec![physical_source(source)],
+        ),
+        PhysicalPlan::Distinct { source, outputs } => Tree::node(
+            Operator::Distinct,
+            "",
+            vec![Tree::node(
+                Operator::Project,
+                planned_projections(outputs),
+                vec![physical_source(source)],
+            )],
+        ),
+    }
 }
 
 fn physical_source(plan: &PhysicalSource) -> Tree {
@@ -467,14 +498,12 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             final_,
             ..
         } => scan(table, alias, *final_),
+        PhysicalSource::Use { id, alias } => {
+            leaf(Operator::Scan, format!("Subplan({}) AS {alias}", id.0))
+        }
         PhysicalSource::Filter { predicates, input } => filter(
             predicates.iter().flat_map(planned_predicate).collect(),
             physical_source(input),
-        ),
-        PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
-            Operator::SemiJoin,
-            format!("{} IN subquery", planned_column(value)),
-            vec![physical_source(input), physical_tree(keys)],
         ),
         PhysicalSource::Scope { alias, input } => {
             Tree::node(Operator::Bind, alias, vec![physical_source(input)])

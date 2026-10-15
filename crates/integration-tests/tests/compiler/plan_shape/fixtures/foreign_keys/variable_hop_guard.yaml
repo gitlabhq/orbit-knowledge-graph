@@ -1,4 +1,4 @@
-name: FK substitution retains exact two-hop paths
+name: Stored expansion retains exact two-hop paths
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr","hops":[2,2]}]}

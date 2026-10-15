@@ -10,7 +10,7 @@ physical:
   clickhouse:
     planned:
       expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['definition_type:function'], ... (_))"]
-      reject: ["(Filter _orbit_edge_1.source_tags HAS ANY ?, ... (_))", "(Scan Table(gl_definition) ...)"]
+      reject: ["(Filter _orbit_edge_1.source_tags HAS ANY ?, ... (_))"]
     emitted:
       expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'definition_type:function'), ... (_))"]
       reject: ["(Filter ArrayContains(_orbit_edge_1.source_tags, ?), ... (_))"]

@@ -1,5 +1,5 @@
 use super::sql::latest_row_dedup;
-use crate::ast::{Expr, Query, SelectExpr, TableRef};
+use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 
 use super::requirements::{column, predicate, projections};
@@ -11,7 +11,15 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
         from: source.from,
         where_parts: source.predicates,
         select: projections(&plan.outputs),
-        ctes: vec![],
+        ctes: plan
+            .subplans
+            .iter()
+            .map(|subplan| {
+                let mut cte = Cte::new(subplan_name(subplan.id), query(&subplan.plan));
+                cte.materialized = subplan.materialized;
+                cte
+            })
+            .collect(),
         nodes: plan
             .bindings
             .iter()
@@ -29,8 +37,16 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
     }
 }
 
+fn subplan_name(id: crate::passes::plan::physical::SubplanId) -> String {
+    format!("_orbit_subplan_{}", id.0)
+}
+
 pub(super) fn query(plan: &PhysicalPlan) -> Query {
-    let (source, order_by, limit_by, condition) = match &plan.source {
+    let (source, outputs, distinct) = match plan {
+        PhysicalPlan::Project { source, outputs } => (source, outputs, false),
+        PhysicalPlan::Distinct { source, outputs } => (source, outputs, true),
+    };
+    let (source, order_by, limit_by, condition) = match source {
         PhysicalSource::Latest {
             alias,
             sort_key,
@@ -50,7 +66,8 @@ pub(super) fn query(plan: &PhysicalPlan) -> Query {
     let mut output = emit_source(source);
     output.predicates.extend(condition.iter().map(predicate));
     Query {
-        select: projections(&plan.outputs),
+        distinct,
+        select: projections(outputs),
         from: output.from,
         where_clause: Expr::conjoin(output.predicates),
         order_by,
@@ -91,17 +108,13 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             },
             predicates: vec![],
         },
+        PhysicalSource::Use { id, alias } => SourceOutput {
+            from: TableRef::cte(subplan_name(*id), alias),
+            predicates: vec![],
+        },
         PhysicalSource::Filter { predicates, input } => {
             let mut output = emit_source(input);
             output.predicates.extend(predicates.iter().map(predicate));
-            output
-        }
-        PhysicalSource::KeyFilter { value, keys, input } => {
-            let mut output = emit_source(input);
-            output.predicates.push(Expr::InSelect {
-                expr: Box::new(column(value)),
-                query: Box::new(query(keys)),
-            });
             output
         }
         PhysicalSource::Scope { alias, input } | PhysicalSource::Latest { alias, input, .. } => {

@@ -154,6 +154,10 @@ pub trait OrbitQueryModel {
         self.query_backend().table_sort_key(table)
     }
 
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.query_backend().equivalent_layouts(table)
+    }
+
     fn in_sort_key(&self, table: &str, column: &str) -> bool {
         self.table_sort_key(table)
             .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))

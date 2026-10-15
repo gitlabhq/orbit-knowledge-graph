@@ -1,16 +1,26 @@
-use super::requirements::{Column, OutputValue, Predicate, Projection, node_outputs, node_predicates};
+use super::requirements::{Column, Predicate, Projection, node_outputs, node_predicates};
 use crate::error::{QueryError, Result};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, SOURCE_TAGS_COLUMN,
     TARGET_TAGS_COLUMN,
 };
 
-use super::{Hop, NodePlan};
+use super::{EdgeRelation, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
+    pub subplans: Vec<Subplan>,
     pub outputs: Vec<Projection>,
     pub bindings: Vec<BindingSource>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SubplanId(pub usize);
+
+pub struct Subplan {
+    pub id: SubplanId,
+    pub plan: PhysicalPlan,
+    pub materialized: bool,
 }
 
 #[derive(Clone)]
@@ -41,18 +51,39 @@ impl BindingSource {
 }
 
 #[derive(Clone)]
-pub struct PhysicalPlan {
-    pub source: PhysicalSource,
-    pub outputs: Vec<Projection>,
+pub enum PhysicalPlan {
+    Project {
+        source: PhysicalSource,
+        outputs: Vec<Projection>,
+    },
+    Distinct {
+        source: PhysicalSource,
+        outputs: Vec<Projection>,
+    },
+}
+
+impl PhysicalPlan {
+    pub fn source(&self) -> &PhysicalSource {
+        match self {
+            Self::Project { source, .. } | Self::Distinct { source, .. } => source,
+        }
+    }
+
+    pub fn outputs(&self) -> &[Projection] {
+        match self {
+            Self::Project { outputs, .. } | Self::Distinct { outputs, .. } => outputs,
+        }
+    }
+
+    pub fn into_source(self) -> PhysicalSource {
+        match self {
+            Self::Project { source, .. } | Self::Distinct { source, .. } => source,
+        }
+    }
 }
 
 #[derive(Clone)]
 pub enum PhysicalSource {
-    KeyFilter {
-        value: Column,
-        keys: Box<PhysicalPlan>,
-        input: Box<Self>,
-    },
     Union {
         alias: String,
         arms: Vec<PhysicalPlan>,
@@ -63,6 +94,10 @@ pub enum PhysicalSource {
         alias: String,
         final_: bool,
         relationship: Option<usize>,
+    },
+    Use {
+        id: SubplanId,
+        alias: String,
     },
     Filter {
         predicates: Vec<Predicate>,
@@ -87,10 +122,10 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
-    pub(super) fn edge(hop: &Hop, alias: &str, final_: bool) -> Self {
-        if let Some(table) = hop.single_edge_table() {
+    pub(super) fn edge(relation: &EdgeRelation, alias: &str, final_: bool) -> Self {
+        if let Some(table) = relation.single_edge_table() {
             return Self::Scan {
-                relationship: Some(hop.input_index),
+                relationship: Some(relation.input_index),
                 table: table.into(),
                 alias: alias.into(),
                 final_,
@@ -98,12 +133,12 @@ impl PhysicalSource {
         }
         Self::Union {
             alias: alias.into(),
-            arms: hop
+            arms: relation
                 .edge_tables
                 .iter()
-                .map(|table| PhysicalPlan {
+                .map(|table| PhysicalPlan::Project {
                     source: Self::Scan {
-                        relationship: Some(hop.input_index),
+                        relationship: Some(relation.input_index),
                         table: table.clone(),
                         alias: format!("_{alias}"),
                         final_,
@@ -116,7 +151,7 @@ impl PhysicalSource {
                         .collect(),
                 })
                 .collect(),
-            relationship: hop.input_index,
+            relationship: relation.input_index,
         }
     }
 
@@ -153,20 +188,8 @@ impl PhysicalSource {
 }
 
 impl PhysicalPlan {
-    pub fn exact_keys(node: &NodePlan, column: &str) -> Result<Self> {
-        Ok(Self {
-            source: PhysicalSource::node(node, true)?.filter(node_predicates(node)),
-            outputs: vec![Projection::new(
-                OutputValue::Column(Column::new(&node.alias, column)),
-                DEFAULT_PRIMARY_KEY,
-            )],
-        })
-    }
-
-    pub fn node_scan(
-        node: &NodePlan,
-    ) -> Result<Self> {
-        Ok(Self {
+    pub fn node_scan(node: &NodePlan) -> Result<Self> {
+        Ok(Self::Project {
             source: PhysicalSource::Scope {
                 alias: node.alias.clone(),
                 input: Box::new(PhysicalSource::node(node, true)?.filter(node_predicates(node))),
@@ -176,7 +199,7 @@ impl PhysicalPlan {
     }
 
     pub fn single_node(node: &NodePlan) -> Result<Self> {
-        Ok(Self {
+        Ok(Self::Project {
             outputs: node_outputs(node),
             source: PhysicalSource::node(node, true)?.filter(node_predicates(node)),
         })

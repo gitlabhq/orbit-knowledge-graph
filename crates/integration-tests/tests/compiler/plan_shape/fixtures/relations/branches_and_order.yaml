@@ -1,5 +1,5 @@
 cases:
-- name: An FK branch shares semantic node bindings without a star operator
+- name: A branch joins edge relations through the shared occurrence
   query:
     json: |
       {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]},{"id":"j","entity":"Job","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
@@ -13,13 +13,12 @@ cases:
     clickhouse:
       planned:
         expect:
-        - (Join ON mr.project_id = p.id (_) (Bind p (_)))
-        - (Join ON mr.head_pipeline_id = pipe.id (_) (Bind pipe (_)))
-        - (Join ON j.pipeline_id = pipe.id (_) (Bind j (_)))
-        reject:
-        - (Scan Table(gl_edge) ...)
-        - (Scan Table(gl_ci_edge) ...)
-- name: A mixed branch keeps stored and FK decisions independent
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.source_id (_) (_))
+        - (Join ON _orbit_edge_1.target_id = _orbit_edge_2.source_id (_) (_))
+        - (Scan Table(gl_edge) AS _orbit_edge_0)
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_1)
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+- name: A mixed table branch keeps one edge relation per relationship
   query:
     json: |
       {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
@@ -33,10 +32,9 @@ cases:
     clickhouse:
       planned:
         expect:
+        - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
+        - (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (_) (_))
         - (Scan Table(gl_edge) AS _orbit_edge_0)
-        - (Join ON mr.project_id = p.id (_) (Bind p (_)))
-        - (Join ON mr.head_pipeline_id = pipe.id (_) (Bind pipe (_)))
-        reject:
         - (Scan Table(gl_edge) AS _orbit_edge_1)
         - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
 - name: Connected relationships linearize by occurrence connectivity only
