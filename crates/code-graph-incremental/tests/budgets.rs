@@ -151,3 +151,42 @@ fn a_file_nested_past_the_depth_limit_keeps_what_lies_above_the_cut() {
         .collect();
     assert_eq!(calls, [("nested".to_string(), "top".to_string())]);
 }
+
+#[test]
+fn a_class_whose_body_is_cut_keeps_its_definitions() {
+    let repo = tempfile::tempdir().unwrap();
+    let nested = format!(
+        "class Shallow {{\n  method(c) {{\n{}{}  }}\n}}\n",
+        "if (c) {\n".repeat(200),
+        "}\n".repeat(200)
+    );
+    write_all(repo.path(), &[("shallow.js", &nested)]);
+    let env = Env::with_limits(
+        SupportLang::JavaScript,
+        Limits {
+            max_tree_depth: 64,
+            ..Limits::UNLIMITED
+        },
+    )
+    .unwrap();
+    let graph = templates::index(Context::new(&env, common::walk(repo.path()))).unwrap();
+    assert_eq!(
+        skipped(&graph.context().report.limited),
+        [("depth", "shallow.js")]
+    );
+    let mut names: Vec<_> = graph
+        .value()
+        .state
+        .trees
+        .iter()
+        .flat_map(|tree| {
+            tree.root()
+                .descendants()
+                .filter_map(|n| n.child_sym(C::DefName))
+                .collect::<Vec<_>>()
+        })
+        .map(|sym| env.lang.syms.resolve(sym).to_string())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Shallow", "method"]);
+}
