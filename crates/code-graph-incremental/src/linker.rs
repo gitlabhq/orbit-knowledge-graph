@@ -589,6 +589,9 @@ impl<'t> Fold<'t> {
                 if obj.child(C::Member).is_some() {
                     self.flow_chain_root(obj, from);
                 }
+                if self.lookup(obj.chain_root().sym()).iter().all(is_name) {
+                    self.named_calls.insert(c.index());
+                }
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
             if let Some(cls) = self.enclosing_class(from) {
@@ -1502,7 +1505,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
 }
 
 fn is_name(value: &Value) -> bool {
-    matches!(value, Value::LocalDef(_) | Value::ImportRef(_))
+    matches!(
+        value,
+        Value::LocalDef(_) | Value::ImportRef(_) | Value::Type(_)
+    )
 }
 
 fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
