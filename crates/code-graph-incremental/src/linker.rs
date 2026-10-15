@@ -116,6 +116,9 @@ struct LoopNames {
     spans: FxHashMap<u32, (u32, u32)>,
     assigned: FxHashMap<u32, Vec<u32>>,
     next: u32,
+    inline_wildcard: Option<u32>,
+    wildcards: Vec<u32>,
+    def_names: FxHashSet<u32>,
 }
 
 impl LoopNames {
@@ -137,6 +140,9 @@ impl LoopNames {
             self.next += 1;
             if node.is(C::Import) || node.is(C::ImportType) {
                 for name in std::iter::once(node).chain(node.descendants()) {
+                    if Some(name.sym()) == self.inline_wildcard {
+                        self.bind_wildcard(name, at);
+                    }
                     self.assigned.entry(name.sym()).or_default().push(at);
                 }
                 continue;
@@ -155,11 +161,28 @@ impl LoopNames {
         }
     }
 
-    fn assigns(&self, sym: u32, (start, end): (u32, u32)) -> bool {
-        let at = self.assigned.get(&sym).map_or(&[][..], Vec::as_slice);
-        at.get(at.partition_point(|&n| n < start))
-            .is_some_and(|&n| n < end)
+    fn bind_wildcard(&mut self, name: Cursor, at: u32) {
+        if self.wildcards.is_empty() {
+            let root = name.ancestors().last().unwrap_or(name);
+            self.def_names = root
+                .descendants()
+                .filter(|d| d.is(C::Def))
+                .filter_map(|d| d.child_sym(C::DefName))
+                .collect();
+        }
+        self.wildcards.push(at);
     }
+
+    fn assigns(&self, sym: u32, span: (u32, u32)) -> bool {
+        let at = self.assigned.get(&sym).map_or(&[][..], Vec::as_slice);
+        within(at, span) || (self.def_names.contains(&sym) && within(&self.wildcards, span))
+    }
+}
+
+fn within(sorted: &[u32], (start, end): (u32, u32)) -> bool {
+    sorted
+        .get(sorted.partition_point(|&n| n < start))
+        .is_some_and(|&n| n < end)
 }
 
 impl<'t> Fold<'t> {
@@ -1329,7 +1352,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         obj_seen: FxHashSet::default(),
         chain_memo: FxHashMap::default(),
         loops: Vec::new(),
-        loop_names: LoopNames::default(),
+        loop_names: LoopNames {
+            inline_wildcard: config.inline_modules.then(|| lang.syms.intern(WILDCARD)),
+            ..LoopNames::default()
+        },
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
