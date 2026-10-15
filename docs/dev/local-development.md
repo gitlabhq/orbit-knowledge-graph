@@ -156,8 +156,8 @@ the copies, and restores the replica counts.
    mise run dev
    ```
 
-The webserver is available at `http://localhost:8090` (HTTP) and `0.0.0.0:50054` (gRPC)
-by default. Override ports in `config/dev.local.yaml`.
+The webserver listens for gRPC on `0.0.0.0:50054` by default. Override ports in
+`config/dev.local.yaml`.
 
 `mise run dev` runs a check, then four tasks side by side with prefixed output:
 `dev:connect`, `dev:web`, `dev:indexer`, `dev:dispatcher`. Ctrl+C stops everything.
@@ -194,7 +194,7 @@ Personal overrides go in `config/dev.local.yaml`. The file is Git-ignored and th
 merges it last into the generated `.dev/<mode>.yaml` that each process loads:
 
 ```yaml
-bind_address: "127.0.0.1:8091"
+grpc_bind_address: "0.0.0.0:50055"
 engine:
   max_concurrent_workers: 16
 ```
