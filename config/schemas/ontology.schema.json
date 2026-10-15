@@ -28,7 +28,8 @@
         "security",
         "plan",
         "packages",
-        "container_registry"
+        "container_registry",
+        "agents"
       ],
       "description": "Domain classification for organizing entities."
     },
