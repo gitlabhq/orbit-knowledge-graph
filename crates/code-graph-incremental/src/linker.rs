@@ -809,11 +809,10 @@ impl<'t> Fold<'t> {
     }
 
     fn bind(&mut self, name: u32, binding: u32) {
-        let depth = self.scopes.len() - 1;
-        let Some((_, scope)) = self.scopes.last_mut() else {
+        let Some(depth) = self.scopes.len().checked_sub(1) else {
             return;
         };
-        scope.insert(name, binding);
+        self.scopes[depth].1.insert(name, binding);
         let stack = self.bound.entry(name).or_default();
         match stack.last_mut() {
             Some((at, bound)) if *at == depth => *bound = binding,
