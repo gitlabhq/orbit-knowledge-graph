@@ -817,12 +817,12 @@ mod tests {
             }
 
             let phi_val = Value::Phi(phi_id);
-            let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
-            phi_users.retain(|user| {
-                *user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
-            });
-            phi_users.sort_unstable_by_key(|user| user.0);
-            phi_users.dedup();
+            let phi_users: Vec<PhiId> = (0..self.phis.len() as u32)
+                .map(PhiId)
+                .filter(|&user| {
+                    user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
+                })
+                .collect();
 
             for user_id in &phi_users {
                 let user = &mut self.phis[user_id.0 as usize];
@@ -831,10 +831,6 @@ mod tests {
                         *op = replacement.clone();
                     }
                 }
-                if let Value::Phi(used) = replacement {
-                    self.users[used.0 as usize].push(*user_id);
-                }
-                let user = &mut self.phis[user_id.0 as usize];
                 for w in &mut user.witnesses {
                     if w.as_ref() == Some(&phi_val) {
                         *w = None;
