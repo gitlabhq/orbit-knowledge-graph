@@ -287,13 +287,9 @@ async fn drain(
                     let _ = ack.send(());
                 }
                 Some(Msg::FlushFor(token)) => {
-                    let holding: Vec<String> = pending
-                        .iter()
-                        .filter(|(_, buf)| buf.tokens.iter().any(|t| Arc::ptr_eq(t, &token)))
-                        .map(|(table, _)| table.clone())
-                        .collect();
-                    for table in holding {
-                        let buf = pending.remove(&table).unwrap();
+                    let holding = pending
+                        .extract_if(|_, buf| buf.tokens.iter().any(|t| Arc::ptr_eq(t, &token)));
+                    for (table, buf) in holding {
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
                 }
