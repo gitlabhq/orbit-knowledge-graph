@@ -321,8 +321,8 @@ async fn a_read_inside_deeply_nested_loops_links_inside_the_budget() {
 }
 
 #[tokio::test]
-async fn a_value_copied_into_its_own_fields_is_reported_at_the_copy_limit() {
-    let copies = "a.x = a;\na.y = a;\n".repeat(40);
+async fn a_value_copied_into_its_own_fields_links_without_a_copy_limit() {
+    let copies = "a.x = a;\na.y = a;\n".repeat(5_000);
     let body = format!("fn target() {{}}\nfn self_fields(mut a: Node) {{\n{copies}target();\n}}\n");
     let files: &[(&str, &[u8])] = &[
         ("root/src/lib.rs", body.as_bytes()),
@@ -330,7 +330,7 @@ async fn a_value_copied_into_its_own_fields_is_reported_at_the_copy_limit() {
     ];
     let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
     assert!(timings.skipped_paths.is_empty());
-    assert_eq!(timings.limited_reasons, ["too_many_field_copies"]);
+    assert!(timings.limited_reasons.is_empty());
 }
 
 #[tokio::test]

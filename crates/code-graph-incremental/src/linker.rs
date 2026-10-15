@@ -18,7 +18,6 @@ type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 type WildcardImports = Rc<Vec<u32>>;
 
-const MAX_FIELD_COPIES: usize = 4_096;
 const MAX_FILE_EDGES: usize = 2_000_000;
 
 fn edge_limit(edges: &[Edge], path: &str) -> Result<(), Killed> {
@@ -850,20 +849,20 @@ impl<'t> Fold<'t> {
                         .then(|| self.binding(value.sym()))
                 })
                 .unwrap_or(0);
+            if source != lhs
+                && self.reaches(source, lhs)
+                && let Some(shared) = self.fields.get(&source).cloned()
+            {
+                self.fields.insert(lhs, shared);
+                return;
+            }
             self.fields.get(&source).cloned().unwrap_or_default()
         };
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
-        let mut copied = 0;
+        let mut copied = FxHashSet::default();
         while let Some((target, sources)) = copies.pop() {
-            copied += 1;
-            if copied > MAX_FIELD_COPIES {
-                self.limited.get_or_insert_with(|| {
-                    Killed::limit("fields", &self.tree.label, copied, MAX_FIELD_COPIES)
-                });
-                break;
-            }
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
                 return;
@@ -884,7 +883,9 @@ impl<'t> Fold<'t> {
                 }
                 let value = self.read_value(source);
                 value_updates.push((target, value));
-                if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
+                if (self.fields.contains_key(&source) || self.fields.contains_key(&target))
+                    && copied.insert(source)
+                {
                     let sources = self.fields.get(&source).cloned().unwrap_or_default();
                     copies.push((target, sources));
                 }
@@ -895,6 +896,25 @@ impl<'t> Fold<'t> {
         for (target, value) in value_updates {
             self.ssa.write_variable(target, self.cur, value);
         }
+    }
+
+    fn reaches(&self, from: u32, to: u32) -> bool {
+        let mut seen = FxHashSet::default();
+        let mut stack = vec![from];
+        while let Some(binding) = stack.pop() {
+            if binding == to {
+                return true;
+            }
+            if seen.insert(binding) {
+                stack.extend(
+                    self.fields
+                        .get(&binding)
+                        .into_iter()
+                        .flat_map(|f| f.values()),
+                );
+            }
+        }
+        false
     }
 
     fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {

@@ -181,7 +181,6 @@ fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error
         "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
         "link" => FileSkip::Timeout(AbortPhase::Ssa),
         "edges" => FileSkip::TooManyEdges,
-        "fields" => FileSkip::TooManyFieldCopies,
         "manifests" => FileSkip::TooManyManifestBytes,
         "fqn" => FileSkip::FqnTruncated,
         _ => FileSkip::Timeout(AbortPhase::Sentinel),
