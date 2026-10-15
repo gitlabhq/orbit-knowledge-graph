@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::multiple_anchors_apply_distinct_traversal_paths
 description: Distinct per-anchor traversal paths still join via cross-namespace CLOSES edge
 
 config:

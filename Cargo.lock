@@ -4106,6 +4106,7 @@ dependencies = [
  "duckdb-client",
  "futures",
  "gitalisk-core",
+ "jsonschema",
  "ontology",
  "orbit-arrow",
  "orbit-migrations",

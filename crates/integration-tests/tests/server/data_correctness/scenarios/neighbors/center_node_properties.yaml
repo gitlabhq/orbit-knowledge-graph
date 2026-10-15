@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_center_node_properties_hydrated
 description: Center node columns are hydrated on User 1
 
 query:
@@ -25,4 +24,6 @@ expect:
         - { id: 100, name: Public Group }
         - { id: 102, name: Internal Group }
   edge_exists:
-    MEMBER_OF: [[1, 100], [1, 102]]
+    MEMBER_OF:
+      - { from: User, from_id: 1, to: Group, to_id: 100 }
+      - { from: User, from_id: 1, to: Group, to_id: 102 }

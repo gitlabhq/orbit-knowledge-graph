@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_wildcard_user_to_mr_infers_relationship_kinds
 description: Wildcard relationship infers all User-MergeRequest edge kinds
 
 query:

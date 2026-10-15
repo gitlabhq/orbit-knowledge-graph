@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_narrow_scope_returns_all_authors
 description: Project-level scope 1/100/1000/ returns all authors of that project's MRs
 
 config:

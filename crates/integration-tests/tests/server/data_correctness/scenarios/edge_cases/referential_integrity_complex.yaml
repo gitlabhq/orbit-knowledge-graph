@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::traversal_referential_integrity_on_complex_query
 description: Multi-hop User→Group→Project traversal has referential integrity
 
 query:

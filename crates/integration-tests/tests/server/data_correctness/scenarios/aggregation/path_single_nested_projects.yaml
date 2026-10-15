@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_path_single_nested_group
 description: Path 1/100/ restricts CONTAINS aggregation to Group 100's projects
 
 config:

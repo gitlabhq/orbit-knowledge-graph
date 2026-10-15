@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_user_authored_work_item_returns_correct_edges
 description: User-WorkItem AUTHORED traversal returns correct edges and node properties
 
 query:
@@ -20,11 +19,11 @@ expect:
   referential_integrity: true
   edge_exists:
     AUTHORED:
-      - [1, 4000]
-      - [2, 4001]
-      - [1, 4002]
-      - [3, 4003]
-      - [7, 4010]
+      - { from: User, from_id: 1, to: WorkItem, to_id: 4000 }
+      - { from: User, from_id: 2, to: WorkItem, to_id: 4001 }
+      - { from: User, from_id: 1, to: WorkItem, to_id: 4002 }
+      - { from: User, from_id: 3, to: WorkItem, to_id: 4003 }
+      - { from: User, from_id: 7, to: WorkItem, to_id: 4010 }
   nodes:
     WorkItem:
       rows:

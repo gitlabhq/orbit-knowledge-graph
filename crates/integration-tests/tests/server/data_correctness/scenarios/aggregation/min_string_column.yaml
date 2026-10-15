@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_min_on_string_column
 description: Lexicographic min on string column (username)
 
 config:

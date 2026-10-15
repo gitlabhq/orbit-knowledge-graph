@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::hydration_returns_latest_properties
 description: Hydration returns latest properties for deduped node
 
 config:
@@ -42,4 +41,4 @@ expect:
         - { id: 9600, username: hydrate_new, name: New Hydrated }
   edge_exists:
     MEMBER_OF:
-      - [9600, 100]
+      - { from: User, from_id: 9600, to: Group, to_id: 100 }
