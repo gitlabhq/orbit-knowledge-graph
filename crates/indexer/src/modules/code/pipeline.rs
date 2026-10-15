@@ -387,6 +387,7 @@ impl CodeIndexer {
             }
         };
 
+        drop(repository);
         context.work.release();
         run.commit.durable().await.map_err(IndexError::Failed)?;
         Ok(IndexOutcome::Indexed {
