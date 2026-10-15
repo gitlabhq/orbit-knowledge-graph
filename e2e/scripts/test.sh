@@ -4,8 +4,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 JOB_NAME="e2e-robot-runner"
 RELEASE_NAME="e2e-robot-runner"
 DIAG_DIR="${E2E_DIR}/diagnostics"
-TIMEOUT_SECONDS=1800
+INDEXING_BUDGET_MULTIPLIER="${E2E_INDEXING_BUDGET_MULTIPLIER:-1}"
+SETUP_MARGIN_SECONDS=600
 POLL_INTERVAL=3
+
+budgets() { grep -hoE "(Start Indexing Budget|Scaled Timeout) +[0-9]+" "$@" | awk '{ print $NF }'; }
+SMOKE_BUDGET_SECONDS=$(budgets "$E2E_DIR/tests/01_setup_and_smoke.robot" | awk '{ s += $1 } END { print s + 0 }')
+SUITE_BUDGET_SECONDS=$(budgets "$E2E_DIR"/tests/*.robot | sort -n | tail -1)
+TIMEOUT_SECONDS=$(awk -v smoke="$SMOKE_BUDGET_SECONDS" -v suite="$SUITE_BUDGET_SECONDS" \
+  -v multiplier="$INDEXING_BUDGET_MULTIPLIER" -v margin="$SETUP_MARGIN_SECONDS" \
+  'BEGIN { printf "%d", (smoke + suite) * multiplier + margin }')
 
 log "E2E Tests (SHA: $E2E_SHA)"
 mkdir -p "$DIAG_DIR"
@@ -38,7 +46,7 @@ HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
   --kube-context "$KCTX"
   --set "namespaces.gitlab=$NS_GITLAB"
   --set "namespaces.gkg=$NS_GKG"
-  --set "indexingBudgetMultiplier=${E2E_INDEXING_BUDGET_MULTIPLIER:-1}"
+  --set "indexingBudgetMultiplier=${INDEXING_BUDGET_MULTIPLIER}"
   --set-string "codeGraphIncremental=${E2E_CODE_GRAPH_INCREMENTAL:-false}")
 if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
   HELM_ARGS+=(--set "image=$E2E_ROBOT_IMAGE")
@@ -52,7 +60,7 @@ trap 'rm -rf "$FIX_TMP"; kill "$CHAOS_PID" 2>/dev/null || true' EXIT
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
 # streaming `kubectl logs -f` from a background subshell.
-log "Waiting for tests to complete (timeout: ${TIMEOUT_SECONDS}s)"
+log "Waiting for tests to complete (timeout: ${TIMEOUT_SECONDS}s = (${SMOKE_BUDGET_SECONDS} smoke + ${SUITE_BUDGET_SECONDS} suite) x ${INDEXING_BUDGET_MULTIPLIER} + ${SETUP_MARGIN_SECONDS})"
 result=timeout
 SECONDS=0
 while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do

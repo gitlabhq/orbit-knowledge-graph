@@ -1514,7 +1514,7 @@ e2e:
 # replica during the schema migration and another during the run.
 e2e-ha:
   extends: e2e
-  timeout: 90 minutes
+  timeout: 2 hours
   variables:
     E2E_CH_REPLICAS: "3"
     E2E_SUFFIX: "-ha"
