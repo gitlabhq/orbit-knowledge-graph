@@ -1,122 +1,86 @@
 #!/usr/bin/env bash
-
+# Native-process Orbit development against a Caproni cluster.
+#
+# Usage: scripts/dev/orbit-native-dev.sh {check|config|connect|setup|webserver|indexer|dispatcher|healthcheck}
+#
+# The cluster comes from a gitlab-caproni checkout (CAPRONI_DIR) with
+# fragments/caproni.orbit.yaml enabled. Every cluster call goes through
+# `caproni kubectl` run from that directory, so this script always talks to
+# the cluster that checkout owns.
+#
+# `connect` holds the session state the modes need: port-forwards for
+# ClickHouse and NATS, the in-cluster Orbit scaled to zero so only local code
+# consumes NATS, and an EndpointSlice that routes the gkg-webserver Service to
+# this host so GitLab Rails reaches the local webserver. Ctrl+C undoes all of it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-if [[ -f "$REPO_ROOT/.env" ]]; then
+if [[ -z "${ORBIT_DEV_SKIP_ENV:-}" && -f "$REPO_ROOT/.env" ]]; then
   set -a
   # shellcheck source=/dev/null
   source "$REPO_ROOT/.env"
   set +a
 fi
 
-# Prerequisite: enable GDK-native `nats`, `clickhouse`, and `siphon` in
-# `gdk.yml`. This script intentionally targets the existing GDK services rather
-# than starting extra local infrastructure.
+# CAPRONI_DIR_RESOLVED is the mise [env] fallback, so the mise tasks work without a .env file.
+CAPRONI_DIR="${CAPRONI_DIR:-${CAPRONI_DIR_RESOLVED:-$HOME/gitlab-caproni}}"
+CAPRONI_DIR="${CAPRONI_DIR/#\~/$HOME}"
 
-parse_gdk_value() {
-  local expr="$1"
-  local dot_expr=".${expr}"
-  local value
-  # Look up the key in the user's gdk.yml first; fall back to gdk.example.yml for
-  # keys the user hasn't overridden. yq returns "null" (not empty string) for
-  # missing keys, so we treat both as "not found".
-  value="$(yq "$dot_expr" "$GDK_YML" 2>/dev/null)"
-  if [[ "$value" == "null" || -z "$value" ]]; then
-    value="$(yq "$dot_expr" "$GDK_DEFAULT_YML" 2>/dev/null)"
-  fi
-  [[ "$value" != "null" && -n "$value" ]] || return 1
-  echo "$value"
-}
+DEV_OVERLAY="${DEV_OVERLAY_OVERRIDE:-$REPO_ROOT/config/dev.yaml}"
+LOCAL_OVERLAY="${LOCAL_OVERLAY_OVERRIDE:-$REPO_ROOT/config/dev.local.yaml}"
+GENERATED_DIR="${GENERATED_DIR_OVERRIDE:-$REPO_ROOT/.dev}"
+STATE_FILE="$GENERATED_DIR/connect-state"
 
-gdk_enabled() {
-  [[ "$(parse_gdk_value "$1.enabled" 2>/dev/null || true)" == "true" ]]
-}
+# Fixed Caproni names. The databases and users live in config/dev.yaml.
+GITLAB_NS="gitlab"
+STACK_NS="gitlab-dev-stack"
+ORBIT_SELECTOR="app.kubernetes.io/name=gkg,app.kubernetes.io/instance=gkg"
+SECRET_NAME="gitlab-dev-stack-gkg-secrets"
+CLICKHOUSE_SVC="gitlab-dev-stack-clickhouse"
+NATS_SVC="gitlab-dev-stack-nats"
+CLICKHOUSE_LOCAL_PORT=8123
+NATS_LOCAL_PORT=4222
+WEBSERVER_SVC="gkg-webserver"
+WEBSERVER_GRPC_PORT=50054
+ENDPOINTSLICE_NAME="gkg-webserver-orbit-native-dev"
 
-# GDK_ROOT_RESOLVED is the mise [env] fallback, so the mise tasks work without a .env file.
-GDK_ROOT="${GDK_ROOT:-${GDK_DIR:-${GDK_ROOT_RESOLVED:-}}}"
-if [[ -z "$GDK_ROOT" ]]; then
-  cat <<'EOF'
-ERROR: GDK_ROOT is not set.
-
-Set it to the path of your GDK installation:
-  export GDK_ROOT=/path/to/your/gdk
-  mise run dev
-
-GDK_DIR is also accepted as an alias for GDK_ROOT.
-EOF
-  exit 1
-fi
-
-GDK_ROOT="${GDK_ROOT/#\~/$HOME}"
-GDK_YML="$GDK_ROOT/gdk.yml"
-GDK_DEFAULT_YML="$GDK_ROOT/gdk.example.yml"
-GITLAB_ROOT="${GITLAB_ROOT:-$GDK_ROOT/gitlab}"
-
-# Each mode runs on one generated overlay: config/dev.yaml deep-merged with the connection details
-# derived below, the mode's ports, and the Git-ignored config/dev.local.yaml when present.
-DEV_OVERLAY="$REPO_ROOT/config/dev.yaml"
-LOCAL_OVERLAY="$REPO_ROOT/config/dev.local.yaml"
-GENERATED_DIR="$REPO_ROOT/.dev"
-
-GDK_CLICKHOUSE_HTTP_PORT="$(parse_gdk_value clickhouse.http_port 2>/dev/null || echo 8123)"
-GDK_CLICKHOUSE_TCP_PORT="$(parse_gdk_value clickhouse.tcp_port 2>/dev/null || echo 9001)"
-GDK_POSTGRES_PORT="$(parse_gdk_value postgresql.port 2>/dev/null || echo 5432)"
-# gdk.example.yml contains a hardcoded absolute path for postgresql.host
-# (e.g. /home/git/gdk/postgresql) which won't exist on macOS. If the resolved
-# path doesn't exist, fall back to $GDK_ROOT/postgresql.
-GDK_POSTGRES_HOST="$(parse_gdk_value postgresql.host 2>/dev/null || echo "$GDK_ROOT/postgresql")"
-if [[ "$GDK_POSTGRES_HOST" == /* && ! -d "$GDK_POSTGRES_HOST" ]]; then
-  GDK_POSTGRES_HOST="$GDK_ROOT/postgresql"
-fi
-
-# Derive the GDK external URL from gdk.yml hostname/port/https settings.
-# GDK may be configured with HTTPS + nginx, in which case Rails is not
-# directly reachable on a TCP port — traffic goes through nginx/workhorse.
-GDK_HOSTNAME="$(parse_gdk_value hostname 2>/dev/null || echo "127.0.0.1")"
-GDK_PORT="$(parse_gdk_value port 2>/dev/null || echo 3000)"
-GDK_HTTPS_ENABLED="$(parse_gdk_value https.enabled 2>/dev/null || echo false)"
-
-if [[ "$GDK_HTTPS_ENABLED" == "true" ]]; then
-  GDK_GITLAB_URL="https://${GDK_HOSTNAME}:${GDK_PORT}"
-else
-  GDK_GITLAB_URL="http://${GDK_HOSTNAME}:${GDK_PORT}"
-fi
-
-# Static dev values (databases, bind addresses, consumer name) live in config/dev.yaml; only what
-# must be read from the GDK checkout is derived here.
-CLICKHOUSE_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
-GITLAB_BASE_URL="$GDK_GITLAB_URL"
-# GDK templates its Siphon stream name in layout.yml, not the generated CDC config.
-SIPHON_STREAM_NAME="$(yq '.stream_name' "$GDK_ROOT/siphon/layout.yml" 2>/dev/null || true)"
-if [[ -z "$SIPHON_STREAM_NAME" || "$SIPHON_STREAM_NAME" == "null" ]]; then
-  printf 'Warning: Siphon stream name missing from %s; using fallback siphon_stream\n' "$GDK_ROOT/siphon/layout.yml" >&2
-  SIPHON_STREAM_NAME="siphon_stream"
-fi
-
-GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'
-import re
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-if not path.exists():
-    sys.exit(0)
-text = path.read_text()
-match = re.search(r'^listen_addr\s*=\s*"([^"]+)"', text, re.M)
-if match:
-    print(match.group(1))
-PY
-)"
-
-JWT_VERIFYING_KEY="$(cat "$GITLAB_ROOT/.gitlab_knowledge_graph_secret" 2>/dev/null || cat "$GITLAB_ROOT/.gitlab_shell_secret" 2>/dev/null || echo "development-secret-at-least-32-bytes")"
-JWT_SIGNING_KEY="$JWT_VERIFYING_KEY"
-
+# Filled by load_cluster_values; tests set them directly.
+CLICKHOUSE_URL="http://127.0.0.1:${CLICKHOUSE_LOCAL_PORT}"
 CLICKHOUSE_PASSWORD=""
-if [[ -f "$GITLAB_ROOT/config/click_house.yml" ]]; then
-  CLICKHOUSE_PASSWORD="$(ruby -e 'require "yaml"; require "erb"; path=ARGV[0]; data=YAML.safe_load(ERB.new(File.read(path)).result, aliases: true) rescue {}; dev=(data["development"] || {}); puts(dev["password"] || "")' "$GITLAB_ROOT/config/click_house.yml" 2>/dev/null || true)"
-fi
+GITLAB_BASE_URL=""
+JWT_VERIFYING_KEY=""
+JWT_SIGNING_KEY=""
+
+cap() { mise -C "$CAPRONI_DIR" exec -- caproni "$@"; }
+kc() { cap kubectl "$@"; }
+# A tool from the gitlab-caproni toolchain (colima, docker-cli) with that checkout's versions.
+captool() { mise -C "$CAPRONI_DIR" exec -- "$@"; }
+
+secret_value() {
+  kc -n "$GITLAB_NS" get secret "$SECRET_NAME" -o "jsonpath={.data.$1}" | base64 -d
+}
+
+cluster_hostname() {
+  cap config print 2>/dev/null | yq '.cluster.network.hostname'
+}
+
+cluster_driver() {
+  local driver
+  driver="$(cap config print 2>/dev/null | yq '.cluster.driver')"
+  if [[ "$driver" == "auto" || -z "$driver" || "$driver" == "null" ]]; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then driver=colima; else driver=k3d; fi
+  fi
+  echo "$driver"
+}
+
+load_cluster_values() {
+  GITLAB_BASE_URL="http://$(cluster_hostname)"
+  CLICKHOUSE_PASSWORD="$(secret_value graph-password)"
+  JWT_VERIFYING_KEY="$(secret_value gitlab-jwt-verifying-key)"
+  JWT_SIGNING_KEY="$(secret_value gitlab-jwt-signing-key)"
+}
 
 yaml_str() {
   local escaped
@@ -124,46 +88,29 @@ yaml_str() {
   printf '"%s"' "$escaped"
 }
 
-gdk_overlay_yaml() {
+cluster_overlay_yaml() {
   echo "datalake:"
   echo "  url: $(yaml_str "$CLICKHOUSE_URL")"
-  if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
-    echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
-  fi
+  echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
   echo "graph:"
   echo "  url: $(yaml_str "$CLICKHOUSE_URL")"
-  if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
-    echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
-  fi
+  echo "  password: $(yaml_str "$CLICKHOUSE_PASSWORD")"
   echo "gitlab:"
   echo "  base_url: $(yaml_str "$GITLAB_BASE_URL")"
   echo "  jwt:"
   echo "    verifying_key: $(yaml_str "$JWT_VERIFYING_KEY")"
   echo "    signing_key: $(yaml_str "$JWT_SIGNING_KEY")"
-  echo "schedule:"
-  echo "  tasks:"
-  echo "    siphon:"
-  echo "      events_stream_name: $(yaml_str "$SIPHON_STREAM_NAME")"
 }
 
 # The only value that differs between the processes `mise run dev` starts side by side. Every mode
 # binds this address for the labkit probe server, so each one needs its own even with metrics off.
 mode_overlay_yaml() {
   case "$1" in
-    webserver)
-      printf 'probe_server:\n  bind_address: "127.0.0.1:9100"\n'
-      ;;
-    indexer)
-      printf 'probe_server:\n  bind_address: "127.0.0.1:9200"\n'
-      ;;
-    dispatch-indexing)
-      printf 'probe_server:\n  bind_address: "127.0.0.1:9300"\n'
-      ;;
-    health-check)
-      printf 'probe_server:\n  bind_address: "127.0.0.1:9400"\n'
-      ;;
-    *)
-      ;;
+    webserver) printf 'probe_server:\n  bind_address: "127.0.0.1:9100"\n' ;;
+    indexer) printf 'probe_server:\n  bind_address: "127.0.0.1:9200"\n' ;;
+    dispatch-indexing) printf 'probe_server:\n  bind_address: "127.0.0.1:9300"\n' ;;
+    health-check) printf 'probe_server:\n  bind_address: "127.0.0.1:9400"\n' ;;
+    *) ;;
   esac
 }
 
@@ -171,35 +118,216 @@ mode_overlay_yaml() {
 write_mode_overlay() {
   local mode="$1"
   local target="$GENERATED_DIR/$mode.yaml"
-  local gdk_part mode_part tmp
+  local cluster_part mode_part tmp
   mkdir -p "$GENERATED_DIR"
-  gdk_part="$(mktemp "$GENERATED_DIR/gdk.XXXXXX")"
+  cluster_part="$(mktemp "$GENERATED_DIR/cluster.XXXXXX")"
   mode_part="$(mktemp "$GENERATED_DIR/mode.XXXXXX")"
   tmp="$(mktemp "$target.XXXXXX")"
-  gdk_overlay_yaml > "$gdk_part"
-  mode_overlay_yaml "$mode" > "$mode_part"
-  local parts=("$DEV_OVERLAY" "$gdk_part")
+  cluster_overlay_yaml >"$cluster_part"
+  mode_overlay_yaml "$mode" >"$mode_part"
+  local parts=("$DEV_OVERLAY" "$cluster_part")
   if [[ -s "$mode_part" ]]; then
     parts+=("$mode_part")
   fi
   if [[ -f "$LOCAL_OVERLAY" ]]; then
     parts+=("$LOCAL_OVERLAY")
   fi
-  {
-    echo "# Generated by scripts/dev/orbit-native-dev.sh; regenerated on every start. Edit config/dev.local.yaml instead."
-    yq eval-all '(. as $item ireduce ({}; . * $item)) | ... comments=""' "${parts[@]}"
-  } > "$tmp"
-  rm -f "$gdk_part" "$mode_part"
+  # yq's status is checked explicitly: callers run this inside $(...), where errexit does not
+  # apply on bash 3.2, and a header-only overlay would send the server off on embedded defaults.
+  echo "# Generated by scripts/dev/orbit-native-dev.sh; regenerated on every start. Edit config/dev.local.yaml instead." >"$tmp"
+  if ! yq eval-all '(. as $item ireduce ({}; . * $item)) | ... comments=""' "${parts[@]}" >>"$tmp"; then
+    rm -f "$cluster_part" "$mode_part" "$tmp"
+    printf 'ERROR: could not merge %s; see the yq error above\n' "${parts[*]}" >&2
+    return 1
+  fi
+  rm -f "$cluster_part" "$mode_part"
   chmod 600 "$tmp"
   mv "$tmp" "$target"
   echo "$target"
 }
 
+port_open() { nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
+
+wait_for_port() { # port, what, seconds, [hint]
+  local port="$1" what="$2" seconds="${3:-60}" i
+  local hint="${4:-Is \`mise run dev:connect\` running in another terminal?}"
+  for ((i = 0; i < seconds; i++)); do
+    port_open "$port" && return 0
+    if ((i == 0)); then
+      printf 'Waiting for %s on 127.0.0.1:%s. %s\n' "$what" "$port" "$hint" >&2
+    fi
+    sleep 1
+  done
+  printf 'ERROR: %s never appeared on 127.0.0.1:%s\n' "$what" "$port" >&2
+  return 1
+}
+
+# The Caproni cluster (colima profile or k3d cluster) name. Caproni's kube context is
+# `colima-<name>` or `k3d-<name>`, which also covers the directory-hash naming strategy.
+# CAPRONI_CLUSTER_NAME overrides.
+cluster_name() {
+  if [[ -n "${CAPRONI_CLUSTER_NAME:-}" ]]; then echo "$CAPRONI_CLUSTER_NAME"; return; fi
+  kc config current-context 2>/dev/null | sed -e 's/^colima-//' -e 's/^k3d-//'
+}
+
+# The host's IP as the cluster sees it, for the EndpointSlice. ORBIT_DEV_HOST_IP overrides.
+host_ip() {
+  if [[ -n "${ORBIT_DEV_HOST_IP:-}" ]]; then echo "$ORBIT_DEV_HOST_IP"; return; fi
+  local cluster ip=""
+  cluster="$(cluster_name)"
+  case "$(cluster_driver)" in
+    colima)
+      # colima writes host.docker.internal into the VM's /etc/hosts; the default route is the
+      # lima gateway, which also reaches the host.
+      ip="$(captool colima ssh -p "$cluster" -- sh -c "awk '/host.docker.internal/ {print \$1; exit}' /etc/hosts; ip route | awk '/^default/ {print \$3; exit}'" 2>/dev/null | head -1)"
+      ;;
+    k3d)
+      ip="$(captool docker exec "k3d-${cluster}-server-0" sh -c "getent hosts host.k3d.internal | awk '{print \$1}'" 2>/dev/null)"
+      ;;
+  esac
+  [[ -n "$ip" ]] || { echo "ERROR: could not determine the host IP as seen from the cluster; set ORBIT_DEV_HOST_IP" >&2; return 1; }
+  echo "$ip"
+}
+
+endpointslice_yaml() { # host ip
+  cat <<EOF
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: $ENDPOINTSLICE_NAME
+  namespace: $GITLAB_NS
+  labels:
+    kubernetes.io/service-name: $WEBSERVER_SVC
+    endpointslice.kubernetes.io/managed-by: orbit-native-dev
+addressType: IPv4
+ports:
+  - name: grpc
+    protocol: TCP
+    port: $WEBSERVER_GRPC_PORT
+endpoints:
+  - addresses: ["$1"]
+    conditions:
+      ready: true
+EOF
+}
+
+# State file lines are `<deployment>=<replicas>`. A zero is never restored: it means a previous
+# session was killed before it could restore, and restoring zero would park Orbit for good.
+restore_from_state_file() {
+  local file="$1" name replicas
+  [[ -f "$file" ]] || return 0
+  while IFS='=' read -r name replicas; do
+    [[ -n "$name" ]] || continue
+    if [[ "$replicas" == "0" || -z "$replicas" ]]; then
+      printf '[warn] %s was already at 0 replicas when this session started; restoring to 1. Check `kubectl -n %s get deploy`.\n' "$name" "$GITLAB_NS" >&2
+      replicas=1
+    fi
+    kc -n "$GITLAB_NS" scale "deploy/$name" --replicas="$replicas" >/dev/null
+  done <"$file"
+  rm -f "$file"
+}
+
+run_connect() {
+  mkdir -p "$GENERATED_DIR"
+  local pf_pids=()
+  cleanup() {
+    printf '\nRestoring the cluster...\n'
+    local pid
+    for pid in "${pf_pids[@]:-}"; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true; done
+    kc -n "$GITLAB_NS" delete endpointslice "$ENDPOINTSLICE_NAME" --ignore-not-found >/dev/null
+    restore_from_state_file "$STATE_FILE"
+    printf 'Done.\n'
+  }
+  trap cleanup EXIT INT TERM
+
+  if [[ -f "$STATE_FILE" ]]; then
+    printf '[warn] a previous session left %s behind; restoring it first\n' "$STATE_FILE"
+    restore_from_state_file "$STATE_FILE"
+  fi
+
+  printf 'Recording Orbit replica counts...\n'
+  kc -n "$GITLAB_NS" get deploy -l "$ORBIT_SELECTOR" \
+    -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}' >"$STATE_FILE"
+  cat "$STATE_FILE"
+
+  printf 'Scaling the in-cluster Orbit to 0 so only local code consumes NATS...\n'
+  kc -n "$GITLAB_NS" scale deploy -l "$ORBIT_SELECTOR" --replicas=0 >/dev/null
+
+  local ip
+  ip="$(host_ip)"
+  printf 'Routing Service %s to this host (%s:%s)...\n' "$WEBSERVER_SVC" "$ip" "$WEBSERVER_GRPC_PORT"
+  endpointslice_yaml "$ip" | kc apply -f - >/dev/null
+
+  printf 'Port-forwarding ClickHouse (%s) and NATS (%s)...\n' "$CLICKHOUSE_LOCAL_PORT" "$NATS_LOCAL_PORT"
+  kc -n "$STACK_NS" port-forward "svc/$CLICKHOUSE_SVC" "$CLICKHOUSE_LOCAL_PORT:8123" >"$GENERATED_DIR/pf-clickhouse.log" 2>&1 &
+  pf_pids+=("$!")
+  kc -n "$STACK_NS" port-forward "svc/$NATS_SVC" "$NATS_LOCAL_PORT:4222" >"$GENERATED_DIR/pf-nats.log" 2>&1 &
+  pf_pids+=("$!")
+  wait_for_port "$CLICKHOUSE_LOCAL_PORT" ClickHouse 30
+  wait_for_port "$NATS_LOCAL_PORT" NATS 30
+
+  printf 'Connected. Ctrl+C restores the cluster.\n'
+  wait
+}
+
+# Runs a command with a ClickHouse port-forward if none is open (dev:setup without dev:connect).
+# The forward is torn down on every path, including failure: a RETURN trap would not run when
+# errexit tears the shell down, and an orphaned forward would make the next dev:connect believe
+# the port is its own.
+with_clickhouse_forward() {
+  if port_open "$CLICKHOUSE_LOCAL_PORT"; then
+    "$@"
+    return
+  fi
+  mkdir -p "$GENERATED_DIR"
+  kc -n "$STACK_NS" port-forward "svc/$CLICKHOUSE_SVC" "$CLICKHOUSE_LOCAL_PORT:8123" >"$GENERATED_DIR/pf-clickhouse-setup.log" 2>&1 &
+  local pid=$! rc=0
+  wait_for_port "$CLICKHOUSE_LOCAL_PORT" ClickHouse "${FORWARD_WAIT_SECONDS:-30}" \
+    "Opening a temporary port-forward; see $GENERATED_DIR/pf-clickhouse-setup.log if this stalls." || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    "$@" || rc=$?
+  fi
+  pkill -P "$pid" 2>/dev/null || true
+  kill "$pid" 2>/dev/null || true
+  return "$rc"
+}
+
+# Reads the database from the same merged overlay the server loads, so a graph.database override
+# in config/dev.local.yaml creates the schema where the processes will look for it.
+apply_schema() {
+  load_cluster_values
+  local overlay graph_database
+  overlay="$(write_mode_overlay setup)"
+  graph_database="$(yq '.graph.database' "$overlay")"
+  # Exported rather than passed through `env`, whose argv (password included) shows in `ps`.
+  export CLICKHOUSE_URL CLICKHOUSE_PASSWORD
+  export CLICKHOUSE_DATABASE="$graph_database"
+  CLICKHOUSE_USER="$(yq '.graph.username' "$overlay")"
+  export CLICKHOUSE_USER
+  with_clickhouse_forward "$SCRIPT_DIR/apply-graph-schema.sh"
+}
+
+print_config() {
+  cat <<EOF
+CAPRONI_DIR=$CAPRONI_DIR
+DEV_OVERLAY=$DEV_OVERLAY
+GENERATED_OVERLAYS=$GENERATED_DIR/<mode>.yaml
+LOCAL_OVERLAY=$LOCAL_OVERLAY$([[ -f "$LOCAL_OVERLAY" ]] || echo " (absent)")
+
+Derived from the Caproni cluster:
+datalake.url=$CLICKHOUSE_URL
+graph.url=$CLICKHOUSE_URL
+gitlab.base_url=$GITLAB_BASE_URL
+jwt keys and ClickHouse password: secret $GITLAB_NS/$SECRET_NAME
+EOF
+}
+
 run_checks() {
   local failures=0
-  printf "Checking lightweight native-process prerequisites...\n\n"
+  printf "Checking Caproni-connected native-process prerequisites...\n\n"
 
-  for tool in cargo clickhouse ruby yq python3; do
+  local tool
+  for tool in mise cargo yq nc curl python3; do
     if command -v "$tool" >/dev/null 2>&1; then
       printf "[ok] %s found: %s\n" "$tool" "$(command -v "$tool")"
     else
@@ -208,132 +336,46 @@ run_checks() {
     fi
   done
 
-  if [[ -d "$GDK_ROOT" ]]; then
-    printf "[ok] GDK_ROOT exists: %s\n" "$GDK_ROOT"
+  if [[ -f "$CAPRONI_DIR/caproni.yaml" ]]; then
+    printf "[ok] CAPRONI_DIR is a gitlab-caproni checkout: %s\n" "$CAPRONI_DIR"
   else
-    printf "[fail] GDK_ROOT not found: %s\n" "$GDK_ROOT"
+    printf "[fail] CAPRONI_DIR has no caproni.yaml: %s\n  Set CAPRONI_DIR in .env to your gitlab-caproni checkout.\n" "$CAPRONI_DIR"
+    return 1
+  fi
+
+  if cap status >/dev/null 2>&1; then
+    printf "[ok] caproni cluster is running\n"
+  else
+    printf "[fail] caproni cluster is not running. From %s run: caproni up\n" "$CAPRONI_DIR"
+    return 1
+  fi
+
+  local deploys
+  deploys="$(kc -n "$GITLAB_NS" get deploy -l "$ORBIT_SELECTOR" -o name 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "$deploys" -gt 0 ]]; then
+    printf "[ok] Orbit fragment is deployed (%s deployments)\n" "$deploys"
+  else
+    printf "[fail] no Orbit deployments in namespace %s.\n  Enable fragments/caproni.orbit.yaml in caproni.local.yaml and run scripts/setup-orbit.sh in %s\n" "$GITLAB_NS" "$CAPRONI_DIR"
+    return 1
+  fi
+
+  if kc -n "$GITLAB_NS" get secret "$SECRET_NAME" >/dev/null 2>&1; then
+    printf "[ok] secret %s present\n" "$SECRET_NAME"
+  else
+    printf "[fail] secret %s missing in namespace %s\n" "$SECRET_NAME" "$GITLAB_NS"
     failures=$((failures + 1))
   fi
 
-  if [[ ! -f "$GDK_YML" ]]; then
-    printf "\nERROR: GDK is not configured for GKG development.\n\n"
-    printf "Missing configuration in %s:\n" "$GDK_YML"
-    cat <<'EOF'
-  nats:
-    enabled: true
-  clickhouse:
-    enabled: true
-  siphon:
-    enabled: true
-
-Add the above to your gdk.yml, then run: cd ~/gdk && gdk reconfigure
-EOF
-    return 1
-  fi
-
-  if ! gdk_enabled nats || ! gdk_enabled clickhouse || ! gdk_enabled siphon; then
-    printf "\nERROR: GDK is not configured for GKG development.\n\n"
-    printf "Missing configuration in %s:\n" "$GDK_YML"
-    cat <<'EOF'
-  nats:
-    enabled: true
-  clickhouse:
-    enabled: true
-  siphon:
-    enabled: true
-
-Add the above to your gdk.yml, then run: cd ~/gdk && gdk reconfigure
-EOF
-    return 1
-  fi
-
-  printf "[ok] gdk.yml enables nats, clickhouse, and siphon\n"
-
-  if ! gdk_enabled duo_workflow; then
-    printf "[warn] gdk.yml does not enable duo_workflow — add the following to gdk.yml:\n"
-    cat <<'EOF'
-  duo_workflow:
-    enabled: true
-
-Then run: cd ~/gdk && gdk reconfigure
-EOF
+  load_cluster_values
+  if curl -fsS -o /dev/null --max-time 10 "$GITLAB_BASE_URL/-/liveness"; then
+    printf "[ok] GitLab reachable at %s\n" "$GITLAB_BASE_URL"
   else
-    printf "[ok] gdk.yml enables duo_workflow\n"
+    printf "[fail] GitLab not reachable at %s. Run 'caproni update-etc-hosts' in %s\n" "$GITLAB_BASE_URL" "$CAPRONI_DIR"
+    failures=$((failures + 1))
   fi
 
-  if command -v gdk >/dev/null 2>&1; then
-    if (cd "$GDK_ROOT" && gdk status >/dev/null 2>&1); then
-      printf "[ok] gdk status succeeded\n"
-    else
-      printf "[fail] GDK is not running — start it with: cd %s && gdk start\n" "$GDK_ROOT"
-      failures=$((failures + 1))
-    fi
-  elif [[ -x "$GDK_ROOT/bin/gdk" ]]; then
-    if (cd "$GDK_ROOT" && "$GDK_ROOT/bin/gdk" status >/dev/null 2>&1); then
-      printf "[ok] gdk status succeeded\n"
-    else
-      printf "[fail] GDK is not running — start it with: cd %s && bin/gdk start\n" "$GDK_ROOT"
-      failures=$((failures + 1))
-    fi
-  else
-    printf "[warn] gdk executable not found; falling back to port checks only\n"
-  fi
-
-  if [[ -f "$GITLAB_ROOT/.gitlab_knowledge_graph_secret" || -f "$GITLAB_ROOT/.gitlab_shell_secret" ]]; then
-    printf "[ok] GitLab JWT secret file found\n"
-  else
-    printf "[warn] GitLab JWT secret file not found under %s\n" "$GITLAB_ROOT"
-  fi
-
-  if command -v nc >/dev/null 2>&1; then
-    nc -z 127.0.0.1 4222 >/dev/null 2>&1 && printf "[ok] NATS reachable on localhost:4222\n" || { printf "[fail] NATS not running — enable it in gdk.yml: nats:\n  enabled: true\n"; failures=$((failures + 1)); }
-    nc -z 127.0.0.1 "$GDK_CLICKHOUSE_HTTP_PORT" >/dev/null 2>&1 && printf "[ok] ClickHouse reachable on localhost:%s\n" "$GDK_CLICKHOUSE_HTTP_PORT" || { printf "[fail] ClickHouse not running — enable it in gdk.yml: clickhouse:\n  enabled: true\n"; failures=$((failures + 1)); }
-
-    # PostgreSQL: GDK may use a Unix socket (default) or TCP depending on
-    # postgresql.host in gdk.yml. Try the socket first, then fall back to TCP.
-    local pg_reachable=false
-    if [[ "$GDK_POSTGRES_HOST" != "localhost" && -S "${GDK_POSTGRES_HOST}/.s.PGSQL.${GDK_POSTGRES_PORT}" ]]; then
-      printf "[ok] PostgreSQL reachable via Unix socket at %s (port %s)\n" "$GDK_POSTGRES_HOST" "$GDK_POSTGRES_PORT"
-      pg_reachable=true
-    elif nc -z 127.0.0.1 "$GDK_POSTGRES_PORT" >/dev/null 2>&1; then
-      printf "[ok] PostgreSQL reachable on localhost:%s\n" "$GDK_POSTGRES_PORT"
-      pg_reachable=true
-    else
-      printf "[fail] PostgreSQL not reachable (checked socket %s and TCP localhost:%s)\n" "$GDK_POSTGRES_HOST" "$GDK_POSTGRES_PORT"
-      failures=$((failures + 1))
-    fi
-
-    if [[ "$pg_reachable" == "true" ]]; then
-      local wal_level
-      wal_level="$(psql -h "$GDK_POSTGRES_HOST" -p "$GDK_POSTGRES_PORT" -U "$USER" -d gitlabhq_development -tAc "SHOW wal_level" 2>/dev/null || true)"
-      if [[ "$wal_level" == "logical" ]]; then
-        printf "[ok] PostgreSQL wal_level is 'logical' (required for Siphon CDC)\n"
-      elif [[ -n "$wal_level" ]]; then
-        printf "[fail] PostgreSQL wal_level is '%s', must be 'logical' for Siphon CDC\n" "$wal_level"
-        printf "  Edit %s/postgresql/data/postgresql.conf and set: wal_level = logical\n" "$GDK_ROOT"
-        printf "  Then restart PostgreSQL: gdk restart postgresql\n"
-        failures=$((failures + 1))
-      fi
-    fi
-
-    # GitLab: GDK may serve via HTTPS + nginx, so check the derived URL
-    # instead of assuming a raw TCP port.
-    local gitlab_host="${GDK_HOSTNAME}"
-    local gitlab_port="${GDK_PORT}"
-    if nc -z "$gitlab_host" "$gitlab_port" >/dev/null 2>&1; then
-      printf "[ok] GitLab reachable on %s:%s\n" "$gitlab_host" "$gitlab_port"
-    else
-      printf "[fail] GitLab not reachable on %s:%s — GKG requires GitLab for JWT auth\n" "$gitlab_host" "$gitlab_port"
-      failures=$((failures + 1))
-    fi
-
-    if [[ -n "$GITALY_TCP_ADDR" ]]; then
-      local gitaly_host="${GITALY_TCP_ADDR%:*}"
-      local gitaly_port="${GITALY_TCP_ADDR##*:}"
-      nc -z "$gitaly_host" "$gitaly_port" >/dev/null 2>&1 && printf "[ok] Gitaly reachable on %s\n" "$GITALY_TCP_ADDR" || printf "[warn] Gitaly not reachable on %s\n" "$GITALY_TCP_ADDR"
-    else
-      printf "[warn] Gitaly TCP listen_addr is not configured; code indexing may require enabling it in gitaly.config.toml\n"
-    fi
+  if [[ -f "$STATE_FILE" ]]; then
+    printf "[warn] %s exists: a previous dev:connect did not restore the cluster. The next dev:connect repairs it.\n" "$STATE_FILE"
   fi
 
   printf "\nDerived config:\n"
@@ -345,84 +387,33 @@ EOF
   fi
 }
 
-print_config() {
-  cat <<EOF
-GDK_ROOT=$GDK_ROOT
-GDK_CLICKHOUSE_HTTP_PORT=$GDK_CLICKHOUSE_HTTP_PORT
-GDK_CLICKHOUSE_TCP_PORT=$GDK_CLICKHOUSE_TCP_PORT
-GDK_POSTGRES_HOST=$GDK_POSTGRES_HOST
-GDK_POSTGRES_PORT=$GDK_POSTGRES_PORT
-GDK_GITLAB_URL=$GDK_GITLAB_URL
-GITALY_TCP_ADDR=${GITALY_TCP_ADDR:-<not configured>}
-DEV_OVERLAY=$DEV_OVERLAY
-GENERATED_OVERLAYS=$GENERATED_DIR/<mode>.yaml
-LOCAL_OVERLAY=$LOCAL_OVERLAY$([[ -f "$LOCAL_OVERLAY" ]] || echo " (absent)")
-
-Derived from the GDK checkout:
-datalake.url=$CLICKHOUSE_URL
-graph.url=$CLICKHOUSE_URL
-gitlab.base_url=$GITLAB_BASE_URL
-schedule.tasks.siphon.events_stream_name=$SIPHON_STREAM_NAME
-EOF
-}
-
-# Reads the database from the same merged overlay the server loads, so a graph.database override
-# in config/dev.local.yaml creates the schema where the processes will look for it.
-apply_schema() {
-  local overlay graph_database
-  overlay="$(write_mode_overlay setup)"
-  graph_database="$(yq '.graph.database' "$overlay")"
-  clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$graph_database\`"
-
-  python3 - <<'PY' | while IFS= read -r stmt; do
-from pathlib import Path
-sql = Path("config/graph.sql").read_text()
-parts = []
-for line in sql.splitlines():
-    stripped = line.split("--", 1)[0].strip()
-    if stripped:
-        parts.append(stripped)
-joined = " ".join(parts)
-for stmt in joined.split(";"):
-    stmt = stmt.strip()
-    if stmt:
-        print(stmt + ";")
-PY
-    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$graph_database" --query "$stmt"
-  done
-}
-
 run_mode() {
   local mode="$1"
+  wait_for_port "$CLICKHOUSE_LOCAL_PORT" ClickHouse 120
+  wait_for_port "$NATS_LOCAL_PORT" NATS 120
+  load_cluster_values
   local overlay
   overlay="$(write_mode_overlay "$mode")"
   exec cargo run -p orbit-server -- --mode="$mode" --config "$overlay"
 }
 
-case "${1:-webserver}" in
-  check)
-    run_checks
-    ;;
-  config)
-    print_config
-    ;;
-  setup)
-    apply_schema
-    ;;
-  webserver)
-    run_mode webserver
-    ;;
-  indexer)
-    run_mode indexer
-    ;;
-  dispatcher)
-    run_mode dispatch-indexing
-    ;;
-  healthcheck)
-    run_mode health-check
-    ;;
-  *)
-    printf "Usage: %s {check|config|setup|webserver|indexer|dispatcher|healthcheck}\n" "$(basename "$0")"
-    exit 1
-    ;;
-esac
+main() {
+  case "${1:-webserver}" in
+    check) run_checks ;;
+    config) load_cluster_values; print_config ;;
+    connect) run_connect ;;
+    setup) apply_schema ;;
+    webserver) run_mode webserver ;;
+    indexer) run_mode indexer ;;
+    dispatcher) run_mode dispatch-indexing ;;
+    healthcheck) run_mode health-check ;;
+    *)
+      printf "Usage: %s {check|config|connect|setup|webserver|indexer|dispatcher|healthcheck}\n" "$(basename "$0")"
+      exit 1
+      ;;
+  esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
