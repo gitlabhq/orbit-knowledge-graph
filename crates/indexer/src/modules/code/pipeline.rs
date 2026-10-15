@@ -14,14 +14,13 @@ use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
-use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
+use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
-use crate::retry::GlobalRetry;
 use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Clone)]
@@ -31,16 +30,8 @@ pub struct IndexingRequest {
     pub traversal_path: TraversalPath,
     pub task_id: i64,
     pub commit_sha: Option<String>,
-    pub attempt: u32,
     pub checkpoint: CodeCheckpoint,
 }
-
-/// A commit SHA proves content exists, so one redelivery covers Gitaly visibility lag. A second
-/// empty archive (a tree past git's `core.maxTreeDepth`, a pruned commit) is checkpointed empty.
-const EMPTY_ARCHIVE_RETRY: GlobalRetry = GlobalRetry {
-    max_attempts: 2,
-    dead_letter: false,
-};
 
 /// Keeps the NATS message alive during long pipeline runs so it is not redelivered.
 struct NatsHeartbeat {
@@ -438,13 +429,7 @@ impl CodeIndexer {
                 repository
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
-                let worth_a_redelivery = match reason {
-                    EmptyRepositoryReason::EmptyArchive => {
-                        EMPTY_ARCHIVE_RETRY.should_redeliver(request.attempt)
-                    }
-                    _ => !reason.is_permanent(),
-                };
-                if request.commit_sha.is_some() && worth_a_redelivery {
+                if request.commit_sha.is_some() && !reason.is_permanent() {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
                         "archive empty ({reason}: {detail}) for task with commit_sha; retrying"
@@ -981,7 +966,6 @@ mod tests {
                 traversal_path,
                 task_id: 7,
                 commit_sha: None,
-                attempt: 1,
                 checkpoint,
             },
             indexed_at: Utc::now(),

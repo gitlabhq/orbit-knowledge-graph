@@ -202,10 +202,10 @@ struct ProjectData {
     /// in the handler using the ref from the request query, so the Gitaly
     /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
     archive_files: Vec<(String, Vec<u8>)>,
-    /// When true, the archive endpoint returns 200 OK with a zero-byte body,
+    /// How many more times the archive endpoint returns 200 OK with a zero-byte body,
     /// matching the production case where Gitaly streams an empty archive for
-    /// projects that lack repository content.
-    empty_archive_body: bool,
+    /// projects that lack repository content. `u32::MAX` means always.
+    empty_archive_responses: u32,
     slow_archive: bool,
     archive_error: bool,
 }
@@ -265,7 +265,7 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files,
-                empty_archive_body: false,
+                empty_archive_responses: 0,
                 slow_archive: false,
                 archive_error: false,
             },
@@ -282,7 +282,7 @@ impl MockGitlabServer {
                     "src/Main.java".to_string(),
                     b"public class Main {}".to_vec(),
                 )],
-                empty_archive_body: false,
+                empty_archive_responses: 0,
                 slow_archive: true,
                 archive_error: false,
             },
@@ -298,11 +298,24 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files: Vec::new(),
-                empty_archive_body: true,
+                empty_archive_responses: u32::MAX,
                 slow_archive: false,
                 archive_error: false,
             },
         );
+    }
+
+    pub fn add_project_with_transient_empty_archive(
+        &self,
+        project_id: i64,
+        default_branch: &str,
+        files: &[(&str, &str)],
+        empty_responses: u32,
+    ) {
+        self.add_project(project_id, default_branch, files);
+        if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
+            project.empty_archive_responses = empty_responses;
+        }
     }
 
     pub fn add_project_with_archive_error(&self, project_id: i64, default_branch: &str) {
@@ -311,7 +324,7 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files: Vec::new(),
-                empty_archive_body: false,
+                empty_archive_responses: 0,
                 slow_archive: false,
                 archive_error: true,
             },
@@ -325,7 +338,7 @@ impl MockGitlabServer {
                 .iter()
                 .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
                 .collect();
-            project.empty_archive_body = false;
+            project.empty_archive_responses = 0;
         }
     }
 }
@@ -366,10 +379,15 @@ async fn handle_download_archive(
     if slow {
         tokio::time::sleep(SLOW_ARCHIVE_DELAY).await;
     }
-    let projects = state.projects.lock();
-    match projects.get(&project_id) {
+    let mut projects = state.projects.lock();
+    match projects.get_mut(&project_id) {
         Some(p) if p.archive_error => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),
+        Some(p) if p.empty_archive_responses > 0 => {
+            if p.empty_archive_responses != u32::MAX {
+                p.empty_archive_responses -= 1;
+            }
+            (StatusCode::OK, Vec::<u8>::new()).into_response()
+        }
         Some(p) => {
             let files: Vec<(&str, &str)> = p
                 .archive_files

@@ -57,14 +57,12 @@ impl EmptyRepositoryReason {
         }
     }
 
-    /// Only the size cap is known to be permanent; the other reasons can be
-    /// Gitaly visibility lag, which a retry may clear.
+    /// The size cap and an archive that stays empty across the download retries are
+    /// permanent; a 404 or 5xx can be Gitaly visibility lag, which a redelivery may clear.
     pub fn is_permanent(self) -> bool {
         match self {
-            EmptyRepositoryReason::RepositoryTooLarge => true,
-            EmptyRepositoryReason::NotFound
-            | EmptyRepositoryReason::ServerError
-            | EmptyRepositoryReason::EmptyArchive => false,
+            EmptyRepositoryReason::RepositoryTooLarge | EmptyRepositoryReason::EmptyArchive => true,
+            EmptyRepositoryReason::NotFound | EmptyRepositoryReason::ServerError => false,
         }
     }
 }
@@ -148,8 +146,14 @@ impl RepositoryResolver {
             namespace_id,
         )
         .then_some(config);
-        self.full_download(project_id, branch, ref_name, virtual_config)
-            .await
+        self.full_download(
+            project_id,
+            branch,
+            ref_name,
+            virtual_config,
+            commit_sha.is_some(),
+        )
+        .await
     }
 
     async fn full_download(
@@ -158,6 +162,7 @@ impl RepositoryResolver {
         branch: &str,
         ref_name: &str,
         virtual_config: Option<&orbit_server_config::CodeIndexingPipelineConfig>,
+        retry_empty: bool,
     ) -> Result<Repository, ResolveError> {
         info!(
             project_id,
@@ -190,12 +195,19 @@ impl RepositoryResolver {
             };
             match repository {
                 Ok(path) => Step::Done(path),
-                Err(RepositoryCacheError::EmptyArchive) => Step::GiveUp(ResolveError::EmptyRepository {
-                    reason: EmptyRepositoryReason::EmptyArchive,
-                    detail: format!(
-                        "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
-                    ),
-                }),
+                Err(RepositoryCacheError::EmptyArchive) => {
+                    let empty = ResolveError::EmptyRepository {
+                        reason: EmptyRepositoryReason::EmptyArchive,
+                        detail: format!(
+                            "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
+                        ),
+                    };
+                    if !retry_empty {
+                        return Step::GiveUp(empty);
+                    }
+                    warn!(project_id, ref_name, attempt = attempt + 1, "archive empty for a commit that exists; retrying the download");
+                    ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), empty)
+                }
                 Err(RepositoryCacheError::RepositoryTooLarge) => Step::GiveUp(ResolveError::EmptyRepository {
                     reason: EmptyRepositoryReason::RepositoryTooLarge,
                     detail: format!(
@@ -227,12 +239,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn only_the_size_cap_is_permanent() {
+    fn the_size_cap_and_a_persistently_empty_archive_are_permanent() {
         assert!(EmptyRepositoryReason::RepositoryTooLarge.is_permanent());
+        assert!(EmptyRepositoryReason::EmptyArchive.is_permanent());
         for reason in [
             EmptyRepositoryReason::NotFound,
             EmptyRepositoryReason::ServerError,
-            EmptyRepositoryReason::EmptyArchive,
         ] {
             assert!(!reason.is_permanent());
         }

@@ -1360,7 +1360,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
-async fn an_empty_archive_with_a_commit_sha_retries_once_then_checkpoints_empty() {
+async fn an_archive_that_stays_empty_is_checkpointed_empty_on_the_first_delivery() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";
 
@@ -1376,27 +1376,10 @@ async fn an_empty_archive_with_a_commit_sha_retries_once_then_checkpoints_empty(
     let handler = deps.code_indexing_task_handler();
 
     let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    let result = handler.handle(handler_context(), envelope).await;
-    assert!(
-        result.is_err(),
-        "the first delivery of a push-dispatched task hitting an empty archive must nack for one retry, got {result:?}"
-    );
-    assert_eq!(
-        attempts(&clickhouse, traversal_path, project_id).await,
-        [0],
-        "a handled failure that NATS redelivers refunds its attempt"
-    );
-    assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
-        None
-    );
-
-    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    envelope.attempt = 2;
     handler
         .handle(handler_context(), envelope)
         .await
-        .expect("a second empty archive is a permanent outcome, checkpointed as indexed-empty");
+        .expect("an archive that stays empty across the download retries is a permanent outcome");
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(11)
@@ -1416,6 +1399,39 @@ async fn an_empty_archive_with_a_commit_sha_retries_once_then_checkpoints_empty(
     );
     assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
+async fn a_transiently_empty_archive_is_retried_before_the_download_gives_up() {
+    let project_id: i64 = 65;
+    let traversal_path = "1/65/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_transient_empty_archive(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+        1,
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the download retry sees the archive once Gitaly serves it");
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
 }
 
 async fn attempts(
@@ -2361,7 +2377,6 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         task_id: 1,
         commit_sha: Some("abc123".to_string()),
-        attempt: 1,
         checkpoint: indexer::modules::code::CodeCheckpoint::new(
             TraversalPath::new_unchecked(traversal_path),
             project_id,
