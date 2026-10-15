@@ -392,12 +392,19 @@ fn write_edges(
     let mut located: Vec<_> = ids.iter().collect();
     located.sort_unstable();
     let mut enclosing = Enclosing::default();
+    let mut path = Vec::new();
+    let mut current_tree = None;
     for (&(tree, node), &(id, entity, emitted)) in located {
         if !emitted {
             continue;
         }
+        if current_tree != Some(tree) {
+            current_tree = Some(tree);
+            enclosing.clear();
+        }
         for rule in plan.containment.iter().filter(|c| c.to == entity) {
-            let mut path = vec![(tree, node)];
+            path.clear();
+            path.push((tree, node));
             let found = loop {
                 let (tree, node) = *path.last().expect("the start location");
                 let Some(above) = forest
@@ -414,7 +421,7 @@ fn write_edges(
                 }
                 path.push(above);
             };
-            for loc in path {
+            for &loc in &path {
                 enclosing.insert((rule.from, loc), found);
             }
             if let Some(&(from_id, _, _)) = found.and_then(|loc| ids.get(&loc)) {
