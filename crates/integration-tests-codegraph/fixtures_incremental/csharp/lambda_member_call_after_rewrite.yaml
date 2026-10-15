@@ -1,0 +1,59 @@
+name: "C#: a member call in a lambda after a rewrite gets its file's wildcard candidates"
+
+fixtures:
+  # The braces are unbalanced on purpose: this shape made a rewrite reuse
+  # the arena slot of a replaced call that was tagged implicit_self.
+  - path: Extensions.cs
+    content: |
+      using System.Runtime.CompilerServices;
+      using Acme.Data.Util.Linq;
+      using System.Linq;
+      namespace Acme.Data.Tree
+      {
+              public static ISeq<Node> Above<T>(this IEnumerable<T> source) where T : Node
+              {
+                  Guard.NotNull(source, nameof(source));
+              {
+                  Guard.NotNull(source, nameof(source));
+                  return source.SelectMany(j => j.Below()).AsSeq();
+              }
+              public static ISeq<Prop> Fields(this IEnumerable<Obj> source)
+              {
+                  Guard.NotNull(source, nameof(source));
+                  return source.SelectMany(d => d.Fields()).AsSeq();
+              }
+              }
+              public static ISeq<Node> Values(this IEnumerable<Node> source)
+              {
+                  return source.Values(null);
+              }
+              public static IEnumerable<U?> Values<U>(this IEnumerable<Node> source, object key)
+              {
+                  return Values<Node, U>(source, key);
+              }
+              public static U? Value<U>(this IEnumerable<Node> value)
+                  return value.Value<Node, U>();
+              public static U? Value<T, U>(this IEnumerable<T> value) where T : Node
+              {
+                  Guard.NotNull(value, nameof(value));
+                  if (!(value is Node token))
+                          if (token is Leaf value)
+                      foreach (T token in source)
+                              yield return value.Convert<Node, U>();
+                  }
+              }
+              public static ISeq<Node> Children<T>(this IEnumerable<T> source) where T : Node
+              {
+                  return Children<T, Node>(source)!.AsSeq();
+                  return source.SelectMany(c => c.Children()).Convert<Node, U>();
+              }
+              internal static IEnumerable<U?> Convert<T, U>(this IEnumerable<T> source) where T : Node
+
+tests:
+  - name: "the lambda member calls of Above get the wildcard candidates of the file"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(candidate:ImportedSymbol)
+      WHERE caller.name = 'Above'
+      RETURN count(candidate) AS n
+    assert:
+      - { count_equals: { field: n, value: 12 } }
