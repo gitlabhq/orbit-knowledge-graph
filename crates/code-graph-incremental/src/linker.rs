@@ -130,7 +130,8 @@ impl LoopNames {
     }
 
     fn number(&mut self, root: Cursor) {
-        let mut stack = vec![(root, None)];
+        let mut stack = vec![(root, Some(self.next))];
+        stack.extend(root.children().map(|child| (child, None)));
         while let Some((node, start)) = stack.pop() {
             if let Some(start) = start {
                 self.spans.insert(node.index(), (start, self.next));
