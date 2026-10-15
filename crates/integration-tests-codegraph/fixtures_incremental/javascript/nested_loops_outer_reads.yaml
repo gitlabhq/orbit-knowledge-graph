@@ -1,0 +1,22 @@
+name: "JavaScript: nested loops that read outer names build no phis for them"
+
+fixtures:
+  - path: m.js
+    content:
+      - "function a() {}\n"
+      - { repeat: 1000, text: "function g{i}() {}\n" }
+      - "function f(c) {\nlet x = a;\n"
+      - { repeat: 1000, text: "while (c) {\nx = g{i};\n" }
+      - "x();\n"
+      - { repeat: 1000, text: "}\n" }
+      - "}\n"
+
+tests:
+  - name: "the call in the innermost loop calls the last assigned function"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: g999 } }
