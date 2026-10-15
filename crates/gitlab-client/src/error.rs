@@ -14,6 +14,9 @@ pub enum GitlabClientError {
     #[error("server error for project {project_id}: status {status}")]
     ServerError { project_id: i64, status: u16 },
 
+    #[error("rate limited (429) for project {project_id}")]
+    RateLimited { project_id: i64 },
+
     #[error("force push detected for project {0}")]
     ForcePush(i64),
 
@@ -38,6 +41,7 @@ impl CircuitBreakableError for GitlabClientError {
         match self {
             Self::Request(_) => true,
             Self::ServerError { .. }
+            | Self::RateLimited { .. }
             | Self::Unauthorized
             | Self::NotFound(_)
             | Self::ForcePush(_)
