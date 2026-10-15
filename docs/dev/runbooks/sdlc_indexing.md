@@ -216,14 +216,14 @@ kubectl -n gkg wait --for=condition=ready pod/gkg-nats-0 --timeout=120s
 
 ## Retry mechanism
 
-SDLC handlers use `max_attempts: 1` by default (no NATS-level retry). Instead, they rely on eventual consistency:
+SDLC handlers retry a transient failure (ClickHouse timeout, network blip) through NATS redelivery. The module policy is `max_attempts: 5` with a 60 second `retry_interval_secs`:
 
-1. Handler fails and term-acks the message
-2. Message is removed from the stream
-3. On the next dispatcher cycle, the dispatcher publishes a new request for the same subject
-4. The handler picks it up and retries from its checkpoint
+1. Handler fails and nacks the message with the retry delay
+2. NATS redelivers the message and the handler retries from its checkpoint
+3. After the last attempt the handler term-acks the message, which removes it from the stream
+4. The next namespace change or the hourly sweep publishes a new request for the same subject
 
-A transient failure (ClickHouse timeout, network blip) resolves on its own within one dispatch interval.
+The namespace dispatcher does not re-publish a failed namespace on its next cycle; its watermark advances after each publish. NATS redelivery is the only retry inside one dispatch window.
 
 ### Extraction-level retries
 

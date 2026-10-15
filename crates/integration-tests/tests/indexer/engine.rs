@@ -760,3 +760,72 @@ async fn permanent_drop_error_drops_without_dlq() {
         "DLQ should be empty"
     );
 }
+
+struct FailOnceHandler {
+    inner: TestHandler,
+    subscription: Subscription,
+    failed: AtomicBool,
+}
+
+#[async_trait]
+impl Handler for FailOnceHandler {
+    fn name(&self) -> &str {
+        "fail-once-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        self.subscription.clone()
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        if !self.failed.swap(true, Ordering::SeqCst) {
+            return Err(HandlerError::Processing(
+                "transient clickhouse error".into(),
+            ));
+        }
+        self.inner.handle(context, message).await
+    }
+}
+
+#[tokio::test]
+async fn sdlc_dispatch_policy_redelivers_a_transient_failure() {
+    let context = TestContext::new().await;
+    let stream = "sdlc_retry_stream";
+    let subject = "sdlc_retry.events";
+    let policy = SubscriptionConfig {
+        concurrency_group: None,
+        retry_interval_secs: Some(1),
+        ..indexer::modules::sdlc::sdlc_dispatch_topic_policy()
+    };
+    let subscription = Subscription::new(stream, subject).with_config(&policy);
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("sdlc-retry-consumer".into()),
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
+        })
+        .await;
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+
+    publish_test_event(&broker, &subscription).await;
+
+    let handler = FailOnceHandler {
+        inner: TestHandler {
+            writer: context.create_writer(),
+        },
+        subscription: subscription.clone(),
+        failed: AtomicBool::new(false),
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(4)).await;
+
+    assert_eq!(
+        context.query_count().await,
+        1,
+        "a transient failure must be redelivered and then succeed"
+    );
+}

@@ -39,8 +39,8 @@ const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
 pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(SDLC_CONCURRENCY_GROUP.to_string()),
-        max_attempts: Some(1),
-        retry_interval_secs: None,
+        max_attempts: Some(5),
+        retry_interval_secs: Some(60),
         dead_letter_on_exhaustion: None,
         max_ack_pending: None,
     }
@@ -180,9 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn declared_dispatch_policy_does_not_retry() {
+    fn declared_dispatch_policy_retries_transient_failures() {
         let policy = sdlc_dispatch_topic_policy();
-        assert_eq!(policy.max_attempts, Some(1));
+        assert_eq!(policy.max_attempts, Some(5));
+        assert_eq!(policy.retry_interval_secs, Some(60));
         assert_eq!(policy.dead_letter_on_exhaustion, None);
         assert_eq!(policy.concurrency_group.as_deref(), Some("sdlc"));
     }
