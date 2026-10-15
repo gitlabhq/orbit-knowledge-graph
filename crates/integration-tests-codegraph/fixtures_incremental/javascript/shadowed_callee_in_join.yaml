@@ -21,6 +21,11 @@ fixtures:
         x.bar();
       }
 
+      function h() {
+        const x = make();
+        x.bar();
+      }
+
       function g(c) {
         let x = make();
         if (c) {
@@ -37,3 +42,11 @@ tests:
       RETURN caller.name AS caller
     assert:
       - { empty: true }
+
+  - name: "h, whose make is the top-level one, calls bar"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'h' AND callee.name = 'bar'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
