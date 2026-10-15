@@ -185,7 +185,6 @@ parser, and compiler. Validate a cross-version rollout before relying on it.
 
 Deploy variant-table parsing and routing support to every query server and indexer before publishing split-route archives.
 Older binaries can ignore a variant's route and read or write the wrong table.
-The dispatcher validates that Code Graph variants have exact write routes before it publishes an archive.
 Query servers and indexers resolve each relationship variant by its relationship kind and endpoint kinds.
 Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
 If a server rejects the active archive, it clears its last installed snapshot. All query servers
