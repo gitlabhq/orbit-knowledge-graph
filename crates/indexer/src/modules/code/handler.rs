@@ -7,7 +7,7 @@ use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
-use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
+use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore, MAX_CODE_ATTEMPTS};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
@@ -18,7 +18,6 @@ use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingObserver, PipelineType};
-use crate::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
@@ -343,7 +342,7 @@ impl CodeIndexingTaskHandler {
             }
         };
 
-        if attempt > 1 && checkpoint.attempts > 0 {
+        if attempt > 1 && checkpoint.attempts >= i64::from(attempt - 1) {
             let unended = checkpoint.attempts;
             warn!(
                 task_id = request.task_id,
@@ -351,17 +350,15 @@ impl CodeIndexingTaskHandler {
                 branch = %branch,
                 attempt,
                 unended_attempts = unended,
-                "redelivered after attempts that never returned or ended their message; the indexer likely crashed on this repository"
+                "redelivered after earlier attempts of this task that never returned or ended in exhaustion"
             );
-            if let Some(policy) = self.subscription.retry_policy()
-                && !policy.should_redeliver(attempt)
-            {
+            if !context.redelivered_on_failure {
                 checkpoint.attempts = MAX_CODE_ATTEMPTS;
                 if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
                     warn!(project_id, branch = %branch, error = %e, "failed to quarantine the project");
                 }
                 return Err(HandlerError::dead_letter(format!(
-                    "project {project_id} quarantined: {unended} earlier attempts never returned or ended their message (likely an indexer crash on this repository); the last attempt is not run"
+                    "project {project_id} quarantined: {unended} earlier attempts never returned or ended in exhaustion; the last delivery is not run"
                 )));
             }
         }
@@ -429,10 +426,7 @@ impl CodeIndexingTaskHandler {
         }
         let redelivered = match &result {
             Err(HandlerError::Backpressure(_)) => true,
-            Err(HandlerError::Processing(_)) => self
-                .subscription
-                .retry_policy()
-                .is_some_and(|policy| policy.should_redeliver(attempt)),
+            Err(HandlerError::Processing(_)) => context.redelivered_on_failure,
             _ => false,
         };
         if redelivered {

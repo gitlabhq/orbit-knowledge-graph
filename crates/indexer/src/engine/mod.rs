@@ -213,6 +213,9 @@ impl Engine {
                 Some(message) = messages.next(), if permit.is_some() => {
                     let message = message?;
                     let progress = message.progress_notifier();
+                    let redelivered_on_failure = subscription
+                        .retry_policy()
+                        .is_some_and(|policy| policy.should_redeliver(message.envelope.attempt));
                     let span = tracing::info_span!(
                         "process_message",
                         correlation_id = %message.envelope.id.0,
@@ -223,7 +226,8 @@ impl Engine {
                         message,
                         self.registry.handlers_for(&subscription),
                         HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress)
-                            .with_work_slot(permit.take()),
+                            .with_work_slot(permit.take())
+                            .with_redelivery(redelivered_on_failure),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),

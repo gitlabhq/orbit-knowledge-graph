@@ -761,6 +761,71 @@ async fn permanent_drop_error_drops_without_dlq() {
     );
 }
 
+struct RecordingHandler {
+    subscription: Subscription,
+    seen: Arc<std::sync::Mutex<Vec<(u32, bool)>>>,
+}
+
+#[async_trait]
+impl Handler for RecordingHandler {
+    fn name(&self) -> &str {
+        "recording-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        self.subscription.clone()
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push((message.attempt, context.redelivered_on_failure));
+        Err(HandlerError::Processing("always fails".into()))
+    }
+}
+
+#[tokio::test]
+async fn the_context_tells_the_handler_whether_a_failure_is_redelivered() {
+    let context = TestContext::new().await;
+    let stream = "redelivery_flag_stream";
+    let subject = "redelivery_flag.events";
+    let subscription = Subscription::new(stream, subject).with_config(&SubscriptionConfig {
+        max_attempts: Some(2),
+        retry_interval_secs: Some(1),
+        dead_letter_on_exhaustion: Some(false),
+        ..Default::default()
+    });
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("redelivery-flag-consumer".into()),
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
+        })
+        .await;
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+
+    publish_test_event(&broker, &subscription).await;
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let handler = RecordingHandler {
+        subscription: subscription.clone(),
+        seen: seen.clone(),
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(4)).await;
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![(1, true), (2, false)],
+        "the engine's redelivery decision must reach the handler"
+    );
+}
+
 struct FailOnceHandler {
     inner: TestHandler,
     subscription: Subscription,

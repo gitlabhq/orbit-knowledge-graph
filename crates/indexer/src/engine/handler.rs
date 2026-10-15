@@ -124,6 +124,7 @@ pub struct HandlerContext {
     /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
     pub work: WorkSlot,
+    pub redelivered_on_failure: bool,
 }
 
 impl HandlerContext {
@@ -137,11 +138,17 @@ impl HandlerContext {
             lock_service,
             progress,
             work: WorkSlot::default(),
+            redelivered_on_failure: false,
         }
     }
 
     pub fn with_work_slot(mut self, permit: Option<OwnedSemaphorePermit>) -> Self {
         self.work = WorkSlot(Arc::new(Mutex::new(permit)));
+        self
+    }
+
+    pub fn with_redelivery(mut self, redelivered_on_failure: bool) -> Self {
+        self.redelivered_on_failure = redelivered_on_failure;
         self
     }
 }

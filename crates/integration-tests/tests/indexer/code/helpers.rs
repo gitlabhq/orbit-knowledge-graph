@@ -162,7 +162,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
-            code_task_subscription(),
+            CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
     }
@@ -181,15 +181,10 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             lock_ttl,
-            code_task_subscription(),
+            CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
     }
-}
-
-fn code_task_subscription() -> indexer::types::Subscription {
-    CodeIndexingTaskRequest::subscription()
-        .with_config(&indexer::modules::code::code_indexing_task_topic_policy())
 }
 
 struct MockState {
@@ -469,6 +464,10 @@ pub fn handler_context() -> HandlerContext {
 pub fn handler_context_with_lock_service(lock_service: Arc<MockLockService>) -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(mock_nats.clone(), lock_service, ProgressNotifier::noop())
+}
+
+pub fn handler_context_redelivered(redelivered_on_failure: bool) -> HandlerContext {
+    handler_context().with_redelivery(redelivered_on_failure)
 }
 
 pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {

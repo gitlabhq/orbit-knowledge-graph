@@ -1154,7 +1154,7 @@ async fn the_last_redelivery_after_unended_attempts_is_dead_lettered_not_run() {
     let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     envelope.attempt = 5;
     let error = handler
-        .handle(handler_context(), envelope)
+        .handle(handler_context_redelivered(false), envelope)
         .await
         .expect_err("four attempts that never returned mean the repository crashes the indexer");
     assert!(
@@ -1200,29 +1200,31 @@ async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold()
         let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
         envelope.attempt = attempt;
         handler
-            .handle(handler_context(), envelope)
+            .handle(handler_context_redelivered(attempt < 5), envelope)
             .await
             .expect_err("the archive endpoint keeps failing")
     };
 
-    for attempt in 1..=5 {
-        let error = fail_once(attempt).await;
-        assert!(
-            matches!(error, indexer::handler::HandlerError::Processing(_)),
-            "first cycle, attempt {attempt}: {error}"
+    for cycle in 1..=4i64 {
+        for attempt in 1..=5 {
+            let error = fail_once(attempt).await;
+            assert!(
+                matches!(error, indexer::handler::HandlerError::Processing(_)),
+                "cycle {cycle}, attempt {attempt}: {error}"
+            );
+        }
+        assert_eq!(
+            attempts(&clickhouse, traversal_path, project_id).await,
+            [cycle],
+            "each exhausted cycle keeps one attempt; the redelivered ones give theirs back"
         );
     }
-    assert_eq!(
-        attempts(&clickhouse, traversal_path, project_id).await,
-        [1],
-        "the exhausted run keeps its attempt, the redelivered ones gave theirs back"
-    );
 
     for attempt in 1..=4 {
         let error = fail_once(attempt).await;
         assert!(
             matches!(error, indexer::handler::HandlerError::Processing(_)),
-            "second cycle, attempt {attempt}: {error}"
+            "last cycle, attempt {attempt}: {error}"
         );
     }
     let error = fail_once(5).await;
@@ -1234,7 +1236,7 @@ async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold()
                 ..
             }
         ),
-        "second cycle, attempt 5: {error}"
+        "last cycle, attempt 5: {error}"
     );
     assert_eq!(
         attempts(&clickhouse, traversal_path, project_id).await,
@@ -1267,7 +1269,7 @@ async fn a_redelivery_after_one_unended_attempt_still_runs() {
     let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     envelope.attempt = 2;
     handler
-        .handle(handler_context(), envelope)
+        .handle(handler_context_redelivered(true), envelope)
         .await
         .expect("one unended attempt may be a hard kill; the redelivery runs");
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
