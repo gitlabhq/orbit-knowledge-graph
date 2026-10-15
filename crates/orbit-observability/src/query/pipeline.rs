@@ -7,7 +7,7 @@
 //! Renamed here to `batches`, `redactions`, and `result_set.rows`.
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, ROW_COUNT};
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
 
 pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
@@ -40,7 +40,7 @@ pub const PIPELINE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "End-to-end pipeline duration from security check to formatted output.",
     Some("s"),
     &[labels::QUERY_TYPE, labels::STATUS],
-    LATENCY,
+    QUERY_LATENCY,
     DOMAIN,
 );
 
@@ -157,3 +157,20 @@ pub const CATALOG: &[&MetricSpec] = &[
     &CH_MEMORY_USAGE,
     &FAILED,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_duration_has_slo_threshold_boundaries() {
+        let buckets = PIPELINE_DURATION.buckets.unwrap();
+        for threshold in [5.0, 25.0] {
+            assert!(
+                buckets.contains(&threshold),
+                "{} needs an exact {threshold}s boundary for the latency SLI",
+                PIPELINE_DURATION.otel_name
+            );
+        }
+    }
+}
