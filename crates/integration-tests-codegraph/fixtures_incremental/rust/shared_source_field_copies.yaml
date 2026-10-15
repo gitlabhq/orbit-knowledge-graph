@@ -4,7 +4,22 @@ fixtures:
   - path: main.rs
     content: |
       fn helper() {}
+      fn other() {}
       fn target() {}
+
+      #[derive(Clone, Copy)]
+      struct R {
+          cb: fn(),
+      }
+
+      struct P {
+          p: R,
+          q: R,
+      }
+
+      fn make() -> P {
+          todo!()
+      }
 
       fn nested_copy(mut a: Node) {
           a.cb = helper;
@@ -20,6 +35,35 @@ fixtures:
           a.x = a;
           let b = a;
           target();
+      }
+
+      fn reset_then_rebind() {
+          let s = R { cb: other };
+          let w = R { cb: other };
+          let mut a = P { p: s, q: w };
+          a = make();
+          let h = R { cb: helper };
+          a.p = h;
+          let t = a.q;
+          (t.cb)();
+      }
+
+      fn reset_q() {
+          let s = R { cb: other };
+          let w = R { cb: other };
+          let mut a = P { p: s, q: w };
+          a = make();
+          let t = a.q;
+          (t.cb)();
+      }
+
+      fn literal_then_rebind() {
+          let s = R { cb: other };
+          let mut a = P { p: s, q: s };
+          let h = R { cb: helper };
+          a.p = h;
+          let t = a.q;
+          (t.cb)();
       }
 
 tests:
@@ -40,3 +84,22 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { target: target } }
+
+  - name: "a reset clears each field on its own, so a later rebind of a.p does not reach a.q"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name IN ['reset_then_rebind', 'reset_q']
+        AND target.name IN ['helper', 'other']
+      RETURN caller.name AS caller, target.name AS target
+    assert:
+      - { empty: true }
+
+  - name: "a rebind of a.p after a literal leaves a.q with the callback of s"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'literal_then_rebind'
+        AND target.name IN ['helper', 'other']
+      RETURN target.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: other } }
