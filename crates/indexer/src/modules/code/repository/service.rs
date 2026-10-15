@@ -147,6 +147,7 @@ pub mod test_utils {
         archives: Mutex<HashMap<i64, Vec<u8>>>,
         download_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
         project_info_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
+        storages: Mutex<HashMap<i64, String>>,
     }
 
     impl MockRepositoryService {
@@ -164,6 +165,7 @@ pub mod test_utils {
                 archives: Mutex::new(HashMap::new()),
                 download_errors: Mutex::new(HashMap::new()),
                 project_info_errors: Mutex::new(HashMap::new()),
+                storages: Mutex::new(HashMap::new()),
             })
         }
 
@@ -173,6 +175,10 @@ pub mod test_utils {
 
         pub fn set_download_error(&self, project_id: i64, error: RepositoryServiceError) {
             self.download_errors.lock().insert(project_id, error);
+        }
+
+        pub fn set_repository_storage(&self, project_id: i64, storage: &str) {
+            self.storages.lock().insert(project_id, storage.to_string());
         }
 
         pub fn set_project_info_error(&self, project_id: i64, error: RepositoryServiceError) {
@@ -201,7 +207,9 @@ pub mod test_utils {
                     ))
                 })?;
 
-            Ok(make_project_info(project_id, &default_branch))
+            let mut info = make_project_info(project_id, &default_branch);
+            info.repository_storage = self.storages.lock().get(&project_id).cloned();
+            Ok(info)
         }
 
         async fn download_archive(

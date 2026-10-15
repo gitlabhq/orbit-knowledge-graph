@@ -703,11 +703,53 @@ mod tests {
     #[tokio::test]
     async fn a_push_task_looks_the_project_up_once() {
         let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
 
         let envelope = TestContext::make_request(1, 123, "main");
-        let _ = ctx.handler.handle(ctx.handler_context(), envelope).await;
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
+        assert!(result.is_ok(), "got {result:?}");
         assert_eq!(ctx.counting_repo.project_info_call_count(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_storage_from_project_info_picks_the_archive_slots() {
+        let config = crate::testkit::builders::test_pipeline_configuration();
+        for branch in [None, Some("main")] {
+            let ctx = TestContext::new();
+            ctx.mock_repo.set_repository_storage(123, "gitaly-1");
+            ctx.mock_repo.set_archive(
+                123,
+                build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+            );
+            for slot in 0..config.archive_storage_budget {
+                ctx.mock_locks
+                    .set_lock(&crate::modules::code::repository::slot_key(
+                        Some("gitaly-1"),
+                        slot,
+                    ));
+            }
+            let envelope = Envelope::new(&CodeIndexingTaskRequest {
+                task_id: 1,
+                project_id: 123,
+                branch: branch.map(str::to_string),
+                commit_sha: Some("abc123".to_string()),
+                traversal_path: TraversalPath::new_unchecked("1/123/"),
+                dispatch_id: uuid::Uuid::new_v4(),
+                campaign_id: None,
+            })
+            .unwrap();
+
+            let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+            assert!(
+                matches!(result, Err(HandlerError::Backpressure(_))),
+                "branch {branch:?}: got {result:?}"
+            );
+        }
     }
 
     #[tokio::test]
