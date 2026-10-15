@@ -1,0 +1,39 @@
+name: "JavaScript: a join with a shadowed call does not take the type of the function it hides"
+
+fixtures:
+  - path: main.js
+    content: |
+      class Foo {
+        bar() {}
+      }
+
+      class Foo2 extends Foo {}
+
+      function make() {
+        return new Foo();
+      }
+
+      function f(make, c) {
+        let x = make();
+        if (c) {
+          x = new Foo2();
+        }
+        x.bar();
+      }
+
+      function g(c) {
+        let x = make();
+        if (c) {
+          x = new Foo2();
+        }
+        x.bar();
+      }
+
+tests:
+  - name: "f, whose make is a parameter, does not call bar through the join"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f' AND callee.name = 'bar'
+      RETURN caller.name AS caller
+    assert:
+      - { empty: true }
