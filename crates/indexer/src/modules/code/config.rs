@@ -97,7 +97,7 @@ impl CodeTableNames {
         ]
     }
 
-    /// Ontology node names backing [`Self::node_tables`], in the same order.
+    /// Code-origin source kinds used to clean shared edge tables.
     pub const NODE_KINDS: [&'static str; 5] = [
         "Branch",
         "Directory",

@@ -683,6 +683,8 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     }
 }
 
+type RouteKey = (usize, usize, usize);
+
 pub(super) fn route_graph(
     data: ConvertedGraphData,
     table_names: &super::config::CodeTableNames,
@@ -698,8 +700,6 @@ pub(super) fn route_graph(
     if data.edges.num_rows() > 0 {
         use std::collections::HashMap;
 
-        // Cloned so the routing borrow detaches from `data.edges` and the
-        // single-table path can move the batch out instead of copying it.
         let routing = EdgeRouting::resolve(&data.edges, table_names)?;
 
         // Columns that only exist on gl_code_edge. Sub-batches going
@@ -739,6 +739,8 @@ pub(super) fn route_graph(
 
 struct EdgeRouting<'a>(Vec<&'a str>);
 
+type DictionaryStrings<'a> = (&'a [i32], &'a arrow::array::StringArray);
+
 impl<'a> EdgeRouting<'a> {
     fn resolve(
         edges: &RecordBatch,
@@ -763,7 +765,7 @@ impl<'a> EdgeRouting<'a> {
                 let values = dictionary.values().as_string_opt::<i32>().ok_or_else(|| {
                     SinkError(format!("{name} dictionary values are not strings"))
                 })?;
-                Ok((dictionary.keys().values(), values))
+                Ok((dictionary.keys().values().as_ref(), values))
             })
             .into_iter()
             .collect::<Result<Vec<_>, SinkError>>()?;
@@ -771,16 +773,29 @@ impl<'a> EdgeRouting<'a> {
         let [relationship, source, target] = strings.as_slice() else {
             return Err(SinkError("edge route columns did not resolve".into()));
         };
+        let mut routes: rustc_hash::FxHashMap<RouteKey, &'a str> = rustc_hash::FxHashMap::default();
+        routes.reserve(relationship.1.len().min(edges.num_rows()));
         let mut tables = Vec::with_capacity(edges.num_rows());
         for row in 0..edges.num_rows() {
-            let relationship_kind = relationship.1.value(relationship.0[row] as usize);
-            let source_kind = source.1.value(source.0[row] as usize);
-            let target_kind = target.1.value(target.0[row] as usize);
-            tables.push(
-                table_names
-                    .edge_table_for(relationship_kind, source_kind, target_kind)
-                    .map_err(|error| SinkError(error.to_string()))?,
-            );
+            let relationship_key = dictionary_key(relationship, row, "relationship_kind")?;
+            let source_key = dictionary_key(source, row, "source_kind")?;
+            let target_key = dictionary_key(target, row, "target_kind")?;
+            let route_key = (relationship_key, source_key, target_key);
+            let table = match routes.get(&route_key) {
+                Some(table) => *table,
+                None => {
+                    let table = table_names
+                        .edge_table_for(
+                            relationship.1.value(relationship_key),
+                            source.1.value(source_key),
+                            target.1.value(target_key),
+                        )
+                        .map_err(|error| SinkError(error.to_string()))?;
+                    routes.insert(route_key, table);
+                    table
+                }
+            };
+            tables.push(table);
         }
         Ok(Self(tables))
     }
@@ -799,6 +814,21 @@ impl<'a> EdgeRouting<'a> {
     fn tables_by_row(&self) -> Box<dyn Iterator<Item = &'a str> + '_> {
         Box::new(self.0.iter().copied())
     }
+}
+
+fn dictionary_key(
+    dictionary: &DictionaryStrings<'_>,
+    row: usize,
+    column: &str,
+) -> Result<usize, SinkError> {
+    let key = usize::try_from(dictionary.0[row])
+        .map_err(|_| SinkError(format!("{column} contains a negative dictionary key")))?;
+    if key >= dictionary.1.offsets().len() - 1 {
+        return Err(SinkError(format!(
+            "{column} dictionary key {key} is out of bounds"
+        )));
+    }
+    Ok(key)
 }
 
 fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
