@@ -133,6 +133,10 @@ description = "Run local integration tests — compiler + querying pipeline (no 
 run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
 description = "Check logical input and selected physical plans against YAML fixtures"
 
+[tasks."test:compiler-contract"]
+run = "cargo test -p integration-tests --test local compiler::compiler_contract -- --nocapture"
+description = "Check compiler errors, inputs, parameters, settings, and metadata against YAML fixtures"
+
 [tasks."test:integration:codegraph"]
 run = "cargo nextest run -p integration-tests-codegraph --no-capture"
 description = "Run code-graph and code-graph-incremental YAML suites with OpenCypher-like checks (no Docker)"

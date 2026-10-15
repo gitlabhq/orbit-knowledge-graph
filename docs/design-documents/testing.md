@@ -108,6 +108,10 @@ The [plan-shape harness](../../crates/integration-tests/tests/compiler/plan_shap
 
 Plan-shape fixtures do not measure latency, and they do not replace query scenarios.
 
+### Compiler contract fixtures
+
+The [compiler contract harness](../../crates/integration-tests/tests/compiler/compiler_contract/README.md) checks what the compiler promises outside the plan. Each YAML case in `compiler_contract/fixtures/` gives a query and the expected errors, normalized input, parameters, settings, hydration plan, result metadata, pagination, or schema-call response. Cases run both frontends and check that they agree. Run them with `mise test:compiler-contract`.
+
 ## Code-graph suites
 
 The code-graph engine turns source code into definitions, references, and edges. YAML suites in [`crates/integration-tests-codegraph`](../../crates/integration-tests-codegraph/README.md) check it. Each suite works like this:

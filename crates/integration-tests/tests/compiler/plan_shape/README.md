@@ -16,6 +16,20 @@ missing_frontends:
   json: The JSON frontend does not expose property-to-property comparisons.
 ```
 
+Set `ontology` to `{overlay, schema_prefix, path_scopable, rename_tables}` to
+compile against a modified catalog. `ontology_overlay` remains as a shorthand.
+
+Each backend accepts `planned`, `emitted`, and `compiled` assertion blocks.
+`planned` and `emitted` explain the planner and lowering output before security.
+`compiled` explains the final AST after the full pipeline, including scope
+proofs, security filters, enforcement columns, cursors, and text excerpts. Set
+`security` to `default`, `admin`, or an inline context for `compiled` checks;
+see the [compiler contract README](../compiler_contract/README.md) for the
+fields. Scalar scope lookups render as `scalar(SELECT ... FROM ... WHERE ...)`.
+
+`PLAN_SHAPE_FILTER=<text>` runs matching fixtures. `PLAN_SHAPE_PRINT=<text>`
+prints every explain tree for matching fixtures.
+
 A file can hold several fixtures in a `cases` list. Every other top-level key
 is a default for each case, and each case needs its own `name`.
 
@@ -96,8 +110,9 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
   verify predicate content, but do not assert the internal balanced-tree depth.
 - Compiler unit tests retain synthetic catalog guards that the embedded ontology
   cannot express, such as an FK chain made entirely of global hubs.
-- Scope enforcement, role scans, virtual-property hydration, cursor handling,
-  and backend code-generation optimizations are outside this harness.
+- Virtual-property hydration plans, settings, parameters, and errors belong in
+  the [compiler contract harness](../compiler_contract/README.md). Dialect
+  function rendering belongs in codegen unit tests.
 
 ## Keep in Rust
 
@@ -112,11 +127,7 @@ not ignored tests or missing fixture migrations.
 | `plan_shape::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
 | `compiler::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
 | `plan::edge_chain::tests::fk_chain_*` | Uses synthetic catalog facts, including all-global chains absent from the embedded ontology |
-| `compiler::tests::cross_namespace_fk_chain_elides_to_node_joins` | Also checks authorization predicates after lowering |
-| `compiler::tests::multi_hop_aggregation_generates_cascade_cte` | Also checks security injection after lowering |
-| Compiler cursor, scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside plan-shape assertions |
-| Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
-| Input deserialization, normalization, schema-limit, validation-error, GQL hashing, cursor-token, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
+| Codegen and DDL unit tests | Check final backend SQL rather than the shared SQL AST |
 
 Keep a Rust test until a fixture checks every one of its assertions. For the
 plan-shape layer and its limits, see
