@@ -762,7 +762,8 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         .stack_size(templates::WORKER_STACK_BYTES)
         .build()
         .unwrap();
-    let (small, large) = pool.install(|| (export_ms(3_000), export_ms(12_000)));
+    let best = |levels| (0..3).map(|_| export_ms(levels)).fold(f64::MAX, f64::min);
+    let (small, large) = pool.install(|| (best(3_000), best(12_000)));
     assert!(
         large < 8.0 * small.max(1.0),
         "exporting 4x the nesting went from {small:.0} ms to {large:.0} ms"

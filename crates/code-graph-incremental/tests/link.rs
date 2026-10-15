@@ -188,9 +188,10 @@ fn linking_deeply_nested_blocks_grows_linearly() {
         started.elapsed().as_secs_f64() * 1000.0
     }
 
+    let best = |levels| (0..3).map(|_| link_ms(levels)).fold(f64::MAX, f64::min);
     let (small, large) = std::thread::Builder::new()
         .stack_size(templates::WORKER_STACK_BYTES)
-        .spawn(|| (link_ms(2_000), link_ms(8_000)))
+        .spawn(move || (best(2_000), best(8_000)))
         .unwrap()
         .join()
         .unwrap();
