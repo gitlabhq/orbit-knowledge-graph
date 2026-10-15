@@ -627,9 +627,12 @@ fn expand(
         .type_uses
         .par_iter()
         .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
-        .filter(|(producer, _)| {
+        .filter(|(producer, uses)| {
             (producer.is(C::Binding)
                 || (producer.is(C::Call)
+                    && uses
+                        .iter()
+                        .any(|e| e.call_resolution == CallResolution::Callable)
                     && !ctx
                         .call_at_site
                         .contains_key(&(producer.fi(), producer.index())))
