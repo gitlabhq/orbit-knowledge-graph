@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Canonicalize, Link, Parse, Rewrite, SourceFile};
+use code_graph_incremental::tree::EdgeKind;
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Sentinel, templates};
 mod common;
@@ -133,12 +135,19 @@ fn a_file_nested_past_the_depth_limit_keeps_what_lies_above_the_cut() {
     let report = &graph.context().report;
     assert!(report.skipped.is_empty());
     assert_eq!(skipped(&report.limited), [("depth", "nested.js")]);
-    assert!(
-        graph
-            .value()
-            .state
-            .edges
-            .iter()
-            .any(|e| e.kind == code_graph_incremental::tree::EdgeKind::Calls)
-    );
+    let state = &graph.value().state;
+    let name = |tree: u32, node: u32| {
+        let def = state.trees[tree as usize].cursor(node);
+        env.lang
+            .syms
+            .resolve(def.child_sym(C::DefName).unwrap_or(0))
+            .to_string()
+    };
+    let calls: Vec<_> = state
+        .edges
+        .iter()
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .map(|e| (name(e.from_tree, e.from_node), name(e.to_tree, e.to_node)))
+        .collect();
+    assert_eq!(calls, [("nested".to_string(), "top".to_string())]);
 }
