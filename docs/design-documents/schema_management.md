@@ -11,6 +11,8 @@ table-prefix-aware migration orchestrator.
 The ontology declares storage. `Relational<ClickHouse>` resolves ClickHouse graph-table definitions and source bindings during derivation.
 The query catalog and DDL renderer consume those resolved definitions.
 Migration uses the catalog's writer map to classify graph-table rebuilds.
+Join-source changes widen migration to a full rebuild. Cleanup includes deployed derived graph tables.
+Reordered-table declarations remain metadata only until the ETL pipeline can populate them through resumable writes.
 Schema construction and view rendering return errors for invalid layouts. Migration classification reuses the constructed schema's layout.
 Cleanup construction and refreshable-view lifecycle operations propagate layout errors. Fingerprint generation fails on invalid view templates instead of omitting them.
 These backend-specific types contain owned data and require no compiler dependency or SQL parser.
@@ -183,7 +185,8 @@ parser, and compiler. Validate a cross-version rollout before relying on it.
 
 Deploy variant-table parsing and routing support to every query server before publishing split-route archives.
 Older binaries can ignore a variant's `table` field and read the wrong table.
-The metadata-only release rejects split routes at dispatcher startup and server snapshot loading.
+The dispatcher rejects split routes until producers support writes to variant-specific tables.
+Query servers support split routes once variant-aware query planning is deployed.
 Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
 If a server rejects the active archive, it clears its last installed snapshot. All query servers
 return `503` until an operator repairs the archive or rolls back the active version.

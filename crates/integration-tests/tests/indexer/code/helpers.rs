@@ -471,7 +471,7 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
             "SELECT source_id FROM {} \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'DEFINES'",
-            ontology.edge_table_for_relationship("DEFINES")
+            ontology.edge_table_for_relationship("DEFINES").unwrap()
         ))
         .await;
     assert!(

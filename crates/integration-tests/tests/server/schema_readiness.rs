@@ -16,7 +16,7 @@ use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
     table_prefix,
 };
-use orbit_server::active_schema::{ActiveSchema, validate_servable_archive};
+use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::InMemoryAnalyticsTracker;
 use orbit_server::auth::{Claims, JwtValidator};
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -49,7 +49,7 @@ const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
 ];
 
 #[tokio::test]
-async fn split_route_archive_is_not_served() {
+async fn split_route_archive_is_served_by_variant_aware_queries() {
     let mut cluster = Cluster::start(1).await;
     cluster.create_tables(&[1, 2]).await;
     cluster.promote(1).await;
@@ -59,14 +59,8 @@ async fn split_route_archive_is_not_served() {
     calls["variants"][0]["table"] = json!("gl_edge");
     sources.insert("edges/calls.yaml".into(), yaml::to_string(&calls).unwrap());
     let archive = OntologyArchive::from_sources(2, &sources).unwrap();
-    assert_eq!(
-        validate_servable_archive(&archive).unwrap_err().to_string(),
-        "validation error: relationship 'CALLS' has split table routes; this consumer requires one table per relationship kind"
-    );
     cluster.catalog.publish(&archive).await.unwrap();
     cluster.promote(2).await;
-    cluster.await_serving(None).await;
-    cluster.restore_archive(2).await;
     cluster.await_serving(Some(2)).await;
 }
 

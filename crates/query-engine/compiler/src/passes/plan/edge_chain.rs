@@ -8,10 +8,7 @@ use super::context::PlanningContext;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-use super::{
-    Aggregation, BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
-    QueryPlan, Traversal,
-};
+use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, QueryPlan};
 use query_data_model::OrbitQueryModel;
 
 pub struct Hop {
@@ -220,46 +217,34 @@ pub enum HydrationStrategy {
     Skip,
 }
 
-pub(super) fn plan<M>(
-    mut context: PlanningContext<'_, M>,
-    use_fk_elision: bool,
+pub(super) fn plan(
+    mut context: PlanningContext<'_, query_data_model::ClickHouseDataModel>,
     table_scans: &HashSet<String>,
-) -> Result<QueryPlan>
-where
-    M: OrbitQueryModel + ?Sized,
-{
+) -> Result<QueryPlan> {
     let input = context.input;
     let model = context.model;
-    let hops = build_hops(input, model);
+    let hops = build_hops(input, model)?;
     let mut nodes = build_node_plans(input, model);
     let denormalized = super::denormalized_facts(input, model);
     let placement = place_conditions(input, model, &hops, &nodes, &denormalized)?;
     context.bind_scan_conditions(&mut nodes, &placement)?;
 
-    let (mut hops, elided_fks) = if use_fk_elision {
-        elide_hops(hops, &mut nodes, input, model)
-    } else {
-        (hops, Vec::new())
-    };
+    let (mut hops, elided_fks) = elide_hops(hops, &mut nodes, input, model);
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
 
     for node_plan in nodes.values_mut() {
-        if use_fk_elision {
-            node_plan.hydration = determine_hydration(
-                node_plan,
-                input,
-                &hops,
-                &denormalized,
-                table_scans.contains(&node_plan.alias),
-                placement.joined_nodes.contains(&node_plan.alias),
-                model,
-            );
-        } else {
-            node_plan.hydration = HydrationStrategy::Join;
-        }
+        node_plan.hydration = determine_hydration(
+            node_plan,
+            input,
+            &hops,
+            &denormalized,
+            table_scans.contains(&node_plan.alias),
+            placement.joined_nodes.contains(&node_plan.alias),
+            model,
+        );
     }
 
     resolve_join_columns(&mut hops)?;
@@ -273,10 +258,6 @@ where
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
-    } else if !use_fk_elision {
-        for np in nodes.values_mut() {
-            np.emit_select = true;
-        }
     }
 
     context.hops = hops;
@@ -284,9 +265,9 @@ where
     context.denormalized = denormalized;
     let mut execution = if context.hops.is_empty() {
         context.single_node()?
-    } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
+    } else if let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&context, &center)?
-    } else if use_fk_elision && detect_fk_chain(&context.hops, &context.nodes) {
+    } else if detect_fk_chain(&context.hops, &context.nodes) {
         super::fk::chain(&context)?
     } else {
         super::flat::plan(&context)?
@@ -332,15 +313,10 @@ where
             context.hops.push(hop);
         }
     }
-    Ok(if input.query_type == QueryType::Aggregation {
-        let result = context.aggregation(&execution);
-        QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
-    } else {
-        QueryPlan::Traversal(context.finish(Traversal { execution }))
-    })
+    Ok(context.finish_execution(execution))
 }
 
-fn build_hops<M>(input: &Input, model: &M) -> Vec<Hop>
+pub(super) fn build_hops<M>(input: &Input, model: &M) -> Result<Vec<Hop>>
 where
     M: OrbitQueryModel + ?Sized,
 {
@@ -358,10 +334,6 @@ where
                 "{}edge_{input_index}",
                 crate::constants::internal_column_prefix()
             );
-            let mut edge_tables = model.relationship_tables(&rel.types);
-            if edge_tables.is_empty() {
-                edge_tables.push(model.default_edge_table().to_string());
-            }
             let from_entity = input
                 .nodes
                 .iter()
@@ -382,6 +354,31 @@ where
             let target_entity = endpoint_entities
                 .1
                 .and_then(|entity| model.graph().entity_id(entity));
+            let mut edge_tables = match from_entity.zip(to_entity) {
+                _ if rel.hops.max > 1 && crate::passes::normalize::is_wildcard(&rel.types) => {
+                    vec![model.default_edge_table().to_string()]
+                }
+                Some((from, to)) if rel.hops.max == 1 => {
+                    let mut tables = Vec::new();
+                    if rel.direction != Direction::Incoming {
+                        tables.extend(model.relationship_tables_between(&rel.types, from, to));
+                    }
+                    if rel.direction != Direction::Outgoing {
+                        tables.extend(model.relationship_tables_between(&rel.types, to, from));
+                    }
+                    tables
+                }
+                _ => model.relationship_tables(&rel.types),
+            };
+            if edge_tables.is_empty() {
+                if crate::passes::normalize::is_wildcard(&rel.types) {
+                    edge_tables.push(model.default_edge_table().to_string());
+                } else {
+                    edge_tables = model.relationship_tables(&rel.types);
+                }
+            }
+            edge_tables.sort();
+            edge_tables.dedup();
             let fk = from_entity
                 .zip(to_entity)
                 .and_then(|(from, to)| match rel.direction {
@@ -431,7 +428,7 @@ where
                 super::helpers::FilterOwner::Tables(&edge_tables),
                 model,
             );
-            Hop {
+            Ok(Hop {
                 input_index,
                 rel_types: rel.types.clone(),
                 relationships: rel
@@ -453,12 +450,12 @@ where
                 filters,
                 join_prev: None,
                 cascade_anchor: false,
-            }
+            })
         })
         .collect()
 }
 
-fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
+pub(super) fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
 where
     M: OrbitQueryModel + ?Sized,
 {

@@ -32,7 +32,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Project 2 AS depth, ... (_)))
+        - (Union ALL AS e0 (Project 2 AS depth, ... (_)))
       reject:
         - (Project 1 AS depth, ... (_))
         - (Project 3 AS depth, ... (_))

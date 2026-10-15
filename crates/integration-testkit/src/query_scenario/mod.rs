@@ -137,10 +137,27 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
 async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
     let cfg = &scenario.config;
 
-    let needs_fork = !cfg.extra_seed.is_empty();
+    let needs_fork = !cfg.extra_seed.is_empty() || cfg.ontology_overlay.is_some();
     let ctx = if needs_fork {
         let db_name = scenario::database_name(name);
         let forked = ctx.fork(&db_name).await;
+        if let Some(overlay) = &cfg.ontology_overlay {
+            let ontology = crate::load_ontology_overlay(overlay);
+            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
+            let credentials = orbit_migrations::schema::DictionaryCredentials {
+                database: forked.config.database.clone(),
+                user: forked.config.username.clone(),
+                password: forked.config.password.clone(),
+            };
+            orbit_migrations::execute::create_all_versioned_tables(
+                &forked.create_client(),
+                &schema,
+                &credentials,
+                &crate::TABLE_PREFIX,
+            )
+            .await
+            .unwrap();
+        }
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         let mut settings = Default::default();
         if cfg.unmerged_seed {

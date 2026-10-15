@@ -209,7 +209,6 @@ impl SnapshotLoader {
         } else {
             self.catalog.load(version).await?.load_ontology()?
         };
-        let ontology = validate_servable_ontology(ontology)?;
         let ontology = Arc::new(ontology.with_schema_version_prefix(&table_prefix(version)));
         let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)?
             .table_names()
@@ -221,16 +220,6 @@ impl SnapshotLoader {
         }
         SchemaSnapshot::new(version, ontology).map(Arc::new)
     }
-}
-
-fn validate_servable_ontology(ontology: Ontology) -> anyhow::Result<Ontology> {
-    ontology.validate_single_table_edge_routes()?;
-    Ok(ontology)
-}
-
-#[cfg(any(test, feature = "testkit"))]
-pub fn validate_servable_archive(archive: &OntologyArchive) -> anyhow::Result<()> {
-    validate_servable_ontology(archive.load_ontology()?).map(drop)
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
