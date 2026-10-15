@@ -1,0 +1,40 @@
+name: "C#: a read of a method name in one method does not hide it from the next"
+
+fixtures:
+  - path: T.cs
+    content: |
+      public class T
+      {
+          public void A(Album[] albums)
+          {
+              using var context = CreateContext();
+              foreach (var album in albums)
+                  context.Add(album);
+          }
+
+          public void B()
+          {
+              using var context = CreateContext();
+          }
+
+          protected C CreateContext() => new C();
+      }
+
+      public class C
+      {
+          public void Add(Album a) {}
+      }
+
+      public class Album {}
+
+tests:
+  - name: "both methods call CreateContext"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'CreateContext'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: A } }
+      - { row: { caller: B } }

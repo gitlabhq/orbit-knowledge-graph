@@ -158,8 +158,10 @@ impl SsaEngine {
         let mut seen = FxHashSet::default();
         let mut stack = vec![block];
         while let Some(b) = stack.pop() {
-            if defs.contains_key(&b) {
-                return true;
+            match defs.get(&b) {
+                Some(Value::Undefined) => continue,
+                Some(_) => return true,
+                None => {}
             }
             if seen.insert(b) {
                 stack.extend(self.blocks[b.0 as usize].predecessors.iter().copied());
