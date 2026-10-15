@@ -197,11 +197,51 @@ fn item_phases_pipe_into_one_named_pass() {
     assert_eq!(killed.label, "run");
 }
 
+/// A barrier that fails instead of hanging when fewer items than expected
+/// are admitted together.
+struct Meet {
+    parties: usize,
+    state: Mutex<(usize, usize)>,
+    changed: std::sync::Condvar,
+}
+
+impl Meet {
+    fn new(parties: usize) -> Self {
+        Self {
+            parties,
+            state: Mutex::new((0, 0)),
+            changed: std::sync::Condvar::new(),
+        }
+    }
+
+    fn wait(&self) {
+        let mut state = self.state.lock().unwrap();
+        let generation = state.1;
+        state.0 += 1;
+        if state.0 == self.parties {
+            *state = (0, generation + 1);
+            self.changed.notify_all();
+            return;
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while state.1 == generation {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !left.is_zero(),
+                "only {} of {} items were admitted together",
+                state.0,
+                self.parties
+            );
+            state = self.changed.wait_timeout(state, left).unwrap().0;
+        }
+    }
+}
+
 #[derive(Clone)]
 struct InflightProbe {
     inflight: Arc<AtomicU64>,
     peak: Arc<AtomicU64>,
-    meet: Arc<std::sync::Barrier>,
+    meet: Arc<Meet>,
 }
 
 impl ItemPhase<SourceFile> for InflightProbe {
@@ -219,8 +259,6 @@ impl ItemPhase<SourceFile> for InflightProbe {
     }
 }
 
-/// Every admitted item waits for `parties` of them to be in flight at once,
-/// so the peak is exact: the budget's worth, or all of them with no budget.
 fn peak_inflight(
     files: &[(String, String)],
     max_inflight_bytes: u64,
@@ -241,7 +279,7 @@ fn peak_inflight(
     let probe = InflightProbe {
         inflight: Arc::default(),
         peak: Arc::default(),
-        meet: Arc::new(std::sync::Barrier::new(parties)),
+        meet: Arc::new(Meet::new(parties)),
     };
     let items = rayon::ThreadPoolBuilder::new()
         .num_threads(8)
