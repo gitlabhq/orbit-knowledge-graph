@@ -1,35 +1,38 @@
 # config/ontology/edges/created_mr.yaml
 
-description: Duo Agent Platform session created a merge request
+description: Agent session created a merge request
 
 variants:
-  - from_node: { type: DuoWorkflow, id: id }
+  - from_node: { type: AgentSession, id: id }
     to_node: { type: MergeRequest, id: id }
-    description: "Duo session created the merge request."
+    description: "Agent session created the merge request."
 
 # Source rows are duo_workflows_workflow_merge_requests with link_type = 1 (created);
 # link_type 0 (source) is the MR a flow was started against, not one it made.
+# The link is keyed by workflow_id, so it is joined to the governance session
+# (source = gitlab_duo) with that workflow_id; the session id is the edge source.
+# Only Duo sessions have MR links today. A link whose session row has not synced
+# yet, or is not a project session, produces no edge until the link row is extracted
+# again.
 # The row's traversal_path is the workflow's, so the edge sits in the workflow's
 # namespace even when the MR lives in a sibling project.
-# Only project-scoped sessions have a DuoWorkflow node, so links with no project_id
-# (namespace-level sessions) are skipped.
 # Deletes are best effort. A Siphon tombstone keeps the sort key (traversal_path,
 # workflow_id, id) but zeroes merge_request_id and link_type, so the extract reads
 # them from the last live version of the row. After ClickHouse merges the source
 # parts only the tombstone remains and the edge stays. CLOSES has the same gap;
 # the general fix is tracked in knowledge-graph#1308.
 indexer:
-  reindex: [siphon_duo_workflows_workflow_merge_requests]
+  reindex: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
 pipelines:
   - name: CREATED_MR_siphon_duo_workflows_workflow_merge_requests_MergeRequest
     extract:
       type: clickhouse
-      tables: [siphon_duo_workflows_workflow_merge_requests]
+      tables: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
       order_by: [traversal_path, workflow_id, id]
       query: created_mr.sql.j2
     transform:
       type: datafusion
       edges:
-        - from: { field: source_id, kind: DuoWorkflow }
+        - from: { field: source_id, kind: AgentSession }
           to: { field: target_id, kind: MergeRequest }
           label: CREATED_MR

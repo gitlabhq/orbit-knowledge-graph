@@ -1,11 +1,11 @@
 SELECT
   id,
-  -- workflow_definition is free-form user input on the create API: only the
-  -- family (the part before the version) of a known flow type is ingested,
+  -- flow_type is the workflow definition, free-form user input on the create
+  -- API: only the family (the part before the version) of a known flow type is ingested,
   -- everything else is bucketed as 'other'. Keep in sync with the flow_type
-  -- values in duo_workflow.yaml.
+  -- values in agent_session.yaml.
   if(
-    splitByChar('/', workflow_definition)[1] IN (
+    splitByChar('/', coalesce(flow_type, ''))[1] IN (
       'software_development', 'external_agent', 'ai_catalog_agent',
       'claude_code_compliance_api', 'chat', 'agentic_chat',
       'developer', 'code_review', 'deep_code_review', 'fix_pipeline',
@@ -18,20 +18,23 @@ SELECT
       'ci_expert_agent', 'duo_permissions_assistant', 'support_assistant',
       'onboarding_guide', 'flow_creator'
     ),
-    splitByChar('/', workflow_definition)[1],
+    splitByChar('/', coalesce(flow_type, ''))[1],
     'other'
   ) AS flow_type,
-  environment,
-  created_at,
-  updated_at,
+  -- Stored as an Int16; the ontology enum maps it to the source name.
+  source,
+  session_started_at,
   project_id,
   namespace_id,
   traversal_path,
   {{version_column}} AS _version,
   {{deleted_column}} AS _deleted
-FROM siphon_duo_workflows_workflows
+FROM siphon_ai_governance_sessions
 WHERE startsWith(traversal_path, {traversal_path:String})
-  -- A tombstone may not carry project_id, so it must not be filtered out.
-  AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
+  -- Only GitLab Duo sessions for now (source 0). External sessions (glab, MCP,
+  -- Claude compliance API) wait for a privacy ruling. Slack and other
+  -- invoker-private sessions are never written to this table by Rails.
+  -- A tombstone may not carry project_id or source, so it must not be filtered out.
+  AND ((source = 0 AND project_id IS NOT NULL) OR {{deleted_column}}) {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}

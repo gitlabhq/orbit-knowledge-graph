@@ -141,8 +141,8 @@ variants:
     scope: namespace_anchor
     description: "Dependency belongs to project."
 
-  - from_node: { type: DuoWorkflow, id: id }
+  - from_node: { type: AgentSession, id: id }
     to_node: { type: Project, id: id }
     fk_column: project_id
     scope: namespace_anchor
-    description: "Duo session belongs to project."
+    description: "Agent session belongs to project."

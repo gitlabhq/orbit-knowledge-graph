@@ -227,12 +227,12 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
     assert!(!authorized_ids.contains(&5));
 }
 
-async fn duo_workflow_hidden_when_project_read_code_is_denied(ctx: &TestContext) {
+async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, flow_type, project_id, traversal_path) VALUES
          (1, 'developer', 1000, '1/100/1000/'),
          (2, 'chat', 1001, '1/101/1001/')",
-        t("gl_duo_workflow")
+        t("gl_agent_session")
     ))
     .await;
     ctx.optimize_all().await;
@@ -241,7 +241,7 @@ async fn duo_workflow_hidden_when_project_read_code_is_denied(ctx: &TestContext)
     let query = compile(
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "w", "entity": "DuoWorkflow", "id_range": {"start": 1, "end": 10000}}],
+            "nodes": [{"id": "w", "entity": "AgentSession", "id_range": {"start": 1, "end": 10000}}],
             "limit": 10
         }"#,
         query_engine::compiler::Frontend::JsonDsl,
@@ -258,7 +258,7 @@ async fn duo_workflow_hidden_when_project_read_code_is_denied(ctx: &TestContext)
     mock_service.deny("project", &[1001]);
     run_redaction(&mut result, &mock_service);
 
-    // The redaction id of a DuoWorkflow row is its project, not the workflow.
+    // The redaction id of a AgentSession row is its project, not the workflow.
     let visible_projects: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&w))
@@ -4446,7 +4446,7 @@ async fn redaction_integration() {
         three_hop_denying_one_project_removes_only_those_paths,
         group_project_two_hop_verifies_exact_pairs,
         single_node_project_query_verifies_all_projects,
-        duo_workflow_hidden_when_project_read_code_is_denied,
+        agent_session_hidden_when_project_read_code_is_denied,
         all_nodes_have_required_type_columns,
         empty_query_result_stays_empty,
         all_authorized_preserves_all_data,

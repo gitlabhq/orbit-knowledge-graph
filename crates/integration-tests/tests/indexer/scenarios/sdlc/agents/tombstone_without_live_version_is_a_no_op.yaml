@@ -11,10 +11,10 @@ steps:
       projects:
         - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
       gl_edge:
-        - { traversal_path: "1/100/1000/", source_id: 1, source_kind: DuoWorkflow, relationship_kind: CREATED_MR, target_id: 10, target_kind: MergeRequest }
+        - { traversal_path: "1/100/1000/", source_id: 11, source_kind: AgentSession, relationship_kind: CREATED_MR, target_id: 10, target_kind: MergeRequest }
     expect:
       edges:
-        - { kind: CREATED_MR, from: DuoWorkflow, to: MergeRequest, count: 1 }
+        - { kind: CREATED_MR, from: AgentSession, to: MergeRequest, count: 1 }
 
   - seed:
       checkpoint:
@@ -23,4 +23,4 @@ steps:
         - { id: 1, workflow_id: 1, merge_request_id: 0, link_type: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
     expect:
       edges:
-        - { kind: CREATED_MR, from: DuoWorkflow, to: MergeRequest, count: 1 }
+        - { kind: CREATED_MR, from: AgentSession, to: MergeRequest, count: 1 }

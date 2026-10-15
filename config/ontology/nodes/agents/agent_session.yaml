@@ -1,11 +1,11 @@
-# config/ontology/nodes/duo/duo_workflow.yaml
+# config/ontology/nodes/agents/agent_session.yaml
 
-node_type: DuoWorkflow
-domain: duo
-description: A Duo Agent Platform session in a project. Existence and flow type only, never its content
+node_type: AgentSession
+domain: agents
+description: An AI agent session in a project, recorded in the AI governance sessions table. Existence, source and flow type only, never its content
 label: flow_type
-destination_table: gl_duo_workflow
-default_columns: [id, flow_type, environment, created_at]
+destination_table: gl_agent_session
+default_columns: [id, source, flow_type, session_started_at]
 
 style:
   size: 24
@@ -13,7 +13,10 @@ style:
 
 # Project-delegated on purpose: the session's existence is visible to anyone with
 # read_code (Reporter+) on the project, like the source-code nodes. read_duo_workflow
-# is invoker-only for non-pipeline sessions and would hide that.
+# is invoker-only for non-pipeline sessions and would hide that. The pipeline only
+# extracts source = gitlab_duo for now; the other source values are declared so
+# external sessions can be enabled later without a schema rename, once the privacy
+# owners rule on them.
 redaction:
   resource_type: project
   id_column: project_id
@@ -25,7 +28,7 @@ properties:
     source: id
     nullable: false
     mutable: false
-    description: "Unique ID."
+    description: "Governance session ID."
 
   flow_type:
     type: enum
@@ -69,19 +72,17 @@ properties:
       31: flow_creator
       32: other
 
-  environment:
+  source:
     type: enum
-    source: environment
-    nullable: true
-    description: "Surface the session ran in."
+    source: source
+    nullable: false
+    description: "Where the session was recorded. Only gitlab_duo sessions are indexed today."
     selectivity: low
     values:
-      1: ide
-      2: web
-      3: chat_partial
-      4: chat
-      5: ambient
-      6: external
+      0: gitlab_duo
+      1: claude_code_compliance_api
+      2: claude_code_glab
+      3: mcp
 
   project_id:
     type: int64
@@ -97,18 +98,12 @@ properties:
     mutable: false
     description: "Owning namespace ID, when the session also records one."
 
-  created_at:
+  session_started_at:
     type: timestamp
-    source: created_at
+    source: session_started_at
     nullable: false
     mutable: false
-    description: "Creation timestamp."
-
-  updated_at:
-    type: timestamp
-    source: updated_at
-    nullable: false
-    description: "Last update timestamp."
+    description: "When the session started."
 
   traversal_path:
     type: string
@@ -119,20 +114,20 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: [siphon_duo_workflows_workflows]
+  reindex: [siphon_ai_governance_sessions]
 pipelines:
-  - name: DuoWorkflow
+  - name: AgentSession
     extract:
       type: clickhouse
-      tables: [siphon_duo_workflows_workflows]
+      tables: [siphon_ai_governance_sessions]
       order_by: [traversal_path, id]
-      query: duo_workflow.sql.j2
+      query: agent_session.sql.j2
     transform:
       type: datafusion
       edges:
         - from:
             field: id
-            kind: DuoWorkflow
+            kind: AgentSession
           to:
             field: project_id
             kind: Project
@@ -146,14 +141,13 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: flow_type, type: "LowCardinality(String)", default: "'other'", codec: ["LZ4"]}
-    - {name: environment, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: source, type: "LowCardinality(String)", default: "'gitlab_duo'", codec: ["LZ4"]}
     - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: namespace_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: session_started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_flow_type, column: flow_type, type: "set(64)", granularity: 2}
-    - {name: idx_environment, column: environment, type: "set(8)", granularity: 2}
+    - {name: idx_source, column: source, type: "set(8)", granularity: 2}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

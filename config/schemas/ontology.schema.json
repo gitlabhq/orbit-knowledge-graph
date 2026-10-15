@@ -29,7 +29,7 @@
         "plan",
         "packages",
         "container_registry",
-        "duo"
+        "agents"
       ],
       "description": "Domain classification for organizing entities."
     },

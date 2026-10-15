@@ -19,7 +19,7 @@ migrations:
 - version: 105
   scope: "*"
   note: >-
-    Registers the DuoWorkflow node and the CREATED_MR edge in schema.yaml. The
+    Registers the AgentSession node and the CREATED_MR edge in schema.yaml. The
     scope deriver widens any schema.yaml change to a full rebuild, so no narrower scope
     is accepted.
 - version: 104

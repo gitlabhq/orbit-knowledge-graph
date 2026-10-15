@@ -13,7 +13,7 @@ WITH
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
   FROM siphon_duo_workflows_workflow_merge_requests
-  -- Namespace-level sessions have no DuoWorkflow node (project sessions only),
+  -- Namespace-level sessions have no AgentSession node (project sessions only),
   -- so their links would dangle. Tombstones carry no project_id and pass through.
   WHERE startsWith(traversal_path, {traversal_path:String})
     AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
@@ -28,13 +28,25 @@ WITH
   FROM siphon_duo_workflows_workflow_merge_requests
   WHERE (traversal_path, workflow_id, id) IN (SELECT traversal_path, workflow_id, id FROM _batch WHERE _deleted)
     AND {{deleted_column}} = false
-  GROUP BY id)
+  GROUP BY id),
+  -- The edge source is the governance session id, not the workflow id. Both tables
+  -- carry the workflow's traversal_path, so the join is bounded to the same prefix.
+  _sessions AS (SELECT
+    workflow_id,
+    argMax(id, {{version_column}}) AS session_id
+  FROM siphon_ai_governance_sessions
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND source = 0
+    AND project_id IS NOT NULL
+    AND {{deleted_column}} = false
+    AND workflow_id IN (SELECT workflow_id FROM _batch)
+  GROUP BY workflow_id)
 SELECT
   _batch.traversal_path AS traversal_path,
   _batch.id AS id,
   _batch.workflow_id AS workflow_id,
   if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
-     nullIf(if(_batch._deleted, _prev.prev_workflow_id, _batch.workflow_id), 0),
+     nullIf(_sessions.session_id, 0),
      NULL) AS source_id,
   if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
      nullIf(if(_batch._deleted, _prev.prev_merge_request_id, _batch.merge_request_id), 0),
@@ -43,4 +55,5 @@ SELECT
   _batch._deleted AS _deleted
 FROM _batch
 LEFT JOIN _prev ON _prev.id = _batch.id
+LEFT JOIN _sessions ON _sessions.workflow_id = if(_batch._deleted, _prev.prev_workflow_id, _batch.workflow_id)
 ORDER BY traversal_path, workflow_id, id
