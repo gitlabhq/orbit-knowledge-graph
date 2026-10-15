@@ -305,7 +305,7 @@ fn package_built_by_pipeline_traversal() {
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_package"));
-    assert!(rendered.contains("gl_edge"));
+    assert!(rendered.contains("gl_ci_edge"));
     assert!(rendered.contains("'BUILT_BY'"));
     assert!(rendered.contains("(_orbit_edge_0.source_kind = 'Package')"));
     assert!(rendered.contains("(_orbit_edge_0.target_kind = 'Pipeline')"));
@@ -1689,4 +1689,52 @@ fn code_graph_edge_union_routes_to_code_table() {
         !mentions_sdlc_edge,
         "code-graph edges should not touch SDLC gl_edge: {rendered}"
     );
+}
+
+#[test]
+fn agent_session_detail_columns_are_not_queryable() {
+    for column in [
+        "goal",
+        "title",
+        "summary",
+        "status",
+        "user_id",
+        "workflow_definition",
+        "agent_type",
+        "external_xid",
+        "session_finished_at",
+    ] {
+        let json = format!(
+            r#"{{
+            "query_type": "traversal",
+            "nodes": [{{"id": "w", "entity": "AgentSession", "columns": ["{column}"]}}],
+            "limit": 10
+        }}"#
+        );
+        assert!(
+            compile(&json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_err(),
+            "AgentSession.{column} must not be selectable"
+        );
+    }
+}
+
+#[test]
+fn agent_session_created_mr_traversal_compiles() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "w", "entity": "AgentSession", "columns": ["flow_type"], "filters": {"flow_type": "developer"}},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+        ],
+        "relationships": [{"type": "CREATED_MR", "from": "w", "to": "mr"}],
+        "limit": 25
+    }"#;
+
+    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    assert!(rendered.contains("gl_agent_session"));
+    assert!(rendered.contains("'CREATED_MR'"));
+    assert!(rendered.contains("(_orbit_edge_0.source_kind = 'AgentSession')"));
+    assert!(rendered.contains("(_orbit_edge_0.target_kind = 'MergeRequest')"));
 }

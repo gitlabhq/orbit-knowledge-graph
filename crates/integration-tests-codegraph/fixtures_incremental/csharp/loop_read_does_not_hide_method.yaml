@@ -1,0 +1,35 @@
+name: "C#: a read inside a loop does not hide a method from a later call"
+
+fixtures:
+  - path: T.cs
+    content: |
+      public class Translator
+      {
+          public void Translate(int s)
+          {
+              var resolved = Resolve(s);
+              for (var i = 0; i < s; i++)
+              {
+              }
+              for (var j = 0; j < s; j++)
+              {
+                  Use(resolved.Length);
+              }
+
+              string Again() => Resolve(s);
+          }
+
+          private string Resolve(int s) => "";
+      }
+
+tests:
+  - name: "the local function after the loops calls Resolve"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'Resolve'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: Again } }
+      - { row: { caller: Translate } }

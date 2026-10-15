@@ -53,7 +53,6 @@ pub(in crate::modules::sdlc) fn build_plans(
     ontology: &Ontology,
     sizing: Sizing<'_>,
 ) -> Result<Plans, PlanError> {
-    ontology.validate_single_table_edge_routes()?;
     let mut plans = PlanSet::default();
 
     for node in ontology.nodes() {
@@ -232,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_split_relationship_routes() {
+    fn accepts_split_relationship_routes() {
         let ontology = Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/seeds/overlays/variant_routes"
@@ -246,10 +245,7 @@ mod tests {
                 overrides: &HashMap::new(),
             },
         );
-        assert!(
-            matches!(result, Err(PlanError::Ontology(ontology::OntologyError::Validation(message)))
-            if message.contains("relationship 'CALLS' has split table routes"))
-        );
+        assert!(result.is_ok());
     }
 
     fn plans(ontology: &Ontology, batch_size: u64) -> Plans {

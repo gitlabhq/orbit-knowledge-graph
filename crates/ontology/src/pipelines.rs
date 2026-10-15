@@ -144,6 +144,7 @@ mod tests {
                 "CHILD_OF_siphon_ci_sources_pipelines_Pipeline",
                 "CLOSES_siphon_merge_requests_closing_issues_WorkItem",
                 "CONTAINS_siphon_work_item_parent_links_WorkItem",
+                "CREATED_MR_siphon_duo_workflows_workflow_merge_requests",
                 "DECLARES_DEPENDENCY_siphon_packages_dependency_links_Dependency",
                 "DEPLOYED_TO_siphon_deployment_merge_requests_Deployment",
                 "FIXES_siphon_vulnerability_merge_request_links_Vulnerability",

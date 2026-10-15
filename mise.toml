@@ -10,10 +10,9 @@ postinstall = "if [ -z \"$CI\" ]; then mise run hooks:install; fi"
 enter = 'test -n "$CI" || { common_dir=$(git rev-parse --git-common-dir 2>/dev/null) && test -f "$common_dir/hooks/pre-commit" && test -f "$common_dir/hooks/post-checkout"; } || { command -v lefthook >/dev/null 2>&1 && mise run hooks:install; true; }'
 
 [env]
-# GDK root directory. Override with an absolute path, e.g: export GDK_ROOT=$HOME/workspace/gdk
-# GDK_DIR is also accepted as an alias for GDK_ROOT.
+# gitlab-caproni checkout. Override with an absolute path, e.g: export CAPRONI_DIR=$HOME/Projects/gitlab-caproni
 # Do not use ~ (tilde is not expanded in variable values).
-GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}"
+CAPRONI_DIR_RESOLVED = "{{env.CAPRONI_DIR | default(value=env.HOME ~ '/gitlab-caproni')}}"
 
 
 # Auto-download prebuilt DuckDB shared library on first build (cached in target/).
@@ -35,6 +34,8 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
+# Rebuild-and-run loop for Caproni edit mode (scripts/dev/caproni-edit-mode.sh).
+watchexec = "2.8.0"
 "sccache" = "0.13.0"
 "zig" = "0.15.2"
 clickhouse = "26.3.41.4-lts"
@@ -128,6 +129,10 @@ description = "Run unit tests (--lib, plus the xtask and orbit binaries; no inte
 [tasks."test:local"]
 run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
+
+[tasks."test:scripts"]
+run = "for t in scripts/dev/tests/*_test.sh; do bash \"$t\" || exit 1; done"
+description = "Run the shell tests for the local development scripts (no cluster needed)"
 
 [tasks."test:plan-shape"]
 run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
@@ -323,41 +328,41 @@ description = "Start the GKG server (dispatch-indexing mode)"
 [tasks.dev]
 run = [
   "mise run dev:check",
-  "mise run dev:web ::: dev:indexer ::: dev:dispatcher",
+  "mise run dev:connect ::: dev:web ::: dev:indexer ::: dev:dispatcher",
 ]
-description = "Start a local GKG environment (webserver + indexer + dispatcher) connected to GDK services"
+description = "Start a local Orbit environment (webserver + indexer + dispatcher) against the Caproni cluster"
 
-[tasks.gdk]
-run = "mise run dev"
-description = "Alias for the local GKG environment connected to GDK services"
+[tasks."dev:connect"]
+run = "./scripts/dev/orbit-native-dev.sh connect"
+description = "Hold the Caproni port-forwards, park the in-cluster Orbit, and route Rails to the local webserver (restored on Ctrl+C)"
 
 [tasks."dev:check"]
 run = "./scripts/dev/orbit-native-dev.sh check"
-description = "Verify GDK-connected local development prerequisites"
+description = "Verify Caproni-connected local development prerequisites"
 
 [tasks."dev:status"]
 run = "./scripts/dev/orbit-native-dev.sh config"
-description = "Show the derived GDK-backed configuration for local development"
+description = "Show the derived Caproni-backed configuration for local development"
 
 [tasks."dev:stop"]
 run = "echo 'Use Ctrl+C in the running mise session to stop all dev processes'"
-description = "Explain how to stop the local GKG environment"
+description = "Explain how to stop the local Orbit environment"
 
 [tasks."dev:setup"]
 run = "./scripts/dev/orbit-native-dev.sh setup"
-description = "Create the graph database and apply config/graph.sql to ClickHouse"
+description = "Apply config/graph.sql to the Caproni graph database"
 
 [tasks."dev:web"]
 run = "./scripts/dev/orbit-native-dev.sh webserver"
-description = "Start a local GKG webserver connected to GDK services"
+description = "Start a local Orbit webserver against the Caproni cluster"
 
 [tasks."dev:indexer"]
 run = "./scripts/dev/orbit-native-dev.sh indexer"
-description = "Start a local GKG indexer connected to GDK services"
+description = "Start a local Orbit indexer against the Caproni cluster"
 
 [tasks."dev:dispatcher"]
 run = "./scripts/dev/orbit-native-dev.sh dispatcher"
-description = "Start a local GKG dispatch-indexing process connected to GDK services"
+description = "Start a local Orbit dispatch-indexing process against the Caproni cluster"
 
 [tasks."dev:healthcheck"]
 run = "./scripts/dev/orbit-native-dev.sh healthcheck"

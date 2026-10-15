@@ -438,7 +438,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .report
             .skipped
             .iter()
-            .map(|file| (file.path.as_str(), file.label))
+            .map(|file| (file.path.as_str(), file.label.as_ref()))
             .collect();
         let unread: FxHashSet<_> = context
             .report
@@ -549,7 +549,6 @@ impl Phase<DirtyGraph> for Resolve {
         for k in result.killed {
             context.skip(k);
         }
-        context.report.limited.extend(result.limited);
         Ok(Resolved { state, resolved })
     }
 }
@@ -571,6 +570,7 @@ impl Phase<Resolved> for Display {
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
+        let mut cut = Vec::new();
         state.trees = std::mem::take(&mut state.trees)
             .into_iter()
             .enumerate()
@@ -583,9 +583,16 @@ impl Phase<Resolved> for Display {
                     tree_index: fi as u32,
                     edges: &edges,
                 };
-                pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)
+                let (tree, kept) =
+                    pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)?;
+                if let Some((key, segments)) = kept {
+                    let label = env.lang.syms.resolve(key).to_string();
+                    cut.push(Killed::limit(label, &tree.label, segments + 1, segments));
+                }
+                Ok(tree)
             })
             .collect::<Result<_, Killed>>()?;
+        context.report.limited.extend(cut);
         Ok(Displayed { state })
     }
 }
@@ -616,6 +623,7 @@ impl Phase<Displayed> for Export<'_> {
             &self.envelope,
             true,
             &|_| true,
+            &context.run,
         )?;
         Ok(Exported { state, tables })
     }
@@ -715,9 +723,77 @@ mod tests {
         context.run = context.run.with_cancellation(Arc::new(move || {
             counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= after
         }));
+        let ontology = Ontology::load_embedded().unwrap();
+        let envelope = Envelope::new([
+            ("project_id", export::Scalar::Int(1)),
+            ("branch", export::Scalar::Str("main")),
+            ("commit_sha", export::Scalar::Str("abc")),
+        ]);
         templates::index(context)
             .and_then(|graph| graph.then(Display))
+            .and_then(|graph| {
+                graph.then(Export {
+                    ontology: &ontology,
+                    envelope,
+                })
+            })
             .map(|_| ())
+    }
+
+    #[test]
+    fn export_checks_the_run_budget_inside_the_phase() {
+        let files = [("a.js".to_owned(), "function a() {}\n".to_owned())];
+        let lang = crate::treesitter::SupportLang::JavaScript;
+        let exported = cancelled_inside("export", lang, &files, 3);
+        assert!(matches!(exported, Err(Error::Killed(killed)) if killed.cancelled));
+    }
+
+    #[test]
+    fn a_namespace_imported_through_many_files_links_each_use_once() {
+        let (namespaces, per_namespace) = (10, 10);
+        let usings: String = (0..namespaces).map(|n| format!("using Ns{n};\n")).collect();
+        let calls: String = (0..namespaces).map(|n| format!(" new C{n}_0();")).collect();
+        let files: Vec<_> = (0..namespaces)
+            .flat_map(|n| (0..per_namespace).map(move |f| (n, f)))
+            .map(|(n, f)| {
+                (
+                    format!("Ns{n}/C{n}_{f}.cs"),
+                    format!(
+                        "{usings}namespace Ns{n} {{ class C{n}_{f} {{ void M() {{{calls} }} }} }}\n"
+                    ),
+                )
+            })
+            .collect();
+        let repo = tempfile::tempdir().unwrap();
+        for (path, content) in &files {
+            let path = repo.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let env =
+            Env::with_limits(crate::treesitter::SupportLang::CSharp, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let graph = templates::index(Context::new(&env, repository)).unwrap();
+        let (_, resolved) = graph.finish();
+        let mut keys: Vec<_> = resolved
+            .state
+            .edges
+            .iter()
+            .filter(|e| e.kind == crate::edge::EdgeKind::Imports && e.site.is_none())
+            .map(|e| (e.from(), e.to()))
+            .collect();
+        let edges = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(edges, keys.len());
     }
 
     #[test]

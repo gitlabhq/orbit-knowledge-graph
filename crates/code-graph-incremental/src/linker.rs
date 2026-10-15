@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -18,14 +19,11 @@ type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 type WildcardImports = Rc<Vec<u32>>;
 
-const MAX_FIELD_COPIES: usize = 4_096;
-const MAX_FILE_EDGES: usize = 2_000_000;
-
-fn edge_limit(edges: &[Edge], path: &str) -> Result<(), Killed> {
-    if edges.len() <= MAX_FILE_EDGES {
+fn edge_limit(edges: &[Edge], cap: usize, path: &str) -> Result<(), Killed> {
+    if cap == 0 || edges.len() <= cap {
         return Ok(());
     }
-    Err(Killed::limit("edges", path, edges.len(), MAX_FILE_EDGES))
+    Err(Killed::limit("edges", path, edges.len(), cap))
 }
 
 enum WorkItem {
@@ -78,6 +76,7 @@ enum Wildcards {
 
 struct Fold<'t> {
     tree: &'t Tree,
+    max_edges: usize,
     ssa: SsaEngine,
     cur: BlockId,
     registered: FxHashSet<u32>,
@@ -99,6 +98,10 @@ struct Fold<'t> {
     chain_seen: FxHashSet<u32>,
     obj_seen: FxHashSet<u32>,
     chain_memo: FxHashMap<u32, Vec<Value>>,
+    member_memo: FxHashMap<(u32, u32), Vec<Value>>,
+    member_busy: FxHashSet<(u32, u32)>,
+    member_memo_at: (BlockId, usize, usize, usize),
+    loops: Vec<(BlockId, FxHashSet<u32>)>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
@@ -124,10 +127,13 @@ impl<'t> Fold<'t> {
                 .run
                 .check()
                 .and_then(|()| self.file.check())
-                .and_then(|()| edge_limit(&self.edges, &self.tree.label))
+                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))
             {
                 self.killed = Some(k);
                 return;
+            }
+            if !matches!(item, WorkItem::Visit(_)) {
+                self.chain_memo.clear();
             }
             match item {
                 WorkItem::ExitScope { wildcards, block } => {
@@ -157,7 +163,10 @@ impl<'t> Fold<'t> {
                     let exits = exits.chain(lhs.is_none().then_some(pre));
                     self.cur = self.ssa.add_sealed_join(exits);
                 }
-                WorkItem::ExitLoop(header) => self.cur = self.ssa.finish_loop(header, self.cur),
+                WorkItem::ExitLoop(header) => {
+                    self.loops.pop();
+                    self.cur = self.ssa.finish_loop(header, self.cur);
+                }
                 WorkItem::ExitBinding {
                     binding,
                     lhs,
@@ -195,8 +204,10 @@ impl<'t> Fold<'t> {
     }
 
     fn dispatch(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
-        self.chain_memo.clear();
         let k = c.kind();
+        if Self::rebinds(c) {
+            self.chain_memo.clear();
+        }
         if k == C::Import || k == C::ImportType {
             self.handle_import(c);
         } else if c.is(C::Def) {
@@ -240,6 +251,7 @@ impl<'t> Fold<'t> {
             Self::handle_branch(c, sink, stack);
             return;
         } else if k == C::SsaLoop {
+            self.loops.push((self.cur, Self::assigned_names(c)));
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
@@ -254,6 +266,21 @@ impl<'t> Fold<'t> {
                 .filter(|child| !((k == C::Call || k == C::SuperType) && child.is(C::Import)))
                 .map(|child| WorkItem::Visit(child.index())),
         );
+    }
+
+    fn rebinds(c: Cursor<'t>) -> bool {
+        let kinds = [
+            C::Import,
+            C::ImportType,
+            C::Binding,
+            C::Scope,
+            C::Destructure,
+            C::SsaBranch,
+            C::SsaLoop,
+        ];
+        c.is(C::Def)
+            || kinds.iter().any(|&kind| c.is(kind))
+            || c.is(C::Call) && c.children().any(|child| child.is(C::Import))
     }
 
     fn handle_branch(branch: Cursor<'t>, lhs: Option<u32>, stack: &mut Vec<WorkItem>) {
@@ -544,7 +571,8 @@ impl<'t> Fold<'t> {
                 let sym = callee
                     .sym_opt()
                     .filter(|_| !c.has_tag(self.tags.implicit_self))?;
-                let value = self.ssa.read_variable_internal(self.binding(sym), self.cur);
+                let block = self.name_block(sym);
+                let value = self.ssa.read_variable_internal(self.binding(sym), block);
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
@@ -850,20 +878,21 @@ impl<'t> Fold<'t> {
                         .then(|| self.binding(value.sym()))
                 })
                 .unwrap_or(0);
+            if source != lhs
+                && self.reaches(source, lhs)
+                && let Some(shared) = self.fields.get(&source).cloned()
+            {
+                self.fields.insert(lhs, shared);
+                return;
+            }
             self.fields.get(&source).cloned().unwrap_or_default()
         };
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
-        let mut copied = 0;
+        let mut copied = FxHashMap::default();
+        let mut aliases = smallvec::SmallVec::<[_; 4]>::new();
         while let Some((target, sources)) = copies.pop() {
-            copied += 1;
-            if copied > MAX_FIELD_COPIES {
-                self.limited.get_or_insert_with(|| {
-                    Killed::limit("fields", &self.tree.label, copied, MAX_FIELD_COPIES)
-                });
-                break;
-            }
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
                 return;
@@ -885,16 +914,48 @@ impl<'t> Fold<'t> {
                 let value = self.read_value(source);
                 value_updates.push((target, value));
                 if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
-                    let sources = self.fields.get(&source).cloned().unwrap_or_default();
-                    copies.push((target, sources));
+                    match copied.entry(source) {
+                        Entry::Occupied(first) => aliases.push((target, *first.get())),
+                        Entry::Vacant(slot) => {
+                            slot.insert(target);
+                            let sources = self.fields.get(&source).cloned().unwrap_or_default();
+                            copies.push((target, sources));
+                        }
+                    }
                 }
             }
             field_updates.push((target, fields));
         }
         self.fields.extend(field_updates);
+        for (target, first) in aliases {
+            if target != first
+                && let Some(shared) = self.fields.get(&first).cloned()
+            {
+                self.fields.insert(target, shared);
+            }
+        }
         for (target, value) in value_updates {
             self.ssa.write_variable(target, self.cur, value);
         }
+    }
+
+    fn reaches(&self, from: u32, to: u32) -> bool {
+        let mut seen = FxHashSet::default();
+        let mut stack = vec![from];
+        while let Some(binding) = stack.pop() {
+            if binding == to {
+                return true;
+            }
+            if seen.insert(binding) {
+                stack.extend(
+                    self.fields
+                        .get(&binding)
+                        .into_iter()
+                        .flat_map(|f| f.values()),
+                );
+            }
+        }
+        false
     }
 
     fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {
@@ -911,7 +972,11 @@ impl<'t> Fold<'t> {
         if sym == 0 {
             return Value::Opaque;
         }
-        let value = self.read_value(self.binding(sym));
+        let block = self.name_block(sym);
+        let value = match self.ssa.read_variable_internal(self.binding(sym), block) {
+            Value::Undefined => Value::Opaque,
+            value => value,
+        };
         if let Value::LocalDef(node) = value
             && self.tree.cursor(node).is_class()
         {
@@ -929,8 +994,39 @@ impl<'t> Fold<'t> {
         }
     }
 
+    fn assigned_names(c: Cursor) -> FxHashSet<u32> {
+        let mut names = FxHashSet::default();
+        let mut walk = c.walk();
+        while let Some(node) = walk.next() {
+            if node.is(C::Import) || node.is(C::ImportType) {
+                names.extend(
+                    std::iter::once(node)
+                        .chain(node.descendants())
+                        .map(|n| n.sym()),
+                );
+                walk.skip_subtree();
+            } else if [C::Binding, C::DefName, C::Alias, C::SsaHint]
+                .into_iter()
+                .any(|kind| node.is(kind))
+                || node.has(C::Declaration)
+            {
+                names.insert(node.sym());
+            }
+        }
+        names
+    }
+
+    fn name_block(&self, sym: u32) -> BlockId {
+        self.loops
+            .iter()
+            .rev()
+            .take_while(|(_, assigned)| !assigned.contains(&sym))
+            .last()
+            .map_or(self.cur, |&(preheader, _)| preheader)
+    }
+
     fn lookup(&mut self, sym: u32) -> Vec<Value> {
-        for block in [self.cur, BlockId(0)] {
+        for block in [self.name_block(sym), BlockId(0)] {
             let result = self.ssa.read_variable(self.binding(sym), block);
             if !result.is_empty() {
                 return result;
@@ -997,11 +1093,13 @@ impl<'t> Fold<'t> {
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
-            bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
-            for r in &bound {
-                self.emit(r, from);
+            if !bound.is_empty() {
+                bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
+                for r in &bound {
+                    self.emit(r, from);
+                }
+                return;
             }
-            return;
         }
         let members = self
             .enclosing_class(from)
@@ -1171,6 +1269,30 @@ impl<'t> Fold<'t> {
         let Some(obj) = m.child(C::Object) else {
             return vec![];
         };
+        let name = obj.reference();
+        let bare = obj.child(C::Call).is_none()
+            && !name.has(C::Object)
+            && name.child(C::Member).is_none()
+            && name.child(C::Ivar).is_none();
+        let key = bare.then(|| (name.sym(), m.sym()));
+        let at = (
+            self.cur,
+            self.ssa.writes(),
+            self.scopes.len(),
+            self.def_stack.len(),
+        );
+        if self.member_memo_at != at {
+            self.member_memo.clear();
+            self.member_memo_at = at;
+        }
+        if let Some(found) = key.and_then(|key| self.member_memo.get(&key)) {
+            return found.clone();
+        }
+        if let Some(key) = key
+            && !self.member_busy.insert(key)
+        {
+            return vec![];
+        }
         let mut targets = Vec::new();
         for r in self.lookup_chain(obj) {
             match r {
@@ -1182,7 +1304,7 @@ impl<'t> Fold<'t> {
                 _ => targets.push(r),
             }
         }
-        targets
+        let found: Vec<Value> = targets
             .into_iter()
             .flat_map(|r| match r {
                 Value::LocalDef(d) => self
@@ -1193,7 +1315,12 @@ impl<'t> Fold<'t> {
                 Value::ImportRef(_) => vec![r],
                 _ => vec![],
             })
-            .collect()
+            .collect();
+        if let Some(key) = key {
+            self.member_busy.remove(&key);
+            self.member_memo.insert(key, found.clone());
+        }
+        found
     }
 
     fn push_calls(&mut self, from: u32, targets: Vec<u32>) {
@@ -1235,6 +1362,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
 
     let mut f = Fold {
         tree,
+        max_edges: env.limits.max_file_edges,
         ssa,
         cur: entry,
         registered: FxHashSet::default(),
@@ -1255,6 +1383,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         chain_seen: FxHashSet::default(),
         obj_seen: FxHashSet::default(),
         chain_memo: FxHashMap::default(),
+        member_memo: FxHashMap::default(),
+        member_busy: FxHashSet::default(),
+        member_memo_at: (entry, 0, 0, 0),
+        loops: Vec::new(),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
@@ -1278,7 +1410,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         f.run
             .check()
             .and_then(|()| f.file.check())
-            .and_then(|()| edge_limit(&f.edges, &tree.label))?;
+            .and_then(|()| edge_limit(&f.edges, f.max_edges, &tree.label))?;
         let first = f.edges.len();
         let mut targets = f.ssa.resolve_value(&value);
         if targets.is_empty() {

@@ -28,7 +28,8 @@
         "security",
         "plan",
         "packages",
-        "container_registry"
+        "container_registry",
+        "agents"
       ],
       "description": "Domain classification for organizing entities."
     },
@@ -379,6 +380,14 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
+              "domains": {
+                "type": "array",
+                "description": "Node domains whose same-domain edge variants route to this table unless an edge or variant overrides the table.",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
               "sort_key": {
                 "type": "array",
                 "description": "ClickHouse ORDER BY columns for this edge table.",

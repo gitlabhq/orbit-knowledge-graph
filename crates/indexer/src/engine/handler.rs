@@ -24,14 +24,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use thiserror::Error;
+use tokio::sync::OwnedSemaphorePermit;
 
 use super::types::{Envelope, Subscription};
 use crate::{
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
 };
+
+#[derive(Clone, Default)]
+pub struct WorkSlot(Arc<Mutex<Option<OwnedSemaphorePermit>>>);
+
+impl WorkSlot {
+    pub fn release(&self) {
+        self.0.lock().take();
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermanentAction {
@@ -109,6 +119,8 @@ pub struct HandlerContext {
     pub lock_service: Arc<dyn LockService>,
     /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
+    pub work: WorkSlot,
+    pub redelivered_on_failure: bool,
 }
 
 impl HandlerContext {
@@ -121,7 +133,19 @@ impl HandlerContext {
             nats,
             lock_service,
             progress,
+            work: WorkSlot::default(),
+            redelivered_on_failure: true,
         }
+    }
+
+    pub fn with_work_slot(mut self, permit: Option<OwnedSemaphorePermit>) -> Self {
+        self.work = WorkSlot(Arc::new(Mutex::new(permit)));
+        self
+    }
+
+    pub fn with_redelivery(mut self, redelivered_on_failure: bool) -> Self {
+        self.redelivered_on_failure = redelivered_on_failure;
+        self
     }
 }
 

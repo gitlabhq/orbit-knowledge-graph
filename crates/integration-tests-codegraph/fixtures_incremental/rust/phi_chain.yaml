@@ -1,0 +1,27 @@
+name: "Rust: a long chain of conditional reassignments links in linear work"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "phi_chain"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content:
+      - "pub struct Node;\n\nimpl Node {\n    pub fn new() -> Node {\n        Node\n    }\n\n    pub fn next(&self) -> Node {\n        Node\n    }\n\n    pub fn visit(&self) {}\n}\n\npub fn walk(c: bool) {\n    let mut n = Node::new();\n"
+      - { repeat: 1000, text: "    if c {\n        n = n.next();\n    }\n" }
+      - "    n.visit();\n}\n"
+
+tests:
+  - name: "walk calls the constructor and the method of the chain"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'walk'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: new } }
+      - { row: { callee: next } }

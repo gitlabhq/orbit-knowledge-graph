@@ -13,7 +13,7 @@ mise build
 mise test:fast              # no Docker required
 ```
 
-No GDK, ClickHouse, or NATS needed. The v2 pipeline tests run in-process
+No cluster, ClickHouse, or NATS needed. The v2 pipeline tests run in-process
 against an in-memory graph.
 
 ## Architecture overview

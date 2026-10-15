@@ -105,6 +105,7 @@ impl fmt::Display for OntologyError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTableConfig {
+    pub domains: BTreeSet<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
     pub storage: EdgeTableStorage,
@@ -183,6 +184,7 @@ impl Ontology {
             .map(|s| (*s).to_string())
             .collect();
         let default_config = EdgeTableConfig {
+            domains: BTreeSet::new(),
             sort_key: default_sort_key,
             columns: Vec::new(),
             storage: EdgeTableStorage::default(),
@@ -333,6 +335,7 @@ impl Ontology {
         self.edge_table_configs.insert(
             name,
             EdgeTableConfig {
+                domains: BTreeSet::new(),
                 sort_key,
                 columns: Vec::new(),
                 storage: EdgeTableStorage::default(),
@@ -914,6 +917,102 @@ impl Ontology {
             .get(relationship_kind)?
             .iter()
             .find(|edge| edge.source_kind == source_kind && edge.target_kind == target_kind)
+    }
+
+    pub fn edge_table_for_variant(
+        &self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Result<&str, OntologyError> {
+        self.edge_route(relationship_kind, source_kind, target_kind)
+            .map(|edge| edge.destination_table.as_str())
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "relationship '{relationship_kind}' has no {source_kind} -> {target_kind} variant"
+                ))
+            })
+    }
+
+    pub fn edge_routes_for_mapping(&self, mapping: &EdgeMapping) -> Vec<&EdgeEntity> {
+        self.edges
+            .get(&mapping.label)
+            .into_iter()
+            .flatten()
+            .filter(|edge| {
+                node_ref_matches(&mapping.source, &edge.source_kind)
+                    && node_ref_matches(&mapping.target, &edge.target_kind)
+            })
+            .collect()
+    }
+
+    pub fn table_writers(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut writers = BTreeMap::<String, BTreeSet<String>>::new();
+        let mut mapped_variants = BTreeSet::new();
+
+        for node in self.nodes() {
+            writers
+                .entry(node.destination_table.clone())
+                .or_default()
+                .insert(node.name.clone());
+            for mapping in node
+                .pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+            {
+                for route in self.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(node.name.clone());
+                }
+            }
+        }
+
+        for (kind, pipeline) in self.edge_etl_configs() {
+            for mapping in pipeline.transform.edges() {
+                for route in self.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(kind.to_string());
+                }
+            }
+        }
+
+        for derived in self.derived_entities() {
+            for kind in &derived.emits {
+                for route in self.get_edge(kind).into_iter().flatten() {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(derived.name.clone());
+                }
+            }
+        }
+
+        for route in self.edges() {
+            if mapped_variants.contains(&edge_variant_key(route)) {
+                continue;
+            }
+            let writer = self
+                .get_node(&route.source_kind)
+                .filter(|node| node.pipelines.is_empty())
+                .or_else(|| {
+                    self.get_node(&route.target_kind)
+                        .filter(|node| node.pipelines.is_empty())
+                })
+                .map_or(&route.relationship_kind, |node| &node.name);
+            writers
+                .entry(route.destination_table.clone())
+                .or_default()
+                .insert(writer.clone());
+        }
+
+        writers
     }
 
     pub fn edge_tables_for_relationship(&self, relationship_kind: &str) -> BTreeSet<&str> {
@@ -1726,6 +1825,21 @@ impl Ontology {
     }
 }
 
+fn node_ref_matches(node_ref: &NodeRef, node_kind: &str) -> bool {
+    match &node_ref.kind {
+        NodeRefKind::Literal(literal) => literal == node_kind,
+        NodeRefKind::Derived { .. } => true,
+    }
+}
+
+fn edge_variant_key(edge: &EdgeEntity) -> (String, String, String) {
+    (
+        edge.relationship_kind.clone(),
+        edge.source_kind.clone(),
+        edge.target_kind.clone(),
+    )
+}
+
 impl fmt::Display for Ontology {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -1984,6 +2098,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn variant_table_overrides_domain_route() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/variant_routes"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            ontology
+                .edge_table_for_variant("CALLS", "Definition", "Definition")
+                .unwrap(),
+            "gl_code_edge"
+        );
+        assert_eq!(
+            ontology
+                .edge_table_for_variant("CALLS", "File", "Definition")
+                .unwrap(),
+            "gl_edge"
+        );
     }
 
     #[test]
@@ -2584,6 +2720,68 @@ mod tests {
             "project_id",
             "read_code",
         );
+    }
+
+    #[test]
+    fn agent_session_is_project_delegated_and_exposes_only_allowlisted_properties() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(
+            &ontology,
+            "AgentSession",
+            "project",
+            "project_id",
+            "read_code",
+        );
+
+        let node = ontology
+            .get_node("AgentSession")
+            .expect("AgentSession node");
+        let mut properties: Vec<&str> = node.fields.iter().map(|f| f.name.as_str()).collect();
+        properties.sort_unstable();
+        assert_eq!(
+            properties,
+            [
+                "flow_type",
+                "id",
+                "project_id",
+                "session_started_at",
+                "source",
+                "traversal_path",
+            ],
+            "session detail columns must never become properties"
+        );
+    }
+
+    #[test]
+    fn agent_session_flow_type_sql_list_matches_declared_values() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let declared: BTreeSet<String> = ontology
+            .get_node("AgentSession")
+            .and_then(|node| node.fields.iter().find(|f| f.name == "flow_type"))
+            .and_then(|field| field.enum_values.as_ref())
+            .expect("flow_type should be an enum")
+            .values()
+            .cloned()
+            .collect();
+
+        let sql = std::fs::read_to_string(fixtures_dir().join("nodes/agents/agent_session.sql.j2"))
+            .expect("agent_session.sql.j2 should exist");
+        let list_start = sql.find(" IN (").expect("SQL should list known flow types");
+        let list = &sql[list_start
+            ..sql[list_start..]
+                .find("),")
+                .map(|i| list_start + i)
+                .unwrap()];
+        let mut in_sql: BTreeSet<String> = list
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(String::from)
+            .collect();
+        in_sql.insert("other".to_string());
+
+        assert_eq!(in_sql, declared);
     }
 
     #[test]

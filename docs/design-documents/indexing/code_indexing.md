@@ -178,7 +178,7 @@ Pending projects are published in bounded batches, not after every namespace has
 
 These backfill requests omit `branch` and `commit_sha`. The handler resolves the default branch from the Rails internal API at processing time.
 
-The backfill dispatches a project that has no `indexed_at`, fewer than `MAX_CODE_ATTEMPTS` (5) attempts, and no attempt in the last `CODE_RETRY_AFTER` (1 hour). A project at 5 attempts is a gap, and only a new push indexes it. A run that gets no indexing lane gives its attempt back.
+The backfill dispatches a project that has no `indexed_at`, fewer than `MAX_CODE_ATTEMPTS` (5) attempts, and no attempt in the last `CODE_RETRY_AFTER` (1 hour). A project at 5 attempts is a gap, and only a new push indexes it. A run whose failure NATS redelivers gives its attempt back, if it still holds the project lock. So `attempts` counts the runs that ended the message or never returned.
 
 A namespace whose every project is checkpointed is drained. Once per schema version, the backfill tick then tombstones the namespace's code rows that are older than their project's checkpoint. These are rows left by a previous version or by a run that died before checkpointing. The sweep runs inside the tick. So it is capped at `schedule.tasks.code-backfill.stale_sweeps_per_tick` namespaces per tick, and the rest wait for later ticks. Without the cap a fleet-wide re-index held dispatch for the length of that burst while indexers sat idle. Such a re-index drains thousands of small namespaces within minutes.
 
@@ -408,7 +408,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 ##### Storage in ClickHouse
 
-The graph is converted to Apache Arrow record batches and written to six ClickHouse tables. There is one each for branches, directories, files, definitions, imported symbols, and the ontology-configured edge table (defaulting to `gl_edge`). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
+The graph is converted to Apache Arrow record batches and written to ClickHouse. Node batches use the branch, directory, file, definition, and imported symbol tables. Edge batches route by relationship kind and both endpoint kinds. The resolved ontology variant selects `gl_code_edge` for source-code relationships, including the Project and Branch bridge. Every row carries base columns for the namespace hierarchy path, project ID, branch, and a version timestamp used for stale data cleanup.
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 

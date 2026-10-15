@@ -287,6 +287,7 @@ impl PipelineContext {
                 path: path.into(),
                 kind,
                 detail: detail.into(),
+                family: None,
             });
         }
     }
@@ -1239,6 +1240,7 @@ impl FamilyPipeline {
                             metadata.len(),
                             limit
                         ),
+                        family: None,
                     }));
                 }
                 let source = match std::fs::read(&abs_path) {
@@ -1281,6 +1283,7 @@ impl FamilyPipeline {
                             path: f.path.clone(),
                             kind: FileSkip::Timeout(phase),
                             detail,
+                            family: None,
                         }));
                     }
                     Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {

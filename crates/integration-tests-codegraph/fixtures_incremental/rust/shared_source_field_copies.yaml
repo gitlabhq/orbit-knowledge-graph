@@ -1,0 +1,42 @@
+name: "Rust: fields copied from one shared source all keep its fields"
+
+fixtures:
+  - path: main.rs
+    content: |
+      fn helper() {}
+      fn target() {}
+
+      fn nested_copy(mut a: Node) {
+          a.cb = helper;
+          a.x = a;
+          a.y = a;
+          let b = a;
+          let t = b.y;
+          let u = t.x;
+          (u.cb)();
+      }
+
+      fn copy_cycle(mut a: Node) {
+          a.x = a;
+          let b = a;
+          target();
+      }
+
+tests:
+  - name: "b.y.x still has the callback of a after the copy"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'nested_copy'
+      RETURN target.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: helper } }
+
+  - name: "a copy of a self-referential value ends"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'copy_cycle'
+      RETURN target.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: target } }
