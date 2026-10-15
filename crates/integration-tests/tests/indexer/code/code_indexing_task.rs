@@ -1068,7 +1068,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
 }
 
 #[tokio::test]
-async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
+async fn small_jobs_wait_for_the_natural_flush_and_share_one_part() {
     let project_id: i64 = 61;
     let traversal_path = "1/61/";
 
@@ -1088,29 +1088,99 @@ async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
         )],
     );
 
-    let config = indexer::testkit::test_pipeline_configuration();
-    let buffer_tick = config.write_buffer_age();
-    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
-    let handler = deps.code_indexing_task_handler();
+    let other_project: i64 = 62;
+    let other_traversal = "1/62/";
+    mock.add_project(
+        other_project,
+        "main",
+        &[(
+            "src/Other.java",
+            "public class Other { public void keep() {} }",
+        )],
+    );
 
-    let started = std::time::Instant::now();
-    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
-    handler
-        .handle(handler_context(), envelope)
-        .await
-        .expect("indexing succeeds");
-    let elapsed = started.elapsed();
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, never_flushing());
+    let handler = Arc::new(deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL));
+
+    let (first, first_slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
+    released(&first_slot).await;
+    let (second, second_slot) = spawn_with_work_slot(&handler, other_project, other_traversal);
+    released(&second_slot).await;
+    assert_eq!(
+        active_parts(&clickhouse, &t("gl_file")).await,
+        0,
+        "a finished job must not force a flush below the floor"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+
+    deps.pipeline.flush().await.expect("flush");
+    first.await.expect("join").expect("first job indexes");
+    second.await.expect("join").expect("second job indexes");
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_file_is_active(&clickhouse, other_project, "src/Other.java").await;
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "the checkpoint must be written before the handler returns"
     );
-    assert!(
-        elapsed < buffer_tick,
-        "the job must flush its own rows instead of waiting {buffer_tick:?} for the tick; took {elapsed:?}"
+    assert_eq!(
+        active_parts(&clickhouse, &t("gl_file")).await,
+        1,
+        "both jobs' rows must land in the one part the flush writes"
     );
+}
+
+const LONG_LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+fn never_flushing() -> orbit_server_config::CodeIndexingPipelineConfig {
+    let mut config = indexer::testkit::test_pipeline_configuration();
+    config.write_buffer_age_secs = 3600;
+    config.write_min_flush_rows = 1_000_000;
+    config.write_max_flush_age_secs = 3600;
+    config
+}
+
+fn spawn_with_work_slot(
+    handler: &Arc<indexer::modules::code::CodeIndexingTaskHandler>,
+    project_id: i64,
+    traversal_path: &'static str,
+) -> (
+    tokio::task::JoinHandle<Result<(), indexer::handler::HandlerError>>,
+    Arc<tokio::sync::Semaphore>,
+) {
+    let slot = Arc::new(tokio::sync::Semaphore::new(1));
+    let permit = Arc::clone(&slot)
+        .try_acquire_owned()
+        .expect("a fresh slot has its permit");
+    let context = handler_context().with_work_slot(Some(permit));
+    let handler = Arc::clone(handler);
+    let task = tokio::spawn(async move {
+        handler
+            .handle(
+                context,
+                code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+            )
+            .await
+    });
+    (task, slot)
+}
+
+async fn released(slot: &tokio::sync::Semaphore) {
+    slot.acquire().await.expect("slot stays open").forget();
+}
+
+async fn active_parts(clickhouse: &integration_testkit::TestContext, table: &str) -> i64 {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT toInt64(count()) FROM system.parts \
+             WHERE database = '{}' AND table = '{table}' AND active",
+            clickhouse.config.database
+        ))
+        .await;
+    i64::extract_column(&result, 0).expect("part count")[0]
 }
 
 #[tokio::test]

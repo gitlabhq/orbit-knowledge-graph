@@ -388,10 +388,6 @@ impl CodeIndexer {
         };
 
         context.work.release();
-        self.writer
-            .start_flush(run.commit.clone())
-            .await
-            .map_err(|e| IndexError::Failed(HandlerError::Processing(e.to_string())))?;
         run.commit.durable().await.map_err(IndexError::Failed)?;
         Ok(IndexOutcome::Indexed {
             rows_written: run.rows_written,
