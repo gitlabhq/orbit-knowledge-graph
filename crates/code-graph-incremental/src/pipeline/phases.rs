@@ -319,7 +319,7 @@ impl<T: Send> IntoParallel for Vec<T> {
         self,
         _: &orbit_utils::vfs::Vfs<()>,
     ) -> impl ParallelIterator<Item = Result<T, String>> {
-        self.into_par_iter().map(Ok)
+        self.into_par_iter().with_max_len(1).map(Ok)
     }
 }
 
@@ -331,6 +331,7 @@ impl IntoParallel for SourcePaths {
     ) -> impl ParallelIterator<Item = Result<SourceFile, String>> {
         self.paths
             .into_par_iter()
+            .with_max_len(1)
             .map(move |path| match read(repository, &path) {
                 Ok(content) => Ok(SourceFile { path, content }),
                 Err(_) => Err(path),

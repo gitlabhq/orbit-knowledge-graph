@@ -197,10 +197,11 @@ fn item_phases_pipe_into_one_named_pass() {
     assert_eq!(killed.label, "run");
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct InflightProbe {
     inflight: Arc<AtomicU64>,
     peak: Arc<AtomicU64>,
+    meet: Arc<std::sync::Barrier>,
 }
 
 impl ItemPhase<SourceFile> for InflightProbe {
@@ -212,13 +213,19 @@ impl ItemPhase<SourceFile> for InflightProbe {
         let bytes = file.content.len() as u64;
         let now = self.inflight.fetch_add(bytes, Ordering::Relaxed) + bytes;
         self.peak.fetch_max(now, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(30));
+        self.meet.wait();
         self.inflight.fetch_sub(bytes, Ordering::Relaxed);
         Ok(())
     }
 }
 
-fn peak_inflight(files: &[(String, String)], max_inflight_bytes: u64) -> (u64, usize) {
+/// Every admitted item waits for `parties` of them to be in flight at once,
+/// so the peak is exact: the budget's worth, or all of them with no budget.
+fn peak_inflight(
+    files: &[(String, String)],
+    max_inflight_bytes: u64,
+    parties: usize,
+) -> (u64, usize) {
     let repo = tempfile::tempdir().unwrap();
     for (path, content) in files {
         std::fs::write(repo.path().join(path), content).unwrap();
@@ -231,7 +238,11 @@ fn peak_inflight(files: &[(String, String)], max_inflight_bytes: u64) -> (u64, u
         },
     )
     .unwrap();
-    let probe = InflightProbe::default();
+    let probe = InflightProbe {
+        inflight: Arc::default(),
+        peak: Arc::default(),
+        meet: Arc::new(std::sync::Barrier::new(parties)),
+    };
     let items = rayon::ThreadPoolBuilder::new()
         .num_threads(8)
         .build()
@@ -255,13 +266,12 @@ fn source_bytes_in_flight_stay_under_the_budget_and_an_oversize_file_runs_alone(
     let files: Vec<_> = (0..8)
         .map(|i| (format!("f{i}.py"), "x = 1\n".repeat(MIB / 6)))
         .collect();
-    let (unbounded, items) = peak_inflight(&files, 0);
-    assert_eq!(items, 8);
-    assert!(unbounded > 2 * MIB as u64, "{unbounded}");
-    let (capped, items) = peak_inflight(&files, 2 * MIB as u64);
-    assert_eq!(items, 8);
-    assert!(capped <= 2 * MIB as u64, "{capped}");
+    let file = files[0].1.len() as u64;
+    assert_eq!(peak_inflight(&files, 0, 8), (8 * file, 8));
+    assert_eq!(peak_inflight(&files, 2 * MIB as u64, 2), (2 * file, 8));
     let big = [("big.py".to_string(), "x = 1\n".repeat(MIB / 2))];
-    let (alone, items) = peak_inflight(&big, 2 * MIB as u64);
-    assert_eq!((items, alone), (1, big[0].1.len() as u64));
+    assert_eq!(
+        peak_inflight(&big, 2 * MIB as u64, 1),
+        (big[0].1.len() as u64, 1)
+    );
 }
