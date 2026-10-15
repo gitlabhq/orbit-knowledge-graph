@@ -291,10 +291,15 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
-    async fn refund_attempt(&self, checkpoint: &mut CodeCheckpoint, project_id: i64, branch: &str) {
+    async fn refund_attempt(&self, checkpoint: &mut CodeCheckpoint) {
         checkpoint.refund_attempt();
         if let Err(e) = self.checkpoint_store.save(checkpoint).await {
-            warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
+            warn!(
+                project_id = checkpoint.project_id,
+                branch = %checkpoint.branch,
+                error = %e,
+                "failed to refund the attempt"
+            );
         }
     }
 
@@ -399,8 +404,7 @@ impl CodeIndexingTaskHandler {
                 ))
             }
             Err(IndexError::NoLane { waited }) => {
-                self.refund_attempt(&mut checkpoint, project_id, branch)
-                    .await;
+                self.refund_attempt(&mut checkpoint).await;
                 Err(HandlerError::Backpressure(format!(
                     "no indexing lane within {}s",
                     waited.as_secs()
@@ -409,8 +413,7 @@ impl CodeIndexingTaskHandler {
             Err(IndexError::Overloaded(cause)) => {
                 // Redeliveries share one dispatch; counting each would exhaust MAX_CODE_ATTEMPTS.
                 if attempt > 1 {
-                    self.refund_attempt(&mut checkpoint, project_id, branch)
-                        .await;
+                    self.refund_attempt(&mut checkpoint).await;
                 }
                 Err(HandlerError::Processing(format!(
                     "archive endpoint overloaded ({cause}); retrying"

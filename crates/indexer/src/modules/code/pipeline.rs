@@ -51,7 +51,7 @@ impl ProgressObserver for NatsHeartbeat {
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
     Indexed { rows_written: u64 },
-    /// Archive endpoint signalled no repository content (404, a non-gateway 5xx, an empty archive, or over the size cap); already checkpointed.
+    /// No repository content to index (404, a non-gateway 5xx, an empty archive, or over the size cap); already checkpointed.
     EmptyRepository,
 }
 

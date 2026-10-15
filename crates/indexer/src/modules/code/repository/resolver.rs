@@ -84,8 +84,9 @@ impl std::fmt::Display for EmptyRepositoryReason {
 fn classify_download_error(
     err: RepositoryServiceError,
 ) -> Result<ResolveError, RepositoryServiceError> {
-    let RepositoryServiceError::GitlabApi(api_error) = err else {
-        return Err(err);
+    let api_error = match err {
+        RepositoryServiceError::GitlabApi(api_error) => api_error,
+        RepositoryServiceError::Archive(_) => return Err(err),
     };
     match &api_error {
         GitlabClientError::NotFound(id) => Ok(ResolveError::EmptyRepository {
