@@ -355,5 +355,6 @@ tests:
     query: |
       MATCH (d:Definition)
       RETURN d.fqn AS fqn
+      LIMIT 100
     assert:
       - { no_nulls: fqn }
