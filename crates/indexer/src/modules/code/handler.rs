@@ -18,6 +18,7 @@ use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingObserver, PipelineType};
+use crate::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
@@ -342,6 +343,29 @@ impl CodeIndexingTaskHandler {
             }
         };
 
+        if attempt > 1 && checkpoint.attempts > 0 {
+            let unended = checkpoint.attempts;
+            warn!(
+                task_id = request.task_id,
+                project_id,
+                branch = %branch,
+                attempt,
+                unended_attempts = unended,
+                "redelivered after attempts that never returned or ended their message; the indexer likely crashed on this repository"
+            );
+            if let Some(policy) = self.subscription.retry_policy()
+                && !policy.should_redeliver(attempt)
+            {
+                checkpoint.attempts = MAX_CODE_ATTEMPTS;
+                if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
+                    warn!(project_id, branch = %branch, error = %e, "failed to quarantine the project");
+                }
+                return Err(HandlerError::dead_letter(format!(
+                    "project {project_id} quarantined: {unended} earlier attempts never returned or ended their message (likely an indexer crash on this repository); the last attempt is not run"
+                )));
+            }
+        }
+
         checkpoint.start_attempt();
         self.checkpoint_store
             .save(&checkpoint)
@@ -392,16 +416,10 @@ impl CodeIndexingTaskHandler {
                     ),
                 ))
             }
-            Err(IndexError::NoLane { waited }) => {
-                checkpoint.refund_attempt();
-                if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
-                    warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
-                }
-                Err(HandlerError::Backpressure(format!(
-                    "no indexing lane within {}s",
-                    waited.as_secs()
-                )))
-            }
+            Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
+                "no indexing lane within {}s",
+                waited.as_secs()
+            ))),
             Err(IndexError::Failed(e)) => Err(e),
         };
 
@@ -409,6 +427,20 @@ impl CodeIndexingTaskHandler {
 
         if let Err(e) = &result {
             warn!(project_id, branch = %branch, error = %e, "failed to index code");
+        }
+        let redelivered = match &result {
+            Err(HandlerError::Backpressure(_)) => true,
+            Err(HandlerError::Processing(_)) => self
+                .subscription
+                .retry_policy()
+                .is_some_and(|policy| policy.should_redeliver(attempt)),
+            _ => false,
+        };
+        if redelivered {
+            checkpoint.refund_attempt();
+            if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
+                warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
+            }
         }
 
         result.map(Some)

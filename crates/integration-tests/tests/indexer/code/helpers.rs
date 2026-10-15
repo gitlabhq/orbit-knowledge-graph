@@ -162,7 +162,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
-            CodeIndexingTaskRequest::subscription(),
+            code_task_subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
     }
@@ -181,10 +181,15 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             lock_ttl,
-            CodeIndexingTaskRequest::subscription(),
+            code_task_subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
     }
+}
+
+fn code_task_subscription() -> indexer::types::Subscription {
+    CodeIndexingTaskRequest::subscription()
+        .with_config(&indexer::modules::code::code_indexing_task_topic_policy())
 }
 
 struct MockState {
@@ -202,6 +207,7 @@ struct ProjectData {
     /// projects that lack repository content.
     empty_archive_body: bool,
     slow_archive: bool,
+    archive_error: bool,
 }
 
 pub struct MockGitlabServer {
@@ -261,6 +267,7 @@ impl MockGitlabServer {
                 archive_files,
                 empty_archive_body: false,
                 slow_archive: false,
+                archive_error: false,
             },
         );
     }
@@ -277,6 +284,7 @@ impl MockGitlabServer {
                 )],
                 empty_archive_body: false,
                 slow_archive: true,
+                archive_error: false,
             },
         );
     }
@@ -292,6 +300,20 @@ impl MockGitlabServer {
                 archive_files: Vec::new(),
                 empty_archive_body: true,
                 slow_archive: false,
+                archive_error: false,
+            },
+        );
+    }
+
+    pub fn add_project_with_archive_error(&self, project_id: i64, default_branch: &str) {
+        self.state.projects.lock().insert(
+            project_id,
+            ProjectData {
+                default_branch: default_branch.to_string(),
+                archive_files: Vec::new(),
+                empty_archive_body: false,
+                slow_archive: false,
+                archive_error: true,
             },
         );
     }
@@ -346,6 +368,7 @@ async fn handle_download_archive(
     }
     let projects = state.projects.lock();
     match projects.get(&project_id) {
+        Some(p) if p.archive_error => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),
         Some(p) => {
             let files: Vec<(&str, &str)> = p

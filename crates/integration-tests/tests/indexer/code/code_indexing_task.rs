@@ -6,7 +6,7 @@ use chrono::{TimeZone, Utc};
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::handler::Handler;
 use indexer::modules::code::{
-    ClickHouseStaleDataCleaner, StaleDataCleaner, config::CodeTableNames,
+    ClickHouseStaleDataCleaner, CodeCheckpointStore, StaleDataCleaner, config::CodeTableNames,
 };
 use indexer::testkit::MockLockService;
 use indexer::topic::CodeIndexingTaskRequest;
@@ -1054,6 +1054,168 @@ async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
     );
 }
 
+async fn seed_unended_attempts(
+    deps: &CodeIndexingDeps,
+    traversal_path: &str,
+    project_id: i64,
+    attempts: i64,
+) {
+    let mut checkpoint = indexer::modules::code::CodeCheckpoint::new(
+        TraversalPath::new_unchecked(traversal_path),
+        project_id,
+        "main",
+    );
+    checkpoint.attempts = attempts;
+    deps.checkpoint_store
+        .save(&checkpoint)
+        .await
+        .expect("seed checkpoint");
+}
+
+#[tokio::test]
+async fn the_last_redelivery_after_unended_attempts_is_dead_lettered_not_run() {
+    let project_id: i64 = 62;
+    let traversal_path = "1/62/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    seed_unended_attempts(&deps, traversal_path, project_id, 4).await;
+
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 5;
+    let error = handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect_err("four attempts that never returned mean the repository crashes the indexer");
+    assert!(
+        matches!(
+            error,
+            indexer::handler::HandlerError::Permanent {
+                action: indexer::handler::PermanentAction::DeadLetter,
+                ..
+            }
+        ),
+        "unexpected error: {error}"
+    );
+    assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [5],
+        "the checkpoint must reach the sweep's quarantine threshold"
+    );
+}
+
+#[tokio::test]
+async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold() {
+    let project_id: i64 = 64;
+    let traversal_path = "1/64/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_archive_error(project_id, "main");
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let handler = &handler;
+    let fail_once = move |attempt: u32| async move {
+        let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+        envelope.attempt = attempt;
+        handler
+            .handle(handler_context(), envelope)
+            .await
+            .expect_err("the archive endpoint keeps failing")
+    };
+
+    for attempt in 1..=5 {
+        let error = fail_once(attempt).await;
+        assert!(
+            matches!(error, indexer::handler::HandlerError::Processing(_)),
+            "first cycle, attempt {attempt}: {error}"
+        );
+    }
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [1],
+        "the exhausted run keeps its attempt, the redelivered ones gave theirs back"
+    );
+
+    for attempt in 1..=4 {
+        let error = fail_once(attempt).await;
+        assert!(
+            matches!(error, indexer::handler::HandlerError::Processing(_)),
+            "second cycle, attempt {attempt}: {error}"
+        );
+    }
+    let error = fail_once(5).await;
+    assert!(
+        matches!(
+            error,
+            indexer::handler::HandlerError::Permanent {
+                action: indexer::handler::PermanentAction::DeadLetter,
+                ..
+            }
+        ),
+        "second cycle, attempt 5: {error}"
+    );
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [5],
+        "the project is parked at the sweep's threshold"
+    );
+}
+
+#[tokio::test]
+async fn a_redelivery_after_one_unended_attempt_still_runs() {
+    let project_id: i64 = 63;
+    let traversal_path = "1/63/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    seed_unended_attempts(&deps, traversal_path, project_id, 1).await;
+
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 2;
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("one unended attempt may be a hard kill; the redelivery runs");
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+}
+
 #[tokio::test]
 async fn empty_200_archive_checkpoints_as_empty_repository() {
     let project_id: i64 = 7;
@@ -1161,7 +1323,11 @@ async fn an_empty_archive_with_a_commit_sha_retries_once_then_checkpoints_empty(
         result.is_err(),
         "the first delivery of a push-dispatched task hitting an empty archive must nack for one retry, got {result:?}"
     );
-    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [1]);
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [0],
+        "a handled failure that NATS redelivers refunds its attempt"
+    );
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         None
