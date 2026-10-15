@@ -861,3 +861,35 @@ fn setup_full_falls_back_when_the_instance_is_unreachable() {
     installed_manifest(&skills);
     assert!(skills.join("orbit/references/local/cli.md").is_file());
 }
+
+#[test]
+fn a_rerun_without_skill_flag_keeps_the_instance_full_tree() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote v1")]);
+    let (output, skills) = setup_skill(Some(&url), &project, &["--skill", "full"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(skills.join("orbit/references/remote.md").is_file());
+    assert_eq!(server.join().unwrap().len(), 1);
+
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote v1")]);
+    let cache = tempfile::tempdir().unwrap();
+    let dir = project.path().to_str().unwrap();
+    let args = [
+        "setup",
+        "claude",
+        "--yes",
+        "--skip",
+        "instructions",
+        "--no-index",
+        "--project",
+        "--dir",
+        dir,
+    ];
+    let output = run_orbit(Some(&url), &cache, &args);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(server.join().unwrap().len(), 1);
+    assert!(
+        skills.join("orbit/references/remote.md").is_file(),
+        "a rerun replaced the instance's full tree with the embedded one"
+    );
+}

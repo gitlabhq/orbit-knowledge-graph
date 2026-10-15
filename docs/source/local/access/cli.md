@@ -199,12 +199,12 @@ For every agent it configures, `orbit setup`:
   themselves, for agents that cannot run a command when they load a skill.
   GitLab Duo CLI is one, so setup installs `full` whenever Duo is among the
   agents, and every agent that shares `.agents/skills` gets it. Without
-  `--skill`, a later setup keeps the kind already installed. `full` uses the
+  `--skill`, a later setup keeps the kind already installed and, for `full`, fetches the instance's skill again. `full` uses the
   skill your instance serves when credentials resolve and the instance answers,
   and the skill embedded in the binary otherwise. The directory name stays
   `orbit` in both cases. Setup records which agents use the directory in a
-  `.orbit-managed` file beside it, not inside it, so the directory matches what
-  `glab skills install` writes. A different `orbit` skill already there is
+  `.orbit-managed` file beside it, not inside it, so under `glab orbit` the
+  directory matches what `glab skills install` writes. A different `orbit` skill already there is
   renamed to `orbit.orbit-backup`, with its `SKILL.md` renamed to
   `SKILL.md.orbit-backup` so it stops loading. Setup also removes the
   `orbit-cli` skill and link that earlier releases installed, including the real

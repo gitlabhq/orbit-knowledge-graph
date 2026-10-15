@@ -72,19 +72,14 @@ impl Installer for Skill<'_> {
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for skill in skill_targets(agents, target)? {
-            if let Some(legacy_link) = &skill.legacy_link {
-                remove_legacy_link(
-                    legacy_link,
-                    &skill.legacy_link_label,
-                    &skill.legacy_root,
-                    target,
-                    report,
-                )?;
-                // Where symlinks fail, the earlier release wrote a real copy instead.
-                remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
-            }
-            remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
+            migrate_legacy(&skill, target, report)?;
             let kind = self.kind_for(&skill);
+            if kind == SkillKind::Wrapper && skill.requires_full {
+                report.note(
+                    &skill.label,
+                    "wrapper installed by request; an agent here cannot run it when it loads a skill",
+                );
+            }
             let tree = self.tree_for(kind)?;
             write_skill_files(
                 &skill.root,
@@ -106,18 +101,7 @@ impl Installer for Skill<'_> {
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for skill in skill_targets(agents, target)? {
-            if let Some(legacy_link) = &skill.legacy_link {
-                remove_legacy_link(
-                    legacy_link,
-                    &skill.legacy_link_label,
-                    &skill.legacy_root,
-                    target,
-                    report,
-                )?;
-                // Where symlinks fail, the earlier release wrote a real copy instead.
-                remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
-            }
-            remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
+            migrate_legacy(&skill, target, report)?;
             if let Some(link) = &skill.link {
                 unlink_skill_dir(link, &skill.link_agents, target, report)?;
             }
@@ -136,6 +120,31 @@ impl Installer for Skill<'_> {
             })
         })
     }
+}
+
+/// Removes what earlier releases installed as `orbit-cli`, directory and Claude link alike.
+fn migrate_legacy(skill: &SkillTarget, target: &Target, report: &mut Report) -> Result<()> {
+    if let Some(legacy_link) = &skill.legacy_link {
+        remove_legacy_link(
+            legacy_link,
+            &skill.legacy_link_label,
+            &skill.legacy_root,
+            target,
+            report,
+        )?;
+        // Where symlinks fail, the earlier release wrote a real copy instead.
+        remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
+    }
+    remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)
+}
+
+/// Whether any of these agents' skill directories was last installed as the full tree.
+pub(in crate::commands::setup) fn records_full_skill(agents: &[Agent], target: &Target) -> bool {
+    skill_targets(agents, target).is_ok_and(|targets| {
+        targets
+            .iter()
+            .any(|skill| read_marker(&skill.root).is_some_and(|m| m.kind == SkillKind::Full))
+    })
 }
 
 impl Skill<'_> {
@@ -428,14 +437,14 @@ fn release_skill_files(
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    if std::fs::symlink_metadata(skill_root).is_err() {
-        return Ok(());
-    }
+    let exists = std::fs::symlink_metadata(skill_root).is_ok();
     let Some(mut marker) = read_marker(skill_root) else {
-        report.note(
-            label,
-            "kept (not installed by orbit setup; delete it by hand)",
-        );
+        if exists {
+            report.note(
+                label,
+                "kept (not installed by orbit setup; delete it by hand)",
+            );
+        }
         return Ok(());
     };
     marker.agents.retain(|owner| !agents.contains(owner));
@@ -448,7 +457,9 @@ fn release_skill_files(
     remove_path(skill_root)?;
     let _ = std::fs::remove_file(marker_path(skill_root));
     remove_empty_parents(skill_root, &target.root()?);
-    report.note(label, "skill removed");
+    if exists {
+        report.note(label, "skill removed");
+    }
     Ok(())
 }
 

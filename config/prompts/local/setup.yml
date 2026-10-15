@@ -13,6 +13,6 @@ description: >-
   form. A later run keeps the installed form unless `--skill` says otherwise. Inside a Git
   repository it then indexes the repository; `--no-index` skips that.
   Writes user-global configuration unless `--project` or `--dir` is given.
-  Existing files get a one-time `.orbit-backup` sibling, and an existing
-  `orbit` skill directory is moved to `orbit.orbit-backup`. Re-running updates
+  Existing files get a one-time `.orbit-backup` sibling, and an `orbit` skill
+  directory that setup did not write is moved to `orbit.orbit-backup`. Re-running updates
   in place. `orbit uninstall` reverts it.

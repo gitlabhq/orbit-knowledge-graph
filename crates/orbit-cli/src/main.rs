@@ -532,9 +532,9 @@ impl SetupFlags {
         }
     }
 
-    fn target(self) -> Result<commands::setup::Target> {
+    fn target(&self) -> Result<commands::setup::Target> {
         if self.project || self.dir.is_some() {
-            commands::setup::Target::project(self.dir)
+            commands::setup::Target::project(self.dir.clone())
         } else {
             Ok(commands::setup::Target::Global)
         }
@@ -903,6 +903,7 @@ async fn dispatch(
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
             let machine = commands::setup::detect::Machine::current()?;
+            let target = flags.target()?;
             let skill = commands::setup::skill_request(
                 skill,
                 &agents,
@@ -910,10 +911,11 @@ async fn dispatch(
                 &components,
                 flags.dry_run,
                 &machine,
+                &target,
             )
             .await?;
             let options = flags.to_options(agents, all, !no_index, components, skill);
-            let run = commands::setup::install(options, flags.target()?, &machine)?;
+            let run = commands::setup::install(options, target, &machine)?;
             if let Some(tracker) = &tracker {
                 telemetry::emit_setup_event(
                     tracker,

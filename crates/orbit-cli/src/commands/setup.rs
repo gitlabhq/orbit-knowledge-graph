@@ -284,7 +284,8 @@ pub(crate) struct SkillRequest {
     pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
 }
 
-/// Fetches the full tree only when an agent that will be configured can load nothing else;
+/// Fetches the full tree only when an agent that will be configured can load nothing else, or
+/// the directory already holds a full install;
 /// anything chosen later in the picker falls back to the embedded skill.
 pub(crate) async fn skill_request(
     kind: Option<SkillKind>,
@@ -293,10 +294,11 @@ pub(crate) async fn skill_request(
     components: &BTreeSet<Component>,
     dry_run: bool,
     machine: &Machine,
+    target: &Target,
 ) -> Result<SkillRequest> {
     let needed = match kind {
         Some(kind) => kind == SkillKind::Full,
-        None => requires_full_skill(agents, all, machine),
+        None => requires_full_skill(agents, all, machine, target),
     };
     let wanted = !dry_run && components.contains(&Component::Skill) && needed;
     let full_tree = match wanted {
@@ -306,7 +308,7 @@ pub(crate) async fn skill_request(
     Ok(SkillRequest { kind, full_tree })
 }
 
-fn requires_full_skill(agents: &[String], all: bool, machine: &Machine) -> bool {
+fn requires_full_skill(agents: &[String], all: bool, machine: &Machine, target: &Target) -> bool {
     let selected: Vec<_> = match (all, agents.is_empty()) {
         (true, _) => spec::agents().collect(),
         (false, false) => plan::agents_named(agents).unwrap_or_default(),
@@ -316,9 +318,11 @@ fn requires_full_skill(agents: &[String], all: bool, machine: &Machine) -> bool 
             .map(|(agent, _)| agent)
             .collect(),
     };
-    selected
+    let needs_full = selected
         .iter()
-        .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full))
+        .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full));
+    // A rerun keeps `full`, so it needs the instance's tree again, not the embedded one.
+    needs_full || components::records_full_skill(&selected, target)
 }
 
 pub(crate) struct Options {
@@ -899,6 +903,26 @@ mod tests {
         };
         install(wrapper, project(dir.path()), &bare_machine()).unwrap();
         assert!(!installed.join("references").exists());
+    }
+
+    #[test]
+    fn a_marker_left_behind_does_not_hide_a_recreated_skill_from_the_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::remove_dir_all(skills.join("orbit")).unwrap();
+
+        uninstall_named(&["codex"], dir.path());
+        assert!(!skills.join(".orbit-managed").exists());
+
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
+        install_with_mcp(&["codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup/notes.md")).unwrap(),
+            "mine\n"
+        );
     }
 
     #[test]
