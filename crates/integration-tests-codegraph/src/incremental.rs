@@ -33,9 +33,7 @@ impl orbit_utils::vfs::Pass for FixturePolicy {
 
 use super::assertions::{SkippedFile, TestCase, TestSuite};
 use super::runner::create_test_db;
-use super::validator::{
-    Failure, load_suite, report, run_suite, workspace_root, write_fixtures, write_suite_files,
-};
+use super::validator::{Failure, load_suite, report, run_suite, write_fixtures, write_suite_files};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     if let Some(pipeline) = suite.pipeline.as_deref().filter(|p| *p != "generic") {
@@ -70,33 +68,26 @@ fn suite_limits(suite: &TestSuite) -> Limits {
     }
 }
 
-/// The production budgets, read from the same file the server reads.
+/// The production budgets, from the embedded config/default.yaml the
+/// server starts from.
 fn default_limits() -> Limits {
-    let path = workspace_root().join("config/default.yaml");
-    let text = std::fs::read_to_string(&path).expect("config/default.yaml");
-    let config: serde_json::Value =
-        orbit_utils::yaml::from_str(&text).expect("config/default.yaml parses");
-    let pipeline = &config["engine"]["handlers"]["code-indexing-task"]["pipeline"];
-    let field = |name: &str| {
-        pipeline[name]
-            .as_u64()
-            .unwrap_or_else(|| panic!("config/default.yaml: pipeline.{name} is not a number"))
-    };
-    let budget = |name: &str| match field(name) {
-        0 => u64::MAX,
-        ms => ms,
-    };
+    let pipeline = orbit_server_config::app::AppConfig::embedded_defaults()
+        .engine
+        .handlers
+        .code_indexing_task
+        .pipeline;
+    let budget = |ms: u64| if ms == 0 { u64::MAX } else { ms };
     Limits {
-        max_files: field("max_files") as usize,
-        file_parse_ms: budget("per_file_parse_timeout_ms"),
-        file_rewrite_ms: budget("per_file_walk_timeout_ms"),
-        file_link_ms: budget("per_file_ssa_timeout_ms"),
-        file_resolve_ms: budget("per_file_timeout_ms"),
-        cross_file_resolve_ms: budget("cross_file_resolve_timeout_ms"),
-        max_tree_depth: field("max_tree_depth") as usize,
-        max_cross_file_names: field("max_cross_file_names") as usize,
-        max_manifest_bytes: field("max_manifest_bytes"),
-        max_file_edges: field("max_file_edges") as usize,
+        max_files: pipeline.max_files,
+        file_parse_ms: budget(pipeline.per_file_parse_timeout_ms),
+        file_rewrite_ms: budget(pipeline.per_file_walk_timeout_ms),
+        file_link_ms: budget(pipeline.per_file_ssa_timeout_ms),
+        file_resolve_ms: budget(pipeline.per_file_timeout_ms),
+        cross_file_resolve_ms: budget(pipeline.cross_file_resolve_timeout_ms),
+        max_tree_depth: pipeline.max_tree_depth,
+        max_cross_file_names: pipeline.max_cross_file_names,
+        max_manifest_bytes: pipeline.max_manifest_bytes,
+        max_file_edges: pipeline.max_file_edges,
         ..Limits::UNLIMITED
     }
 }

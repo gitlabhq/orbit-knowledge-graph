@@ -662,7 +662,7 @@ pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     Some(suite)
 }
 
-pub(super) fn workspace_root() -> std::path::PathBuf {
+fn workspace_root() -> std::path::PathBuf {
     let output = std::process::Command::new("cargo")
         .args(["metadata", "--format-version=1", "--no-deps"])
         .output()

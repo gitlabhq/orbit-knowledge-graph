@@ -58,7 +58,7 @@ pub struct TestSuite {
     #[serde(default)]
     pub trace: bool,
     /// `default` indexes with the production budgets of config/default.yaml;
-    /// unset, no budget applies.
+    /// `unlimited` or unset, no budget applies.
     #[serde(default)]
     pub limits: Option<String>,
     /// The files the budgets must skip, each with the label of the limit
