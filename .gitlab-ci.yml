@@ -977,13 +977,16 @@ code-indexing-benchmark-v2-linux:
   interruptible: true
   script:
     - |
+      REPORT="gkg-benchmark-${SCENARIO}-results.md"
+      COMMENT_FILE="gkg-benchmark-${SCENARIO}-comment.md"
+
       gitlab-xtasks benchmark analyze \
         --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
         --output-format markdown \
         --pipeline-url "$CI_PIPELINE_URL" \
         --job-url "$CI_JOB_URL" \
         --branch "$CI_COMMIT_REF_NAME" \
-        --output-file "gkg-benchmark-${SCENARIO}-results.md"
+        --output-file "$REPORT"
 
       gitlab-xtasks benchmark analyze \
         --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
@@ -995,10 +998,8 @@ code-indexing-benchmark-v2-linux:
 
       if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
         # Post the summary only: drop every <details> block and link the full report.
-        REPORT="gkg-benchmark-${SCENARIO}-results.md"
-        COMMENT_FILE="gkg-benchmark-${SCENARIO}-comment.md"
         awk '
-          /<details>/ { depth++ }
+          /<details[ >]/ { depth++ }
           depth == 0 { print }
           /<\/details>/ && depth > 0 { depth-- }
         ' "$REPORT" > "$COMMENT_FILE"
