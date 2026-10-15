@@ -1116,6 +1116,9 @@ async fn small_jobs_wait_for_the_natural_flush_and_share_one_part() {
         None
     );
 
+    clickhouse
+        .execute(&format!("SYSTEM STOP MERGES {}", t("gl_file")))
+        .await;
     deps.pipeline.flush().await.expect("flush");
     first.await.expect("join").expect("first job indexes");
     second.await.expect("join").expect("second job indexes");
