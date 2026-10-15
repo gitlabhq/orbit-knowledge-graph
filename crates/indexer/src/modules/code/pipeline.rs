@@ -14,7 +14,7 @@ use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
-use super::repository::{RepositoryResolver, ResolveError};
+use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
@@ -342,7 +342,7 @@ impl CodeIndexer {
         let mut clock = WorkClock::new(budget);
 
         // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
-        let Some(fetched) = clock.run(self.fetch_repository(request)).await else {
+        let Some(fetched) = clock.run(self.fetch_repository(context, request)).await else {
             return Err(IndexError::BudgetExceeded {
                 budget: budget.unwrap_or_default(),
             });
@@ -390,7 +390,11 @@ impl CodeIndexer {
         })
     }
 
-    async fn fetch_repository(&self, request: &IndexingRequest) -> Result<Fetched, HandlerError> {
+    async fn fetch_repository(
+        &self,
+        context: &HandlerContext,
+        request: &IndexingRequest,
+    ) -> Result<Fetched, HandlerError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
@@ -429,7 +433,11 @@ impl CodeIndexer {
                 repository
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
-                if request.commit_sha.is_some() && !reason.is_permanent() {
+                let redelivered = match reason {
+                    EmptyRepositoryReason::EmptyArchive => context.redelivered_on_failure,
+                    _ => !reason.is_permanent(),
+                };
+                if request.commit_sha.is_some() && redelivered {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
                         "archive empty ({reason}: {detail}) for task with commit_sha; retrying"

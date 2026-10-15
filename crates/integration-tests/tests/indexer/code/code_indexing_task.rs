@@ -1420,7 +1420,39 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
-async fn an_archive_that_stays_empty_is_checkpointed_empty_on_the_first_delivery() {
+async fn an_empty_archive_on_a_redelivered_attempt_is_not_checkpointed() {
+    let project_id: i64 = 67;
+    let traversal_path = "1/67/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_empty_archive(project_id, "main");
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let error = handler
+        .handle(handler_context_redelivered(true), envelope)
+        .await
+        .expect_err("an empty archive for a commit that exists waits for the next delivery");
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Processing(_)),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+}
+
+#[tokio::test]
+async fn an_empty_archive_on_the_last_delivery_is_checkpointed_empty() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";
 
@@ -1437,9 +1469,18 @@ async fn an_archive_that_stays_empty_is_checkpointed_empty_on_the_first_delivery
 
     let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     handler
-        .handle(handler_context(), envelope)
+        .handle(handler_context_redelivered(true), envelope)
         .await
-        .expect("an archive that stays empty across the download retries is a permanent outcome");
+        .expect_err("earlier deliveries keep the redelivery window open");
+
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 5;
+    handler
+        .handle(handler_context_redelivered(false), envelope)
+        .await
+        .expect(
+            "the last delivery checkpoints the project as indexed-empty instead of dead-lettering",
+        );
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(11)

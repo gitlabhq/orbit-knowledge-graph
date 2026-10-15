@@ -57,12 +57,14 @@ impl EmptyRepositoryReason {
         }
     }
 
-    /// The size cap and an archive that stays empty across the download retries are
-    /// permanent; a 404 or 5xx can be Gitaly visibility lag, which a redelivery may clear.
+    /// Only the size cap is known to be permanent; the other reasons can be
+    /// Gitaly visibility lag, which a retry may clear.
     pub fn is_permanent(self) -> bool {
         match self {
-            EmptyRepositoryReason::RepositoryTooLarge | EmptyRepositoryReason::EmptyArchive => true,
-            EmptyRepositoryReason::NotFound | EmptyRepositoryReason::ServerError => false,
+            EmptyRepositoryReason::RepositoryTooLarge => true,
+            EmptyRepositoryReason::NotFound
+            | EmptyRepositoryReason::ServerError
+            | EmptyRepositoryReason::EmptyArchive => false,
         }
     }
 }
@@ -239,12 +241,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn the_size_cap_and_a_persistently_empty_archive_are_permanent() {
+    fn only_the_size_cap_is_permanent() {
         assert!(EmptyRepositoryReason::RepositoryTooLarge.is_permanent());
-        assert!(EmptyRepositoryReason::EmptyArchive.is_permanent());
         for reason in [
             EmptyRepositoryReason::NotFound,
             EmptyRepositoryReason::ServerError,
+            EmptyRepositoryReason::EmptyArchive,
         ] {
             assert!(!reason.is_permanent());
         }
