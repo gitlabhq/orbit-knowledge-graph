@@ -16,6 +16,10 @@
 
 ## [0.143.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.142.0...v0.143.0) (2026-10-15)
 
+### ⚠ BREAKING CHANGES
+
+* **probes:** Orbit no longer serves the legacy `/live` and `/ready` probe endpoints. Deployments with the Orbit Helm chart need chart 3.0.0 or later.
+
 ### Features
 
 * remove plaintext live and ready probes ([afd6c51](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/afd6c51c298031d3c6b6eaa4e9b1b5b53cc98565)) by Bohdan Parkhomchuk
