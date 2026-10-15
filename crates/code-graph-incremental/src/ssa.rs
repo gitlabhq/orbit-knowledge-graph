@@ -158,6 +158,11 @@ impl SsaEngine {
             .is_some_and(|blocks| blocks.contains_key(&block))
     }
 
+    #[cfg(test)]
+    pub(crate) fn phi_count(&self) -> usize {
+        self.phis.len()
+    }
+
     pub fn is_defined(&self, variable: u32, block: BlockId) -> bool {
         let Some(defs) = self.current_def.get(&variable) else {
             return false;
