@@ -18,13 +18,21 @@ pub(super) struct Def {
     pub(super) kind: String,
 }
 
-/// Callers and callees of each listed definition, by definition id.
-pub(super) type Connections = HashMap<i64, (Vec<String>, Vec<String>)>;
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct Links {
+    pub(super) callers: Vec<String>,
+    pub(super) callees: Vec<String>,
+    pub(super) siblings: Vec<String>,
+}
+
+pub(super) type Connections = HashMap<i64, Links>;
 
 /// Import symbols by `(file, line)`, each as `(name, label)`.
 type ImportsByLine = HashMap<(String, usize), Vec<(String, String)>>;
 
 const CONNECTION_NAMES: usize = 8;
+const SIBLINGS_SHOWN: usize = 4;
+const SIBLINGS_MAX: usize = 25;
 const DEF_FILES_PER_QUERY: usize = 500;
 
 struct Candidate {
@@ -269,14 +277,79 @@ WHERE c.target_kind = 'ImportedSymbol'",
             .filter_map(|(_, name)| seen.insert(name.clone()).then_some(name))
             .collect::<Vec<_>>()
     };
-    Ok(raw
+    let mut links: Connections = raw
         .into_iter()
-        .map(|(def, (callers, callees))| (def, (names(callers), names(callees))))
+        .map(|(def, (callers, callees))| {
+            let links = Links {
+                callers: names(callers),
+                callees: names(callees),
+                siblings: Vec::new(),
+            };
+            (def, links)
+        })
+        .collect();
+    let shown: std::collections::HashSet<&str> = hits.iter().map(|h| h.file.as_str()).collect();
+    for (def, siblings) in siblings(client, &shown)? {
+        links.entry(def).or_default().siblings = siblings;
+    }
+    Ok(links)
+}
+
+fn siblings(
+    client: &DuckDbClient,
+    shown: &std::collections::HashSet<&str>,
+) -> Result<HashMap<i64, Vec<String>>> {
+    let family = |column: &str| {
+        format!(
+            "CASE WHEN regexp_matches({column}, 'Function|Method|Constructor') THEN 1 \
+             WHEN regexp_matches({column}, 'Class|Struct|Interface|Trait|Record|Enum|Object') THEN 2 END"
+        )
+    };
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT g.id AS def, d.file_path AS file, CAST(d.start_line AS BIGINT) AS line
+FROM grep_defs g
+JOIN gl_definition s ON s.id = g.id
+JOIN gl_definition d ON d.project_id = s.project_id AND d.commit_sha = s.commit_sha
+  AND d.name = s.name AND d.file_path <> s.file_path AND d.fqn NOT LIKE '%@%'
+WHERE {source} IS NOT NULL AND {source} = {target}",
+            source = family("s.definition_type"),
+            target = family("d.definition_type"),
+        ),
+        &[],
+    )?;
+    let (defs, files, lines) = (
+        i64_column(&batches, "def"),
+        string_column(&batches, "file"),
+        i64_column(&batches, "line"),
+    );
+    let mut found: HashMap<i64, Vec<(bool, String, i64)>> = HashMap::new();
+    for ((def, file), line) in defs.into_iter().zip(files).zip(lines) {
+        found
+            .entry(def)
+            .or_default()
+            .push((is_test(&file), file, line));
+    }
+    Ok(found
+        .into_iter()
+        .filter(|(_, list)| list.len() <= SIBLINGS_MAX)
+        .map(|(def, mut list)| {
+            list.retain(|(_, file, _)| !shown.contains(file.as_str()));
+            list.sort();
+            list.dedup();
+            (
+                def,
+                list.into_iter()
+                    .map(|(_, file, line)| format!("{file}:{line}"))
+                    .collect(),
+            )
+        })
+        .filter(|(_, list): &(i64, Vec<String>)| !list.is_empty())
         .collect())
 }
 
 pub(super) fn connection_label(def: &Def, connections: &Connections) -> String {
-    let Some((callers, callees)) = connections.get(&def.id) else {
+    let Some(links) = connections.get(&def.id) else {
         return String::new();
     };
     let side = |arrow: &str, names: &[String]| match names.len() {
@@ -287,5 +360,19 @@ pub(super) fn connection_label(def: &Def, connections: &Connections) -> String {
         }
         _ => format!("{arrow}{} ", names.join(",")),
     };
-    format!("{}{}", side("←", callers), side("→", callees))
+    let siblings = match links.siblings.len() {
+        0 => String::new(),
+        n if n > SIBLINGS_SHOWN => format!(
+            "also {} in {},+{} ",
+            def.name,
+            links.siblings[..SIBLINGS_SHOWN].join(","),
+            n - SIBLINGS_SHOWN
+        ),
+        _ => format!("also {} in {} ", def.name, links.siblings.join(",")),
+    };
+    format!(
+        "{}{}{siblings}",
+        side("←", &links.callers),
+        side("→", &links.callees)
+    )
 }
