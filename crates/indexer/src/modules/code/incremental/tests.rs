@@ -211,6 +211,20 @@ async fn files_nested_past_the_default_depth_limit_are_skipped() {
 }
 
 #[tokio::test]
+async fn a_long_operator_chain_is_indexed_under_the_default_depth_limit() {
+    let terms = vec!["c"; 5_000].join(" +\n");
+    let source = format!("function t() {{}}\nfunction f(c) {{\nt();\nreturn {terms};\n}}\n");
+    let files: &[(&str, &[u8])] = &[("root/sum.js", source.as_bytes())];
+    let limits = code_graph_incremental::Limits {
+        max_tree_depth: limits(&config()).max_tree_depth,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+}
+
+#[tokio::test]
 async fn a_long_or_pattern_is_indexed_under_the_default_depth_limit() {
     let codes: Vec<_> = (0..2_000).map(|i| format!("Code.E{i}")).collect();
     let source = format!(

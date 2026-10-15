@@ -283,7 +283,7 @@ fn from_tree_sitter(
     tree.source = std::sync::Arc::from(source);
 
     let root_nid = tree.root;
-    let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
+    let mut parent_stack = vec![(root_nid, ts_root.kind_id(), 1)];
 
     if !cursor.goto_first_child() {
         return Some(tree);
@@ -298,7 +298,8 @@ fn from_tree_sitter(
         let sp = ts.start_position();
         let ep = ts.end_position();
 
-        let parent = *parent_stack.last().expect("root is pushed before the walk");
+        let (parent, parent_kind, parent_depth) =
+            *parent_stack.last().expect("root is pushed before the walk");
         let nid = tree.append(
             parent,
             Node {
@@ -316,9 +317,11 @@ fn from_tree_sitter(
             },
         );
 
+        let chained = ts.kind_id() == parent_kind && cursor.field_name() == Some("left");
         if cursor.goto_first_child() {
-            parent_stack.push(nid);
-            if max_depth > 0 && parent_stack.len() > max_depth {
+            let depth = parent_depth + usize::from(!chained);
+            parent_stack.push((nid, ts.kind_id(), depth));
+            if max_depth > 0 && depth > max_depth {
                 return None;
             }
             continue;
@@ -444,18 +447,26 @@ const PARSE_STACK_RESERVE: usize = 256 * 1024;
 
 fn depth_of(tree: &tree_sitter::Tree) -> usize {
     let mut cursor = tree.walk();
-    let (mut depth, mut deepest) = (0, 0);
+    let mut stack = vec![(cursor.node().kind_id(), 1)];
+    if !cursor.goto_first_child() {
+        return 1;
+    }
+    let mut deepest = 1;
     loop {
+        let kind = cursor.node().kind_id();
+        let &(parent_kind, parent_depth) = stack.last().expect("the root is on the stack");
+        let chained = kind == parent_kind && cursor.field_name() == Some("left");
         if cursor.goto_first_child() {
-            depth += 1;
+            let depth = parent_depth + usize::from(!chained);
             deepest = deepest.max(depth);
+            stack.push((kind, depth));
             continue;
         }
         while !cursor.goto_next_sibling() {
             if !cursor.goto_parent() {
                 return deepest;
             }
-            depth -= 1;
+            stack.pop();
         }
     }
 }
