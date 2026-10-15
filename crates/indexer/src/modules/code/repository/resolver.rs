@@ -133,9 +133,10 @@ impl Repository {
             Repository::Extracted(repository) => repository
                 .file_inventory
                 .iter()
+                .filter(|entry| entry.decision == code_graph::v2::Decision::Parse)
                 .map(|entry| entry.size)
                 .sum(),
-            Repository::IncrementalEngine(repository) => repository.usage().bytes,
+            Repository::IncrementalEngine(repository) => repository.usage().kept,
         }
     }
 

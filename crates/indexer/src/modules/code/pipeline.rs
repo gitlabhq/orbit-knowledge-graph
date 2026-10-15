@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
-use super::memory::{MemoryWatchdog, Pressure};
+use super::memory::{MemoryKill, MemoryWatchdog};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
 use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
@@ -73,7 +73,7 @@ enum Fetched {
 
 pub enum IndexError {
     BudgetExceeded { budget: Duration },
-    MemoryExceeded { used: u64, limit: u64 },
+    MemoryExceeded(MemoryKill),
     Overloaded(GitlabClientError),
     NoLane { waited: Duration },
     Failed(HandlerError),
@@ -298,7 +298,7 @@ impl CodeIndexer {
             checkpoint_store,
             stale_data_cleaner,
             inflight: Arc::new(AtomicUsize::new(0)),
-            memory: MemoryWatchdog::for_this_process(),
+            memory: MemoryWatchdog::for_this_process(metrics.clone()),
             metrics,
             table_names,
             ontology,
@@ -366,12 +366,21 @@ impl CodeIndexer {
 
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
-        let lane = self
-            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
-            .await?;
+        // Registered from the lane wait to the end of the parse: the memory the
+        // watchdog can free lives there, and a kill after a completed parse must
+        // not turn a landed graph into a failure.
         let memory = self
             .memory
             .register(repository.source_bytes(), cancel.clone());
+        let lane = match self
+            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
+            .await
+        {
+            Ok(lane) => lane,
+            Err(error) => {
+                return Err(memory.exceeded().map_or(error, IndexError::MemoryExceeded));
+            }
+        };
 
         let indexed = clock
             .run(self.index_fetched(
@@ -383,19 +392,23 @@ impl CodeIndexer {
                 cancel.clone(),
             ))
             .await;
-        if let Some(Pressure { used, limit }) = memory.exceeded() {
-            return Err(IndexError::MemoryExceeded { used, limit });
-        }
         let run = match indexed {
-            Some(result) => result.map_err(IndexError::Failed)?,
+            Some(Ok(run)) => run,
+            Some(Err(error)) => {
+                return Err(memory
+                    .exceeded()
+                    .map_or(IndexError::Failed(error), IndexError::MemoryExceeded));
+            }
             None => {
                 // The blocking parse outlives the dropped future; cancel makes it bail.
                 cancel.cancel();
-                return Err(IndexError::BudgetExceeded {
+                let budget = IndexError::BudgetExceeded {
                     budget: budget.unwrap_or_default(),
-                });
+                };
+                return Err(memory.exceeded().map_or(budget, IndexError::MemoryExceeded));
             }
         };
+        drop(memory);
 
         context.work.release();
         self.writer
