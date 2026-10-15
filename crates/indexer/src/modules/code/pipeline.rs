@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
+use gitlab_client::GitlabClientError;
 use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
@@ -50,7 +51,7 @@ impl ProgressObserver for NatsHeartbeat {
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
     Indexed { rows_written: u64 },
-    /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
+    /// No repository content to index (404, a non-gateway 5xx, an empty archive, or over the size cap); already checkpointed.
     EmptyRepository,
 }
 
@@ -70,8 +71,15 @@ enum Fetched {
 
 pub enum IndexError {
     BudgetExceeded { budget: Duration },
+    Overloaded(GitlabClientError),
     NoLane { waited: Duration },
     Failed(HandlerError),
+}
+
+impl From<HandlerError> for IndexError {
+    fn from(err: HandlerError) -> Self {
+        Self::Failed(err)
+    }
 }
 
 struct WorkClock {
@@ -327,7 +335,7 @@ impl CodeIndexer {
                 budget: budget.unwrap_or_default(),
             });
         };
-        let repository = match fetched.map_err(IndexError::Failed)? {
+        let repository = match fetched? {
             Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
             Fetched::Repository(repository) => repository,
         };
@@ -360,7 +368,7 @@ impl CodeIndexer {
         }
     }
 
-    async fn fetch_repository(&self, request: &IndexingRequest) -> Result<Fetched, HandlerError> {
+    async fn fetch_repository(&self, request: &IndexingRequest) -> Result<Fetched, IndexError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
@@ -401,7 +409,8 @@ impl CodeIndexer {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
                         "archive empty ({reason}: {detail}) for task with commit_sha; retrying"
-                    )));
+                    ))
+                    .into());
                 }
                 warn!(
                     project_id = request.project_id,
@@ -424,9 +433,13 @@ impl CodeIndexer {
                     .record_error_stage(&self.metrics, "checkpoint")?;
                 return Ok(Fetched::EmptyRepository);
             }
+            Err(ResolveError::Overloaded(cause)) => {
+                self.metrics.record_stage_error("repository_fetch_overload");
+                return Err(IndexError::Overloaded(cause));
+            }
             Err(ResolveError::Other(err)) => {
                 self.metrics.record_stage_error("repository_fetch");
-                return Err(err);
+                return Err(err.into());
             }
         };
         let fetch_duration = fetch_start.elapsed();
