@@ -691,3 +691,139 @@ fn setup_leaves_gitlab_out_when_orbit_does_not_answer() {
     assert!(instructions.contains("grep"), "{instructions}");
     assert!(!instructions.contains("GitLab"), "{instructions}");
 }
+
+fn serve_sequence(bodies: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
+    let handle = thread::spawn(move || {
+        bodies
+            .into_iter()
+            .map(|response_body| {
+                let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
+                let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).expect("read request line");
+                let mut content_length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).expect("read header line");
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = trimmed.split_once(':')
+                        && name.trim().eq_ignore_ascii_case("content-length")
+                    {
+                        content_length = value.trim().parse().expect("parse content-length");
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).expect("read request body");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                    response_body.len()
+                );
+                stream.write_all(response.as_bytes()).expect("write response");
+                stream.flush().expect("flush response");
+                CapturedRequest {
+                    request_line: request_line.trim_end().to_string(),
+                    auth_header: None,
+                    body: String::from_utf8(body).expect("utf8 body"),
+                }
+            })
+            .collect()
+    });
+    (base_url, handle)
+}
+
+#[test]
+fn context_branch_reads_the_merge_request_of_that_branch() {
+    let (base_url, handle) = serve_sequence(vec![
+        r#"[{"name":"fix-ci"}]"#,
+        r#"[{"id":41,"state":"merged"},{"id":42,"state":"opened"}]"#,
+        "orbit_context version=1.1.0 entities=1\n",
+    ]);
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let data = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        clone.path(),
+        data.path(),
+        &base_url,
+        &["context", "--branch", "fix-ci"],
+    );
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        requests[0].request_line.starts_with(
+            "GET /api/v4/projects/my-group%2Fmy-project/repository/branches?search=%5Efix-ci%24 "
+        ),
+        "{}",
+        requests[0].request_line
+    );
+    assert!(
+        requests[1]
+            .request_line
+            .contains("merge_requests?source_branch=fix-ci&state=all"),
+        "{}",
+        requests[1].request_line
+    );
+    assert!(
+        requests[2].body.contains("MergeRequest[42]"),
+        "{}",
+        requests[2].body
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "branch fix-ci: MergeRequest[42]\norbit_context version=1.1.0 entities=1\n"
+    );
+}
+
+#[test]
+fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
+    let (base_url, handle) = serve_sequence(vec![
+        r#"[{"name":"ci-fix"}]"#,
+        "[]",
+        r#"[{"id":7,"status":"failed","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
+        r#"[{"id":9,"name":"unit","stage":"test","failure_reason":"script_failure","allow_failure":false,"web_url":"https://localhost/p/-/jobs/9"}]"#,
+        "ok\n--- FAIL: TestX\n",
+    ]);
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let status = Command::new("git")
+        .args(["symbolic-ref", "HEAD", "refs/heads/ci-fix"])
+        .current_dir(clone.path())
+        .status()
+        .expect("run git");
+    assert!(status.success());
+    let data = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(clone.path(), data.path(), &base_url, &["context"]);
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        requests[4].request_line.contains("/jobs/9/trace"),
+        "{}",
+        requests[4].request_line
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "branch ci-fix: no merge request\n\
+         pipeline 7 failed 0123456789ab https://localhost/p/-/pipelines/7\n\
+         failed_jobs[1]:\n  \
+         unit (test, script_failure) https://localhost/p/-/jobs/9\n    \
+         | ok\n    \
+         | --- FAIL: TestX\n"
+    );
+}

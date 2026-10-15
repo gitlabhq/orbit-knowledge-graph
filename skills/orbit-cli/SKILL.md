@@ -82,7 +82,8 @@ orbit context MergeRequest[42] gitlab-org/gitlab#7 src/lib.rs:120-180
 Pass names as printed by `grep`, paths, ranges, directories, or GitLab tokens
 to `context`. GitLab tokens return entity context after the local output:
 description, comments, and for merge requests the changed files and failed CI
-jobs. A `Definition:<id>` from another indexed checkout reads that checkout.
+jobs. `--branch NAME` reads a branch's merge request, or its latest pipeline and
+failed job logs; bare `orbit context` reads the current branch. A `Definition:<id>` from another indexed checkout reads that checkout.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.

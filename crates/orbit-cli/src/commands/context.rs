@@ -50,6 +50,38 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let dir = args.repo.clone().unwrap_or_else(|| ".".into());
     let mut client = None;
     let mut origin = None;
+    let mut branch_notes = String::new();
+    let wanted = match (&args.branch, args.target.is_empty()) {
+        (Some(name), _) => Some(name.clone()),
+        (None, true) => Some(String::new()),
+        (None, false) => None,
+    };
+    if let Some(wanted) = wanted {
+        let (host, project) = origin
+            .get_or_insert_with(|| crate::remote::origin::project(&dir))
+            .clone()
+            .context("--branch needs a GitLab `origin` remote")?;
+        let found_client = match &client {
+            Some(client) => client,
+            None => client.insert(crate::remote::client::OrbitClient::from_env_in(&dir)?),
+        };
+        let api_host = found_client.get_host()?;
+        anyhow::ensure!(
+            host == api_host,
+            "`origin` is {project} on {host}, but Orbit uses {api_host}"
+        );
+        let wanted = match wanted.is_empty() {
+            true => crate::remote::branch::current(&dir)?,
+            false => wanted,
+        };
+        match crate::remote::branch::resolve(found_client, &project, &wanted).await? {
+            crate::remote::branch::Found::MergeRequest { branch, token } => {
+                branch_notes = format!("branch {branch}: {token}\n");
+                remote.push(token);
+            }
+            crate::remote::branch::Found::Pipeline { text, .. } => branch_notes = text,
+        }
+    }
     for target in &args.target {
         let token = match route(target, &nodes) {
             Route::Local(target) => {
@@ -101,7 +133,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         true => Vec::new(),
         false => by_checkout(args.repo, args.db.clone(), local),
     };
-    let printed = !groups.is_empty();
+    let mut printed = !groups.is_empty();
     for (index, (repo, targets)) in groups.into_iter().enumerate() {
         if index > 0 {
             println!();
@@ -113,6 +145,13 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             println!("repo: {}", repo.display());
         }
         print!("{}", run_local(repo, args.db.clone(), &targets)?);
+    }
+    if !branch_notes.is_empty() {
+        if printed {
+            println!();
+        }
+        print!("{branch_notes}");
+        printed = false;
     }
     let Some(pending) = pending else {
         return Ok(());
