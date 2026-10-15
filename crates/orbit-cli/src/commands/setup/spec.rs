@@ -353,13 +353,14 @@ mod tests {
                     rendered.contains("MergeRequest[42]") == remote,
                     "{launcher}"
                 );
-                assert!(rendered.split_whitespace().count() <= 100, "{launcher}");
+                let budget = if remote { 110 } else { 90 };
+                assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
         let local = render_instructions(DIRECT_LAUNCHER, false);
         assert!(local.contains("or `--kind`.\n"), "{local}");
         assert!(
-            local.contains("in one call: `orbit context a.rs:10-40 b.rs:88-120`."),
+            local.contains("in one call, plus independent searches: `orbit context a.rs:10-40; orbit grep 'x'`."),
             "{local}"
         );
         assert!(search_nudge_text().contains("MANDATORY"));

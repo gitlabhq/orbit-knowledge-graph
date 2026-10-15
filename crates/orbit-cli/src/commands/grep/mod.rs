@@ -155,7 +155,8 @@ fn indexed_checkouts(db: Option<PathBuf>) -> Vec<(PathBuf, String, String)> {
     if db.is_some() {
         return Vec::new();
     }
-    let Ok(manifest) = crate::workspace::Workspace::open_default().map(|w| w.manifest_path()) else {
+    let Ok(manifest) = crate::workspace::Workspace::open_default().map(|w| w.manifest_path())
+    else {
         return Vec::new();
     };
     if !manifest.exists() {

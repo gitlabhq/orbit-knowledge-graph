@@ -403,7 +403,7 @@ fn run_orbit_with_data(
         .expect("run orbit binary")
 }
 
-const GREP_RESPONSE: &str = r#"{"version":"1.0.0","target":{"type":"project","id":1,"full_path":"my-group/my-project"},"scopes":[{"name":"merge_requests","search_type":"basic","results":[{"entity_type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"summary":"Add runner"}]}],"unavailable_scopes":[],"result_count":1,"truncated":false}"#;
+const GREP_RESPONSE: &str = r#"{"version":"1.0.0","target":{"type":"project","id":1,"full_path":"my-group/my-project"},"scopes":[{"name":"merge_requests","status":"ok","backend":"basic","result_count":1}],"results":[{"scope":"merge_requests","type":"MergeRequest","id":42,"token":"MergeRequest[42]","reference":{"id":42},"text":"Add runner"}],"result_count":1,"truncated":false}"#;
 
 #[test]
 fn grep_for_a_hosted_kind_searches_the_origin_project() {
@@ -427,11 +427,13 @@ fn grep_for_a_hosted_kind_searches_the_origin_project() {
     );
     assert_eq!(
         request.request_line,
-        "GET /api/v4/orbit/grep?keywords=runner&full_path=my-group%2Fmy-project&limit=10&per_scope=3&scopes=merge_requests HTTP/1.1"
+        "GET /api/v4/orbit/grep?search=runner&full_path=my-group%2Fmy-project&limit=5&per_scope=5&scopes=merge_requests HTTP/1.1"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.starts_with("gitlab \"runner\" @ localhost/my-group/my-project: 1 results\n  MergeRequest[42]  Add runner\n"),
+        stdout.starts_with(
+            "GitLab \"runner\" in localhost/my-group/my-project:\nMergeRequest[42]  Add runner\n"
+        ),
         "{stdout}"
     );
 }
@@ -456,7 +458,7 @@ fn grep_of_a_group_target_searches_its_projects() {
     );
     assert_eq!(
         request.request_line,
-        "GET /api/v4/orbit/grep?keywords=runner&namespace_id=9&limit=10&per_scope=3&scopes=work_items%2Cmerge_requests%2Ccommits%2Cnotes%2Cmilestones%2Cprojects HTTP/1.1"
+        "GET /api/v4/orbit/grep?search=runner&namespace_id=9&limit=35&per_scope=5&scopes=work_items%2Cmerge_requests%2Cblobs%2Ccommits%2Cnotes%2Cmilestones%2Cprojects HTTP/1.1"
     );
 }
 
@@ -586,7 +588,7 @@ fn grep_with_repo_resolves_credentials_for_that_checkout() {
     assert!(
         request
             .request_line
-            .starts_with("GET /api/v4/orbit/grep?keywords=runner&full_path=my-group%2Fmy-project"),
+            .starts_with("GET /api/v4/orbit/grep?search=runner&full_path=my-group%2Fmy-project"),
         "{}",
         request.request_line
     );

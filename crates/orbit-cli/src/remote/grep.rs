@@ -24,8 +24,8 @@ const PROJECT_SCOPES: &[&str] = &[
     "notes",
     "milestones",
 ];
-const LIMIT: usize = 10;
-const PER_SCOPE: usize = 3;
+const PER_SCOPE: usize = 5;
+const MAX_LIMIT: usize = 50;
 const SHA_CHARS: usize = 12;
 const DEFAULT_BACKOFF: Duration = Duration::from_secs(60);
 const BACKOFF_FILE: &str = "gitlab-grep-retry-at";
@@ -60,6 +60,9 @@ pub(crate) enum Target {
 impl Target {
     pub(crate) fn default_scopes(&self) -> Vec<&'static str> {
         let mut scopes = PROJECT_SCOPES.to_vec();
+        if !matches!(self, Target::Origin(_) | Target::Project(_)) {
+            scopes.insert(2, "blobs");
+        }
         if matches!(self, Target::Namespace(_) | Target::GroupId(_)) {
             scopes.push("projects");
         }
@@ -100,9 +103,9 @@ struct Response {
     #[serde(default)]
     target: Option<ResponseTarget>,
     #[serde(default)]
-    scopes: Vec<ScopeResults>,
+    scopes: Vec<ScopeStatus>,
     #[serde(default)]
-    unavailable_scopes: Vec<Unavailable>,
+    results: Vec<Entry>,
     #[serde(default)]
     truncated: bool,
 }
@@ -113,26 +116,41 @@ struct ResponseTarget {
 }
 
 #[derive(Deserialize)]
-struct ScopeResults {
+struct ScopeStatus {
     name: String,
     #[serde(default)]
-    results: Vec<Entry>,
+    status: String,
+    #[serde(default)]
+    reason: Option<Reason>,
+}
+
+#[derive(Deserialize)]
+struct Reason {
+    code: String,
 }
 
 #[derive(Deserialize)]
 struct Entry {
+    #[serde(default)]
+    scope: String,
+    #[serde(rename = "type")]
     entity_type: String,
     token: Option<String>,
     #[serde(default)]
     reference: serde_json::Value,
     #[serde(default)]
-    summary: String,
+    text: String,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    matches: Vec<Match>,
 }
 
 #[derive(Deserialize)]
-struct Unavailable {
-    name: String,
-    reason: String,
+struct Match {
+    start_line: u64,
+    #[serde(default)]
+    text: String,
 }
 
 pub(crate) async fn search(request: Request, query: String) -> Outcome {
@@ -183,10 +201,11 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .iter()
         .map(|keywords| {
             let client = client.clone();
+            let limit = (PER_SCOPE * request.scopes.len()).clamp(1, MAX_LIMIT);
             let params = vec![
-                ("keywords", keywords.clone()),
+                ("search", keywords.clone()),
                 scope.clone(),
-                ("limit", LIMIT.to_string()),
+                ("limit", limit.to_string()),
                 ("per_scope", PER_SCOPE.to_string()),
                 ("scopes", request.scopes.join(",")),
             ];
@@ -217,7 +236,12 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .find_map(|response| response.target.as_ref())
         .map(|target| target.full_path.clone())
         .unwrap_or(scope.1);
-    render(&format!("{api_host}/{shown}"), &query, &responses)
+    render(
+        &format!("{api_host}/{shown}"),
+        &query,
+        &request.keywords,
+        &responses,
+    )
 }
 
 fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
@@ -260,48 +284,98 @@ fn record_backoff(path: &Path, wait: Duration) {
     let _ = std::fs::write(path, (now() + wait).as_secs().to_string());
 }
 
-fn render(project: &str, query: &str, responses: &[Response]) -> Outcome {
+fn render(project: &str, query: &str, keywords: &[String], responses: &[Response]) -> Outcome {
+    let terms: Vec<String> = keywords
+        .iter()
+        .flat_map(|keyword| keyword.split_whitespace())
+        .map(str::to_lowercase)
+        .collect();
     let mut seen = std::collections::HashSet::new();
     let mut rows: Vec<(usize, String)> = Vec::new();
-    for scope in responses.iter().flat_map(|response| &response.scopes) {
-        for entry in &scope.results {
-            let label = label(entry);
-            if seen.insert(label.clone()) {
-                let row = match entry.summary.is_empty() {
-                    true => label,
-                    false => format!("{label}  {}", entry.summary),
-                };
-                rows.push((scope_order(&scope.name), row));
+    let mut files: Vec<(String, std::collections::BTreeMap<u64, String>)> = Vec::new();
+    for entry in responses.iter().flat_map(|response| &response.results) {
+        if entry.scope == "blobs" {
+            let heading = blob_heading(entry);
+            let index = match files.iter().position(|(name, _)| *name == heading) {
+                Some(index) => index,
+                None => {
+                    files.push((heading, Default::default()));
+                    files.len() - 1
+                }
+            };
+            for found in &entry.matches {
+                for (offset, line) in found.text.lines().enumerate() {
+                    files[index]
+                        .1
+                        .entry(found.start_line + offset as u64)
+                        .or_insert_with(|| line.to_string());
+                }
             }
+            continue;
+        }
+        let label = label(entry);
+        if seen.insert(label.clone()) {
+            let mut row = label;
+            if let Some(state) = &entry.state {
+                let _ = write!(row, " {state}");
+            }
+            if let Some(parent) = entry.reference.get("noteable").and_then(|v| v.as_str()) {
+                let _ = write!(row, " on {parent}");
+            }
+            if !entry.text.is_empty() {
+                let _ = write!(row, "  {}", entry.text);
+            }
+            rows.push((scope_order(&entry.scope), row));
         }
     }
-    if rows.is_empty() {
+    if rows.is_empty() && files.is_empty() {
         return Outcome::Empty;
     }
     rows.sort_by_key(|(order, _)| *order);
+    let statuses = responses.iter().flat_map(|response| &response.scopes);
     let truncated = responses.iter().any(|response| response.truncated);
     let mut failed: Vec<String> = Vec::new();
-    for unavailable in responses.iter().flat_map(|r| &r.unavailable_scopes) {
-        let entry = format!("{} ({})", unavailable.name, unavailable.reason);
-        if unavailable.reason != "not_available_for_search_type" && !failed.contains(&entry) {
+    for scope in statuses {
+        let code = scope
+            .reason
+            .as_ref()
+            .map_or("", |reason| reason.code.as_str());
+        let entry = format!("{} ({code})", scope.name);
+        let quiet = matches!(scope.status.as_str(), "ok" | "skipped" | "")
+            || code == "not_available_for_search_type";
+        if !quiet && !failed.contains(&entry) {
             failed.push(entry);
         }
     }
     let mut out = format!(
-        "gitlab {query:?} @ {project}: {} results{}\n",
-        rows.len(),
+        "GitLab {query:?} in {project}{}:\n",
         if truncated { ", truncated" } else { "" }
     );
     for (_, row) in &rows {
-        let _ = writeln!(out, "  {row}");
+        let _ = writeln!(out, "{row}");
+    }
+    for (heading, lines) in &files {
+        let _ = writeln!(out, "{heading}");
+        let mut last = None;
+        for (number, line) in lines {
+            if last.is_some_and(|last| number - last > 1) {
+                let _ = writeln!(out, "--");
+            }
+            let lower = line.to_lowercase();
+            let mark = match terms.iter().any(|term| lower.contains(term.as_str())) {
+                true => ':',
+                false => '-',
+            };
+            let _ = writeln!(out, "{number}{mark}{line}");
+            last = Some(*number);
+        }
     }
     if !failed.is_empty() {
-        let _ = writeln!(out, "  unavailable: {}", failed.join(", "));
+        let _ = writeln!(out, "unavailable: {}", failed.join(", "));
     }
     let token = responses
         .iter()
-        .flat_map(|response| &response.scopes)
-        .flat_map(|scope| &scope.results)
+        .flat_map(|response| &response.results)
         .find_map(|entry| entry.token.as_deref());
     if let Some(token) = token {
         let _ = writeln!(
@@ -311,6 +385,24 @@ fn render(project: &str, query: &str, responses: &[Response]) -> Outcome {
         );
     }
     Outcome::Found(out)
+}
+
+fn blob_heading(entry: &Entry) -> String {
+    let reference = &entry.reference;
+    let path = reference
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&entry.text);
+    match reference
+        .get("project_path")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(project) => format!("{project}/{path}"),
+        None => match reference.get("project_id") {
+            Some(id) => format!("Project[{id}] {path}"),
+            None => path.to_string(),
+        },
+    }
 }
 
 fn label(entry: &Entry) -> String {
@@ -342,30 +434,45 @@ mod tests {
     #[test]
     fn results_merge_across_keywords_in_scope_order() {
         let first = response(
-            r#"{"scopes":[{"name":"merge_requests","results":[
-                {"entity_type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"summary":"Add scoped search"}]}],
-               "unavailable_scopes":[{"name":"notes","reason":"timeout"},{"name":"users","reason":"not_available_for_search_type"}],
+            r#"{"scopes":[{"name":"merge_requests","status":"ok"},{"name":"notes","status":"error","reason":{"code":"timeout"}},
+                {"name":"users","status":"unavailable","reason":{"code":"not_available_for_search_type"}}],
+               "results":[{"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"state":"merged","text":"Add scoped search"}],
                "truncated":false}"#,
         );
         let second = response(
-            r#"{"scopes":[
-                {"name":"work_items","results":[{"entity_type":"WorkItem","token":"WorkItem[7]","reference":{"id":7},"summary":"Grep issue"}]},
-                {"name":"merge_requests","results":[{"entity_type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"summary":"Add scoped search"}]},
-                {"name":"commits","results":[{"entity_type":"Commit","token":null,"reference":{"project_id":1,"sha":"0123456789abcdef0123"},"summary":"Fix grep"}]}],
-               "unavailable_scopes":[],"truncated":true}"#,
+            r#"{"scopes":[],"results":[
+                {"scope":"commits","type":"Commit","token":null,"reference":{"project_id":1,"sha":"0123456789abcdef0123"},"text":"Fix grep"},
+                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"state":"merged","text":"Add scoped search"},
+                {"scope":"notes","type":"Note","token":"Note[9]","reference":{"id":9,"noteable":"WorkItem[7]"},"text":"grep should search notes"},
+                {"scope":"work_items","type":"WorkItem","token":"WorkItem[7]","reference":{"id":7},"state":"opened","text":"Grep issue"},
+                {"scope":"blobs","type":"File","token":null,"reference":{"project_id":3,"project_path":"g/lib","path":"a.go"},"text":"a.go",
+                 "matches":[{"start_line":10,"end_line":11,"text":"// helper\nfunc Grep() {"}]},
+                {"scope":"blobs","type":"File","token":null,"reference":{"project_id":3,"project_path":"g/lib","path":"a.go"},"text":"a.go",
+                 "matches":[{"start_line":11,"end_line":11,"text":"func Grep() {"},{"start_line":20,"end_line":20,"text":"x := grep()"}]}],
+               "truncated":true}"#,
         );
-        let Outcome::Found(text) =
-            render("gitlab.com/group/project", "grep|search", &[first, second])
-        else {
+        let keywords = ["grep".to_string(), "search".to_string()];
+        let Outcome::Found(text) = render(
+            "gitlab.com/group/project",
+            "grep|search",
+            &keywords,
+            &[first, second],
+        ) else {
             panic!("expected results");
         };
         assert_eq!(
             text,
             format!(
-                "gitlab \"grep|search\" @ gitlab.com/group/project: 3 results, truncated\n  \
-                 WorkItem[7]  Grep issue\n  \
-                 MergeRequest[42]  Add scoped search\n  \
-                 Commit 0123456789ab  Fix grep\n  \
+                "GitLab \"grep|search\" in gitlab.com/group/project, truncated:\n\
+                 WorkItem[7] opened  Grep issue\n\
+                 MergeRequest[42] merged  Add scoped search\n\
+                 Commit 0123456789ab  Fix grep\n\
+                 Note[9] on WorkItem[7]  grep should search notes\n\
+                 g/lib/a.go\n\
+                 10-// helper\n\
+                 11:func Grep() {{\n\
+                 --\n\
+                 20:x := grep()\n\
                  unavailable: notes (timeout)\n\
                  next: {} context MergeRequest[42]\n",
                 crate::commands::setup::spec::launcher()
@@ -375,8 +482,8 @@ mod tests {
 
     #[test]
     fn no_results_is_empty() {
-        let empty = response(r#"{"scopes":[{"name":"work_items","results":[]}]}"#);
-        assert_eq!(render("h/p", "x", &[empty]), Outcome::Empty);
+        let empty = response(r#"{"scopes":[{"name":"work_items","status":"ok"}],"results":[]}"#);
+        assert_eq!(render("h/p", "x", &[], &[empty]), Outcome::Empty);
     }
 
     #[test]
@@ -403,6 +510,16 @@ mod tests {
             !Target::Origin(".".into())
                 .default_scopes()
                 .contains(&"users")
+        );
+        assert!(
+            !Target::Origin(".".into())
+                .default_scopes()
+                .contains(&"blobs")
+        );
+        assert!(
+            Target::Namespace("g/p".into())
+                .default_scopes()
+                .contains(&"blobs")
         );
     }
 
