@@ -106,7 +106,7 @@ struct Fold<'t> {
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
-    unbound_calls: FxHashSet<u32>,
+    named_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, FxHashMap<u32, u32>)>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
@@ -593,13 +593,13 @@ impl<'t> Fold<'t> {
                 self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            let unbound = if c.has_tag(self.tags.implicit_self) {
+            let named = if c.has_tag(self.tags.implicit_self) {
                 self.resolve_implicit(sym, from)
             } else {
                 self.resolve_name(sym, from, Wildcards::All)
             };
-            if unbound {
-                self.unbound_calls.insert(c.index());
+            if named {
+                self.named_calls.insert(c.index());
             }
         }
         for edge in &mut self.edges[first..] {
@@ -1098,11 +1098,12 @@ impl<'t> Fold<'t> {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
-                bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
+                let named = bound.iter().all(is_name);
+                bound.retain(is_name);
                 for r in &bound {
                     self.emit(r, from);
                 }
-                return false;
+                return named;
             }
         }
         let members = self
@@ -1118,8 +1119,8 @@ impl<'t> Fold<'t> {
 
     fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) -> bool {
         let mut targets = self.lookup(sym);
-        let unbound = targets.is_empty();
-        if unbound {
+        let named = targets.iter().all(is_name);
+        if targets.is_empty() {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
                 import.is_some_and(|i| i.has_tag(self.tags.callable))
@@ -1131,7 +1132,7 @@ impl<'t> Fold<'t> {
             targets = wild.map(|&n| Value::ImportRef(n)).collect();
         }
         self.emit_targets(&targets, from);
-        unbound
+        named
     }
 
     fn emit_targets(&mut self, targets: &[Value], from: u32) {
@@ -1397,7 +1398,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
-        unbound_calls: FxHashSet::default(),
+        named_calls: FxHashSet::default(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, FxHashMap::default())],
         keys: RefCell::default(),
@@ -1454,7 +1455,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
 
     for edge in &mut f.edges {
-        if edge.kind == EdgeKind::TypeFlow && f.unbound_calls.contains(&edge.to_node) {
+        if edge.kind == EdgeKind::TypeFlow && f.named_calls.contains(&edge.to_node) {
             edge.call_resolution = crate::tree::CallResolution::Callable;
         }
         if edge.kind == EdgeKind::Imports
@@ -1480,6 +1481,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         }
     }
     Ok((f.edges, f.limited))
+}
+
+fn is_name(value: &Value) -> bool {
+    matches!(value, Value::LocalDef(_) | Value::ImportRef(_))
 }
 
 fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
