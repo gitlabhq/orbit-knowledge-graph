@@ -983,20 +983,19 @@ mod tests {
         let skills = dir.path().join(".agents/skills");
         install_with_mcp(&["codex"], dir.path());
         let manifest = skills.join("orbit/SKILL.md");
-        let other_release = std::fs::read_to_string(&manifest)
-            .unwrap()
-            .replace("version: 0.1.0", "version: 9.9.9");
-        assert!(other_release.contains("9.9.9"));
+        let current = std::fs::read_to_string(&manifest).unwrap();
+        let version_line = current
+            .lines()
+            .find(|line| line.starts_with("version:"))
+            .unwrap();
+        let other_release = current.replace(version_line, "version: 9.9.9");
+        assert_ne!(other_release, current);
         std::fs::write(&manifest, other_release).unwrap();
 
         install_with_mcp(&["codex"], dir.path());
 
         assert!(!skills.join("orbit.orbit-backup").exists());
-        assert!(
-            std::fs::read_to_string(&manifest)
-                .unwrap()
-                .contains("version: 0.1.0")
-        );
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), current);
 
         std::fs::write(&manifest, "---\nname: orbit\n---\nmine\n").unwrap();
         install_with_mcp(&["codex"], dir.path());
