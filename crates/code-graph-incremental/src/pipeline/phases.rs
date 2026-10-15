@@ -623,6 +623,7 @@ impl Phase<Displayed> for Export<'_> {
             &self.envelope,
             true,
             &|_| true,
+            &context.run,
         )?;
         Ok(Exported { state, tables })
     }
@@ -722,9 +723,29 @@ mod tests {
         context.run = context.run.with_cancellation(Arc::new(move || {
             counted.load(Ordering::Relaxed) > 0 && counted.fetch_add(1, Ordering::Relaxed) >= after
         }));
+        let ontology = Ontology::load_embedded().unwrap();
+        let envelope = Envelope::new([
+            ("project_id", export::Scalar::Int(1)),
+            ("branch", export::Scalar::Str("main")),
+            ("commit_sha", export::Scalar::Str("abc")),
+        ]);
         templates::index(context)
             .and_then(|graph| graph.then(Display))
+            .and_then(|graph| {
+                graph.then(Export {
+                    ontology: &ontology,
+                    envelope,
+                })
+            })
             .map(|_| ())
+    }
+
+    #[test]
+    fn export_checks_the_run_budget_inside_the_phase() {
+        let files = [("a.js".to_owned(), "function a() {}\n".to_owned())];
+        let lang = crate::treesitter::SupportLang::JavaScript;
+        let exported = cancelled_inside("export", lang, &files, 3);
+        assert!(matches!(exported, Err(Error::Killed(killed)) if killed.cancelled));
     }
 
     #[test]
