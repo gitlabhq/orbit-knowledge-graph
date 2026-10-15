@@ -5,7 +5,7 @@ fixtures:
     content: |2-
             union {
       	struct {
-      	  WORD Flag_Bit : 1;
+      	  Bits Flag_Bit : 1;
       #if !defined(OPT_A) && !defined(OPT_B) && defined(OPT_C)
           void *_call _peek(void);
       #ifdef __arch__
