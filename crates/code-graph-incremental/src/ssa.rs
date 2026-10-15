@@ -216,7 +216,9 @@ impl SsaEngine {
                     let block = *block;
                     frames.pop();
                     let value = ret.take().expect("a read returns a value");
-                    self.set(variable, block, value.clone());
+                    if value != Value::Marker {
+                        self.set(variable, block, value.clone());
+                    }
                     ret = Some(value);
                 }
                 Frame::Phi(block) => {
@@ -725,10 +727,12 @@ mod tests {
                 self.oracle_marker(variable, block)
             };
 
-            self.current_def
-                .entry(variable)
-                .or_default()
-                .insert(block, val.clone());
+            if val != Value::Marker {
+                self.current_def
+                    .entry(variable)
+                    .or_default()
+                    .insert(block, val.clone());
+            }
             val
         }
 
@@ -1034,6 +1038,23 @@ mod tests {
         }
         ssa.write_variable(1, elsewhere, Value::LocalDef(0));
         assert_eq!(ssa.read_variable(1, a), vec![Value::Opaque]);
+    }
+
+    #[test]
+    fn a_read_after_a_loop_leaves_no_marker_in_the_body() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable(1, entry, Value::LocalDef(0));
+        let (header, body) = ssa.begin_loop(entry);
+        let exit = ssa.finish_loop(header, body);
+        assert_eq!(ssa.read_variable(1, exit), vec![Value::LocalDef(0)]);
+        assert_eq!(ssa.read_variable(1, body), vec![Value::LocalDef(0)]);
+        assert!(
+            ssa.phis
+                .iter()
+                .all(|phi| !phi.operands.contains(&Value::Marker))
+        );
     }
 
     fn nested_loops(levels: usize) -> usize {
