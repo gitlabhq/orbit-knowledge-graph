@@ -52,7 +52,7 @@ async fn ready_at_every_level_when_everything_completed(ctx: &TestContext) {
     let status = respond(ctx, &["1/112/"]).await.remove(0);
 
     assert_eq!(phase_of(status.phase), IndexingPhase::Ready);
-    assert_eq!(status.domains.len(), 8);
+    assert_eq!(status.domains.len(), 9);
     assert!(
         status
             .domains

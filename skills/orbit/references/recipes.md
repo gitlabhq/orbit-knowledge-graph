@@ -351,14 +351,15 @@ Merge requests created by the `developer` flow:
 }
 ```
 
-Count Duo-created merge requests per flow type:
+Count Duo-created merge requests per flow type. Aggregations need a filter on
+at least one node, so bound the sessions by date:
 
 ```json orbit-query
 {
   "query": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "w", "entity": "DuoWorkflow"},
+      {"id": "w", "entity": "DuoWorkflow", "filters": {"created_at": {"gte": "2026-01-01"}}},
       {"id": "mr", "entity": "MergeRequest"}
     ],
     "relationships": [{"type": "CREATED_MR", "from": "w", "to": "mr"}],
