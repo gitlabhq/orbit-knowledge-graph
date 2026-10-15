@@ -76,16 +76,15 @@ edit mode. Enable it in `caproni.local.yaml` in your `gitlab-caproni` checkout:
 ```yaml
 repositories:
   knowledge-graph:
-    edit_reloaders: [gkg-webserver, gkg-indexer-sdlc, gkg-indexer-code, gkg-dispatcher]
-    # Your checkout, when it is not repos/knowledge-graph inside gitlab-caproni:
     directory: /path/to/your/knowledge-graph
+    edit_reloaders: [gkg-webserver, gkg-indexer-sdlc, gkg-indexer-code, gkg-dispatcher]
 ```
 
-Set `directory` when you already have a checkout. A clone under `repos/knowledge-graph`
-means a second `target/`, and a debug build of the workspace is 11 to 13 GB. List only the
-reloaders you want. Each one mirrors one Orbit deployment, because a mirrord session targets
-one pod and each deployment has its own rendered config. Then, from the `gitlab-caproni`
-checkout:
+`directory` comes first for a reason. Without it Caproni clones a second copy under
+`repos/knowledge-graph`, which means a second `target/`. A debug build of the workspace is
+11 to 13 GB. List only the reloaders you are editing. Each one mirrors one Orbit deployment,
+because a mirrord session targets one pod and each deployment has its own rendered config.
+Each one also adds a mirrord agent pod to the VM. Then, from the `gitlab-caproni` checkout:
 
 ```shell
 caproni up     # applies the repository change
@@ -277,6 +276,12 @@ caproni kubectl -n gitlab delete deploy gkg-webserver-caproni gkg-indexer-sdlc-c
 caproni kubectl -n gitlab scale deploy -l app.kubernetes.io/name=gkg --replicas=1
 pkill -f caproni-edit-mode.sh; pkill -f 'mirrord intproxy'; pkill -x gkg-server
 ```
+
+**One reloader fails and all four stop:**
+
+Caproni cancels the whole `caproni run` when any process exits early. Read the first error in
+the output; the others only report the cancellation. A schema error in `caproni-project.yaml`
+surfaces earlier still, from `caproni up`, since Caproni validates the file when it loads it.
 
 **Saves do not rebuild in edit mode:**
 
