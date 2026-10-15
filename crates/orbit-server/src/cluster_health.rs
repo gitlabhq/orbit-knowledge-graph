@@ -11,11 +11,11 @@ use tokio::time::timeout;
 use toon_format::{EncodeOptions, encode};
 use tracing::warn;
 
+use crate::health_client::InfrastructureHealthClient;
 use crate::proto::{
     ClusterStatus, ComponentHealth, GetClusterHealthResponse, ReplicaStatus, ResponseFormat,
     StructuredClusterHealth, get_cluster_health_response,
 };
-use crate::webserver::InfrastructureHealthClient;
 
 const GITLAB_HEALTH_CHECK_PROJECT_ID: i64 = 1;
 const GITLAB_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);

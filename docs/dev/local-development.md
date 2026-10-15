@@ -274,12 +274,12 @@ adjacent.
    mise run dev
    ```
 
-The GKG webserver is available at `http://localhost:8090` (HTTP) and
-`localhost:50054` (gRPC) by default. Override ports in `config/dev.local.yaml`.
+The GKG webserver is available at `localhost:50054` (gRPC) by default.
+Override ports in `config/dev.local.yaml`.
 
 This starts all three GKG runtime modes in the foreground:
 
-- 1 webserver (HTTP + gRPC)
+- 1 webserver (gRPC)
 - 1 indexer
 - 1 dispatcher (dispatch-indexing)
 
@@ -305,9 +305,7 @@ script merges it last into the generated `.dev/<mode>.yaml` that each process
 loads. Any `AppConfig` key is valid there:
 
 ```yaml
-bind_address: "127.0.0.1:8091"
 grpc_bind_address: "127.0.0.1:50055"
-indexer_health_bind_address: "127.0.0.1:4212"
 nats:
   consumer_name: "gkg-indexer-dev-2"
 ```
