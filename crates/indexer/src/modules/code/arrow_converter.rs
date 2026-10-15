@@ -8,7 +8,7 @@ use ontology::Ontology;
 use ontology::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN};
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -707,8 +707,6 @@ pub(super) fn route_graph(
     ];
 
     if data.edges.num_rows() > 0 {
-        use std::collections::HashMap;
-
         let routing = EdgeRouting::resolve(&data.edges, table_names)?;
 
         // Columns that only exist on gl_code_edge. Sub-batches going
@@ -717,36 +715,36 @@ pub(super) fn route_graph(
 
         // Every semantic edge kind usually routes to one table, and `take`
         // would copy the whole batch while the original is still live.
-        if let Some(table) = routing.single_table() {
-            let batch = if table.contains("code_edge") {
-                data.edges
-            } else {
-                drop_columns(&data.edges, code_only_cols)
-            };
-            result.push((table.to_string(), batch));
-            return Ok(result);
-        }
-
-        let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-        for (i, table) in routing.tables_by_row().enumerate() {
-            table_rows.entry(table).or_default().push(i as u32);
-        }
-
-        for (table, indices) in table_rows {
-            let idx_array = arrow::array::UInt32Array::from(indices);
-            let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
-                .map_err(|e| SinkError(format!("edge routing: {e}")))?;
-            if !table.contains("code_edge") {
-                batch = drop_columns(&batch, code_only_cols);
+        match routing {
+            EdgeRouting::Single(table) => {
+                let batch = if table.contains("code_edge") {
+                    data.edges
+                } else {
+                    drop_columns(&data.edges, code_only_cols)
+                };
+                result.push((table.to_string(), batch));
             }
-            result.push((table.to_string(), batch));
+            EdgeRouting::Split(table_rows) => {
+                for (table, indices) in table_rows {
+                    let idx_array = arrow::array::UInt32Array::from(indices);
+                    let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
+                        .map_err(|e| SinkError(format!("edge routing: {e}")))?;
+                    if !table.contains("code_edge") {
+                        batch = drop_columns(&batch, code_only_cols);
+                    }
+                    result.push((table.to_string(), batch));
+                }
+            }
         }
     }
 
     Ok(result)
 }
 
-struct EdgeRouting<'a>(Vec<&'a str>);
+enum EdgeRouting<'a> {
+    Single(&'a str),
+    Split(HashMap<&'a str, Vec<u32>>),
+}
 
 type DictionaryStrings<'a> = (&'a [i32], &'a arrow::array::StringArray);
 
@@ -789,7 +787,7 @@ impl<'a> EdgeRouting<'a> {
         };
         let mut routes: rustc_hash::FxHashMap<RouteKey, &'a str> = rustc_hash::FxHashMap::default();
         routes.reserve(relationship.1.len().min(edges.num_rows()));
-        let mut tables = Vec::with_capacity(edges.num_rows());
+        let mut routing = None;
         for row in 0..edges.num_rows() {
             let relationship_key = dictionary_key(relationship, row, "relationship_kind")?;
             let source_key = dictionary_key(source, row, "source_kind")?;
@@ -809,25 +807,26 @@ impl<'a> EdgeRouting<'a> {
                     table
                 }
             };
-            tables.push(table);
-        }
-        Ok(Self(tables))
-    }
-
-    /// `Some` when every row routes to the same table.
-    #[expect(clippy::expect_used, reason = "length is checked to be 1 just before")]
-    fn single_table(&self) -> Option<&'a str> {
-        let mut tables: Vec<&str> = Vec::new();
-        for &table in &self.0 {
-            if !tables.contains(&table) {
-                tables.push(table);
+            match &mut routing {
+                None => routing = Some(Self::Single(table)),
+                Some(Self::Single(first)) if *first != table => {
+                    let first = *first;
+                    let row = u32::try_from(row)
+                        .map_err(|_| SinkError("edge batch exceeds u32 row indexing".into()))?;
+                    let mut rows = HashMap::new();
+                    rows.insert(first, (0..row).collect());
+                    rows.insert(table, vec![row]);
+                    routing = Some(Self::Split(rows));
+                }
+                Some(Self::Split(rows)) => {
+                    let row = u32::try_from(row)
+                        .map_err(|_| SinkError("edge batch exceeds u32 row indexing".into()))?;
+                    rows.entry(table).or_default().push(row);
+                }
+                Some(Self::Single(_)) => {}
             }
         }
-        (tables.len() == 1).then(|| tables.pop().expect("length checked"))
-    }
-
-    fn tables_by_row(&self) -> Box<dyn Iterator<Item = &'a str> + '_> {
-        Box::new(self.0.iter().copied())
+        routing.ok_or_else(|| SinkError("cannot route an empty edge batch".into()))
     }
 }
 
