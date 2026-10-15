@@ -1,0 +1,22 @@
+name: "C: a file whose parse ends in an error root still gets a File row"
+
+fixtures:
+  - path: w.c
+    content: |2-
+            union {
+      	struct {
+      	  DWORD Default_Big : 1;
+      #if !defined(GENUTIL) && !defined(_GENIA64_) && defined(_IA64_)
+          void *_cdecl _rdteb(void);
+      #ifdef __ia64__
+      #define NtCurrentTeb() ((struct _TEB *)_rdteb())
+      #define GetCurrentFiber() (((PNT_TIB)NtCurrentTeb())->FiberData)
+
+tests:
+  - name: "the file has a File row that defines its field"
+    query: |
+      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      RETURN f.path AS path, d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: w.c, name: Default_Big } }

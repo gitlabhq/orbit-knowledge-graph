@@ -330,6 +330,10 @@ impl ItemPhase<Parsed> for Rewrite {
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
+        let root = tree.root;
+        if !tree.root().is(crate::canonical::Canonical::SourceFile) {
+            tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
+        }
         Ok(Rewritten(tree))
     }
 }
