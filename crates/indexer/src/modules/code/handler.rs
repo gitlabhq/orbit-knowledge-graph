@@ -348,8 +348,14 @@ impl CodeIndexingTaskHandler {
                     project_id,
                     branch = %branch,
                     lock_key = %key,
+                    attempt,
                     "code indexing skipped: lock held by another indexer"
                 );
+                if attempt > 1 {
+                    return Err(HandlerError::Backpressure(format!(
+                        "lock {key} still held on redelivery {attempt}; waiting for it to expire"
+                    )));
+                }
                 return Ok(None);
             }
         };
@@ -632,6 +638,29 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_redelivery_waits_for_a_held_lock_instead_of_acking() {
+        let ctx = TestContext::new();
+        ctx.set_lock(123, "main");
+
+        let mut envelope = TestContext::make_request(100, 123, "main");
+        envelope.attempt = 2;
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "a stale lock from a crashed run must not ack the redelivery, got {result:?}"
+        );
+        assert!(
+            ctx.mock_checkpoints
+                .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+                .await
+                .unwrap()
+                .is_none(),
+            "no attempt is started while the lock is held elsewhere"
+        );
     }
 
     #[tokio::test]
