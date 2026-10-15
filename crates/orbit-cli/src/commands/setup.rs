@@ -959,6 +959,63 @@ mod tests {
     }
 
     #[test]
+    fn uninstalling_an_edited_shared_skill_still_releases_the_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["claude", "codex"], dir.path());
+        let notes = skills.join("orbit/notes.md");
+        std::fs::write(&notes, "mine\n").unwrap();
+
+        uninstall_named(&["codex"], dir.path());
+        uninstall_named(&["claude"], dir.path());
+        assert!(notes.is_file());
+        assert!(!skills.join(".orbit-managed").exists());
+
+        install_with_mcp(&["codex"], dir.path());
+        assert!(skills.join("orbit.orbit-backup").is_dir());
+        uninstall_named(&["codex"], dir.path());
+        assert!(!skills.join("orbit").exists());
+    }
+
+    #[test]
+    fn a_wrapper_from_another_release_is_replaced_not_backed_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        let manifest = skills.join("orbit/SKILL.md");
+        let other_release = std::fs::read_to_string(&manifest)
+            .unwrap()
+            .replace("version: 0.1.0", "version: 9.9.9");
+        assert!(other_release.contains("9.9.9"));
+        std::fs::write(&manifest, other_release).unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!skills.join("orbit.orbit-backup").exists());
+        assert!(
+            std::fs::read_to_string(&manifest)
+                .unwrap()
+                .contains("version: 0.1.0")
+        );
+
+        std::fs::write(&manifest, "---\nname: orbit\n---\nmine\n").unwrap();
+        install_with_mcp(&["codex"], dir.path());
+        assert!(skills.join("orbit.orbit-backup").is_dir());
+    }
+
+    #[test]
+    fn a_finder_file_does_not_count_as_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::write(skills.join("orbit/.DS_Store"), "x").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!skills.join("orbit.orbit-backup").exists());
+    }
+
+    #[test]
     fn the_wrapper_stays_when_no_agent_needs_the_full_skill() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["claude", "codex"], dir.path());

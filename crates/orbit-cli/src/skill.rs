@@ -39,10 +39,7 @@ pub(crate) fn embedded_files() -> Vec<(String, Vec<u8>)> {
 }
 
 pub(crate) fn wrapper_tree() -> Result<BTreeMap<String, Vec<u8>>> {
-    wrapper_tree_for(crate::commands::setup::spec::launcher())
-}
-
-pub(crate) fn wrapper_tree_for(launcher: &str) -> Result<BTreeMap<String, Vec<u8>>> {
+    let launcher = crate::commands::setup::spec::launcher();
     let mut tree = BTreeMap::new();
     for path in WrapperAssets::iter() {
         let Some(asset) = WrapperAssets::get(&path) else {

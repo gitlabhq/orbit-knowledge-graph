@@ -55,8 +55,9 @@ fn tree_digest(tree: &BTreeMap<String, Vec<u8>>) -> String {
         .collect()
 }
 
-/// Whether `path` still holds what setup wrote (or the wrapper `glab skills update` writes in
-/// its place), as opposed to a directory created there after the record was left behind.
+/// Whether `path` still holds what setup wrote, as opposed to a directory created there after
+/// the record was left behind. A lone wrapper `SKILL.md` counts too: `glab skills update`
+/// writes one, possibly from another release, and it holds no user data.
 fn is_ours(path: &Path) -> bool {
     let Some(marker) = read_marker(path) else {
         return false;
@@ -64,12 +65,17 @@ fn is_ours(path: &Path) -> bool {
     let Some(current) = read_tree(path) else {
         return false;
     };
-    let digest = tree_digest(&current);
-    digest == marker.digest
-        || [spec::DIRECT_LAUNCHER, spec::GLAB_LAUNCHER]
-            .into_iter()
-            .filter_map(|launcher| crate::skill::wrapper_tree_for(launcher).ok())
-            .any(|wrapper| tree_digest(&wrapper) == digest)
+    tree_digest(&current) == marker.digest || is_wrapper_tree(&current)
+}
+
+fn is_wrapper_tree(tree: &BTreeMap<String, Vec<u8>>) -> bool {
+    let [(path, contents)] = tree.iter().collect::<Vec<_>>()[..] else {
+        return false;
+    };
+    path == MANIFEST
+        && String::from_utf8_lossy(contents)
+            .lines()
+            .any(|line| line.trim() == "source-path: skills/orbit-wrapper")
 }
 
 fn marker_path(skill_root: &Path) -> PathBuf {
@@ -416,6 +422,9 @@ fn read_tree(root: &Path) -> Option<BTreeMap<String, Vec<u8>>> {
     fn collect(root: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Option<()> {
         for entry in std::fs::read_dir(dir).ok()? {
             let path = entry.ok()?.path();
+            if path.file_name().is_some_and(|name| name == ".DS_Store") {
+                continue;
+            }
             if path.is_dir() {
                 collect(root, &path, files)?;
             } else {
@@ -497,14 +506,21 @@ fn release_skill_files(
         }
         return Ok(());
     };
+    marker.agents.retain(|owner| !agents.contains(owner));
     if exists && !is_ours(skill_root) {
+        // Leave the changed directory unrecorded once nobody uses it, so a later setup backs it up.
+        match marker.agents.is_empty() {
+            true => {
+                let _ = std::fs::remove_file(marker_path(skill_root));
+            }
+            false => write_marker(skill_root, &marker)?,
+        }
         report.note(
             label,
             "kept (changed since orbit setup wrote it; delete it by hand)",
         );
         return Ok(());
     }
-    marker.agents.retain(|owner| !agents.contains(owner));
     if !marker.agents.is_empty() {
         write_marker(skill_root, &marker)?;
         let remaining: Vec<&str> = marker.agents.iter().map(String::as_str).collect();

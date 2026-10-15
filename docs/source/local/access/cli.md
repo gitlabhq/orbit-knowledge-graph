@@ -247,7 +247,7 @@ orbit uninstall
 It lists the detected agents that have GitLab Orbit installed in that scope.
 Name agents to target only those. It removes what `orbit setup` wrote and leaves
 the rest of each file untouched. Setup records the skill directory it writes in a `.orbit-managed` file beside
-it, and uninstall removes only directories listed there that still hold what setup wrote. Agents share that
+it, and uninstall removes only directories listed there that still hold what setup wrote. A directory holding only a wrapper `SKILL.md`, such as the one `glab skills update` writes, counts as unchanged, and `.DS_Store` files are ignored. Agents share that
 directory, so uninstalling one agent keeps it, and reports which agents still
 use it, until the last of them is removed. It also removes the `orbit-cli`
 skill that earlier releases installed, but only the files that match this release when
