@@ -1,27 +1,27 @@
 name: "Java: a super call through a qualified supertype keeps its edge"
 
 fixtures:
-  - path: ImmutableCollection.java
+  - path: Shelf.java
     content: |
-      public abstract class ImmutableCollection<E> extends AbstractCollection<E> implements Serializable {
-        ImmutableCollection() {}
-        public abstract static class Builder<E> {
-          @CanIgnoreReturnValue
-          public Builder<E> addAll(Iterator<? extends E> elements) {
+      public abstract class Shelf<E> extends Base<E> implements Marker {
+        Shelf() {}
+        public abstract static class Stack<E> {
+          @Keep
+          public Stack<E> pushAll(Iterator<? extends E> items) {
           }
         }
-        abstract static class ArrayBasedBuilder<E> extends ImmutableCollection.Builder<E> {
-          public Builder<E> addAll(Iterable<? extends E> elements) {
-            super.addAll(elements);
+        abstract static class ArrayStack<E> extends Shelf.Stack<E> {
+          public Stack<E> pushAll(Iterable<? extends E> items) {
+            super.pushAll(items);
           }
         }
       }
 
 tests:
-  - name: "the override in ArrayBasedBuilder calls the addAll of Builder through super"
+  - name: "the override in ArrayStack calls the pushAll of Stack through super"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.name = 'addAll' AND callee.name = 'addAll'
+      WHERE caller.name = 'pushAll' AND callee.name = 'pushAll'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
