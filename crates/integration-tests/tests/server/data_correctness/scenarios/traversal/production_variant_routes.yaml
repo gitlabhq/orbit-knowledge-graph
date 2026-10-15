@@ -1,0 +1,174 @@
+config:
+  security: admin
+  redaction:
+    allow:
+      project: [1000]
+      user: [1]
+      ci_pipeline: [1101, 1102]
+      ci_stage: [1201]
+      ci_build: [1301]
+      vulnerability: [1401]
+      security_finding: [1501]
+      vulnerability_identifier: [1601]
+      security_scan: [1701]
+      deployment: [1801]
+      environment: [1901]
+      merge_request: [2001, 2501]
+      vulnerability_scanner: [2101]
+      vulnerability_occurrence: [2201]
+      package: [2301]
+      package_file: [2401]
+  extra_seed:
+    gl_project:
+      - { id: 1000, name: Route Project, full_path: route/project, visibility_level: public, traversal_path: "1/100/1000/" }
+    gl_user:
+      - { id: 1, username: router, name: Route User, state: active }
+    gl_pipeline:
+      - { id: 1101, project_id: 1000, status: success, source: push, traversal_path: "1/100/1000/" }
+      - { id: 1102, project_id: 1000, status: success, source: parent_pipeline, traversal_path: "1/100/1000/" }
+    gl_stage:
+      - { id: 1201, name: route-stage, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_job:
+      - { id: 1301, name: route-job, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_vulnerability:
+      - { id: 1401, title: Route Vulnerability, state: detected, severity: critical, report_type: sast, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_finding:
+      - { id: 1501, uuid: route-finding, name: Route Finding, severity: critical, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_vulnerability_identifier:
+      - { id: 1601, external_type: cve, external_id: CVE-ROUTE, name: Route Identifier, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_security_scan:
+      - { id: 1701, scan_type: sast, status: succeeded, project_id: 1000, build_id: 1301, traversal_path: "1/100/1000/" }
+    gl_deployment:
+      - { id: 1801, iid: 1, project_id: 1000, status: success, environment_id: 1901, traversal_path: "1/100/1000/" }
+    gl_environment:
+      - { id: 1901, project_id: 1000, name: route-env, slug: route-env, traversal_path: "1/100/1000/" }
+    gl_merge_request:
+      - { id: 2501, iid: 1, title: Route MR, state: opened, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_merge_request_diff:
+      - { id: 20001, merge_request_id: 2501, project_id: 1000, state: collected, traversal_path: "1/100/1000/" }
+    gl_merge_request_diff_file:
+      - { id: 20002, merge_request_id: 2501, merge_request_diff_id: 20001, project_id: 1000, old_path: old.rs, new_path: new.rs, traversal_path: "1/100/1000/" }
+    gl_vulnerability_scanner:
+      - { id: 2101, external_id: route-scanner, name: Route Scanner, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_vulnerability_occurrence:
+      - { id: 2201, uuid: route-occurrence, name: Route Occurrence, severity: critical, report_type: sast, detection_method: gitlab_security_report, project_id: 1000, scanner_id: 2101, primary_identifier_id: 1601, traversal_path: "1/100/1000/" }
+    gl_package:
+      - { id: 2301, name: route-package, version: "1.0", package_type: npm, status: default, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_package_file:
+      - { id: 2401, file_name: route.tgz, status: default, project_id: 1000, package_id: 2301, traversal_path: "1/100/1000/" }
+    gl_branch:
+      - { id: 2601, project_id: 1000, name: main, traversal_path: "1/100/1000/" }
+    gl_directory:
+      - { id: 2701, project_id: 1000, branch: main, path: src, name: src, traversal_path: "1/100/1000/" }
+      - { id: 2702, project_id: 1000, branch: main, path: src/nested, name: nested, traversal_path: "1/100/1000/" }
+    gl_file:
+      - { id: 2801, project_id: 1000, branch: main, path: root.rs, name: root.rs, traversal_path: "1/100/1000/" }
+      - { id: 2802, project_id: 1000, branch: main, path: src/nested.rs, name: nested.rs, traversal_path: "1/100/1000/" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1101, source_kind: Pipeline, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1201, source_kind: Stage, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1301, source_kind: Job, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1801, source_kind: Deployment, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1901, source_kind: Environment, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1101, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 1102, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 2301, source_kind: Package, relationship_kind: BUILT_BY, target_id: 1101, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 2401, source_kind: PackageFile, relationship_kind: BUILT_BY, target_id: 1101, target_kind: Pipeline }
+    gl_sec_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1401, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1501, source_kind: Finding, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1601, source_kind: VulnerabilityIdentifier, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1701, source_kind: SecurityScan, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 2101, source_kind: VulnerabilityScanner, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 2201, source_kind: VulnerabilityOccurrence, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: CONFIRMED_BY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: RESOLVED_BY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: DISMISSED_BY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 2501, source_kind: MergeRequest, relationship_kind: FIXES, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 2301, source_kind: Package, relationship_kind: HAS_VULNERABILITY, target_id: 1401, target_kind: Vulnerability }
+    gl_diff_edge:
+      - { traversal_path: "1/100/1000/", source_id: 20001, source_kind: MergeRequestDiff, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 20002, source_kind: MergeRequestDiffFile, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2601, source_kind: Branch, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 2601, target_kind: Branch }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2601, source_kind: Branch, relationship_kind: CONTAINS, target_id: 2701, target_kind: Directory }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2601, source_kind: Branch, relationship_kind: CONTAINS, target_id: 2801, target_kind: File }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2701, source_kind: Directory, relationship_kind: CONTAINS, target_id: 2702, target_kind: Directory }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2701, source_kind: Directory, relationship_kind: CONTAINS, target_id: 2802, target_kind: File }
+
+cases:
+  - name: IN_PROJECT returns every specialized route
+    description: Incoming IN_PROJECT reads CI, security, diff, and code edge tables without losing a variant
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"project","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]}}
+      gql: |
+        MATCH (project:Project {id: 1000})<-[:IN_PROJECT]-(neighbor) RETURN project, neighbor
+    expect:
+      node_count: 15
+      edges:
+        IN_PROJECT: [[1101, 1000], [1201, 1000], [1301, 1000], [1401, 1000], [1501, 1000], [1601, 1000], [1701, 1000], [1801, 1000], [1901, 1000], [20001, 1000], [20002, 1000], [2101, 1000], [2201, 1000], [2601, 1000]]
+      sql_contains: [gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge]
+
+  - name: Vulnerability neighbors return every security route
+    description: Vulnerability neighbors read every newly specialized security relationship from gl_sec_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"vulnerability","entity":"Vulnerability","node_ids":[1401]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","CONFIRMED_BY","RESOLVED_BY","DISMISSED_BY","FIXES","HAS_VULNERABILITY"]}}
+      gql: |
+        MATCH (vulnerability:Vulnerability {id: 1401})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY|FIXES|HAS_VULNERABILITY]-(neighbor) RETURN vulnerability, neighbor
+    expect:
+      node_count: 4
+      edges:
+        AUTHORED: [[1, 1401]]
+        CONFIRMED_BY: [[1, 1401]]
+        RESOLVED_BY: [[1, 1401]]
+        DISMISSED_BY: [[1, 1401]]
+        FIXES: [[2501, 1401]]
+        HAS_VULNERABILITY: [[2301, 1401]]
+      sql_contains: [gl_sec_edge]
+      sql_not_contains: [gl_edge]
+
+  - name: Pipeline neighbors return every CI route
+    description: Pipeline neighbors read CHILD_OF and both BUILT_BY variants from gl_ci_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101]}],"neighbors":{"direction":"both","rel_types":["CHILD_OF","BUILT_BY"]}}
+      gql: |
+        MATCH (pipeline:Pipeline {id: 1101})-[:CHILD_OF|BUILT_BY]-(neighbor) RETURN pipeline, neighbor
+    expect:
+      node_count: 4
+      edges:
+        CHILD_OF: [[1101, 1102]]
+        BUILT_BY: [[2301, 1101], [2401, 1101]]
+      sql_contains: [gl_ci_edge]
+      sql_not_contains: [gl_edge]
+
+  - name: Branch neighbors return bridge and root containment routes
+    description: Branch neighbors read Project, Directory, and File CONTAINS variants from gl_code_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"branch","entity":"Branch","node_ids":[2601]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}
+      gql: |
+        MATCH (branch:Branch {id: 2601})-[:CONTAINS]-(neighbor) RETURN branch, neighbor
+    expect:
+      node_count: 4
+      edges:
+        CONTAINS: [[1000, 2601], [2601, 2701], [2601, 2801]]
+      sql_contains: [gl_code_edge]
+      sql_not_contains: [gl_edge]
+
+  - name: Directory neighbors return nested containment routes
+    description: Directory neighbors read Branch, Directory, and File CONTAINS variants from gl_code_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"directory","entity":"Directory","node_ids":[2701]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}
+      gql: |
+        MATCH (directory:Directory {id: 2701})-[:CONTAINS]-(neighbor) RETURN directory, neighbor
+    expect:
+      node_count: 4
+      edges:
+        CONTAINS: [[2601, 2701], [2701, 2702], [2701, 2802]]
+      sql_contains: [gl_code_edge]
+      sql_not_contains: [gl_edge]
