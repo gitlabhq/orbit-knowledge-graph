@@ -1,0 +1,44 @@
+cases:
+  - name: Contains patterns need three characters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"contains":"ab"}}}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.username CONTAINS 'ab' RETURN u LIMIT 10
+    expect: { error: { contains: [search pattern must be at least 3] } }
+
+  - name: Starts-with patterns need three characters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"starts_with":"a"}}}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.username STARTS WITH 'a' RETURN u LIMIT 10
+    expect: { error: { contains: [search pattern must be at least 3] } }
+
+  - name: Ends-with patterns need three characters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"ends_with":""}}}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.username ENDS WITH '' RETURN u LIMIT 10
+    expect: { error: { contains: [search pattern must be at least 3] } }
+
+  - name: Contains is not allowed on email
+    security: admin
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":{"contains":"example"}}}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.email CONTAINS 'example' RETURN u LIMIT 10
+    expect: { error: { contains: [string operators] } }
+
+  - name: Starts-with is not allowed on email
+    security: admin
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":{"starts_with":"alice"}}}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.email STARTS WITH 'alice' RETURN u LIMIT 10
+    expect: { error: { contains: [string operators] } }
+
+  - name: Equality on email compiles for administrators
+    security: admin
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":"alice@example.com"}}],"limit":10}'
+      gql: "MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10"
+
+  - name: Equality on email rejects non-administrators
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"email":"alice@example.com"}}],"limit":10}'
+      gql: "MATCH (u:User {email: 'alice@example.com'}) RETURN u LIMIT 10"
+    expect: { error: { contains: [email, administrator] } }

@@ -1,0 +1,12 @@
+name: A single filter-only node narrows its own hop without a cascade definition
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"n","entity":"Note"},{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"name":"gitlab-org"}}],"relationships":[{"type":"IN_PROJECT","from":"n","to":"p"},{"type":"CONTAINS","from":"g","to":"p"}],"group_by":["p"],"aggregations":[{"count":"n","as":"note_count"}],"limit":10}'
+  gql: "MATCH (n:Note)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group {name: 'gitlab-org'}) RETURN p, count(n) AS note_count LIMIT 10"
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { exact_order: [_filter_g] }
+      expect:
+        - (Filter _orbit_edge_1.source_id IN _filter_g.id, _orbit_edge_1._deleted = false (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)))

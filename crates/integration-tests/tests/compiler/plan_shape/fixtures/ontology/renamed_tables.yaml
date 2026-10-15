@@ -1,0 +1,55 @@
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1],"filters":{"username":"alice"}},{"id":"project","entity":"Project","filters":{"name":"orbit"}}],"relationships":[{"type":"MEMBER_OF","from":"user","to":"project"}],"limit":1}'
+  gql: "MATCH (user:User {id: 1, username: 'alice'})-[:MEMBER_OF]->(project:Project {name: 'orbit'}) RETURN user, project LIMIT 1"
+
+physical: { clickhouse: { compiled: { reject: ["(Filter StartsWith(user.traversal_path, '1/'), ... (_))"] } } }
+
+cases:
+  - name: A renamed archive reads its own global table and keeps join scope
+    ontology: { rename_tables: { gl_user: gl_renamed_user } }
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Scan Table(gl_renamed_user) AS user)
+            - (Filter StartsWith(project.traversal_path, '1/'), ... (_))
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), ... (_))
+
+  - name: The embedded ontology reads the default global table
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Scan Table(gl_user) AS user)
+            - (Filter StartsWith(project.traversal_path, '1/'), ... (_))
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), ... (_))
+
+  - name: A prefixed renamed archive reads its prefixed global table
+    ontology: { rename_tables: { gl_user: gl_renamed_user }, schema_prefix: v1_ }
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Scan Table(v1_gl_renamed_user) AS user)
+            - (Filter StartsWith(project.traversal_path, '1/'), ... (_))
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), ... (_))
+
+  - name: A prefixed embedded ontology reads its prefixed global table
+    ontology: { schema_prefix: v2_ }
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Scan Table(v2_gl_user) AS user)
+            - (Filter StartsWith(project.traversal_path, '1/'), ... (_))
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), ... (_))
+
+  - name: A renamed archive compiled after other ontologies still reads its own table
+    ontology: { rename_tables: { gl_user: gl_renamed_user } }
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Scan Table(gl_renamed_user) AS user)
+            - (Filter StartsWith(project.traversal_path, '1/'), ... (_))
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), ... (_))

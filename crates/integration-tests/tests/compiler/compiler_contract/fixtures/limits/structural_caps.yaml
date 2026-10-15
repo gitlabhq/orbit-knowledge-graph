@@ -1,0 +1,161 @@
+cases:
+  - name: LIMIT 0 rejects in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":0}'
+      gql: "MATCH (u:User {id: 1}) RETURN u LIMIT 0"
+    expect: { error: { client_safe: true } }
+
+  - name: LIMIT above 1000 rejects in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":1001}'
+      gql: "MATCH (u:User {id: 1}) RETURN u LIMIT 1001"
+    expect: { error: { client_safe: true } }
+
+  - name: More than three hops reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,4]}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF*1..4]->(p:Project) RETURN u, p"
+    expect: { error: { client_safe: true } }
+
+  - name: Unknown group keys reject in both frontends
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"group_by":["ghost"],"aggregations":[{"count":"u"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN ghost, count(u)"
+    expect: { error: { client_safe: true } }
+
+  - name: Identifiers longer than 64 characters reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"{{for i in 0..65}}a{{end}}","entity":"User","node_ids":[1]}]}'
+      gql: "MATCH ({{for i in 0..65}}a{{end}}:User {id: 1}) RETURN {{for i in 0..65}}a{{end}}"
+    expect: { error: { client_safe: true } }
+
+  - name: Strings longer than 1024 characters reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"{{for i in 0..1025}}x{{end}}"}}]}'
+      gql: "MATCH (u:User {username: '{{for i in 0..1025}}x{{end}}'}) RETURN u"
+    expect: { error: { client_safe: true } }
+
+  - name: 64-character identifiers are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"{{for i in 0..64}}a{{end}}","entity":"User","node_ids":[1]}]}'
+      gql: "MATCH ({{for i in 0..64}}a{{end}}:User {id: 1}) RETURN {{for i in 0..64}}a{{end}}"
+
+  - name: Path depth 0 is rejected in both frontends
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":0,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..0]->(b:Project {id: 2}) RETURN p"
+    expect: { error: { reason: schema } }
+
+  - name: Path depth 1 is accepted in both frontends
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":1,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..1]->(b:Project {id: 2}) RETURN p"
+
+  - name: Path depth 3 is accepted in both frontends
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":3,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..3]->(b:Project {id: 2}) RETURN p"
+
+  - name: Path depth 4 is rejected in both frontends
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":4,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..4]->(b:Project {id: 2}) RETURN p"
+    expect: { error: { reason: schema } }
+
+  - name: Path depth 4294967295 is rejected in both frontends
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":4294967295,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Project {id: 1})-[:CONTAINS*1..4294967295]->(b:Project {id: 2}) RETURN p"
+    expect: { error: { reason: schema } }
+
+  - name: 1 outgoing neighbor relationship types are accepted
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED]->(n) RETURN n"
+
+  - name: 10 outgoing neighbor relationship types are accepted
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED]->(n) RETURN n"
+
+  - name: 11 outgoing neighbor relationship types are rejected
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED]->(n) RETURN n"
+    expect: { error: { reason: schema } }
+
+  - name: 1 incoming neighbor relationship types are accepted
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"incoming","rel_types":["AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})<-[:AUTHORED]-(n) RETURN n"
+
+  - name: 10 incoming neighbor relationship types are accepted
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"incoming","rel_types":["AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})<-[:AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED]-(n) RETURN n"
+
+  - name: 11 incoming neighbor relationship types are rejected
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"incoming","rel_types":["AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})<-[:AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED]-(n) RETURN n"
+    expect: { error: { reason: schema } }
+
+  - name: 1 both neighbor relationship types are accepted
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED]-(n) RETURN n"
+
+  - name: 10 both neighbor relationship types are accepted
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED]-(n) RETURN n"
+
+  - name: 11 both neighbor relationship types are rejected
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED","AUTHORED"]}}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED|AUTHORED]-(n) RETURN n"
+    expect: { error: { reason: schema } }
+
+  - name: 5 relationship chain nodes are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n0","entity":"Group","node_ids":[1]},{"id":"n1","entity":"Group"},{"id":"n2","entity":"Group"},{"id":"n3","entity":"Group"},{"id":"n4","entity":"Group"}],"relationships":[{"type":"CONTAINS","from":"n0","to":"n1"},{"type":"CONTAINS","from":"n1","to":"n2"},{"type":"CONTAINS","from":"n2","to":"n3"},{"type":"CONTAINS","from":"n3","to":"n4"}]}'
+      gql: "MATCH (n0:Group {id: 1})-[:CONTAINS]->(n1:Group)-[:CONTAINS]->(n2:Group)-[:CONTAINS]->(n3:Group)-[:CONTAINS]->(n4:Group) RETURN n0"
+
+  - name: 6 relationship chain nodes reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n0","entity":"Group","node_ids":[1]},{"id":"n1","entity":"Group"},{"id":"n2","entity":"Group"},{"id":"n3","entity":"Group"},{"id":"n4","entity":"Group"},{"id":"n5","entity":"Group"}],"relationships":[{"type":"CONTAINS","from":"n0","to":"n1"},{"type":"CONTAINS","from":"n1","to":"n2"},{"type":"CONTAINS","from":"n2","to":"n3"},{"type":"CONTAINS","from":"n3","to":"n4"},{"type":"CONTAINS","from":"n4","to":"n5"}]}'
+      gql: "MATCH (n0:Group {id: 1})-[:CONTAINS]->(n1:Group)-[:CONTAINS]->(n2:Group)-[:CONTAINS]->(n3:Group)-[:CONTAINS]->(n4:Group)-[:CONTAINS]->(n5:Group) RETURN n0"
+    expect: { error: { reason: schema } }
+
+  - name: 500 pinned IDs are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[{{for i in 1..=500 sep ","}}{i}{{end}}]}]}'
+      gql: MATCH (u:User) WHERE u.id IN [{{for i in 1..=500 sep ", "}}{i}{{end}}] RETURN u
+
+  - name: 501 pinned IDs reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[{{for i in 1..=501 sep ","}}{i}{{end}}]}]}'
+      gql: MATCH (u:User) WHERE u.id IN [{{for i in 1..=501 sep ", "}}{i}{{end}}] RETURN u
+    expect: { error: { reason: schema } }
+
+  - name: 10 repeated predicates are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":[{{for i in 0..10 sep ","}}{"contains":"abc{i}"}{{end}}]}}]}'
+      gql: MATCH (u:User) WHERE {{for i in 0..10 sep " AND "}}u.username CONTAINS 'abc{i}'{{end}} RETURN u
+
+  - name: 11 repeated predicates reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":[{{for i in 0..11 sep ","}}{"contains":"abc{i}"}{{end}}]}}]}'
+      gql: MATCH (u:User) WHERE {{for i in 0..11 sep " AND "}}u.username CONTAINS 'abc{i}'{{end}} RETURN u
+    expect: { error: { reason: schema } }
+
+  - name: 10 relationship alternatives are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":["MEMBER_OF","AUTHORED","CONTAINS","IN_PROJECT","REVIEWER","ASSIGNED","HAS_HEAD_PIPELINE","ON_BRANCH","DEFINES","CALLS"],"from":"a","to":"b"}]}'
+      gql: "MATCH (a:User {id: 1})-[:MEMBER_OF|AUTHORED|CONTAINS|IN_PROJECT|REVIEWER|ASSIGNED|HAS_HEAD_PIPELINE|ON_BRANCH|DEFINES|CALLS]->(b:Project) RETURN a, b"
+
+  - name: 11 relationship alternatives reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":["MEMBER_OF","AUTHORED","CONTAINS","IN_PROJECT","REVIEWER","ASSIGNED","HAS_HEAD_PIPELINE","ON_BRANCH","DEFINES","CALLS","EXTENDS"],"from":"a","to":"b"}]}'
+      gql: "MATCH (a:User {id: 1})-[:MEMBER_OF|AUTHORED|CONTAINS|IN_PROJECT|REVIEWER|ASSIGNED|HAS_HEAD_PIPELINE|ON_BRANCH|DEFINES|CALLS|EXTENDS]->(b:Project) RETURN a, b"
+    expect: { error: { reason: schema } }

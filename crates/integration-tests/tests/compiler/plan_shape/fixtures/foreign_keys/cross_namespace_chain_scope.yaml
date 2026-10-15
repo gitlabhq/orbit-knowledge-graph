@@ -1,0 +1,18 @@
+name: Cross-namespace FK chains elide to node joins while scoping only namespaced nodes
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"stanhu"}},{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job","filters":{"status":"failed"}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}],"limit":10}'
+  gql: "MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'}) RETURN u, mr, pipe, j LIMIT 10"
+
+physical:
+  clickhouse:
+    compiled:
+      expect:
+        - (Filter StartsWith(mr.traversal_path, '1/'), ... (_))
+        - (Filter StartsWith(pipe.traversal_path, '1/'), ... (_))
+        - (Filter StartsWith(j.traversal_path, '1/'), ... (_))
+        - (Scan Table(gl_user) AS u)
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)
+        - (Filter StartsWith(u.traversal_path, '1/'), ... (_))

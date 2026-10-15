@@ -67,5 +67,4 @@ labkit = { workspace = true, features = ["http", "tls"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio", "testing"] }
-sqlparser.workspace = true
 uuid = { workspace = true }

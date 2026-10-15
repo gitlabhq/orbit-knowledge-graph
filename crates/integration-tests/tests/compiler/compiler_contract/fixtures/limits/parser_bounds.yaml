@@ -1,0 +1,32 @@
+missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+
+cases:
+  - name: The nesting guard sees through escaped names
+    stage: parse
+    query:
+      gql: MATCH (u:User) WHERE u.`'` = 1 AND {{for i in 0..2000}}({{end}}u.id = 1{{for i in 0..2000}}){{end}} AND u.`'` = 2 RETURN u
+    expect: { error: { contains: [nesting is too deep] } }
+
+  - name: Nested predicates are bounded before recursive parsing
+    stage: parse
+    query: { gql: "MATCH (u:User) WHERE {{for i in 0..40}}({{end}}u.id = 1{{for i in 0..40}}){{end}} RETURN u" }
+    expect: { error: {} }
+
+  - name: Oversized literals are bounded before recursive parsing
+    stage: parse
+    query: { gql: "MATCH (u:User {username: '{{for i in 0..40000}}x{{end}}'}) RETURN u" }
+    expect: { error: {} }
+
+  - name: Invalid ID list members reject
+    query: { gql: "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u" }
+    expect: { error: {} }
+
+  - name: Node counts are capped while lowering with the source position
+    stage: parse
+    query: { gql: 'MATCH {{for i in 0..4000 sep ","}}(a{i}){{end}} RETURN a0' }
+    expect: { error: { reason: schema, message: "line 1, column 32: a query declares at most 5 nodes" } }
+
+  - name: Projected property counts are capped while lowering with the source position
+    stage: parse
+    query: { gql: 'MATCH (u:User) RETURN {{for i in 0..51 sep ", "}}u.c{i}{{end}}' }
+    expect: { error: { reason: schema, message: "line 1, column 363: a node projects at most 50 properties" } }

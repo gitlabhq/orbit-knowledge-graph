@@ -1,0 +1,21 @@
+query: { gql: "MATCH (n:Note {id: 1}) RETURN n.note LIMIT 1" }
+
+cases:
+  - name: Single-row pages keep long text excerpts
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["note"]}],"limit":1}'
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Project Concat(Substring(n.note, 1, 1048576), If(ByteLength(n.note) > ByteLength(Substring(n.note, 1, 1048576)), ' [truncated]', '')) AS n_note, ... (_))
+
+  - name: Wide pages shrink text excerpts
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["note"]}],"limit":1000}'
+      gql: "MATCH (n:Note {id: 1}) RETURN n.note LIMIT 1000"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Project Concat(Substring(n.note, 1, 2095), If(ByteLength(n.note) > ByteLength(Substring(n.note, 1, 2095)), ' [truncated]', '')) AS n_note, ... (_))

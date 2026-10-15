@@ -18,10 +18,12 @@ use serde::Deserialize;
 struct Scenario {
     name: String,
     ontology_overlay: Option<String>,
+    ontology: Option<crate::compiler_contract::OntologySetup>,
+    security: Option<crate::compiler_contract::Security>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
-    logical: Assertions,
+    logical: Option<Assertions>,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
 }
@@ -64,6 +66,7 @@ struct HydrationSetup {
 struct PhysicalAssertions {
     planned: Option<Assertions>,
     emitted: Option<Assertions>,
+    compiled: Option<Assertions>,
 }
 
 #[derive(Deserialize)]
@@ -226,9 +229,54 @@ impl Assertions {
     }
 }
 
+fn compiled_ast(
+    scenario: &Scenario,
+    language: &str,
+    raw: &str,
+    backend: &str,
+    ontology: &Arc<ontology::Ontology>,
+) -> compiler::Result<compiler::Node> {
+    use compiler::config::{self, CompilerCtx as _};
+    let security = crate::compiler_contract::security_context(&scenario.security);
+    let node = match backend {
+        "clickhouse" => {
+            let model = compiler::data_model::clickhouse(ontology.clone()).unwrap();
+            if language == "json" {
+                let mut ctx = config::ClickhouseJsonDslCtx::new(security, model);
+                ctx.set_raw(raw.to_string());
+                config::run_clickhouse_json_dsl(&mut ctx)?;
+                ctx.node().clone()
+            } else {
+                let mut ctx = config::ClickhouseGqlCtx::new(security, model);
+                ctx.set_raw(raw.to_string());
+                config::run_clickhouse_gql(&mut ctx)?;
+                ctx.node().clone()
+            }
+        }
+        _ => {
+            let mut local = ontology.as_ref().clone();
+            local.remove_data_model_optimizations();
+            let model = compiler::data_model::duckdb(Arc::new(local)).unwrap();
+            if language == "json" {
+                let mut ctx = config::DuckdbJsonDslCtx::new(model);
+                ctx.set_raw(raw.to_string());
+                config::run_duckdb_json_dsl(&mut ctx)?;
+                ctx.node().clone()
+            } else {
+                let mut ctx = config::DuckdbGqlCtx::new(model);
+                ctx.set_raw(raw.to_string());
+                config::run_duckdb_gql(&mut ctx)?;
+                ctx.node().clone()
+            }
+        }
+    };
+    Ok(node.expect("compiled pipeline produced an AST"))
+}
+
 fn check<M: OrbitQueryModel>(
     scenario: &Scenario,
     model: &M,
+    ontology: &Arc<ontology::Ontology>,
     backend: &str,
     path: &Path,
     build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
@@ -268,18 +316,47 @@ fn check<M: OrbitQueryModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        scenario
-            .logical
-            .check(&explain::logical(&input), &format!("{label}.logical"))
-            .unwrap_or_else(|error| panic!("{error}"));
+        let print = std::env::var("PLAN_SHAPE_PRINT")
+            .is_ok_and(|filter| !filter.is_empty() && label.contains(&filter));
+        if print {
+            println!("=== {label}\n--- logical\n{}", explain::logical(&input));
+        }
+        if let Some(logical) = &scenario.logical {
+            logical
+                .check(&explain::logical(&input), &format!("{label}.logical"))
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
         let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
         let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
+        if print {
+            println!("--- planned\n{planned}\n--- emitted\n{emitted}");
+            if scenario.hydration.is_none() {
+                match compiled_ast(scenario, language, raw, backend, ontology) {
+                    Ok(ast) => println!("--- compiled\n{}", explain::emitted(&ast)),
+                    Err(error) => println!("--- compiled error: {error}"),
+                }
+            }
+        }
         let assertions = &scenario.physical[backend];
         assert!(
-            assertions.planned.is_some() || assertions.emitted.is_some(),
+            assertions.planned.is_some()
+                || assertions.emitted.is_some()
+                || assertions.compiled.is_some(),
             "{label}: missing assertion targets"
         );
+        if let Some(compiled) = &assertions.compiled {
+            assert!(
+                scenario.hydration.is_none(),
+                "{label}: compiled assertions do not apply to hydration fixtures"
+            );
+            let ast = compiled_ast(scenario, language, raw, backend, ontology)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let actual = explain::emitted(&ast);
+            compiled
+                .check(&actual, &format!("{label}.physical.{backend}.compiled"))
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
         for (phase, assertions, actual) in [
             ("planned", &assertions.planned, planned),
             ("emitted", &assertions.emitted, emitted),
@@ -310,44 +387,86 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
+    let filter = std::env::var("PLAN_SHAPE_FILTER").unwrap_or_default();
     let mut cases = 0;
+    let mut failures = Vec::new();
     for (path, scenario) in paths.iter().flat_map(|path| {
         crate::scenario::read_cases::<Scenario>(path)
             .into_iter()
             .map(move |(_, scenario)| (path, scenario))
     }) {
-        cases += 1;
-        assert!(
-            !scenario.physical.is_empty() && !scenario.query.is_empty(),
-            "{}: missing query arms or backend assertions",
-            path.display()
-        );
-        scenario
-            .validate_frontends()
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let overlay = scenario.ontology_overlay.as_ref().map(|name| {
-            let ontology = Arc::new(crate::load_ontology_overlay(name));
-            (
-                ClickHouseDataModel::derive(ontology.clone()).unwrap(),
-                DuckDbDataModel::derive(ontology.clone()).unwrap(),
-            )
-        });
-        let (remote, local) = overlay
-            .as_ref()
-            .map_or((&remote, &local), |(remote, local)| (remote, local));
-        for backend in scenario.physical.keys() {
-            match backend.as_str() {
-                "clickhouse" => check(&scenario, remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, remote, options, &HashSet::new())
-                }),
-                "duckdb" => check(&scenario, local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, local, options, &HashSet::new())
-                }),
-                _ => panic!("unknown backend {backend}"),
-            }
+        if !filter.is_empty() && !format!("{}: {}", path.display(), scenario.name).contains(&filter)
+        {
+            continue;
         }
-        println!("PASS {}", scenario.name);
+        cases += 1;
+        let path = path.strip_prefix(directory).unwrap_or(path);
+        let run = || {
+            assert!(
+                !scenario.physical.is_empty() && !scenario.query.is_empty(),
+                "{}: missing query arms or backend assertions",
+                path.display()
+            );
+            scenario
+                .validate_frontends()
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            assert!(
+                scenario.ontology_overlay.is_none() || scenario.ontology.is_none(),
+                "{}: use ontology.overlay instead of ontology_overlay with ontology",
+                path.display()
+            );
+            let custom = match (&scenario.ontology_overlay, &scenario.ontology) {
+                (Some(name), None) => Some(Arc::new(crate::load_ontology_overlay(name))),
+                (None, Some(setup)) => {
+                    Some(crate::compiler_contract::load_ontology(setup, &ontology))
+                }
+                _ => None,
+            };
+            let overlay = custom.as_ref().map(|ontology| {
+                (
+                    ClickHouseDataModel::derive(ontology.clone()).unwrap(),
+                    DuckDbDataModel::derive(ontology.clone()).unwrap(),
+                )
+            });
+            let (remote, local) = overlay
+                .as_ref()
+                .map_or((&remote, &local), |(remote, local)| (remote, local));
+            let ontology = custom.as_ref().unwrap_or(&ontology);
+            for backend in scenario.physical.keys() {
+                match backend.as_str() {
+                    "clickhouse" => check(
+                        &scenario,
+                        remote,
+                        ontology,
+                        backend,
+                        path,
+                        |input, options| {
+                            plan::plan_clickhouse(input, remote, options, &HashSet::new())
+                        },
+                    ),
+                    "duckdb" => check(
+                        &scenario,
+                        local,
+                        ontology,
+                        backend,
+                        path,
+                        |input, options| plan::plan_duckdb(input, local, options, &HashSet::new()),
+                    ),
+                    _ => panic!("unknown backend {backend}"),
+                }
+            }
+        };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+            Ok(()) => println!("PASS {}", scenario.name),
+            Err(error) => failures.push(crate::compiler_contract::panic_message(error)),
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "{} of {cases} plan fixtures failed:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
     println!("{cases} plan fixtures passed");
 }
 

@@ -410,11 +410,14 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .collect(),
         ),
     };
-    let emitted = match ast {
+    (planned, emitted(ast))
+}
+
+pub fn emitted(ast: &Node) -> Tree {
+    match ast {
         Node::Query(value) => query(value),
         Node::Insert(_) => leaf(Operator::Insert, ""),
-    };
-    (planned, emitted)
+    }
 }
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
@@ -745,9 +748,34 @@ fn expression(value: &Expr) -> String {
             column,
         } => format!("{} IN {cte_name}.{column}", expression(expr)),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
-        Expr::Scalar(_) => "scalar(subquery)".into(),
+        Expr::Scalar(inner) => scalar(inner),
         Expr::Star => "*".into(),
     }
+}
+
+fn scalar(value: &Query) -> String {
+    let TableRef::Scan {
+        table,
+        alias,
+        final_,
+        ..
+    } = &value.from
+    else {
+        return "scalar(subquery)".into();
+    };
+    if !value.ctes.is_empty() || !value.union_all.is_empty() || !value.group_by.is_empty() {
+        return "scalar(subquery)".into();
+    }
+    let mut text = format!(
+        "scalar(SELECT {} FROM {table} AS {alias}{}",
+        projections(&value.select),
+        if *final_ { " FINAL" } else { "" }
+    );
+    if let Some(predicate) = &value.where_clause {
+        text.push_str(&format!(" WHERE {}", expression(predicate)));
+    }
+    text.push(')');
+    text
 }
 
 fn query_filter(predicate: &Expr, input: Tree) -> Tree {

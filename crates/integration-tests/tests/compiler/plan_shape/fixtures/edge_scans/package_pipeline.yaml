@@ -1,0 +1,13 @@
+name: Packages reach their building pipeline through a kind-constrained SDLC edge scan
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"pkg","entity":"Package","columns":["name","version","package_type"],"filters":{"package_type":"npm"}},{"id":"pl","entity":"Pipeline","columns":["id","status"]}],"relationships":[{"type":"BUILT_BY","from":"pkg","to":"pl"}],"limit":25}'
+  gql: "MATCH (pkg:Package {package_type: 'npm'})-[:BUILT_BY]->(pl:Pipeline) RETURN pkg.name, pkg.version, pkg.package_type, pl.id, pl.status LIMIT 25"
+
+physical:
+  clickhouse:
+    compiled:
+      expect:
+        - (Limit 26 (_))
+        - (Filter _orbit_edge_0.relationship_kind = 'BUILT_BY', _orbit_edge_0.source_kind = 'Package', _orbit_edge_0.target_kind = 'Pipeline', ... (Join ON pkg.id = _orbit_edge_0.source_id (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)) (_)))
+        - (Filter pkg.package_type = 'npm', ... (Deduplicate Final (Scan Table(gl_package) AS pkg)))

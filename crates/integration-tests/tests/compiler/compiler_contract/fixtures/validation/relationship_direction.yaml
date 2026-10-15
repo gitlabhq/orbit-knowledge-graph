@@ -1,0 +1,70 @@
+cases:
+  - name: "Relationship guidance: AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr)"
+    query:
+      gql:
+        - "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(u:User) RETURN mr, u"
+        - "MATCH (u:User)<-[a:AUTHORED]-(mr:MergeRequest {project_id: 1}) RETURN count(mr)"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      error:
+        reason: schema
+        contains: ["AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr)"]
+
+  - name: "Relationship guidance: AUTHORED does not connect MergeRequest and Project in either direction"
+    query: { gql: ["MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(p:Project) RETURN mr, p"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      error:
+        reason: schema
+        contains: [AUTHORED does not connect MergeRequest and Project in either direction]
+
+  - name: "Relationship guidance: AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr); CLOSES does not connect MergeRequest and User"
+    query: { gql: ["MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(u:User) RETURN mr, u"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      error:
+        reason: schema
+        contains:
+          - "AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr); CLOSES does not connect MergeRequest and User"
+
+  - name: "Relationship guidance: AUTHORED|CLOSES does not connect MergeRequest and Project in either direction"
+    query: { gql: ["MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(p:Project) RETURN mr, p"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      error:
+        reason: schema
+        contains: [AUTHORED|CLOSES does not connect MergeRequest and Project in either direction]
+
+  - name: "Relationship guidance: [IN_PROJECT] declares a variable, not a relationship type; write [:IN_PROJECT]"
+    query: { gql: ["MATCH (p:Project {id: 1})<-[IN_PROJECT]-(mr:MergeRequest) RETURN count(mr)"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      error:
+        reason: schema
+        contains: ["[IN_PROJECT] declares a variable, not a relationship type; write [:IN_PROJECT]"]
+
+  - name: "Relationship guidance: [IN_MILESTONE] declares a variable, not a relationship type; write [:IN_MILESTONE]"
+    query: { gql: ["MATCH (mr:MergeRequest {id: 1})-[IN_MILESTONE]->(m) RETURN m"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      error:
+        reason: schema
+        contains: ["[IN_MILESTONE] declares a variable, not a relationship type; write [:IN_MILESTONE]"]
+
+  - name: Relationships the ontology can match compile
+    query:
+      gql:
+        - "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 1}) RETURN mr, u"
+        - "MATCH (mr:MergeRequest {project_id: 1})<-[:AUTHORED]-(u:User) RETURN count(mr)"
+        - "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|IN_PROJECT]->(p:Project) RETURN mr, p"
+        - "MATCH (g:Group {id: 1})-[:CONTAINS*1..2]->(p:Project) RETURN p"
+        - "MATCH (p:Project {id: 1})<-[r]-(mr:MergeRequest) RETURN count(mr)"
+        - "MATCH (p:Project {id: 1})<-[R]-(mr:MergeRequest) RETURN count(mr)"
+        - "MATCH (mr:MergeRequest {id: 1})-[:IN_MILESTONE]->(m) RETURN m"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    parity: false
+
+  - name: JSON traversals accept a stored relationship written against its direction
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"mr","to":"u"}]}'
+    missing_frontends: { gql: GQL rejects a reversed AUTHORED arrow with direction guidance. }

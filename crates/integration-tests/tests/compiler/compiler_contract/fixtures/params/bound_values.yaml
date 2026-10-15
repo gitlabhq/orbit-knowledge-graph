@@ -1,0 +1,12 @@
+cases:
+  - name: Relationship kinds bind as parameters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":25}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, g LIMIT 25"
+    expect: { params: { contains: [{ value: MEMBER_OF, type: String }] } }
+
+  - name: Boolean filters bind as boolean parameters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"],"filters":{"confidential":true}}],"limit":5}'
+      gql: "MATCH (n:Note {id: 1, confidential: true}) RETURN n.confidential LIMIT 5"
+    expect: { params: { contains: [{ value: true, type: Bool }] } }

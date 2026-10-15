@@ -30,8 +30,8 @@ use crate::{
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
-    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
-    SecurityOverride,
+    AuthorizedPathSpec, PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig,
+    ScenarioConfig, SecurityOverride,
 };
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
@@ -1219,7 +1219,7 @@ fn resolve_preset<T: Clone + serde::de::DeserializeOwned>(
     }
 }
 
-fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
+pub(crate) fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     let Some(ov) = overrides else {
         return SecurityContext::new(1, vec!["1/".into()]).unwrap();
     };

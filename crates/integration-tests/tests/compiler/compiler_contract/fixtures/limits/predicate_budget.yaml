@@ -1,0 +1,68 @@
+cases:
+  - name: 16 predicates across MATCH clauses fit the clickhouse budget
+    backend: clickhouse
+    query:
+      gql: 'MATCH (a:Definition {id: 1})-[r:CALLS]->(b:Definition) WHERE b.name = ''callee'' AND a.start_line <= a.end_line MATCH (a) WHERE r.source_id >= 1 AND {{for i in 0..12 sep " AND "}}a.id = b.id{{end}} RETURN a.id, b.id'
+    missing_frontends: { json: The JSON frontend cannot express property comparisons. }
+
+  - name: 16 predicates with ID lists and ranges fit the clickhouse budget
+    backend: clickhouse
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1,2],"id_range":{"start":1,"end":100},"filters":{"name":[{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"}],"fqn":[{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"}]}}]}'
+      gql: MATCH (a:Definition) WHERE a.id IN [1, 2] AND a.id >= 1 AND a.id <= 100 AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' RETURN a.id
+    parity: false
+
+  - name: 17 predicates across MATCH clauses exceed the clickhouse budget
+    backend: clickhouse
+    query:
+      gql: 'MATCH (a:Definition {id: 1})-[r:CALLS]->(b:Definition) WHERE b.name = ''callee'' AND a.start_line <= a.end_line MATCH (a) WHERE r.source_id >= 1 AND {{for i in 0..13 sep " AND "}}a.id = b.id{{end}} RETURN a.id, b.id'
+    missing_frontends: { json: The JSON frontend cannot express property comparisons. }
+    expect:
+      error:
+        reason: schema
+        message: Query has 17 predicates; the maximum is 16 across the entire query. Remove redundant conditions or simplify the query.
+
+  - name: 17 predicates with ID lists and ranges exceed the clickhouse budget
+    backend: clickhouse
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1,2],"id_range":{"start":1,"end":100},"filters":{"name":[{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"}],"fqn":[{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"}]}}]}'
+      gql: MATCH (a:Definition) WHERE a.id IN [1, 2] AND a.id >= 1 AND a.id <= 100 AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' RETURN a.id
+    parity: false
+    expect:
+      error:
+        reason: schema
+        message: Query has 17 predicates; the maximum is 16 across the entire query. Remove redundant conditions or simplify the query.
+
+  - name: 16 predicates across MATCH clauses fit the duckdb budget
+    backend: duckdb
+    query:
+      gql: 'MATCH (a:Definition {id: 1})-[r:CALLS]->(b:Definition) WHERE b.name = ''callee'' AND a.start_line <= a.end_line MATCH (a) WHERE r.source_id >= 1 AND {{for i in 0..12 sep " AND "}}a.id = b.id{{end}} RETURN a.id, b.id'
+    missing_frontends: { json: The JSON frontend cannot express property comparisons. }
+
+  - name: 16 predicates with ID lists and ranges fit the duckdb budget
+    backend: duckdb
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1,2],"id_range":{"start":1,"end":100},"filters":{"name":[{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"}],"fqn":[{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"}]}}]}'
+      gql: MATCH (a:Definition) WHERE a.id IN [1, 2] AND a.id >= 1 AND a.id <= 100 AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' RETURN a.id
+    parity: false
+
+  - name: 17 predicates across MATCH clauses exceed the duckdb budget
+    backend: duckdb
+    query:
+      gql: 'MATCH (a:Definition {id: 1})-[r:CALLS]->(b:Definition) WHERE b.name = ''callee'' AND a.start_line <= a.end_line MATCH (a) WHERE r.source_id >= 1 AND {{for i in 0..13 sep " AND "}}a.id = b.id{{end}} RETURN a.id, b.id'
+    missing_frontends: { json: The JSON frontend cannot express property comparisons. }
+    expect:
+      error:
+        reason: schema
+        message: Query has 17 predicates; the maximum is 16 across the entire query. Remove redundant conditions or simplify the query.
+
+  - name: 17 predicates with ID lists and ranges exceed the duckdb budget
+    backend: duckdb
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1,2],"id_range":{"start":1,"end":100},"filters":{"name":[{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"},{"eq":"caller"}],"fqn":[{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"},{"eq":"main.caller"}]}}]}'
+      gql: MATCH (a:Definition) WHERE a.id IN [1, 2] AND a.id >= 1 AND a.id <= 100 AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.name = 'caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' AND a.fqn = 'main.caller' RETURN a.id
+    parity: false
+    expect:
+      error:
+        reason: schema
+        message: Query has 17 predicates; the maximum is 16 across the entire query. Remove redundant conditions or simplify the query.

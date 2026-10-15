@@ -1,0 +1,15 @@
+name: Filtered code endpoints seed frontiers from bounded anchors and stay on one traversal path
+
+query:
+  json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"Definition","filters":{"name":{"eq":"compile"}}},{"id":"end","entity":"Definition","filters":{"name":{"eq":"run_query"}}}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CALLS"]},"limit":10}'
+  gql: "MATCH p = ANY SHORTEST (start:Definition {name: 'compile'})-[:CALLS*1..3]->(`end`:Definition {name: 'run_query'}) RETURN p LIMIT 10"
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { exact_order: [_nf_start, _nf_end, _path_scope_traversal_paths, forward, backward] }
+      expect:
+        - (CTE forward (Union ALL (Project ... (Filter e1.source_id IN _nf_start.id, e1.relationship_kind = 'CALLS', e1.source_kind = 'Definition', e1.traversal_path IN _path_scope_traversal_paths.traversal_path (_))) (_)))
+        - (CTE backward (Project ... (Filter e1.target_id IN _nf_end.id, e1.relationship_kind = 'CALLS', e1.target_kind = 'Definition', e1.traversal_path IN _path_scope_traversal_paths.traversal_path (_))))
+        - (Join ON (e1.target_id = e2.source_id) AND (e1.target_kind = e2.source_kind) AND (e1.traversal_path = e2.traversal_path) AND ... (_) (_))
+        - (Join ON (f.end_id = b.end_id) AND (f.end_kind = b.end_kind) AND (f.traversal_path = b.traversal_path) (_) (_))

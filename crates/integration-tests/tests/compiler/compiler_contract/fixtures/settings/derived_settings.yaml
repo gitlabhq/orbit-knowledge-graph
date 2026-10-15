@@ -1,0 +1,22 @@
+cases:
+  - name: FINAL scans enable PREWHERE movement without materialized CTEs or the IN-subquery index cap
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":10}'
+      gql: "MATCH (u:User {id: 1}) RETURN u LIMIT 10"
+    expect:
+      settings:
+        optimize_move_to_prewhere_if_final: "1"
+        use_index_for_in_with_subqueries_max_values: null
+        enable_materialized_cte: null
+
+  - name: IN-subquery definitions cap their index use
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[116]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"from":"u","to":"mr","type":"AUTHORED"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"c"}],"limit":20}'
+      gql: "MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest) RETURN u, count(mr) AS c LIMIT 20"
+    expect: { settings: { use_index_for_in_with_subqueries_max_values: "100000" } }
+
+  - name: Path finding clamps execution time and memory to the safety floor
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}'
+      gql: "MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100}) RETURN p LIMIT 10"
+    expect: { settings: { max_execution_time: "15", max_memory_usage: "16106127360" } }

@@ -585,6 +585,52 @@ mod tests {
     }
 
     #[test]
+    fn time_buckets_use_date_trunc_and_shift_weeks_to_sunday() {
+        use crate::input::TruncateUnit;
+        for (unit, expected) in [
+            (TruncateUnit::Minute, "date_trunc('minute', u.created_at)"),
+            (TruncateUnit::Hour, "date_trunc('hour', u.created_at)"),
+            (
+                TruncateUnit::Day,
+                "CAST(date_trunc('day', u.created_at) AS DATE)",
+            ),
+            (
+                TruncateUnit::Week,
+                "CAST((date_trunc('week', u.created_at + INTERVAL 1 DAY) - INTERVAL 1 DAY) AS DATE)",
+            ),
+            (
+                TruncateUnit::Month,
+                "CAST(date_trunc('month', u.created_at) AS DATE)",
+            ),
+            (
+                TruncateUnit::Quarter,
+                "CAST(date_trunc('quarter', u.created_at) AS DATE)",
+            ),
+            (
+                TruncateUnit::Year,
+                "CAST(date_trunc('year', u.created_at) AS DATE)",
+            ),
+        ] {
+            let q = Query {
+                select: vec![SelectExpr::new(
+                    Expr::TimeBucket {
+                        unit,
+                        value: Box::new(Expr::col("u", "created_at")),
+                    },
+                    "bucket",
+                )],
+                from: TableRef::scan("gl_note", "u"),
+                ..Default::default()
+            };
+            let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+            assert_eq!(
+                result.sql,
+                format!("SELECT {expected} AS bucket FROM gl_note AS u")
+            );
+        }
+    }
+
+    #[test]
     fn positional_param_placeholders() {
         let q = Query {
             select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],

@@ -1,0 +1,14 @@
+name: Aggregation prunes FK joins to nodes the result never references
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"merged"}}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"merged_mrs"}],"limit":5}'
+  gql: "MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(u:User) RETURN p, count(mr) AS merged_mrs LIMIT 5"
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { absent: true }
+      expect:
+        - (Join ON p.id = mr.project_id (_) (Bind p (_)))
+        - (Deduplicate Final (Scan Table(gl_project) AS p))
+      reject: [(Scan Table(gl_user) ...), (Join ON u.id = mr.author_id (_) (_))]

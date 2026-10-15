@@ -1,0 +1,50 @@
+stage: prepare
+missing_frontends: { json: Schema calls are GQL statements. }
+
+cases:
+  - name: Graph queries prepare as compiled queries
+    query: { gql: "MATCH (n:User {id: 1}) RETURN n" }
+    expect: { result: { aliases: [n] } }
+
+  - name: A bare schema call returns the full schema
+    query: { gql: CALL db.schema() }
+    expect: { schema: { full: true } }
+
+  - name: A bare local schema call returns the full local schema
+    scope: local
+    query: { gql: CALL db.schema() }
+    expect: { schema: { full: true } }
+
+  - name: A node schema call expands one node and its relationships
+    query: { gql: CALL db.schema('MergeRequest') }
+    expect:
+      schema:
+        domains: 1
+        nodes: [MergeRequest]
+        expanded_with_properties: [MergeRequest]
+        edges_touch_expanded_nodes: true
+
+  - name: A local node schema call expands one local node and its relationships
+    scope: local
+    query: { gql: CALL db.schema('File') }
+    expect:
+      schema: { domains: 1, nodes: [File], expanded_with_properties: [File], edges_touch_expanded_nodes: true }
+
+  - name: Invalid schema calls reject as client-safe errors
+    query:
+      gql:
+        - CALL db.schema('Missing')
+        - CALL db.schema('*')
+        - CALL db.schema('File', 'User')
+        - CALL db.schema() YIELD name
+    expect: { error: { client_safe: true } }
+
+  - name: Local schema calls reject nodes outside the local graph
+    scope: local
+    query: { gql: CALL db.schema('MergeRequest') }
+    expect: { error: { client_safe: true } }
+
+  - name: Compiling a schema call as a graph query rejects
+    stage: compile
+    query: { gql: CALL db.schema() }
+    expect: { error: {} }

@@ -1,0 +1,46 @@
+cases:
+  - name: Queries without nodes reject during schema validation
+    query: { json: '{"query_type": "traversal"}' }
+    missing_frontends: { gql: The GQL grammar cannot produce this malformed input. }
+    expect: { error: { reason: schema, client_safe: true } }
+
+  - name: Node aliases cannot carry SQL
+    query:
+      json: '{"query_type": "traversal", "nodes": [{"id": "n; DROP TABLE users; --", "entity": "User", "node_ids": [1]}]}'
+    missing_frontends: { gql: The GQL grammar cannot produce this malformed input. }
+    expect: { error: { reason: schema, client_safe: true } }
+
+  - name: Relationship endpoints cannot carry SQL
+    query:
+      json: '{"query_type": "traversal", "nodes": [{"id": "a", "entity": "User", "node_ids": [1]}, {"id": "b", "entity": "Group"}], "relationships": [{"type": "MEMBER_OF", "from": "a'' OR ''1''=''1", "to": "b"}]}'
+    missing_frontends: { gql: The GQL grammar cannot produce this malformed input. }
+    expect: { error: { reason: schema, client_safe: true } }
+
+  - name: Node aliases cannot be empty
+    query: { json: '{"query_type": "traversal", "nodes": [{"id": "", "entity": "User", "node_ids": [1]}]}' }
+    missing_frontends: { gql: The GQL grammar cannot produce this malformed input. }
+    expect: { error: { reason: schema, client_safe: true } }
+
+  - name: Node aliases cannot start with a digit
+    query:
+      json: '{"query_type": "traversal", "nodes": [{"id": "123abc", "entity": "User", "node_ids": [1]}]}'
+    missing_frontends: { gql: The GQL grammar cannot produce this malformed input. }
+    expect: { error: { reason: schema, client_safe: true } }
+
+  - name: Filter properties cannot carry SQL
+    query:
+      json: '{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"foo; DROP TABLE--": "value"}}]}'
+    missing_frontends: { gql: The GQL grammar cannot produce this malformed input. }
+    expect: { error: { reason: schema, client_safe: true } }
+
+  - name: Underscored, camel-case, and numbered aliases name their result columns
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"user_node","entity":"User","node_ids":[1],"columns":["username"]},{"id":"_private","entity":"Note","columns":["confidential"]},{"id":"CamelCase","entity":"Project","node_ids":[1],"columns":["name"]},{"id":"node123","entity":"Group","columns":["name"]}],"relationships":[{"type":"AUTHORED","from":"user_node","to":"_private"},{"type":"IN_PROJECT","from":"_private","to":"CamelCase"},{"type":"MEMBER_OF","from":"user_node","to":"node123"}]}'
+      gql: "MATCH (user_node:User {id: 1})-[:AUTHORED]->(_private:Note)-[:IN_PROJECT]->(CamelCase:Project {id: 1}), (user_node)-[:MEMBER_OF]->(node123:Group) RETURN user_node.username, _private.confidential, CamelCase.name, node123.name"
+    expect:
+      result:
+        nodes:
+          user_node: { id_column: _orbit_user_node_id }
+          _private: { id_column: _orbit__private_id }
+          CamelCase: { id_column: _orbit_CamelCase_id }
+          node123: { id_column: _orbit_node123_id }

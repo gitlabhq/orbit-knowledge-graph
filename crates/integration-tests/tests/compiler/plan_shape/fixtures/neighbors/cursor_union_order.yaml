@@ -1,0 +1,11 @@
+name: Cursored both-direction neighbors order by projected aliases over the union
+
+query:
+  json: '{"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2,3]}],"neighbors":{"direction":"both"},"cursor":{"page_size":20}}'
+  gql: MATCH (mr:MergeRequest) WHERE mr.id IN [1, 2, 3] MATCH (mr)--(n) RETURN n PAGE 20
+
+physical:
+  clickhouse:
+    compiled:
+      expect: ["(Sort _orbit_mr_id, _orbit_neighbor_id ... (_))"]
+      reject: [(Sort e.source_id ... (_))]

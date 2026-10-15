@@ -1,0 +1,14 @@
+name: A pinned FK source narrows the holder once without a redundant target key definition
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[116]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"user_mrs"}],"limit":5}'
+  gql: "MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) RETURN p, count(mr) AS user_mrs LIMIT 5"
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { exact_order: [_candidate_mr] }
+      expect:
+        - (CTE _candidate_mr (Project mr.id AS id (Filter mr._deleted = false, mr.author_id = 116 (Scan Table(gl_merge_request) AS mr))))
+        - (Join ON p.id = mr.project_id (_) (_))
+      reject: [(Scan Table(gl_user) ...)]

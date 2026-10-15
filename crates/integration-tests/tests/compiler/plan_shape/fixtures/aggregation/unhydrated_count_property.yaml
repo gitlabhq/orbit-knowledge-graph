@@ -1,0 +1,9 @@
+name: Counting a property of a pruned endpoint collapses to a bare count
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"wi","entity":"WorkItem","filters":{"state":"closed"}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"},{"type":"CLOSED","from":"u","to":"wi"}],"group_by":["p"],"aggregations":[{"count":"u.id","as":"closers_count"}],"limit":20}'
+  gql: "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem {state: 'closed'})<-[:CLOSED]-(u:User) RETURN p, count(u.id) AS closers_count LIMIT 20"
+
+physical:
+  clickhouse:
+    emitted: { expect: ["(Aggregate COUNT() AS closers_count, ... (_))"], reject: [(Scan Table(gl_user) ...)] }

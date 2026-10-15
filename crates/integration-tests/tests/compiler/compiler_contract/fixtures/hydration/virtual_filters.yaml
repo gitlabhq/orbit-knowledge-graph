@@ -1,0 +1,57 @@
+cases:
+  - name: Filters on selected virtual columns move to hydration instead of SQL
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"eq":"x"}},"columns":["path","content"]}],"limit":5}'
+      gql: "MATCH (f:File {id: 1}) WHERE f.content = 'x' RETURN f.path, f.content LIMIT 5"
+    expect:
+      params: { absent: [x], inlined_absent: [content] }
+      hydration:
+        kind: static
+        templates:
+          f: { virtual_filters: [{ property: content, op: eq, value: x }], filter_injected_columns: [] }
+
+  - name: Filtering an unselected virtual column injects it for resolution
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"filters":{"content":{"contains":"needle"},"project_id":{"eq":1000}},"columns":["project_id","path"]}],"limit":10}'
+      gql: MATCH (f:File) WHERE f.id IN [1, 2] AND f.content CONTAINS 'needle' AND f.project_id = 1000 RETURN f.project_id, f.path LIMIT 10
+    expect:
+      hydration:
+        kind: static
+        templates:
+          f:
+            virtual_columns: [{ name: content }]
+            filter_injected_columns: [content]
+            virtual_filters: [{ property: content, op: contains, value: needle }]
+
+  - name: Filtering a selected virtual column resolves it once without marking it injected
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"contains":"needle"}},"columns":["path","content"]}],"limit":5}'
+      gql: "MATCH (f:File {id: 1}) WHERE f.content CONTAINS 'needle' RETURN f.path, f.content LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        templates: { f: { virtual_columns: [{ name: content }], filter_injected_columns: [] } }
+
+  - name: Virtual filters require pinned node IDs
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"content":{"contains":"needle"},"project_id":{"eq":1000}},"columns":["path"]}],"limit":10}'
+      gql: MATCH (f:File) WHERE f.content CONTAINS 'needle' AND f.project_id = 1000 RETURN f.path LIMIT 10
+    expect: { error: { client_safe: true, contains: [node_ids, content] } }
+
+  - name: Virtual filters reject aggregation queries
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"f","entity":"File","filters":{"content":{"contains":"needle"}}}],"aggregations":[{"count":"f","as":"total"}],"group_by":["f.language"],"limit":5}'
+      gql: MATCH (f:File) WHERE f.content CONTAINS 'needle' RETURN f.language, count(f) AS total LIMIT 5
+    expect: { error: { client_safe: true, contains: [aggregation, content] } }
+
+  - name: Virtual filters reject neighbors queries
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"contains":"needle"}}}],"neighbors":{"direction":"outgoing"},"limit":5}'
+      gql: "MATCH (f:File {id: 1})-->(n) WHERE f.content CONTAINS 'needle' RETURN n LIMIT 5"
+    expect: { error: { client_safe: true, contains: [neighbors, content] } }
+
+  - name: Virtual filters reject unsupported operators
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"gt":"x"}}}],"limit":5}'
+      gql: "MATCH (f:File {id: 1}) WHERE f.content > 'x' RETURN f LIMIT 5"
+    expect: { error: { client_safe: true, contains: [content, gt] } }

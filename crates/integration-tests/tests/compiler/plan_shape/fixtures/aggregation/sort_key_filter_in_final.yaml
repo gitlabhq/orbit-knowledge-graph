@@ -1,0 +1,22 @@
+security: admin
+
+cases:
+  - name: Single-node counts keep sort-key equality inside the latest-row scan
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","filters":{"project_id":{"eq":278964}}}],"aggregations":[{"count":"d","as":"total"}]}'
+      gql: "MATCH (d:Definition {project_id: 278964}) RETURN count(d) AS total"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Aggregate COUNT() AS total (Filter d.project_id = 278964, ... (Deduplicate Final (Scan Table(gl_definition) AS d))))
+
+  - name: Single-node counts keep sort-key membership inside the latest-row scan
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition","filters":{"project_id":{"in":[69095239,278964,74646916]}}}],"aggregations":[{"count":"d","as":"total"}]}'
+      gql: MATCH (d:Definition) WHERE d.project_id IN [69095239, 278964, 74646916] RETURN count(d) AS total
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Aggregate COUNT() AS total (Filter d.project_id IN [69095239, 278964, 74646916], ... (Deduplicate Final (Scan Table(gl_definition) AS d))))

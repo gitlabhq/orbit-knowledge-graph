@@ -1,0 +1,13 @@
+name: Joined variable-hop unions constrain endpoint kinds outside the arms without target membership probes
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[116]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"},{"id":"g","entity":"Group"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"CONTAINS","from":"g","to":"p","hops":[1,3]}],"group_by":["g"],"aggregations":[{"count":"u","as":"n"}],"limit":3}'
+  gql: "MATCH (u:User {id: 116})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS*1..3]-(g:Group) RETURN g, count(u) AS n LIMIT 3"
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter _orbit_edge_2.source_kind = 'Group', _orbit_edge_2.target_kind = 'Project', ... (Join ON g.id = _orbit_edge_2.source_id (_) (_)))
+        - (Union ALL AS _orbit_edge_2 (Project ... (Filter e1.relationship_kind = 'CONTAINS' (_))) (_) (_))
+      reject: [(SemiJoin e2.target_id IN subquery (_) (_)), (SemiJoin e3.target_id IN subquery (_) (_))]

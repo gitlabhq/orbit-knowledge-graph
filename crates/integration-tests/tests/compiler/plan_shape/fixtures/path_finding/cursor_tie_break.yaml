@@ -1,0 +1,19 @@
+query:
+  json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}'
+  gql: "MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100}) RETURN p LIMIT 10"
+
+cases:
+  - name: Uncursored paths sort only by depth
+    physical:
+      clickhouse:
+        compiled:
+          expect: ["(Deduplicate LimitBy 1 BY paths.path_start_id, paths.path_end_id (Sort paths.depth (_)))"]
+
+  - name: Cursored paths keep the path tie-break sort
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"cursor":{"page_size":10}}'
+      gql: "MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 100}) RETURN p PAGE 10"
+    physical:
+      clickhouse:
+        compiled:
+          expect: ["(Sort paths.depth, ToString(paths._orbit_path), ToString(paths._orbit_edge_kinds) (_))"]

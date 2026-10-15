@@ -1,0 +1,15 @@
+name: Wildcard SDLC paths scan every edge table and constrain only endpoint kinds
+
+query:
+  json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["*"]},"limit":10}'
+  gql: "MATCH p = ANY SHORTEST (start:User {id: 1})-[*1..3]->(`end`:Project {id: 100}) RETURN p LIMIT 10"
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (PathFinding start->end depth=3 forward=2 backward=1 scoped=false tables=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] relationships=[*] ... (_) (_))
+    emitted:
+      expect:
+        - (CTE forward (Union ALL (Project ... (Filter e1.source_id = 1, e1.relationship_kind IN ?, e1.source_kind = 'User' (Union ALL AS e1 (_) (_) (_) (_) (_)))) (_)))
+        - (CTE backward (Project ... (Filter e1.target_id = 100, e1.relationship_kind IN ?, e1.target_kind = 'Project' (_))))

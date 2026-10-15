@@ -1,0 +1,59 @@
+cases:
+  - name: Unsupported syntax and shapes reject as client-safe errors
+    query:
+      gql:
+        - CREATE (u:User)
+        - MATCH (u:User) DELETE u
+        - MATCH (u:User) SET u.username = 'x' RETURN u
+        - MATCH (u:User) RETURN u; MATCH (p:Project) RETURN p
+        - MATCH (u:User) RETURN u UNION MATCH (p:Project) RETURN p
+        - OPTIONAL MATCH (u:User) RETURN u
+        - MATCH (u:User) WITH u RETURN u
+        - UNWIND [1] AS u RETURN u
+        - MATCH (u:User), (p:Project) RETURN u, p
+        - MATCH () RETURN *
+        - MATCH (u:User|Project) RETURN u
+        - MATCH (u IS User) RETURN u
+        - MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u
+        - MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u
+        - MATCH (u:User) RETURN DISTINCT u
+        - MATCH (u:User) RETURN count(*)
+        - MATCH (u:User) RETURN collect(u.username)
+        - MATCH (u:User) RETURN u SKIP 1
+        - MATCH (u:User) RETURN u DEBUG DEBUG
+        - MATCH (u:User) RETURN u DEBUG LIMIT 1
+        - MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id
+        - MATCH (u:User) RETURN u LIMIT 1 PAGE 1
+        - MATCH (u:User) RETURN u PAGE 1 LIMIT 1
+        - MATCH (u:User) RETURN u AFTER 'token'
+        - MATCH (u:User) RETURN u; DEBUG
+        - MATCH (u:User) RETURN count(u) AS n AS other
+        - MATCH (u:User) RETURN u ORDER BY u.id, u.username
+        - "MATCH (u:User {id: 1}) RETURN u.username AS a, u.name AS a"
+        - "MATCH (u:User {id: 1}) RETURN u.username ORDER BY missing"
+        - MATCH (u:User) RETURN u{.username}, u.state
+        - MATCH (u:User) RETURN u.username, u{.state}
+        - MATCH (u:User) RETURN date_trunc('month', u.created_at)
+        - "MATCH (u:User {id: 1})-[:MEMBER_OF*]->(p:Project) RETURN u"
+        - "MATCH (u:User {id: 1})-[:MEMBER_OF*1..]->(p:Project) RETURN u"
+        - "MATCH (u:User {id: 1})-[:MEMBER_OF*0..3]->(p:Project) RETURN u"
+        - "MATCH (u:User {id: 1})-[:MEMBER_OF*3..1]->(p:Project) RETURN u"
+        - "MATCH (u:User {id: 1})-[:MEMBER_OF*1..4]->(p:Project) RETURN u"
+        - "MATCH (u:User {id: 1})-->(n) WHERE n.id = 2 RETURN n"
+        - "MATCH (u:User {id: 1})-->(n) RETURN count(n)"
+        - "MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(p:Project) WHERE r.target_id = 2 RETURN u"
+        - "MATCH p = ANY SHORTEST (u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2}) RETURN p"
+        - "MATCH p = shortestPath((u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group)) RETURN p"
+        - "MATCH p = ALL SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p"
+        - "MATCH p = SHORTEST 2 (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p"
+        - "MATCH p = (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p"
+        - "MATCH (u:User {id: 1})-->(u) RETURN u"
+        - "MATCH (u:User {id: 1, id: 2}) RETURN u"
+        - MATCH (u:User) WHERE missing.username = 'abc' RETURN u
+        - MATCH (u:User) RETURN missing
+        - MATCH (u:User) WHERE u.username = $missing RETURN u
+        - MATCH (`u; DROP TABLE gl_user`:User) RETURN *
+        - "MATCH (u:User {username: '\\q'}) RETURN u"
+        - "MATCH (u:User {username: '\\uD800'}) RETURN u"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { client_safe: true } }

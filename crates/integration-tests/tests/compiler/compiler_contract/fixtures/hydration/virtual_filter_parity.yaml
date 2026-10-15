@@ -1,0 +1,21 @@
+cases:
+  - name: Virtual equality in WHERE matches a JSON scalar filter
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":"abc"}}]}'
+      gql: "MATCH (f:File {id: 1}) WHERE f.content = 'abc' RETURN f"
+    expect:
+      hydration: { kind: static, templates: { f: { virtual_filters: [{ property: content, op: eq, value: abc }] } } }
+
+  - name: Inline virtual equality matches a JSON eq filter
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"filters":{"content":{"eq":"abc"}}}]}'
+      gql: "MATCH (f:File {id: 1, content: 'abc'}) RETURN f"
+    expect:
+      hydration: { kind: static, templates: { f: { virtual_filters: [{ property: content, op: eq, value: abc }] } } }
+
+  - name: Cross-namespace relationship targets hydrate from their own table without injected columns
+    security: admin
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"id":{"eq":1}}},{"id":"wi","entity":"WorkItem","columns":["id"]},{"id":"rel","entity":"WorkItem","columns":["id","title"]}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"},{"type":"RELATED_TO","from":"wi","to":"rel"}],"limit":100}'
+      gql: MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100
+    expect: { hydration: { kind: static, templates: { rel: { table: gl_work_item, injected_columns: [] } } } }

@@ -1,0 +1,37 @@
+security: admin
+
+cases:
+  - name: Pinned code endpoints filter the code edge scan by source
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":["12345"],"columns":["path"]},{"id":"d","entity":"Definition","columns":["name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":50}'
+      gql: "MATCH (f:File {id: 12345})-[:DEFINES]->(d:Definition) RETURN f.path, d.name LIMIT 50"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter _orbit_edge_0.source_id = 12345, ... (Join ON _orbit_edge_0.target_id = d.id (Join ON _orbit_edge_0.source_id = f.id (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)) (_)) (_)))
+          reject: [(Scan Table(gl_edge) ...)]
+
+  - name: EXTENDS routes to the code edge table
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"child","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"parent","entity":"Definition","columns":["name"]}],"relationships":[{"type":"EXTENDS","from":"child","to":"parent"}],"limit":25}'
+      gql: "MATCH (child:Definition {id: 1})-[:EXTENDS]->(parent:Definition) RETURN child.name, parent.name LIMIT 25"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter _orbit_edge_0.relationship_kind = 'EXTENDS', ... (_))
+            - (Scan Table(gl_code_edge) AS _orbit_edge_0)
+          reject: [(Scan Table(gl_edge) ...)]
+
+  - name: Code relationship alternatives stay on the code edge table
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":["CALLS","EXTENDS","DEFINES"],"from":"a","to":"b"}],"limit":25}'
+      gql: "MATCH (a:Definition {id: 1})-[:CALLS|EXTENDS|DEFINES]->(b:Definition) RETURN a, b LIMIT 25"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter _orbit_edge_0.relationship_kind IN ['CALLS', 'EXTENDS', 'DEFINES'], ... (_))
+            - (Scan Table(gl_code_edge) AS _orbit_edge_0)
+          reject: [(Scan Table(gl_edge) ...)]

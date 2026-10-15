@@ -1,0 +1,7 @@
+name: Relationship filters bind with the edge column type
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","filters":{"target_id":2}}]}'
+  gql: "MATCH (u:User {id: 1})-[:MEMBER_OF {target_id: 2}]->(p:Project) RETURN u, p"
+
+expect: { params: { contains: [{ value: 2, type: Int64 }] } }

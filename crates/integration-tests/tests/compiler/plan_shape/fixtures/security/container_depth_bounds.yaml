@@ -1,0 +1,59 @@
+cases:
+  - name: One container hop bounds the contained node depth
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"x","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"a","to":"x"}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+      gql: "MATCH (a:Group {id: 1})-[:CONTAINS]->(x:Project) RETURN count(x) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter (StartsWith(x.traversal_path, scalar ?) AND (CountSubstrings(x.traversal_path, '/') >= ?) AND (CountSubstrings(x.traversal_path, '/') <= ?)) OR ?, ... (Deduplicate Final (Scan Table(gl_project) AS x)))
+          reject: [(Scan Table(gl_edge) ...)]
+
+  - name: A container hop range bounds the contained node depth range
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"x","entity":"Group"}],"relationships":[{"type":"CONTAINS","from":"a","to":"x","hops":[2,3]}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+      gql: "MATCH (a:Group {id: 1})-[:CONTAINS*2..3]->(x:Group) RETURN count(x) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter (StartsWith(x.traversal_path, scalar ?) AND (CountSubstrings(x.traversal_path, '/') >= ?) AND (CountSubstrings(x.traversal_path, '/') <= ?)) OR ?, ... (Deduplicate Final (Scan Table(gl_group) AS x)))
+          reject: [(Scan Table(gl_edge) ...)]
+
+  - name: Project-owned nodes elide to an exact traversal-path check
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"x","entity":"Branch"}],"relationships":[{"type":"CONTAINS","from":"a","to":"x"}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+      gql: "MATCH (a:Project {id: 1})-[:CONTAINS]->(x:Branch) RETURN count(x) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter (x.traversal_path = scalar ?) OR ?, ... (Deduplicate Final (Scan Table(gl_branch) AS x)))
+          reject: [(Scan Table(gl_edge) ...)]
+
+  - name: An incoming container relationship keeps the edge scan
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"x","entity":"Branch"}],"relationships":[{"type":"CONTAINS","from":"a","to":"x","direction":"incoming"}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+    missing_frontends:
+      gql: GQL rejects a Branch containing a Project, which the ontology does not declare.
+    physical: { clickhouse: { compiled: { expect: [(Scan Table(gl_edge) AS _orbit_edge_0)] } } }
+
+  - name: Directory containment keeps the edge scan
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Directory","node_ids":[1]},{"id":"x","entity":"File"}],"relationships":[{"type":"CONTAINS","from":"a","to":"x"}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+      gql: "MATCH (a:Directory {id: 1})-[:CONTAINS]->(x:File) RETURN count(x) AS c LIMIT 20"
+    physical: { clickhouse: { compiled: { expect: [(Scan Table(gl_edge) AS _orbit_edge_0)] } } }
+
+  - name: A contained anchor keeps the edge scan to its container
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Project","node_ids":[1]},{"id":"x","entity":"Group"}],"relationships":[{"type":"CONTAINS","from":"x","to":"a"}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+    missing_frontends:
+      gql: GQL rejects a Group contained by a Project, which the ontology does not declare.
+    physical: { clickhouse: { compiled: { expect: [(Scan Table(gl_edge) AS _orbit_edge_0)] } } }
+
+  - name: A contained group anchor keeps the edge scan to its parent
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"x","entity":"Group"}],"relationships":[{"type":"CONTAINS","from":"x","to":"a"}],"aggregations":[{"count":"x","as":"c"}],"limit":20}'
+      gql: "MATCH (x:Group)-[:CONTAINS]->(a:Group {id: 1}) RETURN count(x) AS c LIMIT 20"
+    physical: { clickhouse: { compiled: { expect: [(Scan Table(gl_edge) AS _orbit_edge_0)] } } }

@@ -1,0 +1,22 @@
+cases:
+  - name: Local search has no traversal-path security filter
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]}],"limit":10}'
+      gql: "MATCH (f:File {id: 1}) RETURN f.path LIMIT 10"
+    physical:
+      duckdb:
+        compiled:
+          expect:
+            - (Limit 11 (Project ... (Filter f.id = 1, f._deleted = false (Deduplicate Final (Scan Table(gl_file) AS f)))))
+
+  - name: Local traversals project both endpoints and compare properties
+    query:
+      gql: "MATCH (f:File {id: 1})-[e:DEFINES]->(d:Definition) WHERE f.path <> f.name RETURN f.path, d.name"
+    missing_frontends: { json: The JSON frontend cannot compare two properties. }
+    physical:
+      duckdb:
+        compiled:
+          expect:
+            - (Project f.path AS f_path, d.name AS d_name, ... (_))
+            - (Filter f.path != f.name, f.id = 1, f._deleted = false (Deduplicate Final (Scan Table(gl_file) AS f)))
+            - (Filter _orbit_edge_0.relationship_kind = 'DEFINES', ... (_))

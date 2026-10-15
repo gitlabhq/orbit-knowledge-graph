@@ -1,0 +1,19 @@
+cases:
+  - name: A pinned variable-hop source filters the union output
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":25}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF*1..3]->(p:Project) RETURN u, p LIMIT 25"
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter _orbit_edge_0.source_id = 1, ... (Union ALL AS _orbit_edge_0 (_) (_) (_)))
+            - (Join ON (e1.target_id = e2.source_id) AND (e2.relationship_kind = 'MEMBER_OF') AND (e1.target_kind = e2.source_kind) (_) (_))
+
+  - name: A pinned variable-hop target filters the union output
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,2]}],"limit":25}'
+      gql: "MATCH (u:User)-[:MEMBER_OF*1..2]->(p:Project {id: 1}) RETURN u, p LIMIT 25"
+    physical:
+      clickhouse:
+        emitted: { expect: ["(Filter _orbit_edge_0.target_id = 1, ... (Union ALL AS _orbit_edge_0 (_) (_)))"] }

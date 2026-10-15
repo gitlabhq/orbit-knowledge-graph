@@ -1,0 +1,12 @@
+name: Traversal-path prefixes prune before latest-row resolution and recheck after it
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}'
+  gql: MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.traversal_path STARTS WITH '1/100/' RETURN p, count(mr) AS c LIMIT 10
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter p.id IN _candidate_p.id, StartsWith(p.traversal_path, '1/100/') (Scan Table(gl_project) AS p))
+        - (Filter StartsWith(p.traversal_path, '1/100/'), p._deleted = false (Bind p (Deduplicate LimitBy 1 BY p.traversal_path, p.id (_))))

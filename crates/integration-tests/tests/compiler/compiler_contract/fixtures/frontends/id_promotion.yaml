@@ -1,0 +1,60 @@
+cases:
+  - name: ID lists and ranges promote independently of predicate order
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2,3,5],"id_range":{"start":1,"end":3},"filters":{"state":"active"}}]}'
+      gql:
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id <= 3 AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2, 3, 5] AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id <= 3 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id >= 1 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id > 0 AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id < 4 AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id IN [1, 2, 3, 5] AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id < 4 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id IN [1, 2, 3, 5] AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id > 0 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id >= 1 AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id <= 3 AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id IN ['1', '2', '3', '5'] AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id <= 3 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id IN ['1', '2', '3', '5'] AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id >= 1 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id > 0 AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id < 4 AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id IN ['1', '2', '3', '5'] AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id < 4 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id IN ['1', '2', '3', '5'] AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id > 0 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+
+  - name: Promoted ID predicates leave no residual id filter
+    stage: parse
+    query:
+      gql:
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id <= 3 AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2, 3, 5] AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id <= 3 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id IN [1, 2, 3, 5] AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id >= 1 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id > 0 AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN [1, 2, 3, 5] AND u.id < 4 AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id IN [1, 2, 3, 5] AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id < 4 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id IN [1, 2, 3, 5] AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id > 0 AND u.id IN [1, 2, 3, 5] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id >= 1 AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id <= 3 AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id IN ['1', '2', '3', '5'] AND u.id <= 3 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id <= 3 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id IN ['1', '2', '3', '5'] AND u.id >= 1 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id <= 3 AND u.id >= 1 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id > 0 AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id IN ['1', '2', '3', '5'] AND u.id < 4 AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id IN ['1', '2', '3', '5'] AND u.id < 4 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id > 0 AND u.id < 4 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id IN ['1', '2', '3', '5'] AND u.id > 0 AND u.state = 'active' RETURN u
+        - MATCH (u:User) WHERE u.id < 4 AND u.id > 0 AND u.id IN ['1', '2', '3', '5'] AND u.state = 'active' RETURN u
+    missing_frontends: { json: The JSON frontend states node_ids and id_range directly. }
+    expect: { input: { nodes: [{ node_ids: [1, 2, 3, 5], id_range: { start: 1, end: 3 }, filter_keys: [state] }] } }

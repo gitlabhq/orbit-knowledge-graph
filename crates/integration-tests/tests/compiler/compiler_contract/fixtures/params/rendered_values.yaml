@@ -1,0 +1,18 @@
+cases:
+  - name: Traversal filters and relationship kinds bind as parameters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}'
+      gql: "MATCH (mr:MergeRequest {state: 'opened'})<-[:AUTHORED]-(u:User) RETURN mr, u LIMIT 10"
+    expect: { params: { contains: [{ value: opened }], inlined_absent: ["'opened'"] } }
+
+  - name: Membership filters bind as array parameters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":{"in":["project_bot","service_account"]}}}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.user_type IN ['project_bot', 'service_account'] RETURN u LIMIT 10
+    expect: { params: { contains: [{ value: [project_bot, service_account] }], inlined_absent: [project_bot] } }
+
+  - name: Pinned IDs bind as array parameters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[100,200,300]}],"limit":10}'
+      gql: MATCH (u:User) WHERE u.id IN [100, 200, 300] RETURN u LIMIT 10
+    expect: { params: { contains: [{ value: [100, 200, 300], type: Array(Int64) }], inlined_absent: ["200"] } }

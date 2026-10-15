@@ -1,0 +1,12 @@
+name: Incoming arrows lower to the stored outgoing FK plan
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}'
+  gql: "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username"
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (CTE _narrow_u (Project n.author_id AS id (Filter n.id = 1, n._deleted = false (Scan Table(gl_note) AS n))))
+        - (Project n.author_id AS e0_src, 'User' AS e0_src_type, ... (Join ON u.id = n.author_id (_) (_)))

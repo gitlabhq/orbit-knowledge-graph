@@ -1,0 +1,53 @@
+missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+
+cases:
+  - name: Consecutive MATCH clauses compile like one pattern
+    query:
+      gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}), (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5"
+    same_output:
+      - gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) MATCH (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5"
+      - gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) WHERE mr.state = 'merged' MATCH (u:User)-[:AUTHORED]->(mr) WHERE u.username = 'a' RETURN mr.iid, u.username LIMIT 5"
+
+  - name: Return aliases are ignored and sortable
+    query:
+      gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid, p ORDER BY mr.iid LIMIT 5"
+    same_output:
+      - gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5"
+      - gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5"
+
+  - name: Return aliases on projections sort descending
+    query:
+      gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid, p{.full_path} ORDER BY mr.iid DESC LIMIT 5"
+    same_output:
+      - gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5"
+
+  - name: Return aliases sort paged results
+    query:
+      gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid ORDER BY mr.iid PAGE 5"
+    same_output:
+      - gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number ORDER BY number PAGE 5"
+
+  - name: Neighbor center aliases are ignored
+    query: { gql: "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n" }
+    same_output: [{ gql: "MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n" }]
+
+  - name: Node aliases cannot sort
+    query:
+      gql:
+        - "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid, p AS project ORDER BY project"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [not a node alias] } }
+
+  - name: Return aliases must be unique
+    query:
+      gql:
+        - "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS x, p AS x"
+        - "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS x, p.full_path AS x"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [duplicate alias] } }
+
+  - name: Sort keys must name a property or property alias
+    query:
+      gql: ["MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid ORDER BY missing"]
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [or a property alias] } }

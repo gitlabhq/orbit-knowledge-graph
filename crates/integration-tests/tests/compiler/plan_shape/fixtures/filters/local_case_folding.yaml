@@ -1,0 +1,18 @@
+cases:
+  - name: Local contains filters fold case on both operands
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"contains":"ALI"}}}],"limit":10}'
+      gql: MATCH (f:File) WHERE f.path CONTAINS 'ALI' RETURN f LIMIT 10
+    physical: { duckdb: { compiled: { expect: ["(Filter Contains(Lower(f.path), Lower('ALI')), ... (_))"] } } }
+
+  - name: Local starts-with filters fold case on both operands
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"starts_with":"ALI"}}}],"limit":10}'
+      gql: MATCH (f:File) WHERE f.path STARTS WITH 'ALI' RETURN f LIMIT 10
+    physical: { duckdb: { compiled: { expect: ["(Filter StartsWith(Lower(f.path), Lower('ALI')), ... (_))"] } } }
+
+  - name: Local ends-with filters fold case on both operands
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"ends_with":"ALI"}}}],"limit":10}'
+      gql: MATCH (f:File) WHERE f.path ENDS WITH 'ALI' RETURN f LIMIT 10
+    physical: { duckdb: { compiled: { expect: ["(Filter EndsWith(Lower(f.path), Lower('ALI')), ... (_))"] } } }

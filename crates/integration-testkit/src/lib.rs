@@ -1,5 +1,6 @@
 mod assertions;
 pub mod cli;
+pub mod compiler_contract;
 mod context;
 pub mod mock_redaction;
 pub mod plan_shape;

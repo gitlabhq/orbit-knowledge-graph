@@ -1,0 +1,107 @@
+cases:
+  - name: Known columns may order results
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":10,"order_by":"u.username"}'
+      gql: "MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.username LIMIT 10"
+
+  - name: Unknown order columns do not exist
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":10,"order_by":"u.nonexistent_column"}'
+      gql: "MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.nonexistent_column LIMIT 10"
+    expect: { error: { client_safe: true }, json: { error: { contains: [does not exist] } } }
+
+  - name: Known columns may filter
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"],"filters":{"username":"admin"}}],"limit":10}'
+      gql: "MATCH (u:User {username: 'admin'}) RETURN u.username LIMIT 10"
+
+  - name: Unknown filter columns are named
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"],"filters":{"nonexistent_column":"value"}}],"limit":10}'
+      gql: "MATCH (u:User {nonexistent_column: 'value'}) RETURN u.username LIMIT 10"
+    expect: { error: { client_safe: true, contains: [nonexistent_column] } }
+
+  - name: Known columns may be counted
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"aggregations":[{"count":"p.name","as":"name_count"}],"limit":10}'
+      gql: "MATCH (p:Project {id: 1}) RETURN count(p.name) AS name_count LIMIT 10"
+
+  - name: Unknown aggregation properties do not exist
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"aggregations":[{"sum":"p.invalid_property","as":"total"}],"limit":10}'
+      gql: "MATCH (p:Project {id: 1}) RETURN sum(p.invalid_property) AS total LIMIT 10"
+    expect: { error: { client_safe: true }, json: { error: { contains: [does not exist] } } }
+
+  - name: Unknown entities list every valid entity
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"NonexistentType","node_ids":[1],"columns":["name"]}],"limit":10}'
+      gql: "MATCH (n:NonexistentType {id: 1}) RETURN n.name LIMIT 10"
+    expect:
+      error: { client_safe: true, contains: [NonexistentType] }
+      json: { error: { contains: ["Valid values:", Branch, WorkItem], not_contains: [more —] } }
+
+  - name: Unknown filter keys list every valid candidate
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"],"filters":{"project_full_path":"x"}}],"limit":10}'
+      gql: "MATCH (u:User {project_full_path: 'x'}) RETURN u.username LIMIT 10"
+    expect:
+      error: { client_safe: true, contains: [project_full_path] }
+      json: { error: { contains: ["Valid values:", username], not_contains: [more —, other candidates] } }
+
+  - name: Unknown group properties list valid fields
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.reviewer_count"],"aggregations":[{"count":"p","as":"c"}],"limit":10}'
+      gql: "MATCH (p:Project {id: 1}) RETURN p.reviewer_count, count(p) AS c LIMIT 10"
+    expect: { error: { client_safe: true, contains: [reviewer_count, does not exist, Valid fields, name] } }
+
+  - name: Malformed group objects show the accepted shapes
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":[{"node":"p","property":"name"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}'
+    missing_frontends: { gql: The GQL frontend reports this mistake with its own parser message. }
+    expect: { error: { client_safe: true, contains: [/group_by/0, '"<node-id>.<property>"', '"truncate"'] } }
+
+  - name: Dotted garbage group keys show the accepted shapes
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.name.x"],"aggregations":[{"count":"p","as":"c"}],"limit":10}'
+    missing_frontends: { gql: The GQL frontend reports this mistake with its own parser message. }
+    expect: { error: { client_safe: true, contains: [/group_by/0, '"<node-id>"', '"<node-id>.<property>"'] } }
+
+  - name: Unknown group nodes name the reference
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["name"],"aggregations":[{"count":"p","as":"c"}],"limit":10}'
+      gql: "MATCH (p:Project {id: 1}) RETURN name, count(p) AS c LIMIT 10"
+    expect: { error: { client_safe: true }, json: { error: { contains: [undefined node "name"] } } }
+
+  - name: Unknown columns list valid candidates without the oneOf fallthrough
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["bogus_col"]}],"limit":10}'
+      gql: MATCH (u:User) RETURN u.bogus_col LIMIT 10
+    expect:
+      error: { client_safe: true, contains: [bogus_col] }
+      json:
+        error:
+          contains: [/nodes/0/columns, Valid values, username]
+          not_contains: [under any of the schemas]
+
+  - name: Unknown relationship types list valid candidates
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"BOGUS_REL","from":"u","to":"n"}],"limit":10}'
+      gql: "MATCH (u:User {id: 1})-[:BOGUS_REL]->(n:Note) RETURN u, n LIMIT 10"
+    expect:
+      error: { client_safe: true, contains: [BOGUS_REL] }
+      json:
+        error:
+          contains: [/relationships/0/type, Valid values, AUTHORED]
+          not_contains: [under any of the schemas]
+
+  - name: CALLS may target imported symbols
+    security: admin
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"sym","entity":"ImportedSymbol","columns":["identifier_name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"sym"}],"limit":10}'
+      gql: "MATCH (caller:Definition {id: 1})-[:CALLS]->(sym:ImportedSymbol) RETURN caller.name, sym.identifier_name LIMIT 10"
+
+  - name: CALLS aggregations compile
+    security: admin
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"caller","entity":"Definition","node_ids":[1]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"group_by":["callee"],"aggregations":[{"count":"caller","as":"callers"}],"limit":1}'
+      gql: "MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition) RETURN callee, count(caller) AS callers LIMIT 1"

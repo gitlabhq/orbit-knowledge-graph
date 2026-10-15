@@ -1,0 +1,20 @@
+cases:
+  - name: Role-gated FK holders stay in the plan when their filter is denormalized
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability","filters":{"state":{"eq":"detected"}}},{"id":"proj","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"proj"}],"group_by":["proj"],"aggregations":[{"count":"v","as":"n"}],"limit":10}'
+      gql: "MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(proj:Project {id: 1}) RETURN proj, count(v) AS n LIMIT 10"
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter v.state = 'detected', ... (Deduplicate Final (Scan Table(gl_vulnerability) AS v)))
+
+  - name: Grouping by a role-gated property keeps the protected node alias
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability"},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["v.severity"],"aggregations":[{"count":"v","as":"vulnerability_count"}],"limit":10}'
+      gql: "MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN v.severity, count(v) AS vulnerability_count LIMIT 10"
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Aggregate group v.severity, v.severity AS v_severity, ... (Bind v (Project * (Filter v._deleted = false, v.project_id = 1 (Deduplicate Final (Scan Table(gl_vulnerability) AS v))))))

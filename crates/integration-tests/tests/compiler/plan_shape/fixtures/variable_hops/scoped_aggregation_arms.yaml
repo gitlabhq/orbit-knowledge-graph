@@ -1,0 +1,13 @@
+name: Variable-hop aggregation arms carry traversal scope on every edge scan
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[278964]},{"id":"f","entity":"File"}],"relationships":[{"type":"CONTAINS","from":"p","to":"f","hops":[1,2]}],"group_by":["p"],"aggregations":[{"count":"f","as":"count"}],"limit":10}'
+  gql: "MATCH (p:Project {id: 278964})-[:CONTAINS*1..2]->(f:File) RETURN p, count(f) AS count LIMIT 10"
+
+physical:
+  clickhouse:
+    compiled:
+      expect:
+        - (Filter _orbit_edge_0.source_id = 278964, ... (Join ON p.id = _orbit_edge_0.source_id (Union ALL AS _orbit_edge_0 (_) (_)) (_)))
+        - (Filter StartsWith(e1.traversal_path, '1/'), e1.relationship_kind = 'CONTAINS' (_))
+        - (Filter StartsWith(e1.traversal_path, '1/'), StartsWith(e2.traversal_path, '1/'), e1.relationship_kind = 'CONTAINS' (_))

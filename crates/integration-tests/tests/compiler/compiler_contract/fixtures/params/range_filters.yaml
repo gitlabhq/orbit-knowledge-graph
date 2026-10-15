@@ -1,0 +1,12 @@
+name: Multi-entry range filters bind both bounds
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"filters":{"created_at":[{"gte":"2026-04-01T00:00:00Z"},{"lt":"2026-05-01T00:00:00Z"}]},"columns":["id","created_at"]}],"limit":10}'
+  gql: "MATCH (mr:MergeRequest {id: 1}) WHERE mr.created_at >= '2026-04-01T00:00:00Z' AND mr.created_at < '2026-05-01T00:00:00Z' RETURN mr.id, mr.created_at LIMIT 10"
+
+expect:
+  input:
+    nodes:
+      - filters:
+          created_at: [{ op: gte, value: "2026-04-01T00:00:00Z" }, { op: lt, value: "2026-05-01T00:00:00Z" }]
+  params: { contains: [{ value: "2026-04-01T00:00:00Z" }, { value: "2026-05-01T00:00:00Z" }] }

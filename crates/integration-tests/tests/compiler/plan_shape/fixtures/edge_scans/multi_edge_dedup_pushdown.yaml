@@ -1,0 +1,21 @@
+name: Multi-edge joins deduplicate each scan and keep kind predicates outside the deduplicated reads
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[490855697]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"project","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"project"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}'
+  gql: |
+    MATCH (label:Label {title: 'group::source code'})<-[:HAS_LABEL]-(mr:MergeRequest {id: 490855697})-[:IN_PROJECT]->(project:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN count(mr) AS n LIMIT 1
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { exact_order: [_filter_label, _filter_project] }
+      expect:
+        - |
+          (Filter _orbit_edge_0.relationship_kind = 'HAS_LABEL', _orbit_edge_0.source_kind = 'MergeRequest', _orbit_edge_0.target_kind = 'Label', _orbit_edge_1.relationship_kind = 'IN_PROJECT', _orbit_edge_1.source_kind = 'MergeRequest', _orbit_edge_1.target_kind = 'Project'
+            (Join ON _orbit_edge_0.source_id = _orbit_edge_1.source_id (_) (_)))
+        - (Filter _orbit_edge_0.source_id = 490855697, _orbit_edge_0.target_id IN _filter_label.id, _orbit_edge_0._deleted = false (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+        - (Filter _orbit_edge_1.source_id = 490855697, _orbit_edge_1.target_id IN _filter_project.id (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)))
+      reject:
+        - (Filter _orbit_edge_0.relationship_kind = 'HAS_LABEL', ... (Deduplicate Final (_)))
+        - (Filter _orbit_edge_1.relationship_kind = 'IN_PROJECT', ... (Deduplicate Final (_)))

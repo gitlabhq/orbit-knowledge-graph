@@ -1,0 +1,40 @@
+cases:
+  - name: Limited queries fetch one probe row past the limit
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"limit":10}'
+      gql: "MATCH (u:User {id: 1}) RETURN u.username LIMIT 10"
+    physical: { clickhouse: { compiled: { expect: [(Limit 11 (_))] } } }
+
+  - name: Paged queries fetch one probe row past the page and sort by the cursor key
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":5}}'
+      gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 5
+    physical:
+      clickhouse:
+        compiled: { expect: ["(Limit 6 (Sort u.id (Project ToString(u.id) AS _orbit_cursor_0, ... (_))))"] }
+
+  - name: Ordered searches sort descending before the probe-row limit
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username","state","created_at"],"filters":{"username":{"starts_with":"admin"},"state":{"in":["active","blocked"]},"created_at":{"gte":"2024-01-01"}}}],"limit":50,"order_by":"-u.created_at"}'
+      gql: MATCH (u:User) WHERE u.username STARTS WITH 'admin' AND u.state IN ['active', 'blocked'] AND u.created_at >= '2024-01-01' RETURN u.username, u.state, u.created_at ORDER BY u.created_at DESC LIMIT 50
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Limit 51 (Sort u.created_at DESC (Project ... (Filter u.created_at >= '2024-01-01', u.state IN ['active', 'blocked'], StartsWith(Lower(u.username), Lower('admin')), u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u))))))
+
+  - name: Traversals without a limit fetch the default page and a probe row
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN u"
+    physical: { clickhouse: { compiled: { expect: [(Limit 31 (_))] } } }
+
+  - name: Truncation group keys keep a custom alias
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"Note","node_ids":[1]}],"aggregations":[{"count":"u","as":"n"}],"group_by":[{"key":"u.created_at","truncate":"month","as":"bucket"}],"limit":10}'
+      gql: "MATCH (u:Note {id: 1}) RETURN date_trunc('month', u.created_at) AS bucket, count(u) AS n LIMIT 10"
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Aggregate group bucket(month, u.created_at), bucket(month, u.created_at) AS bucket, COUNT() AS n (_))

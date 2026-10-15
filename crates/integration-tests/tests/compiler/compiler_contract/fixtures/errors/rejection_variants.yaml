@@ -1,0 +1,36 @@
+cases:
+  - name: Malformed input rejects in the frontend that received it
+    query: { json: not a query, gql: not a query }
+    parity: false
+    expect: { error: { client_safe: true }, json: { error: { reason: parse } }, gql: { error: { reason: schema } } }
+
+  - name: Unknown entities reject as client-safe allowlist errors, not pipeline invariants
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}'
+      gql: MATCH (x:NotARealEntity) RETURN x.id LIMIT 1
+    expect: { error: { reason: ontology, client_safe: true } }
+
+  - name: Traversal-path filters outside the caller's scope reject as authorization errors
+    security: { paths: [1/100/] }
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/"}}}],"limit":1}'
+      gql: MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p LIMIT 1
+    expect: { error: { reason: authorization, client_safe: true } }
+
+  - name: Malformed traversal-path filters reject during schema validation
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":1}}}],"limit":1}'
+      gql: MATCH (p:Project) WHERE p.traversal_path STARTS WITH 1 RETURN p LIMIT 1
+    expect:
+      error: { reason: schema, client_safe: true, contains: [schema violation], not_contains: [RestrictPass] }
+
+  - name: Aggregations reject cross-node property comparisons with a scope anchor
+    query:
+      gql:
+        - "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.id = p.id RETURN count(p) AS c LIMIT 20"
+        - "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE p.id = g.id RETURN count(p) AS c LIMIT 20"
+    missing_frontends: { json: The JSON frontend cannot compare two node properties. }
+    expect:
+      error:
+        reason: schema
+        message: cross-node property comparisons are only supported in traversal queries

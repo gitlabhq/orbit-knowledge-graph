@@ -1,0 +1,13 @@
+name: Filtered indirect-identity neighbors scan the center once per direction and project the redaction ID
+
+query:
+  json: '{"query_type":"neighbors","nodes":[{"id":"f","entity":"File","filters":{"path":{"contains":"labkit"}}}],"neighbors":{"direction":"both"}}'
+  gql: MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n
+
+physical:
+  clickhouse:
+    compiled:
+      occurrences: [{ pattern: (Scan Table(gl_file) AS f), count: 2 }]
+      expect:
+        - (Deduplicate Final (Scan Table(gl_file) AS f))
+        - (Union ALL (Project f.project_id AS _orbit_f_id, f.id AS _orbit_f_pk, ... (_)) (Project f.project_id AS _orbit_f_id, f.id AS _orbit_f_pk, ... (_)))

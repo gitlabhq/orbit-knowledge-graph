@@ -1,0 +1,20 @@
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}'
+  gql: "MATCH (u:User {id: 1}) RETURN u.id LIMIT 1"
+
+cases:
+  - name: A supplied ontology can make a global node path-scoped
+    ontology: { path_scopable: [User] }
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter StartsWith(u.traversal_path, '1/'), ... (Deduplicate Final (Scan Table(gl_user) AS u)))
+
+  - name: A path-scoped node keeps its scope under a table prefix
+    ontology: { path_scopable: [User], schema_prefix: v1_ }
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter StartsWith(u.traversal_path, '1/'), ... (Deduplicate Final (Scan Table(v1_gl_user) AS u)))

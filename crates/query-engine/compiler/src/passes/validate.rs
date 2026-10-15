@@ -1499,6 +1499,46 @@ mod tests {
     }
 
     #[test]
+    fn native_predicate_trees_are_bounded_before_planning() {
+        use crate::input::{BooleanExpression, Condition, PredicateTarget};
+        let model =
+            ClickHouseDataModel::derive(std::sync::Arc::new(Ontology::load_embedded().unwrap()))
+                .unwrap();
+        let validator = Validator::new(&model);
+        let mut input =
+            crate::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+        let leaf = |target| {
+            BooleanExpression::Leaf(Condition {
+                target,
+                property: "id".into(),
+                filter: InputFilter {
+                    op: Some(FilterOp::In),
+                    value: Some(serde_json::json!([1])),
+                    ..Default::default()
+                },
+            })
+        };
+        let mut deep = leaf(PredicateTarget::Node("u".into()));
+        for _ in 0..1024 {
+            deep = BooleanExpression::Not(Box::new(deep));
+        }
+        input.predicates = vec![deep];
+        let error = validator.check_shape(&input).unwrap_err();
+        assert!(
+            error.to_string().contains("must not nest deeper than 32"),
+            "{error}"
+        );
+        input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+            PredicateTarget::Relationship(7),
+        )))];
+        let error = validator.check_shape(&input).unwrap_err();
+        assert!(
+            error.to_string().contains("undefined relationship"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn selectivity_error_mentions_id_range_cap_only_for_wide_ranges() {
         let ontology = test_ontology();
         let error_for = |json: &str| {

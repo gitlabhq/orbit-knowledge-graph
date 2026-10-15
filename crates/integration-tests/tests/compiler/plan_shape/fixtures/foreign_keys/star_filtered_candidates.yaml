@@ -1,0 +1,17 @@
+name: Filtered FK stars define candidates and filter joined targets after latest-row resolution
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed","source":"push"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}'
+  gql: "MATCH (j:Job {status: 'failed'})<-[:HAS_JOB]-(pipe:Pipeline {status: 'failed', source: 'push'})-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN pipe, j LIMIT 10"
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { exact_order: [_candidate_pipe, _candidate_j] }
+      expect:
+        - (CTE _candidate_pipe (Project pipe.id AS id (Filter ... (Scan Table(gl_pipeline) AS pipe))))
+        - (CTE _candidate_j (Project j.id AS id (Filter j.status = 'failed', j._deleted = false, j.pipeline_id IN _candidate_pipe.id (Scan Table(gl_job) AS j))))
+        - (Filter j.status = 'failed', j._deleted = false, j.id IN _candidate_j.id (Deduplicate Final (Scan Table(gl_job) AS j)))
+        - (Filter pipe.source = 'push', pipe.status = 'failed', pipe.project_id = 278964, pipe._deleted = false (Bind pipe (Deduplicate LimitBy 1 BY pipe.traversal_path, pipe.id (_))))
+        - (Filter pipe.id IN _candidate_pipe.id (Scan Table(gl_pipeline) AS pipe))
+        - (Join ON pipe.id = j.pipeline_id (_) (_))

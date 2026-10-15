@@ -1,0 +1,84 @@
+cases:
+  - name: Variable-length relationships reject inline property filters
+    stage: parse
+    query:
+      gql:
+        - "MATCH (a:Group {id: 1})-[:CONTAINS*2 {source_id: 1}]->(b:Group) RETURN a, b"
+        - "MATCH (a:Group {id: 1})-[:CONTAINS*1..2 {source_id: 1}]->(b:Group) RETURN a, b"
+        - "MATCH (a:Group {id: 1})<-[r:CONTAINS*2..3 {target_id: 1}]-(b:Group) RETURN a, b"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { contains: [property filters on variable-length relationships are unsupported] } }
+
+  - name: Aggregations cannot return the path variable
+    stage: parse
+    query:
+      gql:
+        - "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN path, count(u)"
+        - "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN properties(path), count(u)"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { contains: [aggregation cannot return the path variable] } }
+
+  - name: Neighbor centers cannot be projected as all properties
+    stage: parse
+    query:
+      gql:
+        - "MATCH (center:User {id: 1})--(n) RETURN properties(center), n"
+        - "MATCH (center:File {id: 1})-->(n) RETURN properties(center)"
+        - "MATCH (center:User {id: 1})<--(n) RETURN n, properties(center)"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { contains: [dynamic graph results cannot be renamed or projected as properties] } }
+
+  - name: ORDER BY accepts one sort key
+    query:
+      gql:
+        - "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at DESC, mr.iid DESC"
+        - "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at,mr.iid LIMIT 5"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [ORDER BY accepts one sort key] } }
+
+  - name: Separate MATCH clauses must connect
+    query: { gql: ["MATCH (u:User {id: 1}) MATCH (p:Project {id: 2}) RETURN u, p"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [all declared nodes must belong to one connected pattern] } }
+
+  - name: A shortest path must be the only MATCH pattern
+    query:
+      gql:
+        - "MATCH p = ANY SHORTEST (a:User {id: 1})-[*1..3]->(b:Project {id: 2}) MATCH (b)-[:IN_GROUP]->(g:Group) RETURN p"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [a shortest path must be the only MATCH pattern] } }
+
+  - name: OPTIONAL MATCH is outside Orbit query syntax
+    query: { gql: ["MATCH (u:User {id: 1}) OPTIONAL MATCH (u)-[:AUTHORED]->(mr:MergeRequest) RETURN u"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [Orbit query syntax] } }
+
+  - name: Undirected relationships are only supported for neighbors
+    query:
+      gql:
+        - "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN g, u"
+        - "MATCH (g:Group {id: 1})--(u:User) RETURN g, u"
+        - "MATCH (g:Group {id: 1})-[:MEMBER_OF*1..2]-(u:User) RETURN g, u"
+        - "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]-(p:Project) RETURN u, g, p"
+        - "MATCH (g:Group {id: 1})-[:MEMBER_OF]-(u:User) RETURN count(u)"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [undirected relationships are only supported for neighbors] } }
+
+  - name: Traversal paths cannot be compared to other columns
+    query: { gql: ["MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema } }
+
+  - name: PAGE sizes match the JSON cursor bounds
+    query: { gql: ["MATCH (u:User {id: 1}) RETURN u PAGE 0", "MATCH (u:User {id: 1}) RETURN u PAGE 1001"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: schema, contains: [cursor.page_size] } }
+
+  - name: Reserved page words need backticks as aliases
+    query: { gql: ["MATCH (page:User {id: 1}) RETURN page"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: {} }
+
+  - name: Backticked page words are ordinary aliases
+    query: { gql: ["MATCH (`page`:User {id: 1}) RETURN `page`"] }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }

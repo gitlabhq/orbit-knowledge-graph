@@ -1,0 +1,13 @@
+name: Filtered FK counts use a bare count over the filtered holder scan
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"opened"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"open_mrs"}],"limit":10}'
+  gql: "MATCH (mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project) RETURN p, count(mr) AS open_mrs LIMIT 10"
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Aggregate COUNT() AS open_mrs, ... (Join ON p.id = mr.project_id (_) (_)))
+        - (Filter mr.state = 'opened', ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+      reject: [(Scan Table(gl_edge) ...)]

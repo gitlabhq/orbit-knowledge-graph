@@ -1,0 +1,49 @@
+cases:
+  - name: Unknown entities reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"NotAnEntity"}]}'
+      gql: MATCH (u:NotAnEntity) RETURN u
+    expect: { error: { client_safe: true } }
+
+  - name: Unknown columns reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["missing"]}]}'
+      gql: MATCH (u:User) RETURN u.missing
+    expect: { error: { client_safe: true } }
+
+  - name: Unknown filter properties reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"missing":"abc"}}]}'
+      gql: "MATCH (u:User {missing: 'abc'}) RETURN u"
+    expect: { error: { client_safe: true } }
+
+  - name: Mistyped filter values reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":42}}]}'
+      gql: "MATCH (u:User {username: 42}) RETURN u"
+    expect: { error: { client_safe: true } }
+
+  - name: Short contains patterns reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"contains":"ab"}}}]}'
+      gql: MATCH (u:User) WHERE u.username CONTAINS 'ab' RETURN u
+    expect: { error: { client_safe: true } }
+
+  - name: Token search on unindexed columns rejects in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":{"token_match":"abc"}}}]}'
+      gql: MATCH (u:User) WHERE token_match(u.state, 'abc') RETURN u
+    expect: { error: { client_safe: true } }
+
+  - name: Unknown relationships reject in both frontends
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"UNKNOWN_EDGE","from":"u","to":"p"}]}'
+      gql: "MATCH (u:User {id: 1})-[:UNKNOWN_EDGE]->(p:Project) RETURN u, p"
+    expect: { error: { client_safe: true } }
+
+  - name: Traversal-path filters outside the caller scope reject in both frontends
+    security: { paths: [1/24/] }
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/"}}}]}'
+      gql: MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p
+    expect: { error: { reason: authorization } }

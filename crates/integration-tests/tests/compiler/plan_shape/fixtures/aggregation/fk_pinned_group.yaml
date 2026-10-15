@@ -1,0 +1,14 @@
+name: Grouping by a pinned FK target joins on the holder column and keeps the pin
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"total_mrs"}],"limit":10}'
+  gql: "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN p, count(mr) AS total_mrs LIMIT 10"
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON p.id = mr.project_id (_) (_))
+        - (Filter mr.project_id = 278964, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+        - (Filter p.id = 278964, ... (_))
+      reject: [(Scan Table(gl_edge) ...)]

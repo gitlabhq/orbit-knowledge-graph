@@ -1,0 +1,86 @@
+cases:
+  - name: Selected virtual columns hydrate through their service with injected dependencies
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","name","content"]}],"limit":5}'
+      gql: "MATCH (f:File {id: 1}) RETURN f.id, f.name, f.content LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        aliases: [f]
+        templates:
+          f:
+            entity: File
+            virtual_columns: { $contains: [{ name: content, service: gitaly }] }
+            columns: { $contains: [project_id, commit_sha, branch, path] }
+            injected_columns: { $contains: [project_id, commit_sha, branch, path] }
+
+  - name: Searches without virtual columns need no hydration
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","name","path"]}],"limit":5}'
+      gql: "MATCH (f:File {id: 1}) RETURN f.id, f.name, f.path LIMIT 5"
+    expect: { hydration: { kind: none } }
+
+  - name: Aggregations hydrate selected virtual columns
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","content"]}],"group_by":["f"],"aggregations":[{"count":"f","as":"total"}],"limit":5}'
+      gql: "MATCH (f:File {id: 1}) RETURN f{.id, .content}, count(f) AS total LIMIT 5"
+    expect: { hydration: { kind: static, templates: { f: { virtual_columns: { $contains: [{ name: content }] } } } } }
+
+  - name: Traversals hydrate virtual columns on the selecting node
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","name","content"]},{"id":"b","entity":"Branch","columns":["id","name"]}],"relationships":[{"type":"ON_BRANCH","from":"f","to":"b"}],"limit":5}'
+      gql: "MATCH (f:File {id: 1})-[:ON_BRANCH]->(b:Branch) RETURN f.id, f.name, f.content, b.id, b.name LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        templates: { f: { entity: File, virtual_columns: { $contains: [{ name: content, service: gitaly }] } } }
+
+  - name: Traversal hydration injects virtual column dependencies
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"b","entity":"Branch","node_ids":[1],"columns":["id","name"]},{"id":"f","entity":"File","columns":["id","content"]}],"relationships":[{"type":"ON_BRANCH","from":"f","to":"b"}],"limit":5}'
+      gql: "MATCH (b:Branch {id: 1})<-[:ON_BRANCH]-(f:File) RETURN b.id, b.name, f.id, f.content LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        templates:
+          f:
+            columns: { $contains: [project_id, commit_sha, branch, path] }
+            injected_columns: { $contains: [project_id, commit_sha, branch, path] }
+
+  - name: Definition content injects its byte-range dependencies
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","path"]},{"id":"def","entity":"Definition","columns":["id","name","content"]}],"relationships":[{"type":"DEFINES","from":"f","to":"def"}],"limit":5}'
+      gql: "MATCH (f:File {id: 1})-[:DEFINES]->(def:Definition) RETURN f.id, f.path, def.id, def.name, def.content LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        templates:
+          def:
+            entity: Definition
+            virtual_columns: { $contains: [{ name: content }] }
+            columns: { $contains: [project_id, commit_sha, branch, file_path, start_byte, end_byte] }
+
+  - name: Merge request diffs hydrate through gitaly with injected dependencies
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"columns":["id","title","diff"]}],"limit":5}'
+      gql: "MATCH (mr:MergeRequest {id: 1}) RETURN mr.id, mr.title, mr.diff LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        templates:
+          mr:
+            entity: MergeRequest
+            virtual_columns: { $contains: [{ name: diff, service: gitaly }] }
+            columns: { $contains: [project_id, iid] }
+            injected_columns: { $contains: [project_id] }
+
+  - name: Several entities can hydrate virtual columns in one query
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["id","path","content"]},{"id":"def","entity":"Definition","columns":["id","name","content"]}],"relationships":[{"type":"DEFINES","from":"f","to":"def"}],"limit":5}'
+      gql: "MATCH (f:File {id: 1})-[:DEFINES]->(def:Definition) RETURN f.id, f.path, f.content, def.id, def.name, def.content LIMIT 5"
+    expect:
+      hydration:
+        kind: static
+        templates:
+          f: { virtual_columns: { $contains: [{ name: content }] } }
+          def: { virtual_columns: { $contains: [{ name: content }] } }

@@ -1,0 +1,12 @@
+name: Filter-only FK predicates keep the direct latest-row scan without candidate keys
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"j","to":"p"}],"group_by":["j"],"aggregations":[{"count":"j","as":"fail_count"}],"limit":20}'
+  gql: "MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN j, count(j) AS fail_count LIMIT 20"
+
+physical:
+  clickhouse:
+    emitted:
+      ctes: { absent: true }
+      expect:
+        - (Filter j.status = 'failed', j._deleted = false, j.project_id = 278964 (Deduplicate Final (Scan Table(gl_job) AS j)))

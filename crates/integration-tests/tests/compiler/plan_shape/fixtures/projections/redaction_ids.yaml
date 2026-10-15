@@ -1,0 +1,15 @@
+cases:
+  - name: Definitions report their project as the redaction ID
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name","project_id"]}],"limit":10}'
+      gql: "MATCH (d:Definition {id: 1}) RETURN d.name, d.project_id LIMIT 10"
+    physical:
+      clickhouse:
+        compiled: { expect: ["(Project d.project_id AS _orbit_d_id, 'Definition' AS _orbit_d_type, ... (_))"] }
+
+  - name: Projects report their own ID as the redaction ID
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1],"columns":["name"]}],"limit":10}'
+      gql: "MATCH (p:Project {id: 1}) RETURN p.name LIMIT 10"
+    physical:
+      clickhouse: { compiled: { expect: ["(Project p.id AS _orbit_p_id, 'Project' AS _orbit_p_type, ... (_))"] } }

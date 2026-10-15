@@ -1,0 +1,52 @@
+cases:
+  - name: Traversal-path prefixes inside the caller scope compile
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"limit":10}'
+      gql: MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/100/' RETURN g LIMIT 10
+
+  - name: The caller root prefix compiles
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"traversal_path":{"starts_with":"1/"}}}],"limit":10}'
+      gql: MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/' RETURN g LIMIT 10
+
+  - name: Traversal-path equality inside the caller scope compiles
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":"1/100/1000/"}}],"limit":10}'
+      gql: "MATCH (p:Project {traversal_path: '1/100/1000/'}) RETURN p LIMIT 10"
+
+  - name: Traversal paths outside the caller scope reject
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"traversal_path":"2/"}}],"limit":10}'
+      gql: "MATCH (mr:MergeRequest {traversal_path: '2/'}) RETURN mr LIMIT 10"
+    expect: { error: { reason: authorization, contains: [authorized traversal_path scope] } }
+
+  - name: Traversal paths above the caller scope reject
+    security: { paths: [1/100/] }
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":"1/"}}],"limit":10}'
+      gql: "MATCH (p:Project {traversal_path: '1/'}) RETURN p LIMIT 10"
+    expect: { error: { reason: authorization, contains: [authorized traversal_path scope] } }
+
+  - name: Traversal paths need a trailing slash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"traversal_path":{"starts_with":"1/100"}}}],"limit":10}'
+      gql: MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/100' RETURN g LIMIT 10
+    expect: { error: { contains: [invalid traversal_path format] } }
+
+  - name: Traversal paths accept only eq, in, and starts_with
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"contains":"100"}}}],"limit":10}'
+      gql: MATCH (p:Project) WHERE p.traversal_path CONTAINS '100' RETURN p LIMIT 10
+    expect: { error: { contains: ["only eq, in, and starts_with"] } }
+
+  - name: Traversal paths below the entity role floor reject
+    security: { authorized_paths: [{ path: 1/100/, access_level: 20 }] }
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"v","entity":"Vulnerability","filters":{"traversal_path":"1/100/1000/"}}],"limit":10}'
+      gql: "MATCH (v:Vulnerability {traversal_path: '1/100/1000/'}) RETURN v LIMIT 10"
+    expect: { error: { reason: authorization, contains: [authorized traversal_path scope] } }
+
+  - name: Traversal paths may be selected as columns
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","columns":["name","traversal_path"],"node_ids":[100]}],"limit":10}'
+      gql: "MATCH (g:Group {id: 100}) RETURN g.name, g.traversal_path LIMIT 10"

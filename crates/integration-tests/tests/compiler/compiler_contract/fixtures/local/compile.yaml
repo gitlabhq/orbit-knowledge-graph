@@ -1,0 +1,27 @@
+backend: duckdb
+
+cases:
+  - name: Local filters bind values as parameters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"columns":["name"],"filters":{"name":"alice"}}],"limit":10}'
+      gql: "MATCH (d:Definition {id: 1, name: 'alice'}) RETURN d.name LIMIT 10"
+    expect: { params: { contains: [{ value: alice }], inlined_absent: ["'alice'"] } }
+
+  - name: Local untyped relationships compile
+    query: { gql: "MATCH (f:File {id: 1})-[e]->(d:Definition) RETURN d.name" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+
+  - name: Local open-ended scans compile without selectivity
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","columns":["name"]}]}'
+      gql: MATCH (d:Definition) RETURN d.name
+
+  - name: Local counts compile without node IDs
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"d","entity":"Definition"}],"aggregations":[{"count":"d","as":"n"}]}'
+      gql: MATCH (d:Definition) RETURN count(d) AS n
+
+  - name: Local ordering across a traversal compiles
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1]},{"id":"d","entity":"Definition","columns":["name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"order_by":"d.name"}'
+      gql: "MATCH (f:File {id: 1})-[e:DEFINES]->(d:Definition) RETURN d.name ORDER BY d.name"

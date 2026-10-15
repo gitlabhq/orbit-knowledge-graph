@@ -1,0 +1,62 @@
+cases:
+  - name: A scoped container chain elides every hop to FK node joins
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}],"group_by":["p"],"aggregations":[{"count":"f","as":"c"}],"limit":20}'
+      gql: "MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) RETURN p, count(f) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Join ON mr.project_id = p.id (_) (_))
+            - (Join ON mr.latest_merge_request_diff_id = d.id (_) (_))
+            - (Join ON f.merge_request_diff_id = d.id (_) (_))
+            - (Scan Table(gl_project) AS p)
+          reject: [(Scan Table(gl_edge) ...), (Scan Table(gl_ci_edge) ...), (Scan Table(gl_group) AS g)]
+
+  - name: A non-FK relationship keeps the container edge scan
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}],"group_by":["p"],"aggregations":[{"count":"n","as":"c"}],"limit":20}'
+      gql: "MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_NOTE]->(n:Note) RETURN p, count(n) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter _orbit_edge_0.relationship_kind = 'CONTAINS', _orbit_edge_2.relationship_kind = 'HAS_NOTE', ... (_))
+            - (Scan Table(gl_group) AS g)
+
+  - name: A pinned container elides to a depth-bounded path check on the contained node
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"p.created_at","as":"c"}],"limit":20}'
+      gql: "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u, count(p.created_at) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Aggregate COUNT(p.created_at) AS c, ... (_))
+            - (Join ON p.id = mr.project_id (_) (_))
+            - (Filter (StartsWith(p.traversal_path, scalar ?) AND (CountSubstrings(p.traversal_path, '/') >= ?) AND (CountSubstrings(p.traversal_path, '/') <= ?)) OR ?, ... (_))
+          reject: [(Scan Table(gl_edge) ...), (Scan Table(gl_group) AS g)]
+
+  - name: Container elision on a pinned range reads latest rows without narrowing definitions
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}],"group_by":["d.state"],"aggregations":[{"count":"d","as":"c"}],"limit":20}'
+      gql: "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff) WHERE mr.id >= 100 AND mr.id <= 100 RETURN d.state, count(d) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          ctes: { absent: true }
+          expect:
+            - (Deduplicate Final (Scan Table(gl_project) AS p))
+            - (Deduplicate Final (Scan Table(gl_merge_request_diff) AS d))
+
+  - name: A filtered contained node keeps its filter definition alongside the depth bound
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"c"}],"limit":20}'
+      gql: "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u, count(mr) AS c LIMIT 20"
+    physical:
+      clickhouse:
+        compiled:
+          ctes: { exact_order: [_filter_p] }
+          expect:
+            - (Deduplicate Final (Scan Table(gl_project) AS p))
+            - (Filter (StartsWith(p.traversal_path, scalar ?) AND (CountSubstrings(p.traversal_path, '/') >= ?) AND (CountSubstrings(p.traversal_path, '/') <= ?)) OR ?, ... (_))

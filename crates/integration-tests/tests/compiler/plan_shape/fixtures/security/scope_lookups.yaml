@@ -1,0 +1,44 @@
+security: admin
+
+cases:
+  - name: Scoped traversals check holders against the anchor's resolved path
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","columns":["id"]},{"id":"p","entity":"Project","filters":{"id":{"eq":1}}}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"}],"limit":100}'
+      gql: MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN wi.id, p LIMIT 100
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter StartsWith(wi.traversal_path, scalar(SELECT Coalesce ? AS traversal_path FROM gl_project AS _scope WHERE StartsWith(_scope.traversal_path, '1/') AND (_scope.id = 1))) OR ?, ... (Deduplicate Final (Scan Table(gl_work_item) AS wi)))
+
+  - name: Scoped aggregations check holders against the anchor's resolved path
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"wi","entity":"WorkItem","columns":["id"]},{"id":"p","entity":"Project","filters":{"id":{"eq":1}}}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"}],"group_by":["p"],"aggregations":[{"count":"wi","as":"c"}],"limit":100}'
+      gql: MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN p, count(wi) AS c LIMIT 100
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter StartsWith(wi.traversal_path, scalar(SELECT Coalesce ? AS traversal_path FROM gl_project AS _scope WHERE StartsWith(_scope.traversal_path, '1/') AND (_scope.id = 1))) OR ?, ... (Deduplicate Final (Scan Table(gl_work_item) AS wi)))
+
+  - name: Scoped count conditions exclude the scope lookup
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"g","entity":"Group","node_ids":[100]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"count":"u","as":"n"}],"limit":5}'
+      gql: "MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) RETURN g, count(u) AS n LIMIT 5"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Aggregate COUNT() FILTER [(_orbit_edge_0.relationship_kind = 'MEMBER_OF') AND (_orbit_edge_0.source_kind = 'User') AND (_orbit_edge_0.target_kind = 'Group') AND (_orbit_edge_0._deleted = false) AND (_orbit_edge_0.target_id = 100) AND _orbit_edge_0.target_id IN _filter_g.id] AS n, ... (_))
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), StartsWith(_orbit_edge_0.traversal_path, scalar(SELECT Coalesce ? AS traversal_path FROM gl_group AS _scope WHERE StartsWith(_scope.traversal_path, '1/') AND (_scope.id = 100))) OR ?, ... (_))
+
+  - name: Cross-namespace relationships stay outside the anchor scope
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"id":{"eq":1}}},{"id":"wi","entity":"WorkItem","columns":["id"]},{"id":"rel","entity":"WorkItem","columns":["id","title"]}],"relationships":[{"type":"IN_PROJECT","from":"wi","to":"p"},{"type":"RELATED_TO","from":"wi","to":"rel"}],"limit":100}'
+      gql: MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), _orbit_edge_0.target_id IN _filter_p.id, _orbit_edge_0._deleted = false, StartsWith(_orbit_edge_0.traversal_path, scalar(SELECT Coalesce ? AS traversal_path FROM gl_project AS _scope WHERE StartsWith(_scope.traversal_path, '1/') AND (_scope.id = 1))) OR ? (_))
+            - (Filter StartsWith(_orbit_edge_1.traversal_path, '1/') (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)))

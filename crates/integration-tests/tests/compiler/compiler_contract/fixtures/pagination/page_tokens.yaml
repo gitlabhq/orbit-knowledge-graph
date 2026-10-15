@@ -1,0 +1,40 @@
+cases:
+  - name: PAGE matches the JSON cursor
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":5}}'
+      gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 5
+    expect: { input: { cursor: { page_size: 5 } }, pagination: { query_hash: nonzero, key_count: 1 } }
+
+  - name: AFTER tokens bind to the statement regardless of formatting or page size
+    cursor:
+      from: { gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 }
+      keys: ["2"]
+    query:
+      gql:
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 7 AFTER '{{cursor}}'
+        - "\nMATCH ( u : User )\nWHERE u . id >= 1 AND u . id <= 10000\nRETURN u . username\nORDER BY u . id /* page */\nPAGE 7\nAFTER '{{cursor}}'\n// next page\n"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    same_hash:
+      - gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2
+    expect: { input: { cursor: { page_size: 7, after: true } }, params: { contains: [{ value: "2" }] } }
+
+  - name: AFTER tokens reject an edited statement
+    cursor:
+      from: { gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 }
+      keys: ["2"]
+    query:
+      gql:
+        - MATCH (u:User) WHERE u.id >= 2 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{{cursor}}'
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: pagination } }
+
+  - name: AFTER tokens reject a token minted by the JSON frontend
+    cursor:
+      from:
+        json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":2}}'
+      keys: ["2"]
+    query:
+      gql:
+        - MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{{cursor}}'
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { error: { reason: pagination } }

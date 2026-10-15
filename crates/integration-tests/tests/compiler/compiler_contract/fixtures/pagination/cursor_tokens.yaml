@@ -1,0 +1,50 @@
+missing_frontends: { gql: These cases exercise the JSON cursor object. }
+
+cases:
+  - name: JSON cursors read back hidden sort keys
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":20}}'
+    expect: { pagination: { key_count: 1 }, settings: { use_query_cache: null } }
+
+  - name: After tokens from the same query lower to a seek predicate
+    cursor:
+      from:
+        json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":20}}'
+      keys: ["7"]
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":20,"after":"{{cursor}}"}}'
+    expect: { input: { cursor: { after: true } }, params: { contains: [{ value: "7" }] } }
+
+  - name: After tokens minted for another query reject
+    cursor:
+      from:
+        json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[2],"columns":["username"]}],"cursor":{"page_size":20}}'
+      keys: ["7"]
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":20,"after":"{{cursor}}"}}'
+    expect: { error: { reason: pagination } }
+
+  - name: Malformed after tokens reject
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":20,"after":"not-base64!"}}'
+    expect: { error: { reason: pagination } }
+
+  - name: Offset cursors are not accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"offset":0,"page_size":10}}'
+    expect: { error: {} }
+
+  - name: Cursors need a page size
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{}}'
+    expect: { error: {} }
+
+  - name: Cursor page sizes start at one
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":0}}'
+    expect: { error: {} }
+
+  - name: Cursor page sizes stop at 1000
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"cursor":{"page_size":1001}}'
+    expect: { error: {} }

@@ -1,0 +1,11 @@
+name: Property grouping emits a scalar group key without node-group identity columns
+
+query:
+  json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level"],"aggregations":[{"count":"p","as":"project_count"}],"limit":10}'
+  gql: "MATCH (p:Project {id: 1}) RETURN p.visibility_level, count(p) AS project_count LIMIT 10"
+
+physical:
+  clickhouse:
+    compiled:
+      expect:
+        - (Aggregate group p.visibility_level, p.visibility_level AS p_visibility_level, COUNT() AS project_count (_))

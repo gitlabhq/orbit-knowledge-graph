@@ -1,0 +1,12 @@
+name: Variable-hop unions project edge tags so anchor filters push onto them
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"WorkItem","filters":{"state":{"eq":"opened"}},"columns":["iid"]},{"id":"b","entity":"WorkItem","columns":["iid"]}],"relationships":[{"type":"RELATED_TO","from":"a","to":"b","hops":[1,2]}],"limit":50}'
+  gql: "MATCH (a:WorkItem {state: 'opened'})-[:RELATED_TO*1..2]->(b:WorkItem) RETURN a.iid, b.iid LIMIT 50"
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Filter ArrayContains(_orbit_edge_0.source_tags, 'state:opened'), ... (Union ALL AS _orbit_edge_0 (_) (_)))
+        - (Project e1.source_tags AS source_tags, e2.target_tags AS target_tags, ... (_))

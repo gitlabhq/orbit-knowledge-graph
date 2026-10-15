@@ -1,0 +1,152 @@
+cases:
+  - name: DEBUG matches the JSON include_debug_sql option
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"options":{"include_debug_sql":true}}'
+      gql: "MATCH (u:User {id: 1}) RETURN u DEBUG"
+    expect: { input: { options: { include_debug_sql: true } } }
+
+  - name: properties() on neighbors matches dynamic_columns all
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"both"},"options":{"dynamic_columns":"*"}}'
+      gql: "MATCH (g:Group {id: 100})--(n) RETURN g, properties(n)"
+    expect: { input: { options: { dynamic_columns: all } } }
+
+  - name: properties() on paths matches dynamic_columns all
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}'
+      gql: "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN properties(p)"
+    expect: { input: { options: { dynamic_columns: all } } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { input: { options: { include_debug_sql: false }, cursor: null, limit: 30, order_by: null } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u DEBUG"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u DEBUG" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { input: { options: { include_debug_sql: true }, cursor: null, limit: 30, order_by: null } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u LIMIT 7"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u LIMIT 7" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { input: { options: { include_debug_sql: false }, cursor: null, limit: 7, order_by: null } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u LIMIT 7 DEBUG"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u LIMIT 7 DEBUG" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { input: { options: { include_debug_sql: true }, cursor: null, limit: 7, order_by: null } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u PAGE 7"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u PAGE 7" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { input: { options: { include_debug_sql: false }, cursor: { page_size: 7 }, order_by: null } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u PAGE 7 DEBUG"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u PAGE 7 DEBUG" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect: { input: { options: { include_debug_sql: true }, cursor: { page_size: 7 }, order_by: null } }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u ORDER BY u.id"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.id" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input:
+        options: { include_debug_sql: false }
+        cursor: null
+        limit: 30
+        order_by: { node: u, property: id, direction: asc }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u ORDER BY u.id DEBUG"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.id DEBUG" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input:
+        options: { include_debug_sql: true }
+        cursor: null
+        limit: 30
+        order_by: { node: u, property: id, direction: asc }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u ORDER BY u.id LIMIT 7"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.id LIMIT 7" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input:
+        options: { include_debug_sql: false }
+        cursor: null
+        limit: 7
+        order_by: { node: u, property: id, direction: asc }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u ORDER BY u.id LIMIT 7 DEBUG"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.id LIMIT 7 DEBUG" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input:
+        options: { include_debug_sql: true }
+        cursor: null
+        limit: 7
+        order_by: { node: u, property: id, direction: asc }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u ORDER BY u.id PAGE 7"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.id PAGE 7" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input:
+        options: { include_debug_sql: false }
+        cursor: { page_size: 7 }
+        order_by: { node: u, property: id, direction: asc }
+
+  - name: "Optional clauses keep their options: MATCH (u:User {id: 1}) RETURN u ORDER BY u.id PAGE 7 DEBUG"
+    query: { gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.id PAGE 7 DEBUG" }
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input:
+        options: { include_debug_sql: true }
+        cursor: { page_size: 7 }
+        order_by: { node: u, property: id, direction: asc }
+
+  - name: "DEBUG inside literals and comments stays data: DEBUG"
+    query:
+      gql:
+        - "MATCH (u:User {username: 'DEBUG'}) RETURN u"
+        - "MATCH (u:User {username: 'DEBUG'}) RETURN u /* DEBUG */"
+        - "MATCH (u:User {username: 'DEBUG'}) RETURN u // DEBUG"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input: { options: { include_debug_sql: false } }
+      params: { contains: [{ value: DEBUG }], inlined_absent: [DEBUG] }
+
+  - name: "DEBUG inside literals and comments stays data: x' RETURN u DEBUG //"
+    query:
+      gql:
+        - "MATCH (u:User {username: 'x\\' RETURN u DEBUG //'}) RETURN u"
+        - "MATCH (u:User {username: 'x\\' RETURN u DEBUG //'}) RETURN u /* DEBUG */"
+        - "MATCH (u:User {username: 'x\\' RETURN u DEBUG //'}) RETURN u // DEBUG"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input: { options: { include_debug_sql: false } }
+      params: { contains: [{ value: x' RETURN u DEBUG // }], inlined_absent: [x' RETURN u DEBUG //] }
+
+  - name: "DEBUG inside literals and comments stays data: ' RETURN u DEBUG //"
+    query:
+      gql:
+        - "MATCH (u:User {username: '\\u0027 RETURN u DEBUG //'}) RETURN u"
+        - "MATCH (u:User {username: '\\u0027 RETURN u DEBUG //'}) RETURN u /* DEBUG */"
+        - "MATCH (u:User {username: '\\u0027 RETURN u DEBUG //'}) RETURN u // DEBUG"
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input: { options: { include_debug_sql: false } }
+      params: { contains: [{ value: "' RETURN u DEBUG //" }], inlined_absent: ["' RETURN u DEBUG //"] }
+
+  - name: "DEBUG inside literals and comments stays data: '; DROP TABLE gl_user; --"
+    query:
+      gql:
+        - 'MATCH (u:User {username: "''; DROP TABLE gl_user; --"}) RETURN u'
+        - 'MATCH (u:User {username: "''; DROP TABLE gl_user; --"}) RETURN u /* DEBUG */'
+        - 'MATCH (u:User {username: "''; DROP TABLE gl_user; --"}) RETURN u // DEBUG'
+    missing_frontends: { json: This GQL syntax has no JSON DSL form. }
+    expect:
+      input: { options: { include_debug_sql: false } }
+      params:
+        contains: [{ value: "'; DROP TABLE gl_user; --" }]
+        inlined_absent: ["'; DROP TABLE gl_user; --"]

@@ -1,0 +1,179 @@
+cases:
+  - name: Variable hops match JSON hop ranges
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","hops":[1,3]}]}'
+      gql:
+        - "MATCH (a:User {id: 1})-[:MEMBER_OF*1..3]->(b:Project) RETURN a, b"
+        - "MATCH (a:User {id: 1})-[:MEMBER_OF*1..3 {}]->(b:Project) RETURN a, b"
+
+  - name: Exact hop counts match JSON hop pairs
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","hops":[2,2]}]}'
+      gql: ["MATCH (a:User {id: 1})-[:MEMBER_OF*2]->(b:Project) RETURN a, b"]
+
+  - name: Relationship WHERE predicates match JSON relationship filters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":{"gte":2}}}]}'
+      gql: ["MATCH (a:User {id: 1})-[r:MEMBER_OF]->(b:Project) WHERE r.target_id >= 2 RETURN a, b"]
+
+  - name: Inline relationship properties match JSON relationship filters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"a","to":"b","filters":{"target_id":2}}]}'
+      gql:
+        - "MATCH (a:User {id: 1})-[:MEMBER_OF {target_id: 2}]->(b:Project) RETURN a, b"
+        - "MATCH (a:User {id: 1})-[:MEMBER_OF*1..1 {target_id: 2}]->(b:Project) RETURN a, b"
+
+  - name: ID lists combine with an extra equality
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"eq":2}}}]}'
+      gql: ["MATCH (u:User) WHERE u.id IN [1, 2] AND u.id = 2 RETURN u"]
+
+  - name: ID lists combine with an extra membership
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"in":[2,3]}}}]}'
+      gql: ["MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [2, 3] RETURN u"]
+
+  - name: ID lists combine with extra ranges
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":[{"gte":1},{"lte":3},{"eq":2}]}}]}'
+      gql: ["MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2] AND u.id <= 3 AND u.id = 2 RETURN u"]
+
+  - name: Pinned IDs keep extra range predicates
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":[{"in":[2,3]},{"gte":1},{"lte":3}]}}]}'
+      gql: ["MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] AND u.id >= 1 AND u.id <= 3 RETURN u"]
+
+  - name: Pinned IDs keep an extra membership
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":{"in":[2,3]}}}]}'
+      gql: ["MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] RETURN u"]
+
+  - name: Pinned IDs keep an extra equality
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":{"eq":2}}}]}'
+      gql: ["MATCH (u:User {id: 1}) WHERE u.id = 2 RETURN u"]
+
+  - name: Exclusive bounds promote to an inclusive ID range
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":2,"end":9}}]}'
+      gql: [MATCH (u:User) WHERE u.id > 1 AND u.id < 10 RETURN u]
+
+  - name: Pinned IDs and ranges promote together
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":1,"end":10000}}]}'
+      gql: ["MATCH (u:User {id: 1}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u"]
+
+  - name: Repeated text predicates match JSON filter lists
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":[{"contains":"abc"},{"contains":"def"}]}}]}'
+      gql: [MATCH (u:User) WHERE (u.username CONTAINS 'abc' AND u.username CONTAINS 'def') RETURN u]
+
+  - name: Aggregate functions, property groups, and ordering match JSON
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"Note","node_ids":[1,2]}],"group_by":[{"key":"u.confidential","as":"confidential"}],"aggregations":[{"count":"u","as":"n"},{"sum":"u.id"},{"avg":"u.id"},{"min":"u.created_at"},{"max":"u.created_at"}],"aggregation_sort":"-n","limit":10}'
+      gql:
+        - MATCH (u:Note) WHERE u.id IN [1, 2] RETURN u.confidential AS confidential, count(u) AS n, sum(u.id), avg(u.id), min(u.created_at), max(u.created_at) ORDER BY n DESC LIMIT 10
+
+  - name: Null predicates and all-property projections match JSON
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":"*","filters":{"created_at":{"is_not_null":true},"state":{"is_null":true}}}]}'
+      gql: [MATCH (u:User) WHERE u.created_at IS NOT NULL AND u.state IS NULL RETURN properties(u)]
+
+  - name: Hex literals, keyword case, comments, and semicolons are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[16]}]}'
+      gql: ["/* MATCH nothing */ match(u:User {id: 0x10}) return u; // done"]
+
+  - name: Octal literals are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[8]}]}'
+      gql: ["MATCH (u:User {id: 0o10}) RETURN u"]
+
+  - name: The minimum signed 64-bit ID is accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[-9223372036854775808]}]}'
+      gql: ["MATCH (u:User {id: -9223372036854775808}) RETURN u"]
+
+  - name: String escapes and surrogate pairs decode like JSON strings
+    query:
+      json: "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"u\",\"entity\":\"User\",\"filters\":{\"username\":\"a'b\\\\c\\n\ud83d\ude00\"}}]}"
+      gql:
+        - "MATCH (`u`:User {username: 'a\\'b\\\\c\\n\\uD83D\\uDE00'}) RETURN u"
+
+  - name: date() literals decode to strings
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":{"gte":"2024-01-01"}}}]}'
+      gql: [MATCH (u:User) WHERE u.created_at >= date('2024-01-01') RETURN u]
+
+  - name: Escaped names match plain names
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":5}'
+      gql: ["MATCH (`u`:`User` {`id`: 1}) RETURN `u` LIMIT 5"]
+
+  - name: Repeated node projections ignore property order
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}'
+      gql:
+        - "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username, .name} AS author, u{.username, .name} AS owner, count(mr) AS mr_count"
+        - "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username, .name} AS author, u{.name, .username} AS owner, count(mr) AS mr_count"
+
+  - name: Digit-string IDs match numeric IDs
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":["7"]}]}'
+      gql: ["MATCH (u:User) WHERE u.id IN ['7'] RETURN u"]
+
+  - name: Grouping a node with virtual columns matches JSON
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["id","content"]}],"group_by":["f"],"aggregations":[{"count":"f","as":"total"}],"limit":5}'
+      gql: ["MATCH (f:File) WHERE f.id IN [1, 2] RETURN f{.id, .content}, count(f) AS total LIMIT 5"]
+
+  - name: Directed relationships match JSON traversals
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}]}'
+      gql: ["MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, g"]
+
+  - name: Incoming relationships match JSON traversals
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}]}'
+      gql: ["MATCH (g:Group {id: 1})<-[:MEMBER_OF]-(u:User) RETURN g, u"]
+
+  - name: Typed undirected neighbors match JSON neighbors
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF"]}}'
+      gql: ["MATCH (g:Group {id: 1})-[:MEMBER_OF]-(n) RETURN n"]
+
+  - name: Untyped undirected neighbors match JSON neighbors
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"neighbors":{"direction":"both"}}'
+      gql: ["MATCH (g:Group {id: 1})--(n) RETURN n"]
+
+  - name: Neighbors may return the center with its node
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}'
+      gql: ["MATCH (center:User {id: 1})--(n) RETURN center, n"]
+
+  - name: Neighbors may project center properties
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1],"columns":["username","state"]}],"neighbors":{"direction":"both"}}'
+      gql: ["MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n"]
+
+  - name: Incoming neighbors accept the endpoint on either side
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"rel_types":["AUTHORED"],"direction":"incoming"}}'
+      gql:
+        - "MATCH (n)-[:AUTHORED]->(center:WorkItem {id: 1}) RETURN center, n"
+        - "MATCH (center:WorkItem {id: 1})<-[:AUTHORED]-(n) RETURN center, n"
+
+  - name: Outgoing neighbors accept the endpoint on either side
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}'
+      gql:
+        - "MATCH (n)<--(center:WorkItem {id: 1}) RETURN center, n"
+        - "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n"
+
+  - name: Both-direction neighbors accept the endpoint on either side
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"center","entity":"WorkItem","node_ids":[1]}],"neighbors":{"direction":"both"}}'
+      gql:
+        - "MATCH (n)--(center:WorkItem {id: 1}) RETURN center, n"
+        - "MATCH (center:WorkItem {id: 1})--(n) RETURN center, n"

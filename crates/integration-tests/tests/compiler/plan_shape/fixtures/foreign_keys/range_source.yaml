@@ -1,0 +1,14 @@
+name: An ID range on an FK source bounds its candidate keys and node read
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":100}},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}'
+  gql: MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 100 RETURN u, mr LIMIT 10
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (CTE _candidate_u (Project u.id AS id (Filter u.id >= 1, u.id <= 100, u._deleted = false (Scan Table(gl_user) AS u))))
+        - (Filter u.id IN _candidate_u.id, u.id >= 1, u.id <= 100 (Scan Table(gl_user) AS u))
+        - (Join ON u.id = mr.author_id (_) (_))
+      reject: [(Scan Table(gl_edge) ...)]

@@ -1,0 +1,13 @@
+name: Cross-level path endpoints union their traversal scopes instead of intersecting them
+
+query:
+  json: '{"query_type":"path_finding","nodes":[{"id":"from","entity":"Group","node_ids":[9970]},{"id":"to","entity":"Project","node_ids":[278964]}],"path":{"type":"shortest","from":"from","to":"to","max_depth":3,"rel_types":["CONTAINS"]}}'
+  gql: "MATCH p = ANY SHORTEST (`from`:Group {id: 9970})-[:CONTAINS*1..3]->(`to`:Project {id: 278964}) RETURN p"
+
+physical:
+  clickhouse:
+    planned: { expect: [(PathFinding from->to depth=3 forward=2 backward=1 scoped=true ... (_) (_))] }
+    emitted:
+      expect:
+        - (CTE _path_scope_traversal_paths (Union ALL (Aggregate ... (Scan Table(_nf_from) AS _path_scope_start)) (Aggregate ... (Scan Table(_nf_to) AS _path_scope_end))))
+      reject: [(Join ON _path_scope_start.traversal_path = _path_scope_end.traversal_path (_) (_))]

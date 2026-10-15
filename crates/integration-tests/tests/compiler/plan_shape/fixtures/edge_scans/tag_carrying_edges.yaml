@@ -1,0 +1,66 @@
+cases:
+  - name: Denormalized node filters push onto the relationship whose rows carry the tag
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"opened"}}},{"id":"cl","entity":"Label","filters":{"title":{"eq":"Community contribution"}}},{"id":"p","entity":"Project"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"cl"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"c"}]}'
+      gql: "MATCH (cl:Label {title: 'Community contribution'})<-[:HAS_LABEL]-(mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project) RETURN count(mr) AS c"
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter ArrayContains(_orbit_edge_1.source_tags, 'state:opened'), ... (_))"]
+          reject:
+            - (Filter ArrayContains(_orbit_edge_0.source_tags, 'state:opened'), ... (_))
+            - (Scan Table(gl_merge_request) ...)
+
+  - name: Denormalized filters the query relationships do not carry stay on the node table
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"opened"}}},{"id":"cl","entity":"Label","filters":{"title":{"eq":"Community contribution"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"cl"}],"aggregations":[{"count":"mr","as":"c"}]}'
+      gql: "MATCH (mr:MergeRequest {state: 'opened'})-[:HAS_LABEL]->(cl:Label {title: 'Community contribution'}) RETURN count(mr) AS c"
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter mr.state = 'opened', ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+          reject: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'state:opened'), ... (_))"]
+
+  - name: Work item mentions carry no node tags, so state stays on the node table
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"WorkItem","filters":{"state":{"eq":"opened"}}},{"id":"b","entity":"WorkItem"}],"relationships":[{"type":"MENTIONS","from":"a","to":"b"}],"aggregations":[{"count":"a","as":"n"}]}'
+      gql: "MATCH (a:WorkItem {state: 'opened'})-[:MENTIONS]->(b:WorkItem) RETURN count(a) AS n"
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter a.state = 'opened', ... (Deduplicate Final (Scan Table(gl_work_item) AS a)))"]
+          reject: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'state:opened'), ... (_))"]
+
+  - name: Merge request notes carry no node tags, so state stays on the node table
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"a","entity":"MergeRequest","filters":{"state":{"eq":"opened"}}},{"id":"b","entity":"Note"}],"relationships":[{"type":"HAS_NOTE","from":"a","to":"b"}],"aggregations":[{"count":"a","as":"n"}]}'
+      gql: "MATCH (a:MergeRequest {state: 'opened'})-[:HAS_NOTE]->(b:Note) RETURN count(a) AS n"
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Filter a.state = 'opened', ... (Deduplicate Final (Scan Table(gl_merge_request) AS a)))"]
+          reject: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'state:opened'), ... (_))"]
+
+  - name: Pinned targets keep denormalized tag filters beside their ID membership
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","node_ids":[1,2,3],"filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}],"limit":10}'
+      gql: "MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'}) WHERE mr.id IN [1, 2, 3] RETURN u, mr LIMIT 10"
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Filter ArrayContains(_orbit_edge_0.target_tags, 'state:merged'), _orbit_edge_0.target_id IN [1, 2, 3], ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+          reject: [(Scan Table(gl_merge_request) ...)]
+
+  - name: Fully denormalized aggregation counts filter edge tags without a target filter definition
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"eq":"merged"}}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}'
+      gql: "MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest {state: 'merged'}) RETURN u, count(mr) AS n LIMIT 10"
+    physical:
+      clickhouse:
+        emitted:
+          ctes: { exact_order: [_filter_u] }
+          expect:
+            - (Filter ArrayContains(_orbit_edge_0.target_tags, 'state:merged'), ... (Join ON u.id = _orbit_edge_0.source_id (_) (_)))
+          reject: [(Scan Table(gl_merge_request) ...)]

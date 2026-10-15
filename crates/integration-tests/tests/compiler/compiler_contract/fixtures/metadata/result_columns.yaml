@@ -1,0 +1,39 @@
+cases:
+  - name: Searches report node identity columns and need no hydration
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","state"]}],"limit":10}'
+      gql: "MATCH (u:User {id: 1}) RETURN u.username, u.state LIMIT 10"
+    expect:
+      result: { aliases: [u], nodes: { u: { entity: User, id_column: _orbit_u_id, type_column: _orbit_u_type } } }
+      hydration: { kind: none }
+
+  - name: Wildcard searches report node identity columns and need no hydration
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":"*"}],"limit":10}'
+      gql: "MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10"
+    expect:
+      result: { aliases: [u], nodes: { u: { id_column: _orbit_u_id, type_column: _orbit_u_type } } }
+      hydration: { kind: none }
+
+  - name: Traversals report identity columns for every node
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}],"limit":10}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u.username, p.name LIMIT 10"
+    expect:
+      result:
+        aliases: [p, u]
+        nodes:
+          u: { entity: User, id_column: _orbit_u_id, type_column: _orbit_u_type }
+          p: { entity: Project, id_column: _orbit_p_id, type_column: _orbit_p_type }
+
+  - name: Aggregations report identity columns only for grouped nodes
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"mr_count"}],"limit":10}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) RETURN u{.username}, count(mr) AS mr_count LIMIT 10"
+    expect: { result: { aliases: [u], nodes: { u: { id_column: _orbit_u_id, type_column: _orbit_u_type } } } }
+
+  - name: Path finding reports a path result
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100],"columns":["name"]},{"id":"end","entity":"Project","node_ids":[200],"columns":["name"]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p"
+    expect: { result: { query_type: path_finding } }

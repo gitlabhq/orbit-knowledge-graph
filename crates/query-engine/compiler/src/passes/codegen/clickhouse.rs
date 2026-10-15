@@ -477,6 +477,54 @@ mod tests {
     }
 
     #[test]
+    fn time_buckets_cast_sub_daily_units_to_timestamps_and_others_to_dates() {
+        use crate::input::TruncateUnit;
+        for (unit, expected) in [
+            (
+                TruncateUnit::Minute,
+                "toDateTime64(toStartOfMinute(u.created_at), 0)",
+            ),
+            (
+                TruncateUnit::Hour,
+                "toDateTime64(toStartOfHour(u.created_at), 0)",
+            ),
+            (TruncateUnit::Day, "toDate32(toStartOfDay(u.created_at))"),
+            (TruncateUnit::Week, "toDate32(toStartOfWeek(u.created_at))"),
+            (
+                TruncateUnit::Month,
+                "toDate32(toStartOfMonth(u.created_at))",
+            ),
+            (
+                TruncateUnit::Quarter,
+                "toDate32(toStartOfQuarter(u.created_at))",
+            ),
+            (TruncateUnit::Year, "toDate32(toStartOfYear(u.created_at))"),
+        ] {
+            let q = Query {
+                select: vec![SelectExpr::new(
+                    Expr::TimeBucket {
+                        unit,
+                        value: Box::new(Expr::col("u", "created_at")),
+                    },
+                    "bucket",
+                )],
+                from: TableRef::scan("gl_note", "u"),
+                ..Default::default()
+            };
+            let result = codegen(
+                &Node::Query(Box::new(q)),
+                empty_ctx(),
+                QueryConfig::default(),
+            )
+            .unwrap();
+            assert_eq!(
+                result.sql,
+                format!("SELECT {expected} AS bucket FROM gl_note AS u")
+            );
+        }
+    }
+
+    #[test]
     fn simple_select() {
         let q = Query {
             select: vec![

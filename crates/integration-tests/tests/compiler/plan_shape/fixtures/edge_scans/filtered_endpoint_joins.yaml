@@ -1,0 +1,12 @@
+name: Filtered code endpoints filter their latest-row node reads with case folding
+
+query:
+  json: '{"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"path":{"ends_with":".rb"}}},{"id":"d","entity":"Definition","filters":{"name":{"starts_with":"process"}}}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":20}'
+  gql: MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.path ENDS WITH '.rb' AND d.name STARTS WITH 'process' RETURN f, d LIMIT 20
+
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Bind f (Project * (Filter EndsWith(Lower(f.path), Lower('.rb')), f._deleted = false (Deduplicate Final (Scan Table(gl_file) AS f)))))
+        - (Bind d (Project * (Filter StartsWith(Lower(d.name), Lower('process')), d._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS d)))))
