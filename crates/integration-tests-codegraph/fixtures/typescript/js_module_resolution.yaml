@@ -378,14 +378,23 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Module'
+        AND d.fqn IN ['named/util.ts', 'default/util.ts', 'namespace/util.ts', 'explicit/index.ts', 'star/index.ts']
       RETURN d.fqn AS fqn
-      LIMIT 100
     assert:
+      - { row_count: 5 }
       - { row: { fqn: "named/util.ts" } }
       - { row: { fqn: "default/util.ts" } }
       - { row: { fqn: "namespace/util.ts" } }
       - { row: { fqn: "explicit/index.ts" } }
       - { row: { fqn: "star/index.ts" } }
+
+  - name: Synthesizes one module definition per file
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Module'
+      RETURN count(d) AS modules
+    assert:
+      - { row: { modules: 42 } }
 
   - name: Named import targets export proxy
     query: |

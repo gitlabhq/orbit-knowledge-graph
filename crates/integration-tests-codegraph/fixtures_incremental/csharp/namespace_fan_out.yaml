@@ -291,10 +291,9 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'M'
-      RETURN caller.file_path AS file, callee.fqn AS callee
-      LIMIT 100
+      RETURN callee.fqn AS callee, count(caller) AS callers
     assert:
-      - { row_count: 36 }
-      - { where: { callee: Ns0.C0_0.Run }, row_count: 12 }
-      - { where: { callee: Ns1.C1_0.Run }, row_count: 12 }
-      - { where: { callee: Ns2.C2_0.Run }, row_count: 12 }
+      - { row_count: 3 }
+      - { row: { callee: Ns0.C0_0.Run, callers: 12 } }
+      - { row: { callee: Ns1.C1_0.Run, callers: 12 } }
+      - { row: { callee: Ns2.C2_0.Run, callers: 12 } }
