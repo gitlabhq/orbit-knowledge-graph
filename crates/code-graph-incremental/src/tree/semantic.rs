@@ -89,6 +89,7 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
                 || node.is(C::SsaReturn)
                 || node.is(C::Member)
                 || node.is(C::Obj)
+                || node.is(C::Lambda)
         };
         std::iter::successors(Some(self), |node| {
             (!stop(node)).then(|| node.last_named()).flatten()

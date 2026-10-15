@@ -51,6 +51,7 @@ enum WorkItem {
         first_exit: usize,
     },
     ExitLoop(BlockId),
+    ExitLambda(BlockId),
     ExitBinding {
         binding: u32,
         lhs: u32,
@@ -167,6 +168,7 @@ impl<'t> Fold<'t> {
                     self.loops.pop();
                     self.cur = self.ssa.finish_loop(header, self.cur);
                 }
+                WorkItem::ExitLambda(parent) => self.cur = parent,
                 WorkItem::ExitBinding {
                     binding,
                     lhs,
@@ -255,6 +257,11 @@ impl<'t> Fold<'t> {
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
+            Self::push_children(c, stack);
+            return;
+        } else if k == C::Lambda {
+            stack.push(WorkItem::ExitLambda(self.cur));
+            self.cur = self.ssa.add_sealed_successor(self.cur);
             Self::push_children(c, stack);
             return;
         }
@@ -959,7 +966,7 @@ impl<'t> Fold<'t> {
     }
 
     fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {
-        if tail.is(C::Obj) {
+        if tail.is(C::Obj) || tail.is(C::Lambda) {
             return Value::Opaque;
         }
         if let Some(slot) = self.field_slot(tail) {
