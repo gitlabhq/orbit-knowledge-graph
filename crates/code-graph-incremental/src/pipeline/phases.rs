@@ -792,6 +792,7 @@ mod tests {
 
             release_first.send(()).unwrap();
             settles("big runs alone", || admission.lock().used == 3 * MIB);
+            settles("big is recorded", || order.lock().unwrap().len() == 2);
             assert_eq!(*order.lock().unwrap(), ["first", "big"]);
 
             release_big.send(()).unwrap();

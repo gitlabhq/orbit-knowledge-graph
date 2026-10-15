@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
-use super::memory::{MemoryKill, MemoryWatchdog};
+use super::memory::{MemoryKill, MemoryWatchdog, Registration};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
 use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
@@ -83,6 +83,11 @@ impl From<HandlerError> for IndexError {
     fn from(err: HandlerError) -> Self {
         Self::Failed(err)
     }
+}
+
+/// A failure during a memory kill is the kill, whatever shape the cancel took.
+fn unless_killed(memory: &Registration, error: IndexError) -> IndexError {
+    memory.exceeded().map_or(error, IndexError::MemoryExceeded)
 }
 
 struct WorkClock {
@@ -366,9 +371,7 @@ impl CodeIndexer {
 
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
-        // Registered from the lane wait to the end of the parse: the memory the
-        // watchdog can free lives there, and a kill after a completed parse must
-        // not turn a landed graph into a failure.
+        let _holds_memory = self.memory.hold();
         let memory = self
             .memory
             .register(repository.source_bytes(), cancel.clone());
@@ -377,9 +380,7 @@ impl CodeIndexer {
             .await
         {
             Ok(lane) => lane,
-            Err(error) => {
-                return Err(memory.exceeded().map_or(error, IndexError::MemoryExceeded));
-            }
+            Err(error) => return Err(unless_killed(&memory, error)),
         };
 
         let indexed = clock
@@ -394,18 +395,14 @@ impl CodeIndexer {
             .await;
         let run = match indexed {
             Some(Ok(run)) => run,
-            Some(Err(error)) => {
-                return Err(memory
-                    .exceeded()
-                    .map_or(IndexError::Failed(error), IndexError::MemoryExceeded));
-            }
+            Some(Err(error)) => return Err(unless_killed(&memory, IndexError::Failed(error))),
             None => {
                 // The blocking parse outlives the dropped future; cancel makes it bail.
                 cancel.cancel();
                 let budget = IndexError::BudgetExceeded {
                     budget: budget.unwrap_or_default(),
                 };
-                return Err(memory.exceeded().map_or(budget, IndexError::MemoryExceeded));
+                return Err(unless_killed(&memory, budget));
             }
         };
         drop(memory);

@@ -4,7 +4,7 @@
 //! the newest on a tie, and the next kill waits until it has unwound.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
@@ -16,7 +16,8 @@ use super::metrics::CodeMetrics;
 const KILL_AT_PERCENT: u128 = 90;
 const INTERVAL: Duration = Duration::from_millis(100);
 const UNREADABLE_SAMPLES_BEFORE_GIVING_UP: u32 = 10;
-/// cgroup v1 reports "no limit" as PAGE_COUNTER_MAX pages.
+/// cgroup v1 reports "no limit" as a value near i64::MAX; at or above this
+/// threshold there is none.
 const V1_NO_LIMIT: u64 = 1 << 62;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,8 +60,19 @@ pub struct MemoryWatchdog {
     cgroup: Cgroup,
     metrics: CodeMetrics,
     jobs: Mutex<Vec<Job>>,
+    holding: Arc<AtomicUsize>,
     next_id: AtomicU64,
     watching: AtomicBool,
+}
+
+/// A job that holds memory, from its fetch to its last durable write; a kill
+/// is `alone` only when no other job holds any.
+pub struct Hold(Arc<AtomicUsize>);
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// Keeps the job eligible for cancellation; dropping it withdraws the job.
@@ -92,9 +104,15 @@ impl MemoryWatchdog {
             cgroup,
             metrics,
             jobs: Mutex::new(Vec::new()),
+            holding: Arc::new(AtomicUsize::new(0)),
             next_id: AtomicU64::new(0),
             watching: AtomicBool::new(false),
         })
+    }
+
+    pub fn hold(&self) -> Hold {
+        self.holding.fetch_add(1, Ordering::AcqRel);
+        Hold(self.holding.clone())
     }
 
     pub fn register(self: &Arc<Self>, bytes: u64, cancel: CancellationToken) -> Registration {
@@ -130,6 +148,7 @@ impl MemoryWatchdog {
                         info!(cgroup = %cgroup.dir.display(), limit = pressure.limit, "memory watchdog armed");
                         armed = true;
                     }
+                    unreadable = 0;
                     if let Some((kill, bytes)) = watchdog.tick(pressure) {
                         warn!(
                             used = kill.pressure.used,
@@ -170,7 +189,7 @@ impl MemoryWatchdog {
         let victim = jobs.iter().max_by_key(|job| job.bytes)?;
         let kill = MemoryKill {
             pressure,
-            alone: jobs.len() == 1,
+            alone: self.holding.load(Ordering::Acquire) <= 1,
         };
         let _ = victim.killed.set(kill);
         victim.cancel.cancel();
@@ -235,20 +254,33 @@ fn cgroup_from(cgroups: &str, root: &Path) -> Cgroup {
             v1 = Some(path);
         }
     }
-    let relative = |path: &str| path.trim_start_matches('/').to_owned();
-    let v2 = v2.map(|path| root.join(relative(path)));
+    let v2 = v2.map(|path| at(root.to_path_buf(), path, false));
     match (v2, v1) {
-        (Some(dir), None) => Cgroup { dir, v1: false },
-        (Some(dir), Some(_)) if dir.join("memory.max").exists() => Cgroup { dir, v1: false },
-        (_, Some(path)) => Cgroup {
-            dir: root.join("memory").join(relative(path)),
-            v1: true,
-        },
+        (Some(cgroup), None) => cgroup,
+        (Some(cgroup), Some(_)) if cgroup.dir.join("memory.max").exists() => cgroup,
+        (_, Some(path)) => at(root.join("memory"), path, true),
         (None, None) => Cgroup {
             dir: root.to_path_buf(),
             v1: false,
         },
     }
+}
+
+/// The named cgroup under its mount, or the mount root itself when the name
+/// is the host's view (no cgroup namespace) and does not exist there.
+fn at(mount: PathBuf, path: &str, v1: bool) -> Cgroup {
+    let limit_file = if v1 {
+        "memory.limit_in_bytes"
+    } else {
+        "memory.max"
+    };
+    let nested = mount.join(path.trim_start_matches('/'));
+    let dir = if nested.join(limit_file).exists() || !mount.join(limit_file).exists() {
+        nested
+    } else {
+        mount
+    };
+    Cgroup { dir, v1 }
 }
 
 #[cfg(test)]
@@ -293,6 +325,7 @@ mod tests {
     async fn under_pressure_the_largest_newest_job_is_cancelled_and_then_waited_for() {
         let dir = cgroup("1000", 500);
         let watchdog = watchdog(&dir);
+        let _holds: Vec<_> = (0..3).map(|_| watchdog.hold()).collect();
         let (small, big, newest) = (
             CancellationToken::new(),
             CancellationToken::new(),
@@ -332,18 +365,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_job_killed_alone_is_told_so() {
+    async fn a_kill_is_alone_only_when_no_other_job_holds_memory() {
         let dir = cgroup("1000", 950);
         let watchdog = watchdog(&dir);
+        let flushing = watchdog.hold();
+        let _parsing = watchdog.hold();
         let only = CancellationToken::new();
         let job = watchdog.register(7, only.clone());
         let (kill, bytes) = watchdog
             .tick(pressure(&dir))
             .unwrap_or_else(|| panic!("a kill"));
-        assert!(kill.alone && only.is_cancelled());
+        assert!(!kill.alone, "another job still holds its write buffers");
+        assert!(only.is_cancelled());
         assert_eq!((bytes, job.exceeded()), (7, Some(kill)));
-    }
+        drop(job);
 
+        drop(flushing);
+        let again = CancellationToken::new();
+        let job = watchdog.register(7, again.clone());
+        let (kill, _) = watchdog
+            .tick(pressure(&dir))
+            .unwrap_or_else(|| panic!("a kill"));
+        assert!(kill.alone && again.is_cancelled());
+        assert_eq!(job.exceeded(), Some(kill));
+    }
     #[tokio::test]
     async fn no_jobs_means_nothing_to_cancel() {
         let dir = cgroup("1000", 1000);
@@ -417,13 +462,40 @@ mod tests {
                 v1: false
             }
         );
+        let v1_pod = root.path().join("memory/kubepods/pod1");
+        std::fs::create_dir_all(&v1_pod).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(v1_pod.join("memory.limit_in_bytes"), "1\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+        let v1_lines =
+            "11:cpu,cpuacct:/kubepods/pod1\n10:memory:/kubepods/pod1\n1:name=systemd:/x\n";
         assert_eq!(
-            cgroup_from(
-                "11:cpu,cpuacct:/kubepods/pod1\n10:memory:/kubepods/pod1\n1:name=systemd:/x\n",
-                root.path()
-            ),
+            cgroup_from(v1_lines, root.path()),
             Cgroup {
-                dir: root.path().join("memory/kubepods/pod1"),
+                dir: v1_pod,
+                v1: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_host_view_path_that_is_not_mounted_falls_back_to_the_mount_root() {
+        let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(root.path().join("memory.max"), "1\n").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            cgroup_from("0::/kubepods/burstable/pod1/abc\n", root.path()),
+            Cgroup {
+                dir: root.path().to_path_buf(),
+                v1: false
+            }
+        );
+        let v1_root = root.path().join("memory");
+        std::fs::create_dir_all(&v1_root).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(v1_root.join("memory.limit_in_bytes"), "1\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            cgroup_from("10:memory:/kubepods/pod1\n", root.path()),
+            Cgroup {
+                dir: v1_root,
                 v1: true
             }
         );
