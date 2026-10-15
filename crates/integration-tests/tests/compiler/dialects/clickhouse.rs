@@ -630,7 +630,7 @@ fn multi_table_wildcard_keeps_the_default_table_scan() {
 }
 
 #[test]
-fn multi_table_mixed_types_rejects_unsupported_traversal_scan() {
+fn multi_table_mixed_types_scan_every_route() {
     let orbit_query =
         "MATCH (u:User {id: 1})-[:AUTHORED|DEFINES]->(p:Project) RETURN u, p LIMIT 25";
     let json = r#"{
@@ -642,11 +642,11 @@ fn multi_table_mixed_types_rejects_unsupported_traversal_scan() {
         "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let error = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap_err();
-    assert!(
-        error.to_string().contains("multiple edge tables"),
-        "{error}"
-    );
+    let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
+    assert!(rendered.contains("FROM gl_edge"), "{rendered}");
+    assert!(rendered.contains("UNION ALL"), "{rendered}");
 }
 
 #[test]

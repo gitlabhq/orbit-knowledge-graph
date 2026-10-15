@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
-use query_data_model::{DuckDbDataModel, OrbitQueryModel};
+use query_data_model::DuckDbDataModel;
 
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalSource};
@@ -35,6 +35,9 @@ pub fn plan(
 fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryPlan> {
     let input = context.input;
     context.hops = super::edge_chain::build_hops(input, context.model)?;
+    for (index, hop) in context.hops.iter_mut().enumerate() {
+        hop.alias = format!("e{index}");
+    }
     let mut nodes = super::edge_chain::build_node_plans(input, context.model);
     context.denormalized = super::denormalized_facts(input, context.model);
     let placement = super::conditions::place_conditions(
@@ -61,16 +64,8 @@ fn traversal(mut context: PlanningContext<'_, DuckDbDataModel>) -> Result<QueryP
         let edge = if hop.max_hops > 1 {
             super::hops::multi_hop(hop, &alias, &context.nodes)
         } else {
-            PhysicalSource::Scan {
-                table: hop
-                    .single_edge_table()
-                    .unwrap_or_else(|| context.model.default_edge_table())
-                    .to_string(),
-                alias: alias.clone(),
-                final_: false,
-                relationship: Some(hop.input_index),
-            }
-            .filter(context.edge_predicates(&alias, hop, false))
+            PhysicalSource::edge(hop, &alias, false)
+                .filter(context.edge_predicates(&alias, hop, false))
         }
         .filter(
             hop.filters
