@@ -994,11 +994,22 @@ code-indexing-benchmark-v2-linux:
         --output-file "gkg-benchmark-${SCENARIO}-results.json"
 
       if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
+        # Post the summary only: drop every <details> block and link the full report.
+        REPORT="gkg-benchmark-${SCENARIO}-results.md"
+        COMMENT_FILE="gkg-benchmark-${SCENARIO}-comment.md"
+        awk '
+          /<details>/ { depth++ }
+          depth == 0 { print }
+          /<\/details>/ && depth > 0 { depth-- }
+        ' "$REPORT" > "$COMMENT_FILE"
+        printf '\nFull results: [report](%s/artifacts/file/%s) · [raw markdown](%s/artifacts/raw/%s)\n' \
+          "$CI_JOB_URL" "$REPORT" "$CI_JOB_URL" "$REPORT" >> "$COMMENT_FILE"
+
         gitlab-xtasks comment post \
           --type add-or-edit \
           --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
           --token "$BENCHMARK_GITLAB_TOKEN" \
-          --file-path "gkg-benchmark-${SCENARIO}-results.md"
+          --file-path "$COMMENT_FILE"
       else
         echo "Skipping benchmark comment: BENCHMARK_GITLAB_TOKEN unavailable (expected for fork MRs)."
       fi
@@ -1007,7 +1018,7 @@ code-indexing-benchmark-v2-linux:
       - gkg-benchmark-*-results.md
       - gkg-benchmark-*-results.json
       - gkg-benchmark-*.json
-    expire_in: 1 week
+    expire_in: 30 days
 
 code-indexing-benchmark-v2-analyze:
   extends: .code-indexing-benchmark-analyze-template
