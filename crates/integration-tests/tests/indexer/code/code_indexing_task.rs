@@ -2409,7 +2409,21 @@ async fn disk_is_clean_after_a_timed_out_job(incremental: bool) {
     );
 }
 
-async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
+#[derive(Debug, PartialEq)]
+enum CancelledRun {
+    FailedProcessing,
+    RefundedBackpressure,
+    Other,
+}
+
+async fn run_with_cancelled_token(
+    incremental: bool,
+    leasing: bool,
+) -> (
+    CancelledRun,
+    integration_testkit::TestContext,
+    CodeIndexingDeps,
+) {
     if incremental {
         enable_incremental("993/993/");
     }
@@ -2428,7 +2442,12 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
         &[("src/Main.java", "public class Main { void a() {} }")],
     );
 
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let mut pipeline_config = indexer::testkit::test_pipeline_configuration();
+    if !leasing {
+        pipeline_config.archive_storage_budget = 0;
+        pipeline_config.archive_tenant_budget = 0;
+    }
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, pipeline_config);
     let request = indexer::modules::code::IndexingRequest {
         project_id,
         branch: "main".to_string(),
@@ -2457,22 +2476,45 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
         .pipeline
         .index_project(&handler_context(), &request, &mut observer, cancel, &lock)
         .await;
-    assert!(
-        matches!(
-            result,
-            Err(indexer::modules::code::IndexError::Failed(
-                indexer::handler::HandlerError::Processing(_)
-            ))
-        ),
+    let outcome = match result {
+        Err(indexer::modules::code::IndexError::Failed(
+            indexer::handler::HandlerError::Processing(_),
+        )) => CancelledRun::FailedProcessing,
+        Err(indexer::modules::code::IndexError::NoLane { .. }) => {
+            CancelledRun::RefundedBackpressure
+        }
+        _ => CancelledRun::Other,
+    };
+    (outcome, clickhouse, deps)
+}
+
+async fn cancelled_run_that_finishes_writes_no_checkpoint(incremental: bool) {
+    let (outcome, clickhouse, deps) = run_with_cancelled_token(incremental, false).await;
+    assert_eq!(
+        outcome,
+        CancelledRun::FailedProcessing,
         "a cancelled run must fail with Processing so it is retried, not checkpointed"
     );
 
     deps.pipeline.flush().await.expect("flush");
 
     assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        latest_checkpoint_task_id(&clickhouse, "993/993/", 993, "main").await,
         None,
         "a cancelled run must not write a checkpoint"
+    );
+}
+
+async fn cancelled_lease_wait_is_refunded_backpressure(incremental: bool) {
+    let (outcome, clickhouse, _deps) = run_with_cancelled_token(incremental, true).await;
+    assert_eq!(
+        outcome,
+        CancelledRun::RefundedBackpressure,
+        "a lost project lock must stop the lease wait and requeue without an attempt"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, "993/993/", 993, "main").await,
+        None
     );
 }
 
@@ -2481,4 +2523,5 @@ both_engines! {
     heartbeat_keeps_a_slow_job_alive_and_indexes_it,
     disk_is_clean_after_a_timed_out_job,
     cancelled_run_that_finishes_writes_no_checkpoint,
+    cancelled_lease_wait_is_refunded_backpressure,
 }

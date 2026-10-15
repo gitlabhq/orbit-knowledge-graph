@@ -9,6 +9,7 @@ pub mod labels {
     pub const STAGE: &str = "stage";
     pub const LANGUAGE: &str = "language";
     pub const PHASE: &str = "phase";
+    pub const STORAGE: &str = "storage";
 }
 
 const DOMAIN: &str = "indexer.code";
@@ -225,7 +226,46 @@ pub const PIPELINE_PHASE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
+pub const ARCHIVE_LEASE_WAIT: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.archive.lease.wait",
+    "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when \
+     GitLab does not report one).",
+    Some("s"),
+    &[labels::STORAGE],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
+pub const ARCHIVE_LEASE_SLOTS_IN_USE: MetricSpec = MetricSpec::up_down_counter(
+    "gkg.indexer.code.archive.lease.slots_in_use",
+    "Archive lease slots held by this pod. Sum across pods for the storage's load against its budget.",
+    None,
+    &[labels::STORAGE],
+    DOMAIN,
+);
+
+pub const ARCHIVE_DURATION: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.archive.duration",
+    "Archive download and extraction time while holding a lease, per storage.",
+    Some("s"),
+    &[labels::STORAGE],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
+pub const ARCHIVE_LEASE_LOST: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.archive.lease.lost",
+    "Archive downloads cancelled because the lease could not be renewed.",
+    None,
+    &[labels::STORAGE],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
+    &ARCHIVE_LEASE_WAIT,
+    &ARCHIVE_LEASE_SLOTS_IN_USE,
+    &ARCHIVE_DURATION,
+    &ARCHIVE_LEASE_LOST,
     &EVENTS_PROCESSED,
     &HANDLER_DURATION,
     &REPOSITORY_FETCH_DURATION,

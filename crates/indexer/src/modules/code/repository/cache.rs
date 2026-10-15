@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use async_trait::async_trait;
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
@@ -10,6 +11,7 @@ use orbit_utils::fs_walk::{FileInventory, StreamError};
 use tempfile::TempDir;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
+use super::CancelOnDrop;
 use super::service::ByteStream;
 use crate::modules::code::metrics::CodeMetrics;
 
@@ -100,7 +102,15 @@ impl RepositoryCache for LocalRepositoryCache {
     ) -> Result<CachedRepository, RepositoryCacheError> {
         let dir = TempDir::new_in(&self.base_dir)?;
 
-        let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
+        // The detached blocking reader outlives a dropped future; the flag makes its next read fail.
+        let cancel = CancelOnDrop::default();
+        let cancelled = cancel.flag();
+        let reader = StreamReader::new(archive_stream.map(move |r| {
+            if cancelled.load(Ordering::Relaxed) {
+                return Err(std::io::Error::other("archive extraction cancelled"));
+            }
+            r.map_err(std::io::Error::other)
+        }));
         let handle = tokio::runtime::Handle::current();
         let to_cap = |v: u64| if v == 0 { None } else { Some(v) };
         let mut filter = CodeFilter::new(

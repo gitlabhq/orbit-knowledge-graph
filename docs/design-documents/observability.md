@@ -89,6 +89,10 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
 | `gkg.indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
 | `gkg.indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
+| `gkg.indexer.code.archive.lease.wait` | Histogram | s | `storage` | Time queued for a per-storage archive lease (`_tenant` when GitLab reports no storage) |
+| `gkg.indexer.code.archive.lease.slots_in_use` | UpDownCounter | count | `storage` | Archive lease slots this pod holds; sum across pods to compare with the budget |
+| `gkg.indexer.code.archive.duration` | Histogram | s | `storage` | Archive download plus extraction time while holding a lease |
+| `gkg.indexer.code.archive.lease.lost` | Counter | count | `storage` | Archive downloads cancelled because the lease could not be renewed |
 | `gkg.indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
 | `gkg.indexer.code.repository.indexing.completed` | Counter | count | `outcome` (indexed, empty_repository) | Repository indexing runs completed by the code indexing handler |
 | `gkg.indexer.code.repository.source.size` | Histogram | By | | Total bytes of repository files discovered during one code indexing run |

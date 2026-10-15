@@ -1498,6 +1498,126 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
+      "description": "Archive download and extraction time while holding a lease, per storage.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 75
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p50 {{storage}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p95 {{storage}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p99 {{storage}}",
+          "refId": "C"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_duration_seconds — p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Archive download and extraction time while holding a lease, per storage.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 75
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (rate(gkg_indexer_code_archive_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_duration_seconds — observation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
       "description": "Files the stream recorded as a graph node but did not load or parse (and, for the tar source, did not write to disk). Reasons: `excluded_extension` (basename matches the `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, minified bundles), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid UTF-8), `minified` / `line_too_long` (high average line length or a >64 KiB line), `non_regular_file` (a symlink — a node, never parsed), `lfs_pointer` (a Git LFS pointer: the archive is fetched with `include_lfs_blobs=false`, so the pointer text stands in for content Orbit never indexes).",
       "fieldConfig": {
         "defaults": {
@@ -1513,10 +1633,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 75
+        "x": 0,
+        "y": 83
       },
-      "id": 29,
+      "id": 31,
       "options": {
         "legend": {
           "calcs": [
@@ -1549,6 +1669,228 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
+      "description": "Archive downloads cancelled because the lease could not be renewed.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 83
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (rate(gkg_indexer_code_archive_lease_lost_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_lost_total — rate/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Archive lease slots held by this pod. Sum across pods for the storage's load against its budget.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 83
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (gkg_indexer_code_archive_lease_slots_in_use{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"})",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_slots_in_use",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 91
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p50 {{storage}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p95 {{storage}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p99 {{storage}}",
+          "refId": "C"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_wait_seconds — p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 91
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_wait_seconds — observation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
       "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
       "fieldConfig": {
         "defaults": {
@@ -1565,9 +1907,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 75
+        "y": 91
       },
-      "id": 30,
+      "id": 36,
       "options": {
         "legend": {
           "calcs": [
@@ -1616,9 +1958,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 83
+        "y": 99
       },
-      "id": 31,
+      "id": 37,
       "options": {
         "legend": {
           "calcs": [
@@ -1667,9 +2009,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 83
+        "y": 99
       },
-      "id": 32,
+      "id": 38,
       "options": {
         "legend": {
           "calcs": [
@@ -1736,9 +2078,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 83
+        "y": 99
       },
-      "id": 33,
+      "id": 39,
       "options": {
         "legend": {
           "calcs": [
@@ -1787,9 +2129,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 91
+        "y": 107
       },
-      "id": 34,
+      "id": 40,
       "options": {
         "legend": {
           "calcs": [
@@ -1838,9 +2180,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 91
+        "y": 107
       },
-      "id": 35,
+      "id": 41,
       "options": {
         "legend": {
           "calcs": [
@@ -1889,9 +2231,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 91
+        "y": 107
       },
-      "id": 36,
+      "id": 42,
       "options": {
         "legend": {
           "calcs": [
@@ -1940,9 +2282,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 99
+        "y": 115
       },
-      "id": 37,
+      "id": 43,
       "options": {
         "legend": {
           "calcs": [
@@ -2009,9 +2351,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 99
+        "y": 115
       },
-      "id": 38,
+      "id": 44,
       "options": {
         "legend": {
           "calcs": [
@@ -2060,9 +2402,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 99
+        "y": 115
       },
-      "id": 39,
+      "id": 45,
       "options": {
         "legend": {
           "calcs": [
@@ -2129,9 +2471,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 107
+        "y": 123
       },
-      "id": 40,
+      "id": 46,
       "options": {
         "legend": {
           "calcs": [
@@ -2180,9 +2522,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 107
+        "y": 123
       },
-      "id": 41,
+      "id": 47,
       "options": {
         "legend": {
           "calcs": [
@@ -2231,9 +2573,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 107
+        "y": 123
       },
-      "id": 42,
+      "id": 48,
       "options": {
         "legend": {
           "calcs": [
@@ -2282,9 +2624,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 115
+        "y": 131
       },
-      "id": 43,
+      "id": 49,
       "options": {
         "legend": {
           "calcs": [
@@ -2351,9 +2693,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 115
+        "y": 131
       },
-      "id": 44,
+      "id": 50,
       "options": {
         "legend": {
           "calcs": [
@@ -2402,9 +2744,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 115
+        "y": 131
       },
-      "id": 45,
+      "id": 51,
       "options": {
         "legend": {
           "calcs": [
@@ -2453,9 +2795,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 123
+        "y": 139
       },
-      "id": 46,
+      "id": 52,
       "options": {
         "legend": {
           "calcs": [
@@ -2522,9 +2864,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 123
+        "y": 139
       },
-      "id": 47,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [
@@ -2573,9 +2915,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 123
+        "y": 139
       },
-      "id": 48,
+      "id": 54,
       "options": {
         "legend": {
           "calcs": [
@@ -2624,9 +2966,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 131
+        "y": 147
       },
-      "id": 49,
+      "id": 55,
       "options": {
         "legend": {
           "calcs": [
@@ -2675,9 +3017,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 131
+        "y": 147
       },
-      "id": 50,
+      "id": 56,
       "options": {
         "legend": {
           "calcs": [
@@ -2744,9 +3086,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 131
+        "y": 147
       },
-      "id": 51,
+      "id": 57,
       "options": {
         "legend": {
           "calcs": [
@@ -2795,9 +3137,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 139
+        "y": 155
       },
-      "id": 52,
+      "id": 58,
       "options": {
         "legend": {
           "calcs": [
@@ -2846,9 +3188,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 139
+        "y": 155
       },
-      "id": 53,
+      "id": 59,
       "options": {
         "legend": {
           "calcs": [
@@ -2897,9 +3239,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 139
+        "y": 155
       },
-      "id": 54,
+      "id": 60,
       "options": {
         "legend": {
           "calcs": [
@@ -2966,9 +3308,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 147
+        "y": 163
       },
-      "id": 55,
+      "id": 61,
       "options": {
         "legend": {
           "calcs": [
@@ -3002,9 +3344,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 155
+        "y": 171
       },
-      "id": 56,
+      "id": 62,
       "panels": [],
       "title": "SDLC pipeline (indexer)",
       "type": "row"
@@ -3030,9 +3372,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 156
+        "y": 172
       },
-      "id": 57,
+      "id": 63,
       "options": {
         "legend": {
           "calcs": [
@@ -3081,9 +3423,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 156
+        "y": 172
       },
-      "id": 58,
+      "id": 64,
       "options": {
         "legend": {
           "calcs": [
@@ -3150,9 +3492,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 156
+        "y": 172
       },
-      "id": 59,
+      "id": 65,
       "options": {
         "legend": {
           "calcs": [
@@ -3201,9 +3543,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 164
+        "y": 180
       },
-      "id": 60,
+      "id": 66,
       "options": {
         "legend": {
           "calcs": [
@@ -3270,9 +3612,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 164
+        "y": 180
       },
-      "id": 61,
+      "id": 67,
       "options": {
         "legend": {
           "calcs": [
@@ -3321,9 +3663,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 164
+        "y": 180
       },
-      "id": 62,
+      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -3390,9 +3732,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 172
+        "y": 188
       },
-      "id": 63,
+      "id": 69,
       "options": {
         "legend": {
           "calcs": [
@@ -3441,9 +3783,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 172
+        "y": 188
       },
-      "id": 64,
+      "id": 70,
       "options": {
         "legend": {
           "calcs": [
@@ -3492,9 +3834,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 172
+        "y": 188
       },
-      "id": 65,
+      "id": 71,
       "options": {
         "legend": {
           "calcs": [
@@ -3543,9 +3885,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 180
+        "y": 196
       },
-      "id": 66,
+      "id": 72,
       "options": {
         "legend": {
           "calcs": [
@@ -3612,9 +3954,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 180
+        "y": 196
       },
-      "id": 67,
+      "id": 73,
       "options": {
         "legend": {
           "calcs": [
@@ -3663,9 +4005,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 180
+        "y": 196
       },
-      "id": 68,
+      "id": 74,
       "options": {
         "legend": {
           "calcs": [
@@ -3699,9 +4041,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 188
+        "y": 204
       },
-      "id": 69,
+      "id": 75,
       "panels": [],
       "title": "Namespace deletion (indexer)",
       "type": "row"
@@ -3727,9 +4069,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 189
+        "y": 205
       },
-      "id": 70,
+      "id": 76,
       "options": {
         "legend": {
           "calcs": [
@@ -3796,9 +4138,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 189
+        "y": 205
       },
-      "id": 71,
+      "id": 77,
       "options": {
         "legend": {
           "calcs": [
@@ -3847,9 +4189,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 189
+        "y": 205
       },
-      "id": 72,
+      "id": 78,
       "options": {
         "legend": {
           "calcs": [
@@ -3883,9 +4225,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 197
+        "y": 213
       },
-      "id": 73,
+      "id": 79,
       "panels": [],
       "title": "Scheduler (dispatcher)",
       "type": "row"
@@ -3911,9 +4253,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 198
+        "y": 214
       },
-      "id": 74,
+      "id": 80,
       "options": {
         "legend": {
           "calcs": [
@@ -3980,9 +4322,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 198
+        "y": 214
       },
-      "id": 75,
+      "id": 81,
       "options": {
         "legend": {
           "calcs": [
@@ -4031,9 +4373,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 198
+        "y": 214
       },
-      "id": 76,
+      "id": 82,
       "options": {
         "legend": {
           "calcs": [
@@ -4082,9 +4424,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 206
+        "y": 222
       },
-      "id": 77,
+      "id": 83,
       "options": {
         "legend": {
           "calcs": [
@@ -4151,9 +4493,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 206
+        "y": 222
       },
-      "id": 78,
+      "id": 84,
       "options": {
         "legend": {
           "calcs": [
@@ -4202,9 +4544,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 206
+        "y": 222
       },
-      "id": 79,
+      "id": 85,
       "options": {
         "legend": {
           "calcs": [
@@ -4253,9 +4595,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 214
+        "y": 230
       },
-      "id": 80,
+      "id": 86,
       "options": {
         "legend": {
           "calcs": [
@@ -4304,9 +4646,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 214
+        "y": 230
       },
-      "id": 81,
+      "id": 87,
       "options": {
         "legend": {
           "calcs": [
@@ -4340,9 +4682,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 222
+        "y": 238
       },
-      "id": 82,
+      "id": 88,
       "panels": [],
       "title": "Schema migration (dispatcher)",
       "type": "row"
@@ -4368,9 +4710,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 223
+        "y": 239
       },
-      "id": 83,
+      "id": 89,
       "options": {
         "legend": {
           "calcs": [
@@ -4419,9 +4761,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 223
+        "y": 239
       },
-      "id": 84,
+      "id": 90,
       "options": {
         "legend": {
           "calcs": [
@@ -4470,9 +4812,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 223
+        "y": 239
       },
-      "id": 85,
+      "id": 91,
       "options": {
         "legend": {
           "calcs": [
@@ -4521,9 +4863,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 231
+        "y": 247
       },
-      "id": 86,
+      "id": 92,
       "options": {
         "legend": {
           "calcs": [
@@ -4572,9 +4914,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 231
+        "y": 247
       },
-      "id": 87,
+      "id": 93,
       "options": {
         "legend": {
           "calcs": [
@@ -4623,9 +4965,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 231
+        "y": 247
       },
-      "id": 88,
+      "id": 94,
       "options": {
         "legend": {
           "calcs": [
@@ -4659,9 +5001,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 239
+        "y": 255
       },
-      "id": 89,
+      "id": 95,
       "panels": [],
       "title": "Query pipeline (webserver)",
       "type": "row"
@@ -4687,9 +5029,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 240
+        "y": 256
       },
-      "id": 90,
+      "id": 96,
       "options": {
         "legend": {
           "calcs": [
@@ -4756,9 +5098,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 240
+        "y": 256
       },
-      "id": 91,
+      "id": 97,
       "options": {
         "legend": {
           "calcs": [
@@ -4807,9 +5149,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 240
+        "y": 256
       },
-      "id": 92,
+      "id": 98,
       "options": {
         "legend": {
           "calcs": [
@@ -4876,9 +5218,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 248
+        "y": 264
       },
-      "id": 93,
+      "id": 99,
       "options": {
         "legend": {
           "calcs": [
@@ -4927,9 +5269,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 248
+        "y": 264
       },
-      "id": 94,
+      "id": 100,
       "options": {
         "legend": {
           "calcs": [
@@ -4996,9 +5338,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 248
+        "y": 264
       },
-      "id": 95,
+      "id": 101,
       "options": {
         "legend": {
           "calcs": [
@@ -5047,9 +5389,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 256
+        "y": 272
       },
-      "id": 96,
+      "id": 102,
       "options": {
         "legend": {
           "calcs": [
@@ -5098,9 +5440,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 256
+        "y": 272
       },
-      "id": 97,
+      "id": 103,
       "options": {
         "legend": {
           "calcs": [
@@ -5149,9 +5491,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 256
+        "y": 272
       },
-      "id": 98,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [
@@ -5218,9 +5560,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 264
+        "y": 280
       },
-      "id": 99,
+      "id": 105,
       "options": {
         "legend": {
           "calcs": [
@@ -5269,9 +5611,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 264
+        "y": 280
       },
-      "id": 100,
+      "id": 106,
       "options": {
         "legend": {
           "calcs": [
@@ -5338,9 +5680,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 264
+        "y": 280
       },
-      "id": 101,
+      "id": 107,
       "options": {
         "legend": {
           "calcs": [
@@ -5389,9 +5731,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 272
+        "y": 288
       },
-      "id": 102,
+      "id": 108,
       "options": {
         "legend": {
           "calcs": [
@@ -5458,9 +5800,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 272
+        "y": 288
       },
-      "id": 103,
+      "id": 109,
       "options": {
         "legend": {
           "calcs": [
@@ -5509,9 +5851,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 272
+        "y": 288
       },
-      "id": 104,
+      "id": 110,
       "options": {
         "legend": {
           "calcs": [
@@ -5560,9 +5902,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 280
+        "y": 296
       },
-      "id": 105,
+      "id": 111,
       "options": {
         "legend": {
           "calcs": [
@@ -5629,9 +5971,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 280
+        "y": 296
       },
-      "id": 106,
+      "id": 112,
       "options": {
         "legend": {
           "calcs": [
@@ -5680,9 +6022,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 280
+        "y": 296
       },
-      "id": 107,
+      "id": 113,
       "options": {
         "legend": {
           "calcs": [
@@ -5731,9 +6073,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 288
+        "y": 304
       },
-      "id": 108,
+      "id": 114,
       "options": {
         "legend": {
           "calcs": [
@@ -5800,9 +6142,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 288
+        "y": 304
       },
-      "id": 109,
+      "id": 115,
       "options": {
         "legend": {
           "calcs": [
@@ -5851,9 +6193,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 288
+        "y": 304
       },
-      "id": 110,
+      "id": 116,
       "options": {
         "legend": {
           "calcs": [
@@ -5920,9 +6262,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 296
+        "y": 312
       },
-      "id": 111,
+      "id": 117,
       "options": {
         "legend": {
           "calcs": [
@@ -5956,9 +6298,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 304
+        "y": 320
       },
-      "id": 112,
+      "id": 118,
       "panels": [],
       "title": "Query engine — threat counters (webserver)",
       "type": "row"
@@ -5984,9 +6326,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 305
+        "y": 321
       },
-      "id": 113,
+      "id": 119,
       "options": {
         "legend": {
           "calcs": [
@@ -6020,9 +6362,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 313
+        "y": 329
       },
-      "id": 114,
+      "id": 120,
       "panels": [],
       "title": "Content resolution (webserver)",
       "type": "row"
@@ -6048,9 +6390,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 314
+        "y": 330
       },
-      "id": 115,
+      "id": 121,
       "options": {
         "legend": {
           "calcs": [
@@ -6117,9 +6459,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 314
+        "y": 330
       },
-      "id": 116,
+      "id": 122,
       "options": {
         "legend": {
           "calcs": [
@@ -6168,9 +6510,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 314
+        "y": 330
       },
-      "id": 117,
+      "id": 123,
       "options": {
         "legend": {
           "calcs": [
@@ -6219,9 +6561,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 322
+        "y": 338
       },
-      "id": 118,
+      "id": 124,
       "options": {
         "legend": {
           "calcs": [
@@ -6270,9 +6612,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 322
+        "y": 338
       },
-      "id": 119,
+      "id": 125,
       "options": {
         "legend": {
           "calcs": [
@@ -6321,9 +6663,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 322
+        "y": 338
       },
-      "id": 120,
+      "id": 126,
       "options": {
         "legend": {
           "calcs": [
@@ -6390,9 +6732,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 330
+        "y": 346
       },
-      "id": 121,
+      "id": 127,
       "options": {
         "legend": {
           "calcs": [
@@ -6441,9 +6783,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 330
+        "y": 346
       },
-      "id": 122,
+      "id": 128,
       "options": {
         "legend": {
           "calcs": [
@@ -6510,9 +6852,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 330
+        "y": 346
       },
-      "id": 123,
+      "id": 129,
       "options": {
         "legend": {
           "calcs": [
@@ -6546,9 +6888,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 338
+        "y": 354
       },
-      "id": 124,
+      "id": 130,
       "panels": [],
       "title": "Schema watcher (webserver)",
       "type": "row"
@@ -6574,9 +6916,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 339
+        "y": 355
       },
-      "id": 125,
+      "id": 131,
       "options": {
         "legend": {
           "calcs": [
@@ -6610,9 +6952,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 347
+        "y": 363
       },
-      "id": 126,
+      "id": 132,
       "panels": [],
       "title": "Billing events (webserver)",
       "type": "row"
@@ -6638,9 +6980,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 348
+        "y": 364
       },
-      "id": 127,
+      "id": 133,
       "options": {
         "legend": {
           "calcs": [
@@ -6689,9 +7031,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 348
+        "y": 364
       },
-      "id": 128,
+      "id": 134,
       "options": {
         "legend": {
           "calcs": [
@@ -6740,9 +7082,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 348
+        "y": 364
       },
-      "id": 129,
+      "id": 135,
       "options": {
         "legend": {
           "calcs": [
@@ -6791,9 +7133,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 356
+        "y": 372
       },
-      "id": 130,
+      "id": 136,
       "options": {
         "legend": {
           "calcs": [
@@ -6842,9 +7184,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 356
+        "y": 372
       },
-      "id": 131,
+      "id": 137,
       "options": {
         "legend": {
           "calcs": [
@@ -6878,9 +7220,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 364
+        "y": 380
       },
-      "id": 132,
+      "id": 138,
       "panels": [],
       "title": "Billing quota (webserver)",
       "type": "row"
@@ -6906,9 +7248,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 365
+        "y": 381
       },
-      "id": 133,
+      "id": 139,
       "options": {
         "legend": {
           "calcs": [
@@ -6957,9 +7299,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 365
+        "y": 381
       },
-      "id": 134,
+      "id": 140,
       "options": {
         "legend": {
           "calcs": [
@@ -7008,9 +7350,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 365
+        "y": 381
       },
-      "id": 135,
+      "id": 141,
       "options": {
         "legend": {
           "calcs": [
@@ -7077,9 +7419,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 373
+        "y": 389
       },
-      "id": 136,
+      "id": 142,
       "options": {
         "legend": {
           "calcs": [
@@ -7128,9 +7470,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 373
+        "y": 389
       },
-      "id": 137,
+      "id": 143,
       "options": {
         "legend": {
           "calcs": [
@@ -7164,9 +7506,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 381
+        "y": 397
       },
-      "id": 138,
+      "id": 144,
       "panels": [],
       "title": "Circuit breaker (CH / NATS / GitLab clients)",
       "type": "row"
@@ -7192,9 +7534,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 382
+        "y": 398
       },
-      "id": 139,
+      "id": 145,
       "options": {
         "legend": {
           "calcs": [
@@ -7243,9 +7585,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 382
+        "y": 398
       },
-      "id": 140,
+      "id": 146,
       "options": {
         "legend": {
           "calcs": [
@@ -7294,9 +7636,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 382
+        "y": 398
       },
-      "id": 141,
+      "id": 147,
       "options": {
         "legend": {
           "calcs": [
@@ -7330,9 +7672,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 390
+        "y": 406
       },
-      "id": 142,
+      "id": 148,
       "panels": [],
       "title": "Siphon producers",
       "type": "row"
@@ -7358,9 +7700,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 391
+        "y": 407
       },
-      "id": 143,
+      "id": 149,
       "options": {
         "legend": {
           "calcs": [
@@ -7394,9 +7736,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 399
+        "y": 415
       },
-      "id": 144,
+      "id": 150,
       "panels": [],
       "title": "Siphon ClickHouse consumers",
       "type": "row"
@@ -7422,9 +7764,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 400
+        "y": 416
       },
-      "id": 145,
+      "id": 151,
       "options": {
         "legend": {
           "calcs": [
@@ -7458,9 +7800,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 408
+        "y": 424
       },
-      "id": 146,
+      "id": 152,
       "panels": [],
       "title": "NATS JetStream + varz",
       "type": "row"
@@ -7486,9 +7828,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 409
+        "y": 425
       },
-      "id": 147,
+      "id": 153,
       "options": {
         "legend": {
           "calcs": [
@@ -7537,9 +7879,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 409
+        "y": 425
       },
-      "id": 148,
+      "id": 154,
       "options": {
         "legend": {
           "calcs": [
@@ -7588,9 +7930,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 409
+        "y": 425
       },
-      "id": 149,
+      "id": 155,
       "options": {
         "legend": {
           "calcs": [
@@ -7639,9 +7981,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 417
+        "y": 433
       },
-      "id": 150,
+      "id": 156,
       "options": {
         "legend": {
           "calcs": [
@@ -7690,9 +8032,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 417
+        "y": 433
       },
-      "id": 151,
+      "id": 157,
       "options": {
         "legend": {
           "calcs": [
@@ -7741,9 +8083,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 417
+        "y": 433
       },
-      "id": 152,
+      "id": 158,
       "options": {
         "legend": {
           "calcs": [
@@ -7792,9 +8134,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 425
+        "y": 441
       },
-      "id": 153,
+      "id": 159,
       "options": {
         "legend": {
           "calcs": [
@@ -7843,9 +8185,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 425
+        "y": 441
       },
-      "id": 154,
+      "id": 160,
       "options": {
         "legend": {
           "calcs": [
@@ -7894,9 +8236,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 425
+        "y": 441
       },
-      "id": 155,
+      "id": 161,
       "options": {
         "legend": {
           "calcs": [
@@ -7945,9 +8287,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 433
+        "y": 449
       },
-      "id": 156,
+      "id": 162,
       "options": {
         "legend": {
           "calcs": [
@@ -7981,9 +8323,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 441
+        "y": 457
       },
-      "id": 157,
+      "id": 163,
       "panels": [],
       "title": "Rails Orbit request path",
       "type": "row"
@@ -8009,9 +8351,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 442
+        "y": 458
       },
-      "id": 158,
+      "id": 164,
       "options": {
         "legend": {
           "calcs": [
@@ -8078,9 +8420,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 442
+        "y": 458
       },
-      "id": 159,
+      "id": 165,
       "options": {
         "legend": {
           "calcs": [
@@ -8129,9 +8471,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 442
+        "y": 458
       },
-      "id": 160,
+      "id": 166,
       "options": {
         "legend": {
           "calcs": [
@@ -8180,9 +8522,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 450
+        "y": 466
       },
-      "id": 161,
+      "id": 167,
       "options": {
         "legend": {
           "calcs": [
@@ -8249,9 +8591,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 450
+        "y": 466
       },
-      "id": 162,
+      "id": 168,
       "options": {
         "legend": {
           "calcs": [
@@ -8300,9 +8642,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 450
+        "y": 466
       },
-      "id": 163,
+      "id": 169,
       "options": {
         "legend": {
           "calcs": [
@@ -8369,9 +8711,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 458
+        "y": 474
       },
-      "id": 164,
+      "id": 170,
       "options": {
         "legend": {
           "calcs": [
@@ -8420,9 +8762,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 458
+        "y": 474
       },
-      "id": 165,
+      "id": 171,
       "options": {
         "legend": {
           "calcs": [
@@ -8489,9 +8831,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 458
+        "y": 474
       },
-      "id": 166,
+      "id": 172,
       "options": {
         "legend": {
           "calcs": [
@@ -8540,9 +8882,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 466
+        "y": 482
       },
-      "id": 167,
+      "id": 173,
       "options": {
         "legend": {
           "calcs": [
@@ -8609,9 +8951,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 466
+        "y": 482
       },
-      "id": 168,
+      "id": 174,
       "options": {
         "legend": {
           "calcs": [
@@ -8660,9 +9002,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 466
+        "y": 482
       },
-      "id": 169,
+      "id": 175,
       "options": {
         "legend": {
           "calcs": [
@@ -8729,9 +9071,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 474
+        "y": 490
       },
-      "id": 170,
+      "id": 176,
       "options": {
         "legend": {
           "calcs": [
@@ -8765,9 +9107,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 482
+        "y": 498
       },
-      "id": 171,
+      "id": 177,
       "panels": [],
       "title": "Rails Orbit traversal compaction",
       "type": "row"
@@ -8793,9 +9135,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 483
+        "y": 499
       },
-      "id": 172,
+      "id": 178,
       "options": {
         "legend": {
           "calcs": [
@@ -8862,9 +9204,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 483
+        "y": 499
       },
-      "id": 173,
+      "id": 179,
       "options": {
         "legend": {
           "calcs": [
@@ -8913,9 +9255,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 483
+        "y": 499
       },
-      "id": 174,
+      "id": 180,
       "options": {
         "legend": {
           "calcs": [
@@ -8982,9 +9324,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 491
+        "y": 507
       },
-      "id": 175,
+      "id": 181,
       "options": {
         "legend": {
           "calcs": [
@@ -9033,9 +9375,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 491
+        "y": 507
       },
-      "id": 176,
+      "id": 182,
       "options": {
         "legend": {
           "calcs": [
@@ -9084,9 +9426,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 491
+        "y": 507
       },
-      "id": 177,
+      "id": 183,
       "options": {
         "legend": {
           "calcs": [

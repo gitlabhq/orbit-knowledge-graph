@@ -118,6 +118,7 @@ pub mod test_utils {
         ProjectInfo {
             project_id,
             default_branch: default_branch.to_string(),
+            repository_storage: None,
         }
     }
 

@@ -15,7 +15,9 @@ use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
-use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
+use super::repository::{
+    ArchiveLeases, EmptyRepositoryReason, LeaseSettings, RepositoryResolver, ResolveError,
+};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
@@ -68,6 +70,7 @@ impl IndexOutcome {
 enum Fetched {
     Repository(Repository),
     EmptyRepository,
+    NoArchiveSlot { waited: Duration },
 }
 
 pub enum IndexError {
@@ -350,13 +353,17 @@ impl CodeIndexer {
         let mut clock = WorkClock::new(budget);
 
         // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
-        let Some(fetched) = clock.run(self.fetch_repository(context, request)).await else {
+        let Some(fetched) = clock
+            .run(self.fetch_repository(context, request, &cancel))
+            .await
+        else {
             return Err(IndexError::BudgetExceeded {
                 budget: budget.unwrap_or_default(),
             });
         };
         let repository = match fetched? {
             Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
+            Fetched::NoArchiveSlot { waited } => return Err(IndexError::NoLane { waited }),
             Fetched::Repository(repository) => repository,
         };
 
@@ -402,6 +409,7 @@ impl CodeIndexer {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
+        cancel: &CancellationToken,
     ) -> Result<Fetched, IndexError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
@@ -411,6 +419,17 @@ impl CodeIndexer {
         self.metrics
             .record_slot_wait("fetch_slot_wait", fetch_queued.elapsed());
 
+        let leases = ArchiveLeases::new(
+            Arc::clone(&context.lock_service),
+            LeaseSettings {
+                storage_budget: self.pipeline_config.archive_storage_budget,
+                tenant_budget: self.pipeline_config.archive_tenant_budget,
+                ttl: Duration::from_secs(self.pipeline_config.archive_lease_ttl_secs.max(1)),
+                max_wait: Duration::from_secs(self.pipeline_config.archive_lease_max_wait_secs),
+            },
+            cancel.clone(),
+            self.metrics.clone(),
+        );
         let fetch_start = Instant::now();
         let repository = match self
             .resolver
@@ -420,6 +439,7 @@ impl CodeIndexer {
                 request.commit_sha.as_deref(),
                 request.traversal_path.top_level_namespace_id(),
                 &self.pipeline_config,
+                &leases,
             )
             .await
         {
@@ -476,6 +496,9 @@ impl CodeIndexer {
             Err(ResolveError::Overloaded(cause)) => {
                 self.metrics.record_stage_error("repository_fetch_overload");
                 return Err(IndexError::Overloaded(cause));
+            }
+            Err(ResolveError::NoArchiveSlot { waited }) => {
+                return Ok(Fetched::NoArchiveSlot { waited });
             }
             Err(ResolveError::Other(err)) => {
                 self.metrics.record_stage_error("repository_fetch");

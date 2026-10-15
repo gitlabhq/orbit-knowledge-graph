@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use futures::StreamExt;
 use orbit_server_config::CodeIndexingPipelineConfig;
@@ -9,7 +9,7 @@ use orbit_utils::vfs::{
 use orbit_utils::vfs_policies::CodePolicy;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-use super::repository::{ByteStream, cache::RepositoryCacheError};
+use super::repository::{ByteStream, CancelOnDrop, cache::RepositoryCacheError};
 
 mod output;
 #[cfg(test)]
@@ -21,14 +21,6 @@ pub(super) use run::run;
 mod tests;
 
 pub type Repository = Arc<Vfs<()>>;
-
-struct CancelLoad(Arc<AtomicBool>);
-
-impl Drop for CancelLoad {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-}
 
 pub(super) fn limits(config: &CodeIndexingPipelineConfig) -> code_graph_incremental::Limits {
     let budget = |ms: u64| if ms == 0 { u64::MAX } else { ms };
@@ -60,8 +52,8 @@ pub(super) async fn load(
         resident_bytes: Some(config.source_memory_budget_bytes),
         ..Limits::default()
     };
-    let cancel = CancelLoad(Arc::new(AtomicBool::new(false)));
-    let cancelled = cancel.0.clone();
+    let cancel = CancelOnDrop::default();
+    let cancelled = cancel.flag();
     let options = StorageOptions {
         compress_spill: config.source_compress_spill,
         cancelled: Some(Box::new(move || cancelled.load(Ordering::Relaxed))),
