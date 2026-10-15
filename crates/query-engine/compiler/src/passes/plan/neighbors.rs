@@ -50,13 +50,15 @@ where
         relationships
             .iter()
             .filter_map(|relationship| {
-                let route = model.relationship_route(relationship)?;
                 let relationship_id = model.graph().relationship_id(relationship)?;
-                match source {
-                    true if route.has_source(center_entity_id) => Some(relationship_id),
-                    false if route.has_target(center_entity_id) => Some(relationship_id),
-                    _ => None,
-                }
+                model
+                    .relationship_routes(relationship)
+                    .into_iter()
+                    .any(|route| match source {
+                        true => route.has_source(center_entity_id),
+                        false => route.has_target(center_entity_id),
+                    })
+                    .then_some(relationship_id)
             })
             .collect::<Vec<_>>()
     };
@@ -66,28 +68,33 @@ where
         .iter()
         .filter(|relationship| {
             model
-                .relationship_route(relationship)
-                .is_some_and(|route| route.has_target(center_entity_id))
+                .relationship_routes(relationship)
+                .into_iter()
+                .any(|route| route.has_target(center_entity_id))
         })
         .copied()
         .collect();
     let incoming_scope_preserving: Vec<_> = incoming_kinds
         .iter()
         .filter(|relationship| {
-            model.relationship_route(relationship).is_some_and(|route| {
-                route
+            let mut found = false;
+            let mut scope_preserving = true;
+            for route in model.relationship_routes(relationship) {
+                for variant in route
                     .variants()
                     .filter(|variant| variant.target == center_entity_id)
-                    .all(|variant| {
-                        model
-                            .variant_scope(
-                                relationship,
-                                &model.graph().entity(variant.source).name,
-                                &model.graph().entity(variant.target).name,
-                            )
-                            .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
-                    })
-            })
+                {
+                    found = true;
+                    scope_preserving &= model
+                        .variant_scope(
+                            relationship,
+                            &model.graph().entity(variant.source).name,
+                            &model.graph().entity(variant.target).name,
+                        )
+                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving);
+                }
+            }
+            found && scope_preserving
         })
         .map(|relationship| relationship.to_string())
         .collect();
@@ -108,10 +115,11 @@ where
                 .is_some_and(|facts| {
                     relationships.iter().all(|relationship| {
                         model
-                            .relationship_route(
+                            .relationship_routes(
                                 model.graph().relationship(*relationship).name.as_str(),
                             )
-                            .is_some_and(|route| {
+                            .into_iter()
+                            .any(|route| {
                                 route.source_entities().any(|source| {
                                     route.target_entities().any(|target| {
                                         facts.variants.contains(&(*relationship, source, target))
