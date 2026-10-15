@@ -1,4 +1,4 @@
-name: A pinned target chooses the target-leading edge copy
+name: A pinned target keeps the source edge scan while reordered tables are metadata only
 ontology_overlay: reordered_edges
 
 query:
