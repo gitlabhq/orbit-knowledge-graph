@@ -10,6 +10,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 pub use crate::edge::{CallResolution, Edge, EdgeKind};
+#[cfg(test)]
+pub(crate) use cursor::SIBLING_STEPS;
 pub use cursor::{Cursor, Step, Walk};
 pub use node::{Node, Tag};
 #[cfg(feature = "pretty-print")]

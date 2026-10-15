@@ -733,6 +733,39 @@ mod tests {
             .map(|_| ())
     }
 
+    fn index_one_class(methods: usize) -> usize {
+        let body: String = (0..methods)
+            .map(|i| format!("void f{i}() {{}}\n"))
+            .collect();
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::write(
+            repo.path().join("C.java"),
+            format!("class C {{\n{body}}}\n"),
+        )
+        .unwrap();
+        let env =
+            Env::with_limits(crate::treesitter::SupportLang::Java, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let steps = crate::tree::SIBLING_STEPS.load(Ordering::Relaxed);
+        let graph = templates::index(Context::new(&env, repository)).unwrap();
+        assert!(graph.finish().1.state.edges.len() >= methods);
+        crate::tree::SIBLING_STEPS.load(Ordering::Relaxed) - steps
+    }
+
+    #[test]
+    fn a_class_with_many_methods_indexes_in_linear_work() {
+        let (small, large) = (index_one_class(1_000), index_one_class(4_000));
+        assert!(large <= 5 * small, "{small} -> {large}");
+    }
+
     #[test]
     fn a_namespace_imported_through_many_files_links_each_use_once() {
         let (namespaces, per_namespace) = (10, 10);

@@ -1633,22 +1633,19 @@ type Members = (
 fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
     let (mut parts, mut extensions) = Members::default();
     for (fi, tree) in trees.iter().enumerate() {
-        for d in tree.root().descendants().filter(|d| d.is(C::Def)) {
+        let defs = tree
+            .root()
+            .descendants_pruned(|d| d.is(C::Def) && !d.has(C::ImplBlock))
+            .filter(|d| d.is(C::Def));
+        for d in defs {
             let Some(name) = d.child_sym(C::DefName) else {
                 continue;
             };
-            let nested = d.ancestors().any(|a| a.is(C::Def) && !a.has(C::ImplBlock));
-            if nested {
-                continue;
-            }
             let loc = Loc::new(fi, d.index());
             if let Some(key) = partial_key(d, merge_types) {
                 parts.entry(key).or_default().push(loc);
             }
-            let wrapped = d
-                .parent()
-                .is_some_and(|p| p.is(C::Def) && p.has(C::ImplBlock));
-            if wrapped {
+            if d.parent().is_some_and(|p| p.is(C::Def)) {
                 extensions.entry(name).or_default().push(loc);
             }
         }

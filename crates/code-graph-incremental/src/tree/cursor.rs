@@ -2,6 +2,10 @@ use std::ops::ControlFlow;
 
 use super::{Mutable, Storage, Tree};
 
+#[cfg(test)]
+pub(crate) static SIBLING_STEPS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 pub enum Step<R> {
     Into,
     Over,
@@ -55,6 +59,8 @@ impl<'a, S: Storage> Cursor<'a, S> {
 
     pub fn children(self) -> impl Iterator<Item = Self> + 'a {
         std::iter::successors(self.tree().storage.first_child(self.id), move |&id| {
+            #[cfg(test)]
+            SIBLING_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.tree().storage.next_sibling(id)
         })
         .map(move |id| self.at(id))
