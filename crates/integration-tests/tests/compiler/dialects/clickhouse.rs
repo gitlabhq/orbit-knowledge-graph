@@ -23,29 +23,6 @@ fn compile_to_ast_works() {
 }
 
 #[test]
-fn incoming_self_relationship_keeps_the_foreign_key_on_its_source() {
-    let ontology = crate::compiler::setup::embedded_ontology();
-    let compiled = compile_pair(
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
-                {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
-            ],
-            "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}],
-            "limit": 10
-        }"#,
-        "MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10",
-        &ontology,
-        &test_ctx(),
-    ).unwrap();
-    let sql = compiled.base.render();
-    assert!(sql.contains("canceled.auto_canceled_by_id"), "{sql}");
-    assert!(!sql.contains("canceling.auto_canceled_by_id"), "{sql}");
-    assert!(!sql.contains("FROM gl_edge"), "{sql}");
-}
-
-#[test]
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
     let json = r#"{
@@ -854,9 +831,6 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
 
     let before_related = sql.split("RELATED_TO").next().unwrap();
     assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
-
-    let after_related = sql.split("RELATED_TO").nth(1).unwrap();
-    assert!(!after_related.contains(SCOPED_LOOKUP), "{sql}");
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");

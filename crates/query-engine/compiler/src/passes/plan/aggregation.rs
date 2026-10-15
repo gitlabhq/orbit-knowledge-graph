@@ -60,9 +60,9 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     ..
                 } => break aggregate_condition.clone(),
                 PhysicalSource::Join { left, .. } => source = left,
-                PhysicalSource::Filter { input, .. } | PhysicalSource::Scope { input, .. } => {
-                    source = input
-                }
+                PhysicalSource::Filter { input, .. }
+                | PhysicalSource::Project { input, .. }
+                | PhysicalSource::Scope { input, .. } => source = input,
                 PhysicalSource::Scan { .. } | PhysicalSource::Union { .. } => break vec![],
                 PhysicalSource::Use { .. } => break vec![],
             }

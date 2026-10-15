@@ -117,6 +117,25 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             output.predicates.extend(predicates.iter().map(predicate));
             output
         }
+        PhysicalSource::Project {
+            alias,
+            outputs,
+            input,
+        } => {
+            let output = emit_source(input);
+            SourceOutput {
+                from: TableRef::subquery(
+                    Query {
+                        select: projections(outputs),
+                        from: output.from,
+                        where_clause: Expr::conjoin(output.predicates),
+                        ..Default::default()
+                    },
+                    alias,
+                ),
+                predicates: vec![],
+            }
+        }
         PhysicalSource::Scope { alias, input } | PhysicalSource::Latest { alias, input, .. } => {
             let mut output = emit_source(input);
             let (order_by, limit_by) = match plan {

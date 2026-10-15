@@ -267,7 +267,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 items,
                 vec![execution_source(&plan.operation.execution)],
             );
-            let tree = sort(
+            sort(
                 tree,
                 result.order.iter().map(|order| {
                     (
@@ -275,8 +275,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         order.direction == OrderDirection::Desc,
                     )
                 }),
-            );
-            tree
+            )
         }
         QueryPlan::Neighbors(plan) => {
             let operation = &plan.operation;
@@ -505,6 +504,11 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             predicates.iter().flat_map(planned_predicate).collect(),
             physical_source(input),
         ),
+        PhysicalSource::Project { outputs, input, .. } => Tree::node(
+            Operator::Project,
+            planned_projections(outputs),
+            vec![physical_source(input)],
+        ),
         PhysicalSource::Scope { alias, input } => {
             Tree::node(Operator::Bind, alias, vec![physical_source(input)])
         }
@@ -641,6 +645,8 @@ fn planned_projections(values: &[Projection]) -> String {
             let value = match &projection.value {
                 OutputValue::Column(value) => planned_column(value),
                 OutputValue::Text(value) => text_literal(value),
+                OutputValue::Null => "NULL".into(),
+                OutputValue::EmptyTextArray => "[]".into(),
                 OutputValue::Depth(value) => value.to_string(),
                 OutputValue::Path(steps) => format!(
                     "path[{}]",

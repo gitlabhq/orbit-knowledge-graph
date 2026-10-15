@@ -71,6 +71,10 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
             let expression = match &value.value {
                 OutputValue::Column(value) => column(value),
                 OutputValue::Text(value) => Expr::string(value),
+                OutputValue::Null => Expr::Literal(serde_json::Value::Null),
+                OutputValue::EmptyTextArray => {
+                    Expr::param(SqlType::String.to_array(), serde_json::Value::Array(vec![]))
+                }
                 OutputValue::Depth(value) => Expr::int(i64::from(*value)),
                 OutputValue::Path(steps) => Expr::func(
                     Function::Array,

@@ -1,5 +1,5 @@
 cases:
-- name: Stored aggregation joins an uncovered current endpoint filter
+- name: Stored aggregation uses exact keys for an uncovered endpoint filter
   query:
     json: |
       {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"title":{"starts_with":"Fix"}}}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
@@ -13,8 +13,8 @@ cases:
     clickhouse:
       planned:
         expect:
-        - (Join ON mr.id = _orbit_edge_0.target_id (_) (Bind mr (Filter starts_with(mr.title, 'Fix'), mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
-        reject: ["(CTE ... (_))"]
+        - (CTE _orbit_subplan_0 (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+        - (Filter _orbit_edge_0.target_id IN _orbit_subplan_0.id, ... (_))
 - name: Endpoint IDs and ranges remain visible on the edge relation
   query:
     json: |
@@ -30,7 +30,7 @@ cases:
       planned:
         expect:
         - (Filter _orbit_edge_0.target_id IN [1000, 1001], _orbit_edge_0.target_id >= 1000, _orbit_edge_0.target_id <= 1001, ... (_))
-        - (Scan Table(gl_edge) AS _orbit_edge_0)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_0)
 - name: Nullable aggregate properties retain current node rows and arguments
   query:
     json: |

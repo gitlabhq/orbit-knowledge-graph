@@ -41,7 +41,7 @@ cases:
   expect:
     sql_contains:
     - "(_orbit_edge_0.relationship_kind = 'IN_PROJECT')"
-    - "NOT ((_orbit_edge_0.source_kind = 'User') AND ((mr.state = 'opened') AND has(_orbit_edge_0.source_tags, 'state:opened')))"
+    - "NOT ((_orbit_edge_0.source_kind = 'User') AND (mr.state = 'opened'))"
     groups:
       p:
         entity: Project

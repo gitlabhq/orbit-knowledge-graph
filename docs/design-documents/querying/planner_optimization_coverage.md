@@ -51,6 +51,10 @@ query limit.
 | Bounded expansion | Active | Emits one typed edge-join arm per requested depth. |
 | Reusable physical subplans | Active | Defines a selective edge relation once and references it by `SubplanId`. |
 | Adjacent frontier | Active | Derives distinct reached IDs and filters the next edge scan with them. |
+| Chain frontier propagation | Active | Materializes selective intermediate relations and derives the next frontier. |
+| Branch frontier reuse | Active | One shared endpoint frontier narrows every later branch arm. |
+| Exact endpoint keys | Active | Filter-only aggregation endpoints use one current matching ID set. |
+| Candidate node narrowing | Active | Selective equality and `IN` scans narrow exact `FINAL` key reads, which repeat filters and tombstone checks. |
 | Directional layout selection | Active when declared | Chooses the layout whose sort key reaches the selected endpoint first. |
 | Connectivity-only ordering | Active | Orders relations by shared node occurrences only. |
 | Required-column pruning | Partial | Some edge unions and current-row scopes still carry broad columns. |
@@ -113,6 +117,30 @@ WHERE edge.relationship_kind = 'AUTHORED'
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/orbit'})
 RETURN mr.id, p.id
 ```
+
+When an aggregation only needs endpoint membership, the planner can avoid the
+node join:
+
+```sql
+WITH candidate_projects AS MATERIALIZED (
+  SELECT id
+  FROM gl_project
+  WHERE full_path = 'gitlab-org/orbit'
+),
+exact_projects AS MATERIALIZED (
+  SELECT id
+  FROM gl_project FINAL
+  WHERE id IN (SELECT id FROM candidate_projects)
+    AND full_path = 'gitlab-org/orbit'
+    AND _deleted = false
+)
+SELECT count()
+FROM gl_edge FINAL
+WHERE target_id IN (SELECT id FROM exact_projects)
+```
+
+Candidate IDs only narrow the exact read. The exact current-row query enforces
+the property filter and deletion check.
 
 ```sql
 SELECT edge.source_id, edge.target_id

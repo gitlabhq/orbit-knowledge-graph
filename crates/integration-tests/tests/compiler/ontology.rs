@@ -283,9 +283,8 @@ fn full_pipeline() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // AUTHORED is FK-elided via author_id — no edge table scan.
-    assert!(rendered.contains("gl_note"));
-    assert!(rendered.contains("gl_user"));
+    assert!(rendered.contains("FROM gl_note AS _orbit_edge_0 FINAL"));
+    assert!(rendered.contains("_orbit_edge_0.author_id AS source_id"));
     assert!(rendered.contains("LIMIT 26"));
 }
 

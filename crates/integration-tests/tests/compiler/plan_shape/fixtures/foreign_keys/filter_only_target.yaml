@@ -1,4 +1,4 @@
-name: Filtered endpoints join current nodes to the edge relation
+name: Filter-only endpoints use exact reusable keys
 query:
   json: |
     {
@@ -21,7 +21,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON u.id = _orbit_edge_0.source_id (_) (Bind u (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
-        - (Scan Table(gl_edge) AS _orbit_edge_0)
-      reject:
-        - (CTE ... (_))
+        - (CTE _orbit_subplan_0 (Project u.id AS id (Filter u.username = 'alice' (Scan Table(gl_user) AS u))))
+        - (CTE _orbit_subplan_1 (Project u.id AS id (Filter u.id IN _orbit_subplan_0.id, u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+        - (Filter _orbit_edge_0.source_id IN _orbit_subplan_1.id, ... (_))
+        - (Scan Table(gl_merge_request) AS _orbit_edge_0)

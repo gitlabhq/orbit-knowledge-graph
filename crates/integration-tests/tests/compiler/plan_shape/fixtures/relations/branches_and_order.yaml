@@ -15,9 +15,9 @@ cases:
         expect:
         - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.source_id (_) (_))
         - (Join ON _orbit_edge_1.target_id = _orbit_edge_2.source_id (_) (_))
-        - (Scan Table(gl_edge) AS _orbit_edge_0)
-        - (Scan Table(gl_ci_edge) AS _orbit_edge_1)
-        - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_0)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_1)
+        - (Scan Table(gl_job) AS _orbit_edge_2)
 - name: A mixed table branch keeps one edge relation per relationship
   query:
     json: |
@@ -35,8 +35,8 @@ cases:
         - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
         - (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (_) (_))
         - (Scan Table(gl_edge) AS _orbit_edge_0)
-        - (Scan Table(gl_edge) AS _orbit_edge_1)
-        - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_1)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_2)
 - name: Connected relationships linearize by occurrence connectivity only
   missing_frontends:
     gql: GQL MATCH order is already connected in the equivalent pattern.

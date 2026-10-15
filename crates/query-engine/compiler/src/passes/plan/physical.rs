@@ -1,4 +1,6 @@
-use super::requirements::{Column, Predicate, Projection, node_outputs, node_predicates};
+use super::requirements::{
+    Column, OutputValue, Predicate, Projection, node_outputs, node_predicates,
+};
 use crate::error::{QueryError, Result};
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, SOURCE_TAGS_COLUMN,
@@ -63,6 +65,43 @@ pub enum PhysicalPlan {
 }
 
 impl PhysicalPlan {
+    pub fn candidate_keys(node: &NodePlan) -> Result<Option<Self>> {
+        let predicates: Vec<_> = node
+            .filters
+            .iter()
+            .filter(|(_, filter)| filter.is_candidate())
+            .map(|(property, filter)| filter.at(Column::new(&node.alias, property)))
+            .collect();
+        if predicates.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self::Project {
+            source: PhysicalSource::node(node, false)?.filter(predicates),
+            outputs: vec![Projection::new(
+                OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
+                DEFAULT_PRIMARY_KEY,
+            )],
+        }))
+    }
+
+    pub fn node_keys(node: &NodePlan, candidate: Option<(SubplanId, String)>) -> Result<Self> {
+        let mut source = PhysicalSource::node(node, true)?;
+        if let Some((id, key)) = candidate {
+            source = source.filter(vec![Predicate::Membership {
+                column: Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                definition: format!("_orbit_subplan_{}", id.0),
+                key,
+            }]);
+        }
+        Ok(Self::Project {
+            source: source.filter(node_predicates(node)),
+            outputs: vec![Projection::new(
+                OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
+                DEFAULT_PRIMARY_KEY,
+            )],
+        })
+    }
+
     pub fn source(&self) -> &PhysicalSource {
         match self {
             Self::Project { source, .. } | Self::Distinct { source, .. } => source,
@@ -101,6 +140,11 @@ pub enum PhysicalSource {
     },
     Filter {
         predicates: Vec<Predicate>,
+        input: Box<Self>,
+    },
+    Project {
+        alias: String,
+        outputs: Vec<Projection>,
         input: Box<Self>,
     },
     Scope {

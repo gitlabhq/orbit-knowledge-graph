@@ -1,4 +1,4 @@
-description: FK traversal returns note and author properties from the base query alone, no hydration plan
+description: FK traversal discovers note and author identities before static hydration
 
 query:
   json: |
@@ -15,8 +15,8 @@ query:
     MATCH (n:Note {id: 3000})<-[:AUTHORED]-(u:User) RETURN n.confidential, n.created_at, u.username LIMIT 20
 
 expect:
-  hydration: none
-  sql_contains: ["AS n_confidential", "AS n_created_at", "AS u_username"]
+  hydration: static
+  sql_not_contains: ["AS n_confidential", "AS n_created_at", "AS u_username"]
   node_count: 2
   edge_exists:
     AUTHORED:

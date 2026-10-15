@@ -67,6 +67,8 @@ pub enum Predicate {
 pub enum OutputValue {
     Column(Column),
     Text(String),
+    Null,
+    EmptyTextArray,
     Depth(u32),
     Path(Vec<(Column, Column)>),
 }

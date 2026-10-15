@@ -24,6 +24,7 @@ pub struct BoundFilter {
     pub filter: InputFilter,
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
+    pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
 }
 
@@ -35,6 +36,12 @@ impl BoundFilter {
             data_type: self.data_type,
             in_sort_key: self.in_sort_key,
         }
+    }
+
+    pub fn is_candidate(&self) -> bool {
+        self.selectivity == ontology::FieldSelectivity::High
+            && self.filter.rhs_column.is_none()
+            && matches!(self.filter.op, None | Some(FilterOp::Eq | FilterOp::In))
     }
 }
 

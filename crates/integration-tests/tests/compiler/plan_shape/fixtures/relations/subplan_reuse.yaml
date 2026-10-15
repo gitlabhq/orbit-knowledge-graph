@@ -1,0 +1,53 @@
+cases:
+- name: A selective chain materializes each reusable prefix and frontier
+  missing_frontends:
+    gql: The fixture needs a four-edge chain longer than the GQL frontend accepts.
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"},{"id":"e","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"d","to":"e"}]}
+  logical:
+    expect: ["(EdgeScan CALLS a->b AS e0)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (CTE _orbit_subplan_0 (_))
+        - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
+        - (CTE _orbit_subplan_2 (_))
+        - (CTE _orbit_subplan_3 (Distinct (Project _frontier_source.target_id AS id (_))))
+        - (CTE _orbit_subplan_4 (_))
+        - (Filter _orbit_edge_1.source_id IN _orbit_subplan_1.id, ... (_))
+        - (Filter _orbit_edge_2.source_id IN _orbit_subplan_3.id, ... (_))
+- name: One shared frontier narrows every branch arm
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
+    gql: |
+      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
+        (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+      RETURN u.id, mr.id, p.id, pipe.id
+  logical:
+    expect: ["(EdgeScan APPROVED u->mr AS e0)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
+        - (Filter _orbit_edge_1.source_id IN _orbit_subplan_1.id, ... (_))
+        - (Filter _orbit_edge_2.source_id IN _orbit_subplan_1.id, ... (_))
+- name: Shared uncovered endpoint filters materialize exact keys once
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}},{"id":"g","entity":"Group"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}],"group_by":["p.id"],"aggregations":[{"count":"p","as":"n"}]}
+    gql: |
+      MATCH (u:User {username: 'alice'})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+      RETURN p.id, count(p) AS n
+  logical:
+    expect: ["(Aggregate group p.id AS p_id, COUNT(p) AS n (_))"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (CTE _orbit_subplan_0 (Project u.id AS id (Filter u.username = 'alice' (_))))
+        - (CTE _orbit_subplan_1 (Project u.id AS id (Filter u.id IN _orbit_subplan_0.id, u.username = 'alice', u._deleted = false (_))))
+        - (Filter _orbit_edge_0.source_id IN _orbit_subplan_1.id, ... (_))

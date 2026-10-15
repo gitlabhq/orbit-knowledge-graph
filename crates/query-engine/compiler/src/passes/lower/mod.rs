@@ -40,8 +40,10 @@ impl NodeBinding {
     fn source(alias: &str, column: &str, table_alias: Option<String>) -> Self {
         Self::Values {
             identity: Expr::col(alias, column),
+            traversal_path: table_alias
+                .as_ref()
+                .map(|alias| Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
             table_alias,
-            traversal_path: Some(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
         }
     }
 

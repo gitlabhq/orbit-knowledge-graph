@@ -1,4 +1,4 @@
-name: Package files use their routed edge relation
+name: Package files use their FK edge relation
 missing_frontends:
   json: The JSON query form is being deprecated.
 query:
@@ -10,6 +10,9 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter _orbit_edge_0.source_id = 8001, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+        - (Filter _orbit_edge_0.source_id = 8001 (_))
+        - (Project _orbit_edge_0.package_id AS source_id, ... (_))
+        - (Deduplicate Final (Scan Table(gl_package_file) AS _orbit_edge_0))
       reject:
         - (Scan Table(gl_package) ...)
+        - (Scan Table(gl_edge) ...)

@@ -12,8 +12,10 @@ cases:
     clickhouse:
       planned:
         expect:
-        - (Filter _orbit_edge_0.source_id = 2000, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
-        reject: ["(Scan Table(gl_merge_request) ...)", "(Scan Table(gl_project) ...)"]
+        - (Filter _orbit_edge_0.source_id = 2000 (_))
+        - (Project _orbit_edge_0.id AS source_id, ... (_))
+        - (Deduplicate Final (Scan Table(gl_merge_request) AS _orbit_edge_0))
+        reject: ["(Scan Table(gl_edge) ...)", "(Scan Table(gl_project) ...)"]
 - name: A fixed chain composes routed edge relations
   query:
     json: |
@@ -30,9 +32,9 @@ cases:
         expect:
         - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
         - (Join ON _orbit_edge_1.target_id = _orbit_edge_2.source_id (_) (_))
-        - (Scan Table(gl_edge) AS _orbit_edge_0)
-        - (Scan Table(gl_ci_edge) AS _orbit_edge_1)
-        - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_0)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_1)
+        - (Scan Table(gl_job) AS _orbit_edge_2)
 - name: Stored relationship families compose through shared endpoints
   query:
     json: |
@@ -48,7 +50,7 @@ cases:
         expect:
         - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
         - (Scan Table(gl_edge) AS _orbit_edge_0)
-        - (Scan Table(gl_edge) AS _orbit_edge_1)
+        - (Scan Table(gl_merge_request) AS _orbit_edge_1)
         - (CTE _orbit_subplan_0 (_))
         - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
         - (Filter _orbit_edge_1.source_id IN _orbit_subplan_1.id, ... (_))
@@ -66,4 +68,4 @@ cases:
       planned:
         expect:
         - (Filter _orbit_edge_0.target_id = 1, ... (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_edge_0)))
-        - (Scan Table(gl_ci_edge) AS _orbit_edge_1)
+        - (Scan Table(gl_job) AS _orbit_edge_1)
