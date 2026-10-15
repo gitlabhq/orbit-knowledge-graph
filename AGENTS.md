@@ -39,6 +39,8 @@ List these directories and read the relevant owner before you act:
 - `docs/design-documents/` for architecture, security, schema, querying, indexing, and testing (`testing.md`).
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
+- `docs/design-documents/decisions/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
+- **SOX billing surface:** files controlling billing emission, delivery, payloads, or quota checks are in scope, including files outside `crates/orbit-billing/`. If you add or move such a file, add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules. If it introduces a new hook-point category, update the table in `docs/design-documents/decisions/020_billing_sox_scope.md` in the same MR.
 
 Do not create a GitLab issue or epic until the author approves the draft.
 Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR

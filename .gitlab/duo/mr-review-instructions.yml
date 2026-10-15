@@ -87,8 +87,8 @@ instructions:
       - "crates/orbit-server/**/*.rs"
       - "!crates/orbit-server/src/billing_adapter.rs"
     instructions: |
-      The SOX billing scope (ADR 013 — docs/design-documents/decisions/013_billing_sox_scope.md)
-      requires that interaction between orbit-server and orbit-billing flows through
+      The SOX billing scope (ADR 020 — docs/design-documents/decisions/020_billing_sox_scope.md)
+      requires that claims mapped into billing input structs flow through
       a single conversion point: crates/orbit-server/src/billing_adapter.rs. Any
       new billing touch point added anywhere else in orbit-server expands the
       SOX-audited surface and must be reviewed by someone with SOX domain
@@ -104,12 +104,12 @@ instructions:
          orbit-billing types into the public API of orbit-server. Re-exports widen
          the SOX scope silently — anything importing orbit-server then gains
          access.
-      3. Wires a new call site that hands billing-relevant data to anything
-         outside billing_adapter.rs. Billing-relevant data is any field this
-         MR adds that ends up populating `BillingInputs` (see
-         `crates/orbit-billing/src/inputs.rs` for the current set of fields).
-         If unsure whether a value is billing-relevant, treat it as one and
-         flag the change.
+      3. Maps claims into `BillingInputs` or `QuotaCheckInputs` outside
+         billing_adapter.rs, rather than using the adapter's conversions.
+         Configuration, delivery credentials, and observer callbacks are
+         separate inputs and do not pass through this conversion seam.
+         New hook points for those inputs still require SOX review and
+         CODEOWNERS coverage.
 
       Explain why: the MR may be expanding the SOX-audited surface. Recommend
       either moving the change into billing_adapter.rs or getting an explicit
@@ -136,4 +136,3 @@ instructions:
       Recommend the author route emission through BillingTracker / BillingObserver,
       or get an explicit review from someone on the team with SOX domain
       knowledge.
-
