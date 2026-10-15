@@ -2598,7 +2598,9 @@ mod tests {
             "read_code",
         );
 
-        let node = ontology.get_node("AgentSession").expect("DuoWorkflow node");
+        let node = ontology
+            .get_node("AgentSession")
+            .expect("AgentSession node");
         let mut properties: Vec<&str> = node.fields.iter().map(|f| f.name.as_str()).collect();
         properties.sort_unstable();
         assert_eq!(
@@ -2606,7 +2608,6 @@ mod tests {
             [
                 "flow_type",
                 "id",
-                "namespace_id",
                 "project_id",
                 "session_started_at",
                 "source",

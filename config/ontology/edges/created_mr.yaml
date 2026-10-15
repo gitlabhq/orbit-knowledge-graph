@@ -11,9 +11,12 @@ variants:
 # link_type 0 (source) is the MR a flow was started against, not one it made.
 # The link is keyed by workflow_id, so it is joined to the governance session
 # (source = gitlab_duo) with that workflow_id; the session id is the edge source.
-# Only Duo sessions have MR links today. A link whose session row has not synced
-# yet, or is not a project session, produces no edge until the link row is extracted
-# again.
+# Only Duo sessions have MR links today. A link whose session row has not
+# replicated when the link is extracted gets no edge, and the extract does not
+# revisit it until the link row changes or the next full rebuild. For historical
+# data that means sessions the governance backfill writes after the link pass wait
+# for the next rebuild. A link whose session is not a project session never gets
+# an edge.
 # The row's traversal_path is the workflow's, so the edge sits in the workflow's
 # namespace even when the MR lives in a sibling project.
 # Deletes are best effort. A Siphon tombstone keeps the sort key (traversal_path,
@@ -24,7 +27,7 @@ variants:
 indexer:
   reindex: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
 pipelines:
-  - name: CREATED_MR_siphon_duo_workflows_workflow_merge_requests_MergeRequest
+  - name: CREATED_MR_siphon_duo_workflows_workflow_merge_requests
     extract:
       type: clickhouse
       tables: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]

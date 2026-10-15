@@ -91,13 +91,6 @@ properties:
     mutable: false
     description: "Owning project ID."
 
-  namespace_id:
-    type: int64
-    source: namespace_id
-    nullable: true
-    mutable: false
-    description: "Owning namespace ID, when the session also records one."
-
   session_started_at:
     type: timestamp
     source: session_started_at
@@ -143,7 +136,6 @@ storage:
     - {name: flow_type, type: "LowCardinality(String)", default: "'other'", codec: ["LZ4"]}
     - {name: source, type: "LowCardinality(String)", default: "'gitlab_duo'", codec: ["LZ4"]}
     - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: namespace_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: session_started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:

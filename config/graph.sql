@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS gl_agent_session (
     flow_type LowCardinality(String) DEFAULT 'other' CODEC(LZ4),
     source LowCardinality(String) DEFAULT 'gitlab_duo' CODEC(LZ4),
     project_id Int64 CODEC(Delta(8), LZ4),
-    namespace_id Nullable(Int64) CODEC(Delta(8), LZ4),
     session_started_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),

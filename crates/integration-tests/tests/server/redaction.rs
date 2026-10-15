@@ -258,7 +258,7 @@ async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext
     mock_service.deny("project", &[1001]);
     run_redaction(&mut result, &mock_service);
 
-    // The redaction id of a AgentSession row is its project, not the workflow.
+    // The redaction id of an AgentSession row is its project, not the session.
     let visible_projects: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&w))
