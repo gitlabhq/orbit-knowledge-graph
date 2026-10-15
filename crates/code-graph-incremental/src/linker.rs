@@ -1038,11 +1038,13 @@ impl<'t> Fold<'t> {
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
-            bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
-            for r in &bound {
-                self.emit(r, from);
+            if !bound.is_empty() {
+                bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
+                for r in &bound {
+                    self.emit(r, from);
+                }
+                return;
             }
-            return;
         }
         let members = self
             .enclosing_class(from)
