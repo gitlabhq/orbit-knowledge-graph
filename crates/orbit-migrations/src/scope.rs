@@ -116,10 +116,11 @@ pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         }
     }
     for kind in ontology.edge_names() {
-        if ontology
-            .edge_tables_for_relationship(kind)
-            .iter()
-            .any(|table| is_code_domain_table(ontology, table))
+        let tables = ontology.edge_tables_for_relationship(kind);
+        if !tables.is_empty()
+            && tables
+                .iter()
+                .all(|table| is_code_domain_table(ontology, table))
         {
             names.insert(kind.to_string());
         }
@@ -258,7 +259,15 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
             .chain(code_entity_names(ontology))
             .collect(),
         MigrationScope::Sdlc(entities) if entities.is_empty() => sdlc_entity_names(ontology),
-        MigrationScope::Sdlc(entities) => entities.clone(),
+        MigrationScope::Sdlc(entities) => {
+            let mut invalidated = entities.clone();
+            for descriptor in ontology.pipeline_descriptors() {
+                if !descriptor.reindex_targets.is_disjoint(entities) {
+                    invalidated.insert(descriptor.entity);
+                }
+            }
+            invalidated
+        }
         MigrationScope::Code => code_entity_names(ontology),
         MigrationScope::None => BTreeSet::new(),
     }
@@ -328,6 +337,10 @@ mod tests {
         );
         assert_eq!(
             widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["SystemNote"])),
+            MigrationScope::Full,
+        );
+        assert_eq!(
+            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["HAS_NOTE"])),
             MigrationScope::Full,
         );
         assert_eq!(

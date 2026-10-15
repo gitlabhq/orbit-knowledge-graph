@@ -91,6 +91,30 @@ mod tests {
     }
 
     #[test]
+    fn writer_catalog_tracks_exact_node_mapping_routes() {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let model = ClickHouseDataModel::derive(ontology).unwrap();
+
+        let code_writers = model.layout().schema().writers("gl_code_edge").unwrap();
+        assert!(code_writers.contains("Branch"));
+        assert!(code_writers.contains("Directory"));
+        assert!(!code_writers.contains("Group"));
+        assert!(!code_writers.contains("Project"));
+
+        let default_writers = model.layout().schema().writers("gl_edge").unwrap();
+        assert!(default_writers.contains("Group"));
+        assert!(default_writers.contains("Project"));
+
+        let ci_writers = model.layout().schema().writers("gl_ci_edge").unwrap();
+        assert!(ci_writers.contains("Pipeline"));
+        assert!(!ci_writers.contains("Vulnerability"));
+
+        let security_writers = model.layout().schema().writers("gl_sec_edge").unwrap();
+        assert!(security_writers.contains("Vulnerability"));
+        assert!(!security_writers.contains("Pipeline"));
+    }
+
+    #[test]
     fn materialized_bindings_resolve_graph_identities_and_source_columns() {
         let model = ClickHouseDataModel::derive(overlay_ontology("denorm_approved")).unwrap();
         let storage = model.layout().schema();
@@ -280,10 +304,7 @@ mod tests {
             local.backend().entity(definition).unwrap().table,
             "gl_definition"
         );
-        assert_eq!(
-            remote.backend().relationship_table(contains),
-            Some("gl_edge")
-        );
+        assert_eq!(remote.backend().relationship_table(contains), None);
         assert_eq!(
             local.backend().relationship_table(contains),
             Some("gl_edge")

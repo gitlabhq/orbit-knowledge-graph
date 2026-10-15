@@ -340,7 +340,7 @@ display:
       - match: '(__def)'
         tag:
           entity: Definition
-          fqn: '@$ROOT|concat("\", "ancestor_tag:fqn", "child_sym:__defname")'
+          fqn: '@$ROOT|concat("\", "ancestor_tag:fqn", "child_sym:__defname")|keep_last("\", "64", "4096")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
       - match: '(__def (__class))'
         tag:
@@ -354,7 +354,7 @@ display:
       # Promoted constructor parameters are properties of the class
       - match: '(__def (__property))'
         tag:
-          fqn: '@$ROOT|concat("\", "ancestor_tag:class_fqn", "child_sym:__defname")'
+          fqn: '@$ROOT|concat("\", "ancestor_tag:class_fqn", "child_sym:__defname")|keep_last("\", "64", "4096")'
   - name: def_type
     rules:
       - match: '(__def (__function))'

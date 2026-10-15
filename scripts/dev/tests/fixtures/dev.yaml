@@ -1,0 +1,9 @@
+grpc_bind_address: "0.0.0.0:50054"
+nats:
+  url: "nats://127.0.0.1:4222"
+datalake:
+  database: "gitlab_main"
+  username: "gitlab-dev-stack"
+graph:
+  database: "gkg"
+  username: "gitlab-dev-stack"

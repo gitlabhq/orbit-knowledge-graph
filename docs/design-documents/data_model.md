@@ -20,7 +20,7 @@ The Orbit graph data is stored in ClickHouse graph tables that are separate from
 
 ## Concepts to Know
 
-- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model. It is defined in `config/ontology/`, with the same ClickHouse graph schema in `config/graph.sql`. Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each edge YAML can set a `table:` field to route specific relationship types to dedicated tables. This allows linking between the two graphs. For example, a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph.
+- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model. It is defined in `config/ontology/`, with the same ClickHouse graph schema in `config/graph.sql`. Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). An edge table can claim node domains. A relationship variant routes there when both endpoints use a claimed domain. Edge-level and variant-level `table:` values override domain routing. This allows linking between the two graphs. For example, a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph.
 - **Entity as Node**: Every entity in the GitLab platform (e.g., Project, Issue, File, Function Definition) is represented as a node.
 - **Interaction as Edge**: Relationships between these entities (e.g., a User `AUTHORED` a Note, a `File` `CONTAINS` a `Definition`) are represented as directed edges.
 

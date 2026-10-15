@@ -194,6 +194,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 settings: s.settings,
             });
             let config = crate::EdgeTableConfig {
+                domains: cfg.domains.into_iter().collect(),
                 sort_key: cfg.sort_key,
                 columns: cfg
                     .columns
@@ -310,11 +311,36 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         );
     }
 
+    let mut domain_tables = std::collections::BTreeMap::new();
+    for (table, config) in &ontology.edge_table_configs {
+        for domain in &config.domains {
+            if !ontology.domains.contains_key(domain) {
+                return Err(OntologyError::Validation(format!(
+                    "edge table '{table}' references unknown domain '{domain}'"
+                )));
+            }
+            if let Some(existing) = domain_tables.insert(domain.clone(), table.clone()) {
+                return Err(OntologyError::Validation(format!(
+                    "domain '{domain}' is assigned to both edge tables '{existing}' and '{table}'"
+                )));
+            }
+        }
+    }
+    let node_domains = ontology
+        .nodes()
+        .map(|node| (node.name.clone(), node.domain.clone()))
+        .collect();
+
     for (edge_name, edge_path) in &schema.edges {
         let content = reader.read(edge_path)?;
         let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
-        let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table());
+        let entities = edge_def.to_entities(
+            edge_name.clone(),
+            ontology.edge_table(),
+            &node_domains,
+            &domain_tables,
+        );
 
         let mut endpoints = std::collections::HashSet::new();
         for entity in &entities {
