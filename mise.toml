@@ -154,7 +154,7 @@ description = "Run container tests (requires the Colima `gkg` profile: `colima s
 [tasks."test:integration:memory"]
 run = [
   "cargo nextest run --all-features -p integration-tests --test containers --no-run",
-  "ORBIT_MEMORY_PROOF=1 systemd-run --user --scope -p MemoryMax=1G -- cargo nextest run --all-features -p integration-tests --test containers --retries 0 -E 'test(memory_pressure)'",
+  "systemd-run --user --scope -p MemoryMax=1G -- cargo nextest run --all-features -p integration-tests --test containers --retries 0 --run-ignored ignored-only -E 'test(memory_pressure)'",
 ]
 description = "Prove that one code job under a 1 GiB cgroup limit dead-letters alone while the process and a co-scheduled job survive (Linux with a systemd user session and Docker)"
 
