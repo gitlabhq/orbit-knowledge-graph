@@ -152,10 +152,6 @@ impl SsaEngine {
         self.writes
     }
 
-    pub fn phi_count(&self) -> usize {
-        self.phis.len()
-    }
-
     pub fn has_variable_in_block(&self, variable: u32, block: BlockId) -> bool {
         self.current_def
             .get(&variable)

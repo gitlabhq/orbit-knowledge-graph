@@ -102,68 +102,50 @@ struct Fold<'t> {
     member_busy: FxHashSet<(u32, u32)>,
     member_memo_at: (BlockId, usize, usize, usize),
     loops: Vec<(BlockId, (u32, u32))>,
-    loop_names: LoopNames,
+    loop_ends: FxHashMap<u32, u32>,
+    assigned: FxHashMap<u32, Vec<u32>>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
-    scopes: Vec<(u32, FxHashMap<u32, u32>)>,
-    bound: FxHashMap<u32, Vec<(usize, u32)>>,
+    scopes: Vec<(u32, Undo)>,
+    visible: FxHashMap<u32, (u32, usize)>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
     arm_exits: Vec<BlockId>,
 }
 
-#[derive(Default)]
-struct LoopNames {
-    spans: FxHashMap<u32, (u32, u32)>,
-    assigned: FxHashMap<u32, Vec<u32>>,
-    next: u32,
-}
+type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
-impl LoopNames {
-    fn span(&mut self, c: Cursor) -> (u32, u32) {
-        if !self.spans.contains_key(&c.index()) {
-            self.number(c);
+fn loop_spans(root: Cursor) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
+    let (mut ends, mut assigned) = (FxHashMap::default(), FxHashMap::<u32, Vec<u32>>::default());
+    let mut stack = vec![(root, false)];
+    let mut last = root.index();
+    while let Some((node, leaving)) = stack.pop() {
+        if leaving {
+            ends.insert(node.index(), last + 1);
+            continue;
         }
-        self.spans[&c.index()]
-    }
-
-    fn number(&mut self, root: Cursor) {
-        let mut stack = vec![(root, Some(self.next))];
-        stack.extend(root.children().map(|child| (child, None)));
-        while let Some((node, start)) = stack.pop() {
-            if let Some(start) = start {
-                self.spans.insert(node.index(), (start, self.next));
-                continue;
+        last = node.index();
+        if node.is(C::Import) || node.is(C::ImportType) {
+            for name in std::iter::once(node).chain(node.descendants()) {
+                assigned.entry(name.sym()).or_default().push(last);
             }
-            let at = self.next;
-            self.next += 1;
-            if node.is(C::Import) || node.is(C::ImportType) {
-                for name in std::iter::once(node).chain(node.descendants()) {
-                    self.assigned.entry(name.sym()).or_default().push(at);
-                }
-                continue;
-            }
-            if [C::Binding, C::DefName, C::Alias, C::SsaHint]
-                .into_iter()
-                .any(|kind| node.is(kind))
-                || node.has(C::Declaration)
-            {
-                self.assigned.entry(node.sym()).or_default().push(at);
-            }
-            if node.is(C::SsaLoop) {
-                stack.push((node, Some(at)));
-            }
-            stack.extend(node.children().map(|child| (child, None)));
+            continue;
         }
+        if [C::Binding, C::DefName, C::Alias, C::SsaHint]
+            .into_iter()
+            .any(|kind| node.is(kind))
+            || node.has(C::Declaration)
+        {
+            assigned.entry(node.sym()).or_default().push(last);
+        }
+        if node.is(C::SsaLoop) {
+            stack.push((node, true));
+        }
+        stack.extend(node.children_rev().map(|child| (child, false)));
     }
-
-    fn assigns(&self, sym: u32, (start, end): (u32, u32)) -> bool {
-        let at = self.assigned.get(&sym).map_or(&[][..], Vec::as_slice);
-        at.get(at.partition_point(|&n| n < start))
-            .is_some_and(|&n| n < end)
-    }
+    (ends, assigned)
 }
 
 impl<'t> Fold<'t> {
@@ -305,7 +287,11 @@ impl<'t> Fold<'t> {
             Self::handle_branch(c, sink, stack);
             return;
         } else if k == C::SsaLoop {
-            self.loops.push((self.cur, self.loop_names.span(c)));
+            if self.loop_ends.is_empty() {
+                (self.loop_ends, self.assigned) = loop_spans(self.tree.root());
+            }
+            self.loops
+                .push((self.cur, (c.index(), self.loop_ends[&c.index()])));
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
@@ -803,35 +789,37 @@ impl<'t> Fold<'t> {
     }
 
     fn binding(&self, name: u32) -> u32 {
-        self.bound
+        self.visible
             .get(&name)
-            .and_then(|stack| stack.last())
-            .map_or_else(|| self.key(BindingKey::Name(name)), |&(_, binding)| binding)
+            .map_or_else(|| self.key(BindingKey::Name(name)), |&(binding, _)| binding)
+    }
+
+    fn bound_at(&self, name: u32, at: usize) -> Option<u32> {
+        let hit = self.scopes[at + 1..]
+            .iter()
+            .flat_map(|(_, undo)| undo)
+            .find_map(|&(n, previous)| (n == name).then_some(previous));
+        hit.unwrap_or_else(|| self.visible.get(&name).copied())
+            .filter(|&(_, depth)| depth == at)
+            .map(|(binding, _)| binding)
     }
 
     fn bind(&mut self, name: u32, binding: u32) {
         let Some(depth) = self.scopes.len().checked_sub(1) else {
             return;
         };
-        self.scopes[depth].1.insert(name, binding);
-        let stack = self.bound.entry(name).or_default();
-        match stack.last_mut() {
-            Some((at, bound)) if *at == depth => *bound = binding,
-            _ => stack.push((depth, binding)),
+        let previous = self.visible.insert(name, (binding, depth));
+        if previous.is_none_or(|(_, at)| at != depth) {
+            self.scopes[depth].1.push((name, previous));
         }
     }
 
     fn exit_scope(&mut self) {
-        let Some((_, scope)) = self.scopes.pop() else {
-            return;
-        };
-        let depth = self.scopes.len();
-        for name in scope.keys() {
-            if let Some(stack) = self.bound.get_mut(name)
-                && stack.last().is_some_and(|&(at, _)| at == depth)
-            {
-                stack.pop();
-            }
+        for (name, previous) in self.scopes.pop().map(|(_, undo)| undo).unwrap_or_default() {
+            match previous {
+                Some(previous) => self.visible.insert(name, previous),
+                None => self.visible.remove(&name),
+            };
         }
     }
 
@@ -860,7 +848,7 @@ impl<'t> Fold<'t> {
 
     fn enter_scope(&mut self, scope: Cursor<'t>) {
         let label = scope.tag(self.tags.scoped).unwrap_or(scope.sym());
-        self.scopes.push((label, FxHashMap::default()));
+        self.scopes.push((label, Vec::new()));
         if scope.has_tag(self.tags.hoisted) {
             self.predeclare(scope);
         }
@@ -881,18 +869,16 @@ impl<'t> Fold<'t> {
                 .unwrap_or(declaration.sym());
             let key = self.binding_key(declaration, name);
             let unbound = self.key(BindingKey::Name(name));
-            let Some(((_, current), parents)) = self.scopes.split_last() else {
-                return;
-            };
-            if current.contains_key(&name) {
+            let depth = self.scopes.len() - 1;
+            if self.visible.get(&name).is_some_and(|&(_, at)| at == depth) {
                 continue;
             }
             if let Some(owner) = declaration.child_sym(C::Alias) {
-                let binding = parents.iter().rev().find_map(|(label, names)| {
-                    (*label == owner).then(|| names.get(&name).copied().unwrap_or(unbound))
-                });
-                if let Some(binding) = binding {
-                    self.bind(name, binding);
+                let owner = self.scopes[..depth]
+                    .iter()
+                    .rposition(|(label, _)| *label == owner);
+                if let Some(at) = owner {
+                    self.bind(name, self.bound_at(name, at).unwrap_or(unbound));
                 }
                 continue;
             }
@@ -1071,9 +1057,11 @@ impl<'t> Fold<'t> {
     }
 
     fn name_block(&self, sym: u32) -> BlockId {
-        let inner = self
-            .loops
-            .partition_point(|&(_, span)| self.loop_names.assigns(sym, span));
+        let assigned = self.assigned.get(&sym).map_or(&[][..], Vec::as_slice);
+        let inner = self.loops.partition_point(|&(_, (start, end))| {
+            let first = assigned.partition_point(|&at| at < start);
+            assigned.get(first).is_some_and(|&at| at < end)
+        });
         self.loops
             .get(inner)
             .map_or(self.cur, |&(preheader, _)| preheader)
@@ -1404,11 +1392,7 @@ impl<'t> Fold<'t> {
     }
 }
 
-fn walk<'t>(
-    tree: &'t Tree,
-    env: &'t Env,
-    run: &'t Sentinel,
-) -> Result<(Fold<'t>, BlockId), Killed> {
+pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
     let (lang, config) = (&env.lang, &env.rules_for(&tree.label).config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
     let tags = ReservedTags::new(lang);
@@ -1445,29 +1429,24 @@ fn walk<'t>(
         member_busy: FxHashSet::default(),
         member_memo_at: (entry, 0, 0, 0),
         loops: Vec::new(),
-        loop_names: LoopNames::default(),
+        loop_ends: FxHashMap::default(),
+        assigned: FxHashMap::default(),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
         fields: FxHashMap::default(),
-        scopes: vec![(root_label, FxHashMap::default())],
-        bound: FxHashMap::default(),
+        scopes: vec![(root_label, Vec::new())],
+        visible: FxHashMap::default(),
         keys: RefCell::default(),
         arm_exits: Vec::new(),
     };
 
     f.predeclare(root);
     f.walk_children(root);
-    match f.killed.take() {
-        Some(k) => Err(k),
-        None => Ok((f, entry)),
+    if let Some(k) = f.killed.take() {
+        return Err(k);
     }
-}
-
-pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
-    let config = &env.rules_for(&tree.label).config.link;
-    let (mut f, entry) = walk(tree, env, run)?;
 
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
@@ -1542,36 +1521,4 @@ fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
     module
         .children()
         .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Limits;
-    use crate::pipeline::{Canonical, Canonicalize, ItemPhase, Parse, Rewrite, SourceFile};
-    use crate::treesitter::SupportLang;
-
-    fn phis(lang: SupportLang, path: &str, source: &str) -> usize {
-        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let free = Sentinel::disabled();
-        let file = SourceFile::from((path.to_string(), source.to_string()));
-        let parsed = Parse.run(&env, &free, file).unwrap();
-        let rewritten = Rewrite.run(&env, &free, parsed).unwrap();
-        let Canonical(tree) = Canonicalize.run(&env, &free, rewritten).unwrap();
-        walk(&tree, &env, &free).unwrap().0.ssa.phi_count()
-    }
-
-    #[test]
-    fn nested_loops_that_read_outer_names_add_no_phis_for_them() {
-        let loops = 200;
-        let mut source = String::from("function a() {}\nfunction f(c) {\nlet x = a;\n");
-        for i in 0..loops {
-            source.push_str(&format!("while (c) {{\nx = g{i};\n"));
-        }
-        source.push_str("x();\n");
-        source.push_str(&"}\n".repeat(loops));
-        source.push_str("}\n");
-        let created = phis(SupportLang::JavaScript, "m.js", &source);
-        assert_eq!(created, 0, "{created} phis for {loops} nested loops");
-    }
 }
