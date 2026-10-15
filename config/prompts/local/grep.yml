@@ -1,11 +1,13 @@
 name: grep
-version: 2.3.0
+version: 2.4.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
   Matching ignores case, `_`, and `-`; quote `a|b|c` for OR alternatives.
   Output follows rg's heading layout: each file's path once, then `line:text` for each match.
-  A `line-» Kind name:start-end ←callers →callees` line precedes the matches inside each definition.
+  A `line-» Kind name:start-end ←callers →callees` line precedes the matches inside each definition,
+  ending with `also name in path:line` for same-name definitions outside the results.
+  More than 20 files get a `»` index by directory first.
   Import lines get `line-» imports ...`, and other code gets `line-» outside indexed definitions`.
   Lines print in full; -m caps matches per file and -M caps line width.
   A missing path searches tracked paths with the same last segment.
@@ -14,4 +16,5 @@ description: >-
   then code, tests, and config or docs. A definition the query names prints
   first with its source. Pass paths as with rg; rg and grep flags such as
   -A, -l, -w, and -g work. `--kind` takes definition kinds such as
-  `Class,Method`, or `File` and `Directory` to list where matches are.
+  `Class,Method`, languages such as `py` as with rg -t, or `File` and `Directory`
+  to list where matches are.

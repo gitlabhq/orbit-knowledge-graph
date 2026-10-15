@@ -17,6 +17,8 @@ const NOTE: &str = "» ";
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
 const LOOKUP_LINES: usize = 80;
 const EDITED_MARK: &str = " (edited since index)";
+const FILE_INDEX_MIN: usize = 20;
+const FILE_INDEX_DIRECTORIES: usize = 30;
 /// Marks code matches that no indexed definition encloses, such as Rust `#[cfg(test)]`
 /// modules, so they do not read as part of the definition above.
 const OUTSIDE: &str = "outside indexed definitions";
@@ -130,6 +132,9 @@ pub(super) fn render(
         out.push_str(body);
         out.push('\n');
     }
+    if rows.len() > FILE_INDEX_MIN {
+        out.push_str(&file_index(&rows, matched));
+    }
     // rg's heading layout: each file's path once, then `line:text` for matches, `line-text` for
     // -A/-B/-C context, and `line-» Kind name:start-end ←callers →callees` before each enclosing
     // definition, with `--` between separate groups and a blank line between files. Import lines
@@ -190,6 +195,41 @@ pub(super) fn render(
         }
     }
     Ok(out)
+}
+
+fn file_index(rows: &[(String, Vec<&Hit>)], matched: impl Fn(&[&Hit]) -> usize) -> String {
+    let mut dirs: Vec<(&str, Vec<String>)> = Vec::new();
+    for (file, list) in rows {
+        let (dir, name) = file.rsplit_once('/').unwrap_or(("", file.as_str()));
+        let entry = format!("{name} {}", matched(list));
+        match dirs.iter_mut().find(|(d, _)| *d == dir) {
+            Some((_, names)) => names.push(entry),
+            None => dirs.push((dir, vec![entry])),
+        }
+    }
+    let mut out = format!(
+        "{NOTE}{} files by directory, matching lines per file:\n",
+        rows.len()
+    );
+    let more = dirs.len().saturating_sub(FILE_INDEX_DIRECTORIES);
+    let rest: usize = dirs
+        .iter()
+        .skip(FILE_INDEX_DIRECTORIES)
+        .map(|(_, n)| n.len())
+        .sum();
+    for (dir, names) in dirs.into_iter().take(FILE_INDEX_DIRECTORIES) {
+        let dir = match dir.is_empty() {
+            true => ".".to_string(),
+            false => format!("{dir}/"),
+        };
+        out.push_str(&format!("{NOTE}  {dir} {}\n", names.join(", ")));
+    }
+    if more > 0 {
+        out.push_str(&format!(
+            "{NOTE}  +{more} more directories with {rest} files\n"
+        ));
+    }
+    out
 }
 
 /// The source of the one definition a single plain query term names, as rg context lines
@@ -356,6 +396,60 @@ data.json
         assert_eq!(
             show(&hits, &terms, Output::Count, &[]),
             "src/a.rs:8\nsrc/b.rs:1\ndata.json:1\n"
+        );
+    }
+
+    #[test]
+    fn definitions_name_same_name_definitions_outside_the_results() {
+        let hits = [hit(
+            "src/openai.rs",
+            4,
+            "fn check() {",
+            Some(("check", 4, 9)),
+        )];
+        let mut connections = Connections::new();
+        connections.insert(
+            4,
+            super::super::defs::Links {
+                callers: vec!["handle".into()],
+                callees: Vec::new(),
+                siblings: vec!["src/azure.rs:7".into(), "src/base.rs:2".into()],
+            },
+        );
+        let out = render(
+            "grep",
+            &hits,
+            &[Term::parse("check")],
+            &connections,
+            &BTreeSet::new(),
+            &Options::default(),
+            None,
+        )
+        .unwrap();
+        assert!(out.contains(
+            "4-» Function check:4-9 ←handle also check in src/azure.rs:7,src/base.rs:2\n"
+        ));
+    }
+
+    #[test]
+    fn many_matching_files_get_an_index_by_directory_before_the_matches() {
+        let hits: Vec<Hit> = (0..45)
+            .map(|i| hit(&format!("dir{}/f{i}.rs", i % 35), 1, "go();", None))
+            .collect();
+        let out = show(&hits, &[Term::parse("go")], Output::Lines, &[]);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines[1],
+            "» 45 files by directory, matching lines per file:"
+        );
+        assert!(lines[2].starts_with("»   dir"));
+        assert_eq!(lines[32], "»   +5 more directories with 5 files");
+        assert!(!lines[33].starts_with("» "));
+        let few: Vec<Hit> = (0..20)
+            .map(|i| hit(&format!("f{i}.rs"), 1, "go();", None))
+            .collect();
+        assert!(
+            !show(&few, &[Term::parse("go")], Output::Lines, &[]).contains("files by directory")
         );
     }
 
