@@ -1325,7 +1325,11 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
+fn walk<'t>(
+    tree: &'t Tree,
+    env: &'t Env,
+    run: &'t Sentinel,
+) -> Result<(Fold<'t>, BlockId), Killed> {
     let (lang, config) = (&env.lang, &env.rules_for(&tree.label).config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms).on_thread_cpu();
     let tags = ReservedTags::new(lang);
@@ -1375,9 +1379,15 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
 
     f.predeclare(root);
     f.walk_children(root);
-    if let Some(k) = f.killed.take() {
-        return Err(k);
+    match f.killed.take() {
+        Some(k) => Err(k),
+        None => Ok((f, entry)),
     }
+}
+
+pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option<Killed>), Killed> {
+    let config = &env.rules_for(&tree.label).config.link;
+    let (mut f, entry) = walk(tree, env, run)?;
 
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
@@ -1455,4 +1465,59 @@ fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
     module
         .children()
         .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::treesitter::SupportLang;
+    use crate::{Context, Limits, templates};
+    use orbit_utils::vfs::{Decision, File, Pass, Vfs, sources::Directory};
+
+    struct KeepAll;
+
+    impl Pass for KeepAll {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Pending
+        }
+        fn content(&self, _: &File<'_, ()>) -> Decision<()> {
+            Decision::Keep(())
+        }
+    }
+
+    fn phis(lang: SupportLang, path: &str, source: &str) -> usize {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::write(repo.path().join(path), source).unwrap();
+        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
+        let repository = Arc::new(
+            Vfs::load(
+                Directory(repo.path()),
+                KeepAll,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let graph = templates::index(Context::new(&env, repository)).unwrap();
+        let tree = &graph.value().state.trees[0];
+        let run = Sentinel::new("link", path, u64::MAX);
+        walk(tree, &env, &run).unwrap().0.ssa.phi_count()
+    }
+
+    #[test]
+    fn nested_loops_that_read_outer_names_add_no_phis_for_them() {
+        let loops = 200;
+        let mut source = String::from("function a() {}\nfunction f(c) {\nlet x = a;\n");
+        for i in 0..loops {
+            source.push_str(&format!("while (c) {{\nx = g{i};\n"));
+        }
+        source.push_str("x();\n");
+        source.push_str(&"}\n".repeat(loops));
+        source.push_str("}\n");
+        let created = phis(SupportLang::JavaScript, "m.js", &source);
+        assert_eq!(created, 0, "{created} phis for {loops} nested loops");
+    }
 }
