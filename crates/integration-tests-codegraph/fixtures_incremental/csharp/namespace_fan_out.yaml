@@ -286,3 +286,23 @@ tests:
       - { row: { path: Ns0 } }
       - { row: { path: Ns1 } }
       - { row: { path: Ns2 } }
+
+  - name: "every M links to all three targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'M'
+      RETURN caller.file_path AS file, callee.fqn AS callee
+      LIMIT 100
+    assert:
+      - { row_count: 36 }
+      - { where: { callee: Ns0.C0_0.Run }, row_count: 12 }
+      - { where: { callee: Ns1.C1_0.Run }, row_count: 12 }
+      - { where: { callee: Ns2.C2_0.Run }, row_count: 12 }
+
+  - name: "a query without LIMIT returns the default page of 30 rows"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'M'
+      RETURN caller.file_path AS file, callee.fqn AS callee
+    assert:
+      - { row_count: 30 }

@@ -124,6 +124,7 @@ fn execute_cypher(
         arrow::compute::concat_batches(&batches[0].schema(), &batches)
             .map_err(|e| anyhow::anyhow!("concat batches: {e}"))?
     };
+    let batch = batch.slice(0, batch.num_rows().min(compiled.input.limit as usize));
     Ok(apply_aliases(batch, &compiled.input, &aliases))
 }
 
