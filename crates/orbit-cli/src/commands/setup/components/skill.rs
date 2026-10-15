@@ -74,10 +74,10 @@ impl Installer for Skill<'_> {
         for skill in skill_targets(agents, target)? {
             migrate_legacy(&skill, target, report)?;
             let kind = self.kind_for(&skill);
-            if kind == SkillKind::Wrapper && skill.requires_full {
-                report.note(
-                    &skill.label,
-                    "wrapper installed by request; an agent here cannot run it when it loads a skill",
+            if kind == SkillKind::Wrapper && has_full_only_owner(&skill) {
+                eprintln!(
+                    "warning: {} gets the wrapper, which an agent using it (such as Duo) cannot run when it loads a skill",
+                    skill.label
                 );
             }
             let tree = self.tree_for(kind)?;
@@ -138,12 +138,24 @@ fn migrate_legacy(skill: &SkillTarget, target: &Target, report: &mut Report) -> 
     remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)
 }
 
+/// Whether an agent selected now, or recorded for this directory, needs the full tree.
+fn has_full_only_owner(skill: &SkillTarget) -> bool {
+    let recorded = read_marker(&skill.root).map(|marker| marker.agents);
+    skill.requires_full
+        || spec::agents().any(|agent| {
+            recorded
+                .as_ref()
+                .is_some_and(|owners| owners.contains(&agent.name))
+                && agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full)
+        })
+}
+
 /// Whether any of these agents' skill directories was last installed as the full tree.
 pub(in crate::commands::setup) fn records_full_skill(agents: &[Agent], target: &Target) -> bool {
     skill_targets(agents, target).is_ok_and(|targets| {
-        targets
-            .iter()
-            .any(|skill| read_marker(&skill.root).is_some_and(|m| m.kind == SkillKind::Full))
+        targets.iter().any(|skill| {
+            read_marker(&skill.root).is_some_and(|marker| marker.kind == SkillKind::Full)
+        })
     })
 }
 
@@ -451,7 +463,9 @@ fn release_skill_files(
     if !marker.agents.is_empty() {
         write_marker(skill_root, &marker)?;
         let remaining: Vec<&str> = marker.agents.iter().map(String::as_str).collect();
-        report.note(label, format!("kept for {}", remaining.join(", ")));
+        if exists {
+            report.note(label, format!("kept for {}", remaining.join(", ")));
+        }
         return Ok(());
     }
     remove_path(skill_root)?;

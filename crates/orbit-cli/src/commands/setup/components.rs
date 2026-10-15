@@ -14,6 +14,8 @@ use super::plan::Selection;
 use super::spec::{self, Agent};
 use super::{Component, Target};
 
+pub(super) use skill::records_full_skill;
+
 pub(super) trait Installer {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>>;
 
@@ -33,8 +35,6 @@ pub(super) fn installed_agents(components: &BTreeSet<Component>, target: &Target
         })
         .collect()
 }
-
-pub(super) use skill::records_full_skill;
 
 fn file_mentions(path: &Path, marker: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))

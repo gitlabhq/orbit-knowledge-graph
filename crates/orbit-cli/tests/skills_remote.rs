@@ -893,3 +893,35 @@ fn a_rerun_without_skill_flag_keeps_the_instance_full_tree() {
         "a rerun replaced the instance's full tree with the embedded one"
     );
 }
+
+#[test]
+fn a_wrapper_request_warns_when_a_recorded_agent_cannot_run_it() {
+    let project = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let dir = project.path().to_str().unwrap();
+    let setup = |agent: &str, skill: &[&str]| {
+        let mut args = vec![
+            "setup",
+            agent,
+            "--yes",
+            "--skip",
+            "instructions",
+            "--no-index",
+            "--project",
+            "--dir",
+            dir,
+        ];
+        args.extend_from_slice(skill);
+        run_orbit(None, &cache, &args)
+    };
+    assert!(setup("duo", &[]).status.success());
+
+    let output = setup("claude", &["--skill", "wrapper"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("cannot run"),
+        "{}",
+        stderr(&output)
+    );
+}
