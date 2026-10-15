@@ -1,0 +1,29 @@
+name: "Kotlin: the result of an unlinked local call is typed by the callee's return type"
+
+fixtures:
+  - path: Ticker.kt
+    content: |
+      package p
+
+      interface ReceiveChannel<E> {
+          fun cancel()
+      }
+
+      interface CoroutineScope
+
+      fun CoroutineScope.ticker(delayMillis: Long): ReceiveChannel<Unit> = TODO()
+
+      fun CoroutineScope.sample(periodMillis: Long) {
+          val channel = ticker(periodMillis)
+          channel.cancel()
+      }
+
+tests:
+  - name: "sample calls cancel on the channel that ticker returns"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'cancel'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: sample } }

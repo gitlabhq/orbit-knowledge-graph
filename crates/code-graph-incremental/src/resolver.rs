@@ -628,7 +628,12 @@ fn expand(
         .par_iter()
         .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
         .filter(|(producer, _)| {
-            (producer.is(C::Binding) || external_of(ctx, *producer).is_some())
+            (producer.is(C::Binding)
+                || (producer.is(C::Call)
+                    && !ctx
+                        .call_at_site
+                        .contains_key(&(producer.fi(), producer.index())))
+                || external_of(ctx, *producer).is_some())
                 && ctx.run.check().is_ok()
         })
         .flat_map(|(producer, uses)| dispatch(ctx, producer, producer_class(ctx, producer), uses))
