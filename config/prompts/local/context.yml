@@ -9,7 +9,8 @@ description: >-
   `Definition:<id>`. Add GitLab references such as `MergeRequest[42]`, `Issue[7]`,
   `group/project!12`, `!12`, or a GitLab URL. Code targets read the local index,
   including another indexed checkout that owns the ID. GitLab references return
-  entity context after the local output. Files return compact definition maps with every followable
+  entity context after the local output: description, comments and review
+  threads, and for merge requests the changed files and failed CI jobs. Files return compact definition maps with every followable
   ID and up to ten connections per section, with omitted counts. Line ranges
   return those numbered lines with the definitions they touch; directories list
   indexed files with definition counts. Choose a Definition ID for complete source and its indexed
