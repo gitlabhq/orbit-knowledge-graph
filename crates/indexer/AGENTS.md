@@ -239,6 +239,7 @@ plus the relevant ids. Compute branch-dependent values in one fallible step that
 non-lifecycle action. So the caller can log-and-skip if the outer match drifts, instead of
 `unreachable!`-panicking.
 Panicking is only acceptable on a genuine programmer invariant that no production data can reach.
+Clippy enforces this: `unwrap_used`, `expect_used`, `panic` and `unreachable` are denied for this crate. `clippy.toml` exempts tests from `unwrap`, `expect` and `panic`; `unreachable` has no test exemption, so use `panic!` in tests. Annotate a real invariant with `#[expect(clippy::…, reason = "…")]`.
 
 ### New edge/action routing needs an end-to-end YAML scenario
 
