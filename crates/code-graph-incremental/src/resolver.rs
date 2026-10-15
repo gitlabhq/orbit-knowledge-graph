@@ -441,6 +441,7 @@ impl Resolver {
             extends_of,
             imports_to,
             call_at_site,
+            wave_callees: FxHashMap::default(),
             corpus: Cursor::new(trees, 0, 0),
             type_uses,
             producers,
@@ -675,6 +676,13 @@ fn expand(
         .collect();
     while !wave.is_empty() {
         ctx.run.check()?;
+        for e in wave.iter() {
+            if let Some(site) = e.site {
+                ctx.wave_callees
+                    .entry((e.from_tree, site))
+                    .or_insert(e.to());
+            }
+        }
         wave = wave
             .par_iter()
             .flat_map(|ce| resolve_type_edges(ctx, ce))
@@ -698,6 +706,7 @@ struct ResolveCtx<'a> {
     extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
     imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     call_at_site: FxHashMap<(u32, u32), &'a Edge>,
+    wave_callees: FxHashMap<(u32, u32), (u32, u32)>,
     corpus: Cursor<'a>,
     type_uses: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     producers: FxHashMap<(u32, u32), Vec<&'a Edge>>,
@@ -1421,13 +1430,9 @@ fn dispatch(
             let class = match reaching {
                 Some(reaching) if reaching.len() > 1 => lub(
                     ctx,
-                    reaching.iter().map(|e| {
-                        let reached = ctx.corpus.follow(e);
-                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
-                            true => class,
-                            false => producer_class(ctx, reached),
-                        }
-                    }),
+                    reaching
+                        .iter()
+                        .map(|e| producer_class(ctx, ctx.corpus.follow(e))),
                 ),
                 _ => class,
             };
@@ -1509,7 +1514,11 @@ fn callee_of<'a>(ctx: &'a ResolveCtx, call: Cursor<'a>) -> Option<Cursor<'a>> {
     let local = ctx
         .call_at_site
         .get(&(call.fi(), call.index()))
-        .map(|e| ctx.corpus.follow(e));
+        .map(|e| ctx.corpus.follow(e))
+        .or_else(|| {
+            let &(fi, node) = ctx.wave_callees.get(&(call.fi(), call.index()))?;
+            Some(ctx.corpus.jump(fi, node))
+        });
     local.or_else(|| resolve_chain(ctx, call.child(C::Callee)?))
 }
 
