@@ -483,7 +483,7 @@ A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s
                            \- 9. Release lock and ack
 ```
 
-The handler acks only after the project's parts are written and its checkpoint is saved. It does not force a flush. It releases its intake permit and waits for the writer's own size, floor-and-age, or cap flush, so small repositories keep pooling into one part. The wait is bounded by `write_max_flush_age_secs` plus the write retries, which stays under `nats.ack_wait_secs`. The heartbeat keeps the delivery and the lock alive. The two diagrams below show that durable-write path.
+The handler acks only after the project's parts are written and its checkpoint is saved. It does not force a flush. It releases its intake permit and waits for the writer's own size, floor-and-age, or cap flush, so small repositories keep pooling into one part. The age check runs on the `write_buffer_age_secs` tick. So the wait is bounded by `write_max_flush_age_secs` plus one tick plus the write retries, about 190 s at the defaults. The job's work budget bounds it too. The heartbeat progress acks keep the delivery under `nats.ack_wait_secs` and renew the lock during the wait. The two diagrams below show that durable-write path.
 
 ##### ProjectCommit state machine
 
