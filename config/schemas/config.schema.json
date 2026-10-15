@@ -630,6 +630,12 @@
           "format": "uint",
           "minimum": 0
         },
+        "max_inflight_source_bytes": {
+          "description": "Source bytes the incremental engine parses at the same time within one\nlanguage family. A file larger than the budget runs alone. Bounds the\nper-file parse memory, which is 50 to 190 times the file size, to the\nbudget instead of the worker count. 0 = no limit.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "job_timeout_secs": {
           "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.",
           "type": "integer",
@@ -722,6 +728,7 @@
         "max_cross_file_names",
         "max_manifest_bytes",
         "max_file_edges",
+        "max_inflight_source_bytes",
         "job_timeout_secs",
         "fetch_concurrency",
         "write_channel_capacity",

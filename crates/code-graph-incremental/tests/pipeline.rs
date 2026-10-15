@@ -2,10 +2,13 @@ use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use code_graph_incremental::pipeline::{Each, Prepare, SourceFile};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{
     Context, Env, Error, ItemPhase, Killed, Limits, Observer, Phase, Pipeline, Sentinel,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
+mod common;
 
 struct Double;
 
@@ -192,4 +195,73 @@ fn item_phases_pipe_into_one_named_pass() {
         .run(&env, &Sentinel::new("run", "", 0), 1)
         .unwrap_err();
     assert_eq!(killed.label, "run");
+}
+
+#[derive(Clone, Default)]
+struct InflightProbe {
+    inflight: Arc<AtomicU64>,
+    peak: Arc<AtomicU64>,
+}
+
+impl ItemPhase<SourceFile> for InflightProbe {
+    type Output = ();
+    fn name(&self) -> Cow<'static, str> {
+        "probe".into()
+    }
+    fn run(&self, _: &Env, _: &Sentinel, file: SourceFile) -> Result<(), Killed> {
+        let bytes = file.content.len() as u64;
+        let now = self.inflight.fetch_add(bytes, Ordering::Relaxed) + bytes;
+        self.peak.fetch_max(now, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(30));
+        self.inflight.fetch_sub(bytes, Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+fn peak_inflight(files: &[(String, String)], max_inflight_bytes: u64) -> (u64, usize) {
+    let repo = tempfile::tempdir().unwrap();
+    for (path, content) in files {
+        std::fs::write(repo.path().join(path), content).unwrap();
+    }
+    let env = Env::with_limits(
+        SupportLang::Python,
+        Limits {
+            max_inflight_bytes,
+            ..Limits::UNLIMITED
+        },
+    )
+    .unwrap();
+    let probe = InflightProbe::default();
+    let items = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap()
+        .install(|| {
+            Pipeline::new(Context::new(&env, common::walk(repo.path())), ())
+                .then(Prepare)
+                .unwrap()
+                .then(Each(probe.clone()))
+                .unwrap()
+                .into_value()
+                .items
+                .len()
+        });
+    (probe.peak.load(Ordering::Relaxed), items)
+}
+
+#[test]
+fn source_bytes_in_flight_stay_under_the_budget_and_an_oversize_file_runs_alone() {
+    const MIB: usize = 1024 * 1024;
+    let files: Vec<_> = (0..8)
+        .map(|i| (format!("f{i}.py"), "x = 1\n".repeat(MIB / 6)))
+        .collect();
+    let (unbounded, items) = peak_inflight(&files, 0);
+    assert_eq!(items, 8);
+    assert!(unbounded > 2 * MIB as u64, "{unbounded}");
+    let (capped, items) = peak_inflight(&files, 2 * MIB as u64);
+    assert_eq!(items, 8);
+    assert!(capped <= 2 * MIB as u64, "{capped}");
+    let big = [("big.py".to_string(), "x = 1\n".repeat(MIB / 2))];
+    let (alone, items) = peak_inflight(&big, 2 * MIB as u64);
+    assert_eq!((items, alone), (1, big[0].1.len() as u64));
 }

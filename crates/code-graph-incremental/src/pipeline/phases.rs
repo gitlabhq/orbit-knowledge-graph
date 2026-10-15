@@ -1,6 +1,7 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
+use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
@@ -197,12 +198,14 @@ where
             dirty,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
+        let admission = Admission::new(env.limits.max_inflight_bytes);
         let outcomes: Vec<_> = items
             .into_parallel(&context.repository)
             .map(|item| {
                 let item = item?;
                 let path = item.label().to_string();
                 let bytes = item.bytes();
+                let _admitted = admission.admit(bytes);
                 let started = Instant::now();
                 let outcome = phase.run(env, run, item);
                 Ok((outcome, path, bytes, started.elapsed()))
@@ -244,6 +247,59 @@ where
             items,
             dirty,
         })
+    }
+}
+
+/// Source bytes in flight across the workers; an item larger than the whole
+/// budget runs alone. 0 = off.
+struct Admission {
+    budget: u64,
+    used: Mutex<u64>,
+    freed: Condvar,
+}
+
+impl Admission {
+    fn new(budget: u64) -> Self {
+        Self {
+            budget,
+            used: Mutex::new(0),
+            freed: Condvar::new(),
+        }
+    }
+
+    fn admit(&self, bytes: u64) -> Admitted<'_> {
+        if self.budget > 0 {
+            let mut used = self.used.lock().unwrap_or_else(PoisonError::into_inner);
+            while *used > 0 && *used + bytes > self.budget {
+                used = self
+                    .freed
+                    .wait(used)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            *used += bytes;
+        }
+        Admitted {
+            admission: self,
+            bytes,
+        }
+    }
+}
+
+struct Admitted<'a> {
+    admission: &'a Admission,
+    bytes: u64,
+}
+
+impl Drop for Admitted<'_> {
+    fn drop(&mut self) {
+        if self.admission.budget > 0 {
+            *self
+                .admission
+                .used
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) -= self.bytes;
+            self.admission.freed.notify_all();
+        }
     }
 }
 
