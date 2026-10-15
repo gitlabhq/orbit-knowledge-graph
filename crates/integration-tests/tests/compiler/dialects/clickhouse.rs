@@ -1782,7 +1782,7 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
             .base
             .sql
             .contains("gl_user AS u FINAL")
-            && compiled.base.sql.contains("ON (u.id = n.author_id)"),
+            && compiled.base.sql.contains("ON (n.author_id = u.id)"),
         "AUTHORED should resolve to the FK plan: {}",
         compiled.base.sql
     );

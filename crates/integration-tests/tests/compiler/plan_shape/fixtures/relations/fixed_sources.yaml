@@ -1,0 +1,68 @@
+cases:
+- name: Projected FK endpoints use current node rows without an edge scan
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+    gql: |
+      MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project)
+      RETURN mr.title, p.name
+  logical:
+    expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Join ON mr.project_id = p.id (Bind mr (_)) (Bind p (_)))
+        reject: ["(Scan Table(gl_edge) ...)"]
+- name: An FK chain composes independent current node relations
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"},"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+    gql: |
+      MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest)
+        -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+      RETURN u.id, mr.id, pipe.id, j.id
+  logical:
+    expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Join ON mr.author_id = u.id (_) (Bind u (_)))
+        - (Join ON mr.head_pipeline_id = pipe.id (_) (Bind pipe (_)))
+        - (Join ON j.pipeline_id = pipe.id (_) (Bind j (_)))
+        reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)
+- name: A mixed chain selects stored and FK sources per relationship
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+    gql: |
+      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+      RETURN u.username, mr.title, p.name
+  logical:
+    expect: ["(EdgeScan APPROVED u->mr AS e0)", "(EdgeScan IN_PROJECT mr->p AS e1)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Scan Table(gl_edge) AS _orbit_edge_0)
+        - (Join ON mr.project_id = p.id (_) (Bind p (_)))
+        reject: ["(Scan Table(gl_edge) AS _orbit_edge_1)"]
+- name: Relationship filters retain the stored source in a mixed chain
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","columns":["id"]}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+    gql: |
+      MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
+      RETURN mr.id, pipe.id, j.id
+  logical:
+    expect: ["(Filter e0.target_id = 1 (_))"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+        - (Join ON j.pipeline_id = _orbit_edge_0.target_id (_) (Bind j (_)))
+        reject: ["(Scan Table(gl_ci_edge) AS _orbit_edge_1)"]

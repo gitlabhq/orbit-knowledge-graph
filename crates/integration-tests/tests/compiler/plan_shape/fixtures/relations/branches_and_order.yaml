@@ -1,0 +1,54 @@
+cases:
+- name: An FK branch shares semantic node bindings without a star operator
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]},{"id":"j","entity":"Job","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+    gql: |
+      MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
+        (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
+      RETURN mr.title, p.name, pipe.status, j.name
+  logical:
+    expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Join ON mr.project_id = p.id (_) (Bind p (_)))
+        - (Join ON mr.head_pipeline_id = pipe.id (_) (Bind pipe (_)))
+        - (Join ON j.pipeline_id = pipe.id (_) (Bind j (_)))
+        reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)
+- name: A mixed branch keeps stored and FK decisions independent
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
+    gql: |
+      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
+        (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+      RETURN u.username, mr.title, p.name, pipe.status
+  logical:
+    expect: ["(EdgeScan APPROVED u->mr AS e0)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Scan Table(gl_edge) AS _orbit_edge_0)
+        - (Join ON mr.project_id = p.id (_) (Bind p (_)))
+        - (Join ON mr.head_pipeline_id = pipe.id (_) (Bind pipe (_)))
+        reject:
+        - (Scan Table(gl_edge) AS _orbit_edge_1)
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+- name: Connected relationships linearize by occurrence connectivity only
+  missing_frontends:
+    gql: GQL MATCH order is already connected in the equivalent pattern.
+  query:
+    json: |
+      {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"b","to":"c"}]}
+  logical:
+    expect: ["(EdgeScan CALLS a->b AS e0)", "(EdgeScan CALLS c->d AS e1)", "(EdgeScan CALLS b->c AS e2)"]
+  physical:
+    clickhouse:
+      planned:
+        expect:
+        - (Join ON _orbit_edge_2.target_id = _orbit_edge_1.source_id (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (_) (_)) (_))

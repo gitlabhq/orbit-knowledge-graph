@@ -172,7 +172,7 @@ where
 {
     let input = context.input;
     let model = context.model;
-    let hops = build_hops(input, model);
+    let mut hops = build_hops(input, model);
     let mut nodes = build_nodes(input, model);
     let denormalized = super::denormalized_facts(input, model);
     let placement = place_conditions(input, model, &hops, &nodes, &denormalized)?;
@@ -186,6 +186,7 @@ where
         table_scans,
         &mut nodes,
     );
+    linearize_relations(&mut hops)?;
     if input.query_type == QueryType::Aggregation {
         let groups: HashSet<&str> = node_group_ids(&input.aggregation.group_by).collect();
         for node in nodes.values_mut() {
@@ -224,6 +225,27 @@ where
     } else {
         QueryPlan::Traversal(context.finish(Traversal { execution }))
     })
+}
+
+fn linearize_relations(hops: &mut [Hop]) -> Result<()> {
+    let Some(first) = hops.first() else {
+        return Ok(());
+    };
+    let mut reached = HashSet::from([first.from_node.clone(), first.to_node.clone()]);
+    for index in 1..hops.len() {
+        let next = (index..hops.len())
+            .find(|candidate| {
+                reached.contains(&hops[*candidate].from_node)
+                    || reached.contains(&hops[*candidate].to_node)
+            })
+            .ok_or_else(|| {
+                QueryError::Validation("relationships must form a connected tree".into())
+            })?;
+        hops[index..=next].rotate_right(1);
+        reached.insert(hops[index].from_node.clone());
+        reached.insert(hops[index].to_node.clone());
+    }
+    Ok(())
 }
 
 fn build_nodes<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
