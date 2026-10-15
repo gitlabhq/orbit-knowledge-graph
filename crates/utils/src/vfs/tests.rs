@@ -309,6 +309,9 @@ fn the_file_limit_counts_kept_files_and_drops_listed_entries_past_it() {
         .collect();
     let vfs = Vfs::load(entries, (), limits, Options::default()).unwrap();
     assert_eq!((vfs.usage().files, vfs.usage().dropped_listed), (4, 3));
+    let entries = vec![kept("a"), kept("a"), kept("b")];
+    let vfs = Vfs::load(entries, (), limits, Options::default()).unwrap();
+    assert_eq!((vfs.usage().files, vfs.usage().duplicate_paths), (2, 1));
     let entries = vec![kept("a"), kept("b"), kept("c")];
     let result = Vfs::load(entries, (), limits, Options::default());
     assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
