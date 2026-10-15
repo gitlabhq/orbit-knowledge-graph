@@ -1,4 +1,5 @@
 name: FK-chain traversal preserves node outputs and stored edge orientation
+
 query:
   json: |
     {
@@ -19,9 +20,11 @@ query:
     MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
       -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
     RETURN u.id, mr.id, pipe.id, j.id
+
 logical:
   expect:
     - (EdgeScan AUTHORED u->mr AS e0)
+
 physical:
   clickhouse:
     planned:

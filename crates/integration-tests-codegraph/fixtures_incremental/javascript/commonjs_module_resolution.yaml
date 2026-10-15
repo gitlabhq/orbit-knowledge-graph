@@ -1,9 +1,11 @@
 name: "JavaScript CommonJS module resolution"
 pipeline: js
+
 fixtures:
   - path: named/util.js
     content: |
       exports.helper = function helper() {};
+
   - path: named/main.js
     content: |
       const { helper } = require('./util');
@@ -15,6 +17,7 @@ fixtures:
   - path: namespace/util.js
     content: |
       exports.helper = function helper() {};
+
   - path: namespace/main.js
     content: |
       const util = require('./util');
@@ -28,6 +31,7 @@ fixtures:
       exports.resolve = function resolve() {
         return "ok";
       };
+
   - path: alias/main.js
     content: |
       const { resolve: presolve } = require('./util');
@@ -47,6 +51,7 @@ fixtures:
       function unrelated() {
         function main() {}
       }
+
   - path: default/main.js
     content: |
       const runMain = require('./util');
@@ -69,6 +74,7 @@ fixtures:
         helper,
         normalize,
       };
+
   - path: object/main.js
     content: |
       const util = require('./util');
@@ -84,6 +90,7 @@ fixtures:
       function main() {
         return "ok";
       }
+
   - path: alias_chain/main.js
     content: |
       const runMain = require('./util');
@@ -99,6 +106,7 @@ fixtures:
       exports.trimValue = function trimValue(value) {
         return value.trim();
       };
+
   - path: no_false_call/main.js
     content: |
       const { HTTP_STATUS_OK, trimValue } = require('./util');
@@ -121,6 +129,7 @@ fixtures:
     content: |
       exports.unknown = getRuntimeValue();
       exports.HTTP_STATUS_OK = 200;
+
   - path: uncertain/main.js
     content: |
       const { unknown, HTTP_STATUS_OK } = require('./util');
@@ -130,6 +139,7 @@ fixtures:
         const alias = HTTP_STATUS_OK;
         alias();
       }
+
   - path: interop/main.js
     content: |
       const util = require('./util');
@@ -144,6 +154,7 @@ fixtures:
       module.exports.otherName = function otherImplementation() {};
       exports.anonymous = function() {};
       module.exports.otherAnonymous = function() {};
+
   - path: export_names/main.js
     content: |
       const util = require('./util');
@@ -178,17 +189,20 @@ fixtures:
         firstTrack();
         secondTrack();
       }
+
   - path: external/module_level.js
     content: |
       const { init } = require('external-sdk');
 
       init();
+
   - path: external/module_level_globals.js
     content: |
       const { init } = require('external-sdk');
 
       console.log("ready");
       JSON.parse("{}");
+
   - path: external/imported_reference_only.js
     content: |
       const { track } = require('external-tracker');
@@ -196,6 +210,7 @@ fixtures:
       function reportReference() {
         return track;
       }
+
   - path: external/shadowed.js
     content: |
       const { track } = require('external-tracker');
@@ -204,6 +219,7 @@ fixtures:
         const track = () => "local";
         return track();
       }
+
   - path: external/globals.js
     content: |
       const { track } = require('external-tracker');
@@ -212,6 +228,7 @@ fixtures:
         console.log("ready");
         return JSON.parse("{}");
       }
+
   - path: side_effect/main.js
     content: |
       require('external-polyfill');
@@ -258,6 +275,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "separate", path: "separate-sdk" } }
+
   - name: CommonJS captures keep their originating import beside shadowed ESM
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
@@ -296,7 +314,8 @@ tests:
       RETURN callee.fqn AS callee, callee.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { callee: helper, file: 'namespace/util.js' } }
+      - { row: { callee: helper, file: "namespace/util.js" } }
+
   - name: Namespace require call resolves to concrete definition
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -384,6 +403,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }
+
   - name: Imported CJS functions still resolve while constants stay inert
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -497,6 +517,7 @@ tests:
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
+
 steps:
   - name: restore captured import origins
     snapshot: true
@@ -512,6 +533,7 @@ steps:
           - { row: { caller: "nested", path: "inner-sdk" } }
           - { row: { caller: "nestedChain", path: "inner-sdk" } }
           - { row: { caller: "other", path: "outer-sdk" } }
+
   - name: change captured import source
     snapshot: true
     modify:

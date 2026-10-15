@@ -6,7 +6,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 | Crate | Role |
 |---|---|
-| `orbit-server` | HTTP/gRPC server, all 5 modes, JWT auth, config loading, schema-version readiness gate (`active_schema.rs`), MCP tool registry, Orbit agent command registry (`CommandRegistry`), and the deployed remote skill whole-tree contract (`ListSkills`/`GetSkill`) |
+| `orbit-server` | gRPC server, all 5 modes, JWT auth, config loading, schema-version readiness gate (`active_schema.rs`), MCP tool registry, Orbit agent command registry (`CommandRegistry`), and the deployed remote skill whole-tree contract (`ListSkills`/`GetSkill`) |
 | `orbit-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
 | `orbit-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context wrappers implement `labkit_events::SnowplowContext` over typify-codegen'd data types. `build.rs` runs `typify::TypeSpace` over `config/schemas/iglu/<name>/<version>.json` at build time and emits a module per schema (struct + `SCHEMA_URI` + `SCHEMA_JSON` consts) into `OUT_DIR/iglu_schemas.rs`; runtime never reads schema files. `load_schema_json()` returns the embedded JSON for test-time validator compilation. |
 | `orbit-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `orbit-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected,delivered,delivery_failed}`. |
@@ -21,18 +21,20 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/formatters` | Result formatters (graph, raw row, toon, gql) |
 | `orbit-observability` | Central metric catalog: `MetricSpec` consts + typed `build_*` instrument factories, shared bucket sets, per-domain modules (indexer, query, server). `catalog()` feeds the xtask catalog generator; consumers call `meter()` and the typed builders instead of constructing instruments inline |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
+| `indexer/datafusion` | DataFusion SQL projection for `data_fusion` SDLC plans, injected into `indexer::run` (kept as a separate sub-crate for compile-time isolation) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
-| `query-data-model` | Derives shared graph, backend, and authorization catalogs; backend-owned storage definitions supply query mappings, DDL, migration, and cleanup consumers |
+| `query-data-model` | Derives shared graph and access-path contracts, backend catalogs, and authorization catalogs; the ClickHouse implementation owns storage definitions used by its DDL and migration consumers |
 | `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |
 | `code-graph-incremental` | Incremental code graph engine: YAML rewrite rules per language under `langs/`, typed `Pipeline<T>` (parse, rewrite, link, resolve, export), snapshots and reindex. Suites under `integration-tests-codegraph/fixtures_incremental/` |
 | `orbit-migrations` | Schema migrations |
 | `orbit-versions` | Typed access to the pins in `config/versions.yaml` (`Versions`, `VERSIONS`); depends only on serde so build scripts can use it |
-| `utils` | Shared SQL parameter types (`ScalarType`, `SqlType`), ClickHouse encoding helpers, Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait, strict-mode YAML parse/serialize helpers (`yaml`) |
+| `utils` | Shared SQL parameter types (`ScalarType`, `SqlType`), ClickHouse encoding helpers, strict-mode YAML parse/serialize helpers (`yaml`) |
+| `utils/arrow` | Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait, logical byte sizes (kept as a separate sub-crate for compile-time isolation) |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `named-queries` | Named queries: parses/validates YAML under `config/named_queries/` with a JSON and a GQL spelling per query, embeds it via `rust-embed`, and renders the selected spelling with JSON-schema-validated client parameters and separate server-derived `BindingValues` (`$binding`/`$param` placeholders for JSON, MiniJinja `binding`/`param`/`identifier`/`integer` lookups for GQL); `orbit-server` executes `QUERY_TYPE_NAMED` with the spelling and frontend selected by the separate Rails-derived `QueryLanguage` value, and its unit tests compile both examples against the ontology |
 | `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), circuit-breaking decorator (`CircuitBreakingNatsClient`), testkit feature |
-| `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakerRegistry`, `CircuitBreakableError`) with observer hooks and per-service config |
+| `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakableError`) with observer hooks and per-circuit config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
 | `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |

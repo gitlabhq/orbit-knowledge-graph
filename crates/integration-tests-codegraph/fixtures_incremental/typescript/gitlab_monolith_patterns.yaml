@@ -1,5 +1,6 @@
 name: "GitLab monolith JS TS patterns"
 pipeline: js
+
 fixtures:
   - path: webpack.config.js
     content: |
@@ -14,11 +15,13 @@ fixtures:
           },
         },
       };
+
   - path: app/assets/javascripts/lib/utils/common_utils.js
     content: |
       export function parseBoolean(value) {
         return value === 'true';
       }
+
   - path: app/assets/javascripts/gitlab_version_check/index.js
     content: |
       import { parseBoolean } from '~/lib/utils/common_utils';
@@ -26,6 +29,7 @@ fixtures:
       export default function mountVersionCheck() {
         return parseBoolean('true');
       }
+
   - path: app/assets/javascripts/feature_flags/store/modules/feature_flag.ts
     content: |
       export const DEFAULT_SCOPE = 'project';
@@ -33,9 +37,11 @@ fixtures:
       export function buildFlagName(name: string): string {
         return name.trim();
       }
+
   - path: app/assets/javascripts/feature_flags/store/modules/index.ts
     content: |
       export * from './feature_flag';
+
   - path: app/assets/javascripts/feature_flags/store/actions.ts
     content: |
       import { buildFlagName as normalizeFlag, DEFAULT_SCOPE } from '~/feature_flags/store/modules';
@@ -47,6 +53,7 @@ fixtures:
       export function badScopeCall(): string {
         return DEFAULT_SCOPE();
       }
+
   - path: app/assets/javascripts/feature_flags/store/legacy_adapter.js
     content: |
       function legacyAdapter(name) {
@@ -54,11 +61,13 @@ fixtures:
       }
 
       module.exports = legacyAdapter;
+
   - path: app/assets/javascripts/feature_flags/store/index.ts
     content: |
       export { fetchFlags } from './actions';
       export * as featureFlagModule from './modules';
       export { default as legacyAdapter } from './legacy_adapter';
+
   - path: app/assets/javascripts/feature_flags/consumer.ts
     content: |
       import { fetchFlags, featureFlagModule, legacyAdapter } from './store';
@@ -67,16 +76,19 @@ fixtures:
         featureFlagModule.buildFlagName('project');
         legacyAdapter('project');
       }
+
   - path: app/assets/javascripts/projects/your_work/components/app.ts
     content: |
       export default function renderProjects(name: string): string {
         return name.trim();
       }
+
   - path: app/assets/javascripts/projects/your_work/components/tabs.ts
     content: |
       export function buildTab(name: string): string {
         return name.toUpperCase();
       }
+
   - path: app/assets/javascripts/projects/your_work/components/filters.ts
     content: |
       export const DEFAULT_TAB = 'all';
@@ -84,11 +96,13 @@ fixtures:
       export function normalizeSearch(term: string): string {
         return term.trim();
       }
+
   - path: app/assets/javascripts/projects/your_work/components/index.ts
     content: |
       export { default as ProjectsApp } from './app';
       export { buildTab } from './tabs';
       export * from './filters';
+
   - path: app/assets/javascripts/projects/your_work/consumer.ts
     content: |
       import { ProjectsApp, buildTab, normalizeSearch, DEFAULT_TAB } from '~/projects/your_work/components';
@@ -109,6 +123,7 @@ fixtures:
       export function badProjectsCall(): string {
         return DEFAULT_TAB();
       }
+
   - path: app/assets/javascripts/root_entry.js
     content: |
       import mountVersionCheck from 'jh_else_ce/gitlab_version_check/index.js';
@@ -116,6 +131,7 @@ fixtures:
       export function bootVersionCheck() {
         return mountVersionCheck();
       }
+
   - path: app/assets/javascripts/legacy_entry.js
     content: |
       const legacyAdapter = require('~/feature_flags/store/legacy_adapter');
@@ -123,11 +139,13 @@ fixtures:
       export function bootLegacy(name) {
         return legacyAdapter(name);
       }
+
   - path: ee/app/assets/javascripts/security_inventory/utils.js
     content: |
       export function buildSeverityPath(name) {
         return `severity:${name}`;
       }
+
   - path: app/assets/javascripts/security_inventory/index.ts
     content: |
       import { buildSeverityPath } from 'ee/security_inventory/utils';
@@ -135,11 +153,13 @@ fixtures:
       export function openInventory(name: string): string {
         return buildSeverityPath(name);
       }
+
   - path: app/assets/javascripts/vue_shared/components/timezone_dropdown/utils.ts
     content: |
       export function formatTimezone(value: string): string {
         return value.toUpperCase();
       }
+
   - path: ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue
     content: |
       <template>
@@ -159,9 +179,11 @@ fixtures:
         },
       });
       </script>
+
   - path: ee/app/assets/javascripts/oncall_schedules/index.ts
     content: |
       export { default as AddEditScheduleForm } from './components/add_edit_schedule_form.vue';
+
   - path: ee/spec/frontend/oncall_schedule/direct_form_spec.ts
     content: |
       import AddEditScheduleForm from 'ee/oncall_schedules/components/add_edit_schedule_form.vue';
@@ -169,6 +191,7 @@ fixtures:
       export function loadDirectForm() {
         return AddEditScheduleForm;
       }
+
   - path: ee/spec/frontend/oncall_schedule/index_spec.ts
     content: |
       import { AddEditScheduleForm } from 'ee/oncall_schedules/index';
@@ -213,9 +236,9 @@ tests:
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { row_count: 3 }
-      - { row: { name: fetchFlags, file: 'app/assets/javascripts/feature_flags/store/actions.ts' } }
-      - { row: { name: buildFlagName, file: 'app/assets/javascripts/feature_flags/store/modules/feature_flag.ts' } }
-      - { row: { name: legacyAdapter, file: 'app/assets/javascripts/feature_flags/store/legacy_adapter.js' } }
+      - { row: { name: fetchFlags, file: "app/assets/javascripts/feature_flags/store/actions.ts" } }
+      - { row: { name: buildFlagName, file: "app/assets/javascripts/feature_flags/store/modules/feature_flag.ts" } }
+      - { row: { name: legacyAdapter, file: "app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
 
   - name: imported constants from alias barrels do not create false call edges
     query: |
@@ -262,10 +285,10 @@ tests:
       RETURN i.identifier_name AS name, d.fqn AS target, d.file_path AS file
     assert:
       - { row_count: 4 }
-      - { row: { name: "ProjectsApp", target: "renderProjects", file: 'app/assets/javascripts/projects/your_work/components/app.ts' } }
-      - { row: { name: "buildTab", target: "buildTab", file: 'app/assets/javascripts/projects/your_work/components/tabs.ts' } }
-      - { row: { name: "normalizeSearch", target: "normalizeSearch", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
-      - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
+      - { row: { name: "ProjectsApp", target: "renderProjects", file: "app/assets/javascripts/projects/your_work/components/app.ts" } }
+      - { row: { name: "buildTab", target: "buildTab", file: "app/assets/javascripts/projects/your_work/components/tabs.ts" } }
+      - { row: { name: "normalizeSearch", target: "normalizeSearch", file: "app/assets/javascripts/projects/your_work/components/filters.ts" } }
+      - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB", file: "app/assets/javascripts/projects/your_work/components/filters.ts" } }
 
   - name: namespace imports over alias barrels retain their binding
     query: |
@@ -285,9 +308,9 @@ tests:
       ORDER BY callee
     assert:
       - { row_count: 3 }
-      - { row: { caller: "runProjectsNamespace", callee: "buildTab", file: 'app/assets/javascripts/projects/your_work/components/tabs.ts' } }
-      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
-      - { row: { caller: "runProjectsNamespace", callee: "renderProjects", file: 'app/assets/javascripts/projects/your_work/components/app.ts' } }
+      - { row: { caller: "runProjectsNamespace", callee: "buildTab", file: "app/assets/javascripts/projects/your_work/components/tabs.ts" } }
+      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch", file: "app/assets/javascripts/projects/your_work/components/filters.ts" } }
+      - { row: { caller: "runProjectsNamespace", callee: "renderProjects", file: "app/assets/javascripts/projects/your_work/components/app.ts" } }
 
   - name: imported constants from monolith barrels stay inert
     query: |

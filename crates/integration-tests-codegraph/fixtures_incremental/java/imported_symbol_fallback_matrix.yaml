@@ -1,4 +1,5 @@
 name: "Java: imported-symbol fallback matrix"
+
 fixtures:
   - path: com/example/app/Main.java
     content: |

@@ -1,4 +1,5 @@
 name: "Python: symbol re-export resolution"
+
 fixtures:
   # Wildcard re-export through a package __init__. Mirrors ai_gateway exactly:
   # BasePromptRegistry is defined in prompts/base.py and surfaced by

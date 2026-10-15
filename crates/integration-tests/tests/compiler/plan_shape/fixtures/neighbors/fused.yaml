@@ -1,18 +1,25 @@
-name: Default identity neighbors select a single fused scan
+name: Split IN_PROJECT variants use directional table unions
+
 query:
   json: |
     {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}
   gql: |
     MATCH (p:Project {id: 1000})-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
+
 logical:
   expect:
     - (Input neighbors (...))
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (Neighbors center=p direction=both fused table=gl_edge center_filter=false relationships=[IN_PROJECT] ... (_))
+        - (Neighbors center=p direction=both directional outgoing=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] incoming=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] center_filter=false relationships=[IN_PROJECT] ... (_))
     emitted:
-      occurrences:
-        - pattern: (Scan Table(gl_edge) AS e)
-          count: 1
+      expect:
+        - (Union ALL AS e (_) (_) (_) (_) (_))
+        - (Scan Table(gl_ci_edge) AS _e)
+        - (Scan Table(gl_code_edge) AS _e)
+        - (Scan Table(gl_diff_edge) AS _e)
+        - (Scan Table(gl_edge) AS _e)
+        - (Scan Table(gl_sec_edge) AS _e)

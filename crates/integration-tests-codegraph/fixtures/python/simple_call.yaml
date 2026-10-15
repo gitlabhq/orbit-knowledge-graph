@@ -1,4 +1,5 @@
 name: "Python: simple function call"
+
 fixtures:
   - path: main.py
     content: |

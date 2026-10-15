@@ -1,0 +1,34 @@
+name: "JavaScript: a call inside more than 10,000 nested blocks links to its target"
+
+fixtures:
+  - path: target.js
+    content: |
+      export function target() {}
+
+  - path: inside_if.js
+    content:
+      - "import { target } from './target';\nfunction insideIf(c) {\n"
+      - { repeat: 10001, text: "if (c) {\n" }
+      - "target();\n"
+      - { repeat: 10001, text: "}\n" }
+      - "}\n"
+
+  - path: inside_try.js
+    content:
+      - "import { target } from './target';\nfunction insideTry() {\n"
+      - { repeat: 10001, text: "try {\n" }
+      - "target();\n"
+      - { repeat: 10001, text: "} catch (e) {}\n" }
+      - "}\n"
+
+tests:
+  - name: "each innermost call links to the imported target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 2 }
+      - column_values:
+          field: caller
+          values: [insideIf, insideTry]

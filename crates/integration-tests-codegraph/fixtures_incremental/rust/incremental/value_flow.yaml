@@ -1,4 +1,5 @@
 name: "Rust: callable value flow survives snapshots and edits"
+
 fixtures:
   - path: Cargo.toml
     content: |

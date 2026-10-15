@@ -1,4 +1,5 @@
 description: Two-join traversal Group -> Project <- Note
+
 query:
   json: |
     {
@@ -14,5 +15,6 @@ query:
       ],
       "limit": 50
     }
+
 expect:
   compile_only: true

@@ -1,34 +1,38 @@
 # GQL normalizes incoming arrows to outgoing edges; branch_incoming.yaml tests the equivalent JSON query's plan.
 name: GQL incoming branches preserve shared nodes after normalization and reordering
+
 missing_frontends:
   json: branch_incoming.yaml checks the same query with explicit incoming directions in JSON.
+
 query:
   gql: |
     MATCH (a:Definition {id: 1})<-[:CALLS]-(b:Definition)<-[:CALLS]-(c:Definition),
           (a)<-[:CALLS]-(d:Definition)
     RETURN a, b, c, d
+
 logical:
   expect:
     - (EdgeScan CALLS b->a AS e0)
     - (EdgeScan CALLS c->b AS e1)
     - (EdgeScan CALLS d->a AS e2)
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON e1.source_id = e2.target_id (Join ON e0.target_id = e1.target_id (_) (_)) (_))
-        - (SemiJoin e1.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
+        - (SemiJoin _orbit_edge_0.target_id IN subquery (_) (Project e0p.target_id AS target_id (Filter e0p.target_id = 1, ... (_))))
         - |
-          (SemiJoin e2.target_id IN subquery (_)
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
             (Project e1p.source_id AS source_id
               (SemiJoin e1p.target_id IN subquery (_)
                 (Project e0p.target_id AS target_id
                   (Filter e0p.target_id = 1, ... (_))))))
     emitted:
       expect:
-        - (Join ON e1.source_id = e2.target_id (Join ON e0.target_id = e1.target_id (_) (_)) (_))
+        - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_2.target_id = _orbit_edge_0.target_id (_) (_)) (_))
         - |
-          (SemiJoin e2.target_id IN subquery (_)
+          (SemiJoin _orbit_edge_1.target_id IN subquery (_)
             (Project e1p.source_id AS source_id
               (SemiJoin e1p.target_id IN subquery (_)
                 (Project e0p.target_id AS target_id
@@ -36,10 +40,5 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON e1.source_id = e2.target_id (Join ON e0.target_id = e1.target_id (_) (_)) (_))
-        - |
-          (SemiJoin e2.target_id IN subquery (_)
-            (Project e1p.source_id AS source_id
-              (SemiJoin e1p.target_id IN subquery (_)
-                (Project e0p.target_id AS target_id
-                  (Filter e0p.target_id = 1, ... (_))))))
+        - (Join ON e0.target_id = e2.target_id (Join ON e0.source_id = e1.target_id (_) (_)) (_))
+        - (Filter a.id = 1, ... (Scan Table(gl_definition) AS a))

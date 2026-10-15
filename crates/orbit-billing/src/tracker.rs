@@ -207,6 +207,7 @@ mod tests {
 
     #[test]
     fn oidc_mode_builds_source_without_a_cache() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let source = SnowplowBillingTracker::token_source(&config(BillingAuthMode::Oidc), None);
         assert!(source.is_ok());
     }

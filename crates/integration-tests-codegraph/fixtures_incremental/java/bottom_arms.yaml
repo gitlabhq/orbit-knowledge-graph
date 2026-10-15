@@ -1,9 +1,11 @@
 name: "Java: a throw arm is bottom and does not take part in the join"
+
 fixtures:
   - path: com/example/bottom/A.java
     content: |
       package com.example.bottom;
       public class A { public void n() {} }
+
   - path: com/example/bottom/Use.java
     content: |
       package com.example.bottom;

@@ -1,16 +1,20 @@
 name: Hydration plans pruned path prefixes before current-row rendering
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["path"]}]}
   gql: |
     MATCH (f:File) WHERE f.id IN [1, 2] RETURN f.path
+
 hydration:
   dynamic: true
   paths:
     f: ["1/", "1/100/", "1/200/"]
+
 logical:
   expect:
     - (Input hydration (...))
+
 physical:
   clickhouse:
     planned:

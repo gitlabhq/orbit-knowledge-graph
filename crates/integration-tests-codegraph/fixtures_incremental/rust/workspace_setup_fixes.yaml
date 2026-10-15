@@ -1,4 +1,5 @@
 name: "Rust: workspace + sysroot setup fixes"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -53,7 +54,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'crate_a::inner::helper' } }
+      - { row: { fqn: "crate_a::inner::helper" } }
 
   - name: "crate-a root function also carries crate-name prefix"
     query: |
@@ -62,7 +63,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'crate_a::alpha' } }
+      - { row: { fqn: "crate_a::alpha" } }
 
   - name: "standalone file (no Cargo.toml) is still indexed with definitions"
     query: |
@@ -71,5 +72,5 @@ tests:
       RETURN d.name AS name
     assert:
       - { row_count: 2 }
-      - { row: { name: 'standalone_entry' } }
-      - { row: { name: 'helper' } }
+      - { row: { name: "standalone_entry" } }
+      - { row: { name: "helper" } }

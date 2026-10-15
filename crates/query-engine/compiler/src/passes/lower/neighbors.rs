@@ -22,12 +22,12 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         direction,
         edge,
         has_non_denorm,
-        center_tp_lookup,
         fused_table,
+        incoming_scope_preserving,
+        incoming_cross_scope,
     } = &plan.operation;
     let direction = *direction;
     let has_non_denorm = *has_non_denorm;
-    let center_tp_lookup = center_tp_lookup.as_ref();
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -39,6 +39,32 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
     let edge_alias = "e";
+
+    let center_lookup = |edge: &str, center: &str| Expr::InSelect {
+        expr: Box::new(Expr::col(edge, TARGET_ID_COLUMN)),
+        query: Box::new(Query {
+            select: vec![SelectExpr::col(center, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::scan_final(&center_table, center),
+            where_clause: Expr::conjoin(vec![
+                id_list_predicate(center, DEFAULT_PRIMARY_KEY, &center_node_ids),
+                deleted_false(center),
+            ]),
+            ..Default::default()
+        }),
+    };
+
+    let path_lookup = |edge: &str| Expr::InSelect {
+        expr: Box::new(Expr::col(edge, TRAVERSAL_PATH_COLUMN)),
+        query: Box::new(Query {
+            select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
+            from: TableRef::scan_final(&center_table, "_tpd"),
+            where_clause: Expr::conjoin(vec![
+                id_list_predicate("_tpd", DEFAULT_PRIMARY_KEY, &center_node_ids),
+                deleted_false("_tpd"),
+            ]),
+            ..Default::default()
+        }),
+    };
 
     fn build_center_dedup(
         alias: &str,
@@ -116,23 +142,24 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             {
                 wp.push(f);
             }
-            // Incoming edges to a namespace center sit at the center's own tp; pin to the resolved paths for a leading-PK point lookup.
-            if dir == Direction::Incoming
-                && !center_node_ids.is_empty()
-                && let Some((src, key_col)) = center_tp_lookup
-            {
-                wp.push(Expr::InSelect {
-                    expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
-                    query: Box::new(Query {
-                        select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-                        from: TableRef::scan(src.as_str(), "_tpd"),
-                        where_clause: Expr::conjoin(vec![
-                            id_list_predicate("_tpd", key_col, &center_node_ids),
-                            deleted_false("_tpd"),
-                        ]),
-                        ..Default::default()
-                    }),
-                });
+            if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
+                if incoming_cross_scope.is_empty() {
+                    wp.push(path_lookup(a));
+                } else if incoming_scope_preserving.is_empty() {
+                    wp.push(center_lookup(a, "_ctr"));
+                } else {
+                    let narrowed_filter = rel_kind_filter(a, incoming_scope_preserving)
+                        .expect("nonempty scoped kinds");
+                    let broad_filter = rel_kind_filter(a, incoming_cross_scope)
+                        .expect("nonempty cross-scope kinds");
+                    wp.push(
+                        Expr::or_all([
+                            Some(Expr::and(narrowed_filter, path_lookup(a))),
+                            Some(Expr::and(broad_filter, center_lookup(a, "_ctr"))),
+                        ])
+                        .expect("incoming route groups are nonempty"),
+                    );
+                }
             }
             wp.push(deleted_false(a));
             wp

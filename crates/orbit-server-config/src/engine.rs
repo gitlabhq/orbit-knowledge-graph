@@ -231,6 +231,11 @@ pub struct CodeIndexingPipelineConfig {
     /// per-repo disk so fetch/index concurrency can rise without exhausting the
     /// pod volume. 0 = no limit.
     pub max_total_bytes: u64,
+    /// Files that pass the content filter above which a repository is skipped
+    /// entirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,
+    /// oversize, symlinks) do not count; past the same number they get no File
+    /// row and are counted as skipped. 0 = no limit.
+    pub max_repository_files: usize,
     pub source_memory_budget_bytes: u64,
     pub source_compress_spill: bool,
     pub worker_threads: usize,
@@ -253,8 +258,24 @@ pub struct CodeIndexingPipelineConfig {
     pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
     /// (import edges, call edges). Incremental engine:
-    /// `cross_file_resolve_ms`. 0 = no timeout.
+    /// `cross_file_resolve_ms`. On a timeout the language family keeps its
+    /// per-file graph, the cross-file edges of the waves that finished, and
+    /// the part of the last wave that finished, which depends on thread
+    /// scheduling. 0 = no timeout.
     pub cross_file_resolve_timeout_ms: u64,
+    /// Syntax tree depth above which the incremental engine skips a file as
+    /// deeply nested. 0 = no limit.
+    pub max_tree_depth: usize,
+    /// Names that cross-file resolution may make visible across all files of
+    /// one language family before it stops as an overrun. 0 = no limit.
+    pub max_cross_file_names: usize,
+    /// Manifest bytes (package.json, Cargo.toml, and the like) that one language
+    /// family reads for resolution. A manifest past the limit is not read, keeps
+    /// its File row, and is counted as too_many_manifest_bytes. 0 = no limit.
+    pub max_manifest_bytes: u64,
+    /// Edges that the incremental engine's linker may emit for one file. A file
+    /// past the limit is skipped as too_many_edges. 0 = no limit.
+    pub max_file_edges: usize,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how

@@ -24,7 +24,7 @@ pub(crate) fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> St
         return format_group_by_hint(&instance, &path);
     }
 
-    format!("{error} at {path}")
+    format!("{} at {path}", error.masked())
 }
 
 /// Try to extract an enum allowlist from an error.

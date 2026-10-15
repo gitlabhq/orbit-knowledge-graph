@@ -1,4 +1,5 @@
 name: "Rust: simple use imports and cross-file resolution"
+
 fixtures:
   - path: models.rs
     content: |

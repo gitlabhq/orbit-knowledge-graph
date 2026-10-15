@@ -341,3 +341,21 @@ fn http_403_exits_with_code_four() {
     assert_eq!(output.status.code(), Some(4));
     assert!(String::from_utf8_lossy(&output.stderr).contains("access denied"));
 }
+
+#[test]
+fn scheme_less_gitlab_url_fails_with_a_clear_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .args(["status"])
+        .env_remove("ORBIT_API_BASE_URL")
+        .env("GITLAB_TOKEN", "glpat-env")
+        .env("GITLAB_URL", "gitlab.com")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("GITLAB_URL must be an absolute https URL"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("plaintext"), "{stderr}");
+}

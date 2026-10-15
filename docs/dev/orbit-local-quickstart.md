@@ -1,6 +1,6 @@
 # Orbit Local development quickstart
 
-Build and test the `orbit` CLI and related crates without GDK, NATS, Siphon,
+Build and test the `orbit` CLI and related crates without a Caproni cluster, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
 page: language parser additions, `orbit-cli` changes, docs, unit
 tests, and the code-graph integration tests.
@@ -50,10 +50,11 @@ tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
 omitted. The cache uses the operating system's user cache directory and keeps
 instance origins isolated.
 
-When the glab-provided Orbit API and authentication environment is absent or
-incomplete, the command serves the embedded local tree. It makes no network or
-credential-helper call. This makes the local guidance available in offline
-development builds:
+The command finds credentials like the other remote commands: the Orbit API
+variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
+`glab auth credential-helper`. Without a credential, it prints a warning on
+stderr and serves the embedded local tree. The local guidance therefore stays
+available in offline development builds:
 
 ```shell
 ./target/release/orbit skills
@@ -97,13 +98,13 @@ mise run lint:docs                    # markdownlint + Vale + lychee
 For every test layer and where to add a test, see
 [Testing](../design-documents/testing.md).
 
-## What needs GDK
+## What needs the full stack
 
-The container tests run without GDK. They cover SDLC indexing with indexer
+The container tests run without a cluster. They cover SDLC indexing with indexer
 scenarios on a ClickHouse testcontainer. On macOS, start Docker with
 `colima start gkg --memory 12`, then run `mise run test:integration`.
 
-Only these parts need GDK or the [e2e harness](e2e-testing.md):
+Only these parts need the Caproni cluster or the [e2e harness](e2e-testing.md):
 
 - Live Siphon CDC from PostgreSQL.
 - Rails authorization and the Rails query API.

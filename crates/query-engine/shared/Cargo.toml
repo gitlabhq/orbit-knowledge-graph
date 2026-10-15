@@ -9,6 +9,7 @@ arrow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 orbit-utils = { path = "../../utils" }
+orbit-arrow = { path = "../../utils/arrow" }
 ontology = { path = "../../ontology" }
 pipeline = { path = "../pipeline" }
 serde = { workspace = true }

@@ -1,0 +1,27 @@
+description: Traversal reads CI relationship alternatives from the CI edge table
+
+config:
+  redaction:
+    allow:
+      ci_pipeline: [99000, 99001, 99002]
+  extra_seed:
+    gl_pipeline:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, auto_canceled_by_id: 99002 }
+      - { id: 99001, traversal_path: "1/100/1000/", project_id: 1000 }
+      - { id: 99002, traversal_path: "1/100/1000/", project_id: 1000 }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 99001, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: AUTO_CANCELED_BY, target_id: 99002, target_kind: Pipeline }
+
+query:
+  gql: |
+    MATCH (a:Pipeline {id: 99000})-[:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
+    RETURN a.id, b.id
+
+expect:
+  node_count: 3
+  nodes:
+    Pipeline: { ids: [99000, 99001, 99002] }
+  edges:
+    CHILD_OF: [[99000, 99001]]
+    AUTO_CANCELED_BY: [[99000, 99002]]

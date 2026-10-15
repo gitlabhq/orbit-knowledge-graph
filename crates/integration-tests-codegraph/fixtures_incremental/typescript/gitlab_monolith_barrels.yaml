@@ -1,5 +1,6 @@
 name: "TypeScript GitLab monolith barrels"
 pipeline: js
+
 fixtures:
   - path: config/webpack.config.js
     content: |

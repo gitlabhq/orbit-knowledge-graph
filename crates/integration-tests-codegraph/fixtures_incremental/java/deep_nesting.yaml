@@ -1,0 +1,26 @@
+name: "Java: deeply nested control flow links on the worker stack"
+
+fixtures:
+  - path: Nesting.java
+    content:
+      - "class Nesting {\nvoid target() {}\n\nvoid nestedIf(boolean c) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n\nvoid elseIf(boolean c) {\nif (c) {\n"
+      - { repeat: 10000, text: "} else if (c) {\n" }
+      - "}\ntarget();\n}\n\nvoid nestedTry() {\n"
+      - { repeat: 10000, text: "try {\n" }
+      - { repeat: 10000, text: "} catch (Exception e) {}\n" }
+      - "target();\n}\n}\n"
+
+tests:
+  - name: "each method calls its target after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 3 }
+      - column_values:
+          field: caller
+          values: [nestedIf, elseIf, nestedTry]

@@ -1,0 +1,20 @@
+description: Count of a nullable property ignores null values
+
+config:
+  extra_seed:
+    gl_user:
+      - { id: 99002, username: audit_user }
+    gl_merge_request:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, title: audit_unmerged, merged_at: null }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: APPROVED, target_id: 99000, target_kind: MergeRequest }
+
+query:
+  gql: |
+    MATCH (u:User {id: 99002})-[:APPROVED]->(mr:MergeRequest)
+    RETURN count(mr.merged_at) AS n
+
+expect:
+  skip_requirements: ["node_ids"]
+  row_count: 1
+  row_values: [{ n: 0 }]

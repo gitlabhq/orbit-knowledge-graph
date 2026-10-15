@@ -14,6 +14,9 @@ pub use generic::{
     DataModel, Entity, EntityId, GraphCatalog, Property, PropertyId, Relationship, RelationshipId,
     RelationshipVariant, RelationshipVariantId,
 };
+pub use layout::relational::{
+    MaterializedJoin, MaterializedNode, MaterializedRelationship, VariantRoute,
+};
 
 pub use layout::relational::RelationalMapping;
 pub use layout::relational::{

@@ -1,4 +1,5 @@
 name: FK-chain aggregation executes physical node joins with scoped current-row filters
+
 query:
   json: |
     {
@@ -22,9 +23,11 @@ query:
     MATCH (pl:Pipeline {status: 'failed', source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)
       -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
     RETURN f.old_path, count(f) AS appearances LIMIT 60
+
 logical:
   expect:
     - (Aggregate group f.old_path AS f_old_path, COUNT(f) AS appearances (_))
+
 physical:
   clickhouse:
     planned:

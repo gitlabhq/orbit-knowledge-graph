@@ -1,4 +1,5 @@
 name: "Java: type-flow chain resolution"
+
 fixtures:
   - path: UserService.java
     content: |

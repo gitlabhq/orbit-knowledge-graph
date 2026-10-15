@@ -45,430 +45,6 @@
       },
       "id": 1,
       "panels": [],
-      "title": "HTTP transport (webserver)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP server request latency (autoinstrumentation).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 1
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "C"
-        }
-      ],
-      "title": "http_server_request_duration_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP server request latency (autoinstrumentation).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 1
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_request_duration_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "In-flight HTTP server requests.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 1
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route, http_request_method) (http_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
-          "legendFormat": "{{http_route}} / {{http_request_method}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_active_requests",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP request body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "bytes"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 9
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{http_route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{http_route}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{http_route}}",
-          "refId": "C"
-        }
-      ],
-      "title": "http_server_request_body_size_bytes — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP request body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 9
-      },
-      "id": 6,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route) (rate(http_server_request_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{http_route}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_request_body_size_bytes — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP response body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "bytes"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 9
-      },
-      "id": 7,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{http_route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{http_route}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{http_route}}",
-          "refId": "C"
-        }
-      ],
-      "title": "http_server_response_body_size_bytes — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP response body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 17
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route) (rate(http_server_response_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{http_route}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_response_body_size_bytes — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 25
-      },
-      "id": 9,
-      "panels": [],
       "title": "gRPC transport (webserver)",
       "type": "row"
     },
@@ -493,9 +69,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 26
+        "y": 1
       },
-      "id": 10,
+      "id": 2,
       "options": {
         "legend": {
           "calcs": [
@@ -562,9 +138,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 26
+        "y": 1
       },
-      "id": 11,
+      "id": 3,
       "options": {
         "legend": {
           "calcs": [
@@ -613,9 +189,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 26
+        "y": 1
       },
-      "id": 12,
+      "id": 4,
       "options": {
         "legend": {
           "calcs": [
@@ -664,9 +240,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 9
       },
-      "id": 13,
+      "id": 5,
       "options": {
         "legend": {
           "calcs": [
@@ -733,9 +309,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 34
+        "y": 9
       },
-      "id": 14,
+      "id": 6,
       "options": {
         "legend": {
           "calcs": [
@@ -784,9 +360,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 34
+        "y": 9
       },
-      "id": 15,
+      "id": 7,
       "options": {
         "legend": {
           "calcs": [
@@ -853,9 +429,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 42
+        "y": 17
       },
-      "id": 16,
+      "id": 8,
       "options": {
         "legend": {
           "calcs": [
@@ -889,9 +465,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 25
       },
-      "id": 17,
+      "id": 9,
       "panels": [],
       "title": "ETL engine (indexer)",
       "type": "row"
@@ -917,9 +493,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 26
       },
-      "id": 18,
+      "id": 10,
       "options": {
         "legend": {
           "calcs": [
@@ -968,9 +544,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 26
       },
-      "id": 19,
+      "id": 11,
       "options": {
         "legend": {
           "calcs": [
@@ -1019,9 +595,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 26
       },
-      "id": 20,
+      "id": 12,
       "options": {
         "legend": {
           "calcs": [
@@ -1088,9 +664,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 59
+        "y": 34
       },
-      "id": 21,
+      "id": 13,
       "options": {
         "legend": {
           "calcs": [
@@ -1139,9 +715,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 59
+        "y": 34
       },
-      "id": 22,
+      "id": 14,
       "options": {
         "legend": {
           "calcs": [
@@ -1174,7 +750,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Total logical bytes written to ClickHouse per table (orbit_utils::arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
+      "description": "Total logical bytes written to ClickHouse per table (orbit_arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1190,9 +766,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 59
+        "y": 34
       },
-      "id": 23,
+      "id": 15,
       "options": {
         "legend": {
           "calcs": [
@@ -1241,9 +817,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 67
+        "y": 42
       },
-      "id": 24,
+      "id": 16,
       "options": {
         "legend": {
           "calcs": [
@@ -1310,9 +886,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 67
+        "y": 42
       },
-      "id": 25,
+      "id": 17,
       "options": {
         "legend": {
           "calcs": [
@@ -1361,9 +937,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 67
+        "y": 42
       },
-      "id": 26,
+      "id": 18,
       "options": {
         "legend": {
           "calcs": [
@@ -1412,9 +988,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 75
+        "y": 50
       },
-      "id": 27,
+      "id": 19,
       "options": {
         "legend": {
           "calcs": [
@@ -1481,9 +1057,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 75
+        "y": 50
       },
-      "id": 28,
+      "id": 20,
       "options": {
         "legend": {
           "calcs": [
@@ -1532,9 +1108,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 75
+        "y": 50
       },
-      "id": 29,
+      "id": 21,
       "options": {
         "legend": {
           "calcs": [
@@ -1583,9 +1159,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 83
+        "y": 58
       },
-      "id": 30,
+      "id": 22,
       "options": {
         "legend": {
           "calcs": [
@@ -1652,9 +1228,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 83
+        "y": 58
       },
-      "id": 31,
+      "id": 23,
       "options": {
         "legend": {
           "calcs": [
@@ -1703,9 +1279,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 83
+        "y": 58
       },
-      "id": 32,
+      "id": 24,
       "options": {
         "legend": {
           "calcs": [
@@ -1772,9 +1348,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 91
+        "y": 66
       },
-      "id": 33,
+      "id": 25,
       "options": {
         "legend": {
           "calcs": [
@@ -1823,9 +1399,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 91
+        "y": 66
       },
-      "id": 34,
+      "id": 26,
       "options": {
         "legend": {
           "calcs": [
@@ -1859,9 +1435,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 99
+        "y": 74
       },
-      "id": 35,
+      "id": 27,
       "panels": [],
       "title": "Code pipeline (indexer)",
       "type": "row"
@@ -1887,9 +1463,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 100
+        "y": 75
       },
-      "id": 36,
+      "id": 28,
       "options": {
         "legend": {
           "calcs": [
@@ -1938,9 +1514,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 100
+        "y": 75
       },
-      "id": 37,
+      "id": 29,
       "options": {
         "legend": {
           "calcs": [
@@ -1989,9 +1565,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 100
+        "y": 75
       },
-      "id": 38,
+      "id": 30,
       "options": {
         "legend": {
           "calcs": [
@@ -2040,9 +1616,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 108
+        "y": 83
       },
-      "id": 39,
+      "id": 31,
       "options": {
         "legend": {
           "calcs": [
@@ -2091,9 +1667,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 108
+        "y": 83
       },
-      "id": 40,
+      "id": 32,
       "options": {
         "legend": {
           "calcs": [
@@ -2160,9 +1736,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 108
+        "y": 83
       },
-      "id": 41,
+      "id": 33,
       "options": {
         "legend": {
           "calcs": [
@@ -2211,9 +1787,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 116
+        "y": 91
       },
-      "id": 42,
+      "id": 34,
       "options": {
         "legend": {
           "calcs": [
@@ -2262,9 +1838,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 116
+        "y": 91
       },
-      "id": 43,
+      "id": 35,
       "options": {
         "legend": {
           "calcs": [
@@ -2297,7 +1873,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`. `language` comes from the file extension, `unknown` when none matches.",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, `deeply_nested`, `stack_limit`, `too_many_edges`, per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`, and the per-file resolve timeout `timeout_resolve`. Cross-file stops `too_many_names` and `timeout_cross_file` count once per language family per run, with an empty path. `too_many_manifest_bytes` counts a manifest that stays in the graph but is not read for resolution, and `fqn_truncated` a file whose deepest definitions keep only the last 64 segments (or 4 KiB) of their qualified name. `language` comes from the file extension, `unknown` when none matches.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2313,9 +1889,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 116
+        "y": 91
       },
-      "id": 44,
+      "id": 36,
       "options": {
         "legend": {
           "calcs": [
@@ -2364,9 +1940,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 124
+        "y": 99
       },
-      "id": 45,
+      "id": 37,
       "options": {
         "legend": {
           "calcs": [
@@ -2433,9 +2009,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 124
+        "y": 99
       },
-      "id": 46,
+      "id": 38,
       "options": {
         "legend": {
           "calcs": [
@@ -2484,9 +2060,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 124
+        "y": 99
       },
-      "id": 47,
+      "id": 39,
       "options": {
         "legend": {
           "calcs": [
@@ -2553,9 +2129,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 132
+        "y": 107
       },
-      "id": 48,
+      "id": 40,
       "options": {
         "legend": {
           "calcs": [
@@ -2604,9 +2180,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 132
+        "y": 107
       },
-      "id": 49,
+      "id": 41,
       "options": {
         "legend": {
           "calcs": [
@@ -2655,9 +2231,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 132
+        "y": 107
       },
-      "id": 50,
+      "id": 42,
       "options": {
         "legend": {
           "calcs": [
@@ -2706,9 +2282,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 140
+        "y": 115
       },
-      "id": 51,
+      "id": 43,
       "options": {
         "legend": {
           "calcs": [
@@ -2775,9 +2351,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 140
+        "y": 115
       },
-      "id": 52,
+      "id": 44,
       "options": {
         "legend": {
           "calcs": [
@@ -2826,9 +2402,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 140
+        "y": 115
       },
-      "id": 53,
+      "id": 45,
       "options": {
         "legend": {
           "calcs": [
@@ -2877,9 +2453,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 148
+        "y": 123
       },
-      "id": 54,
+      "id": 46,
       "options": {
         "legend": {
           "calcs": [
@@ -2946,9 +2522,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 148
+        "y": 123
       },
-      "id": 55,
+      "id": 47,
       "options": {
         "legend": {
           "calcs": [
@@ -2997,9 +2573,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 148
+        "y": 123
       },
-      "id": 56,
+      "id": 48,
       "options": {
         "legend": {
           "calcs": [
@@ -3048,9 +2624,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 156
+        "y": 131
       },
-      "id": 57,
+      "id": 49,
       "options": {
         "legend": {
           "calcs": [
@@ -3099,9 +2675,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 156
+        "y": 131
       },
-      "id": 58,
+      "id": 50,
       "options": {
         "legend": {
           "calcs": [
@@ -3168,9 +2744,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 156
+        "y": 131
       },
-      "id": 59,
+      "id": 51,
       "options": {
         "legend": {
           "calcs": [
@@ -3219,9 +2795,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 164
+        "y": 139
       },
-      "id": 60,
+      "id": 52,
       "options": {
         "legend": {
           "calcs": [
@@ -3270,9 +2846,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 164
+        "y": 139
       },
-      "id": 61,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [
@@ -3321,9 +2897,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 164
+        "y": 139
       },
-      "id": 62,
+      "id": 54,
       "options": {
         "legend": {
           "calcs": [
@@ -3390,9 +2966,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 172
+        "y": 147
       },
-      "id": 63,
+      "id": 55,
       "options": {
         "legend": {
           "calcs": [
@@ -3426,9 +3002,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 180
+        "y": 155
       },
-      "id": 64,
+      "id": 56,
       "panels": [],
       "title": "SDLC pipeline (indexer)",
       "type": "row"
@@ -3454,9 +3030,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 181
+        "y": 156
       },
-      "id": 65,
+      "id": 57,
       "options": {
         "legend": {
           "calcs": [
@@ -3505,9 +3081,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 181
+        "y": 156
       },
-      "id": 66,
+      "id": 58,
       "options": {
         "legend": {
           "calcs": [
@@ -3574,9 +3150,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 181
+        "y": 156
       },
-      "id": 67,
+      "id": 59,
       "options": {
         "legend": {
           "calcs": [
@@ -3625,9 +3201,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 189
+        "y": 164
       },
-      "id": 68,
+      "id": 60,
       "options": {
         "legend": {
           "calcs": [
@@ -3694,9 +3270,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 189
+        "y": 164
       },
-      "id": 69,
+      "id": 61,
       "options": {
         "legend": {
           "calcs": [
@@ -3745,9 +3321,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 189
+        "y": 164
       },
-      "id": 70,
+      "id": 62,
       "options": {
         "legend": {
           "calcs": [
@@ -3814,9 +3390,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 197
+        "y": 172
       },
-      "id": 71,
+      "id": 63,
       "options": {
         "legend": {
           "calcs": [
@@ -3865,9 +3441,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 197
+        "y": 172
       },
-      "id": 72,
+      "id": 64,
       "options": {
         "legend": {
           "calcs": [
@@ -3916,9 +3492,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 197
+        "y": 172
       },
-      "id": 73,
+      "id": 65,
       "options": {
         "legend": {
           "calcs": [
@@ -3967,9 +3543,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 205
+        "y": 180
       },
-      "id": 74,
+      "id": 66,
       "options": {
         "legend": {
           "calcs": [
@@ -4036,9 +3612,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 205
+        "y": 180
       },
-      "id": 75,
+      "id": 67,
       "options": {
         "legend": {
           "calcs": [
@@ -4087,9 +3663,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 205
+        "y": 180
       },
-      "id": 76,
+      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -4123,9 +3699,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 213
+        "y": 188
       },
-      "id": 77,
+      "id": 69,
       "panels": [],
       "title": "Namespace deletion (indexer)",
       "type": "row"
@@ -4151,9 +3727,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 214
+        "y": 189
       },
-      "id": 78,
+      "id": 70,
       "options": {
         "legend": {
           "calcs": [
@@ -4220,9 +3796,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 214
+        "y": 189
       },
-      "id": 79,
+      "id": 71,
       "options": {
         "legend": {
           "calcs": [
@@ -4271,9 +3847,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 214
+        "y": 189
       },
-      "id": 80,
+      "id": 72,
       "options": {
         "legend": {
           "calcs": [
@@ -4307,9 +3883,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 222
+        "y": 197
       },
-      "id": 81,
+      "id": 73,
       "panels": [],
       "title": "Scheduler (dispatcher)",
       "type": "row"
@@ -4335,9 +3911,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 223
+        "y": 198
       },
-      "id": 82,
+      "id": 74,
       "options": {
         "legend": {
           "calcs": [
@@ -4404,9 +3980,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 223
+        "y": 198
       },
-      "id": 83,
+      "id": 75,
       "options": {
         "legend": {
           "calcs": [
@@ -4455,9 +4031,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 223
+        "y": 198
       },
-      "id": 84,
+      "id": 76,
       "options": {
         "legend": {
           "calcs": [
@@ -4506,9 +4082,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 231
+        "y": 206
       },
-      "id": 85,
+      "id": 77,
       "options": {
         "legend": {
           "calcs": [
@@ -4575,9 +4151,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 231
+        "y": 206
       },
-      "id": 86,
+      "id": 78,
       "options": {
         "legend": {
           "calcs": [
@@ -4626,9 +4202,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 231
+        "y": 206
       },
-      "id": 87,
+      "id": 79,
       "options": {
         "legend": {
           "calcs": [
@@ -4677,9 +4253,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 239
+        "y": 214
       },
-      "id": 88,
+      "id": 80,
       "options": {
         "legend": {
           "calcs": [
@@ -4728,9 +4304,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 239
+        "y": 214
       },
-      "id": 89,
+      "id": 81,
       "options": {
         "legend": {
           "calcs": [
@@ -4764,9 +4340,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 247
+        "y": 222
       },
-      "id": 90,
+      "id": 82,
       "panels": [],
       "title": "Schema migration (dispatcher)",
       "type": "row"
@@ -4792,9 +4368,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 248
+        "y": 223
       },
-      "id": 91,
+      "id": 83,
       "options": {
         "legend": {
           "calcs": [
@@ -4843,9 +4419,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 248
+        "y": 223
       },
-      "id": 92,
+      "id": 84,
       "options": {
         "legend": {
           "calcs": [
@@ -4894,9 +4470,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 248
+        "y": 223
       },
-      "id": 93,
+      "id": 85,
       "options": {
         "legend": {
           "calcs": [
@@ -4945,9 +4521,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 256
+        "y": 231
       },
-      "id": 94,
+      "id": 86,
       "options": {
         "legend": {
           "calcs": [
@@ -4996,9 +4572,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 256
+        "y": 231
       },
-      "id": 95,
+      "id": 87,
       "options": {
         "legend": {
           "calcs": [
@@ -5047,9 +4623,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 256
+        "y": 231
       },
-      "id": 96,
+      "id": 88,
       "options": {
         "legend": {
           "calcs": [
@@ -5083,9 +4659,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 264
+        "y": 239
       },
-      "id": 97,
+      "id": 89,
       "panels": [],
       "title": "Query pipeline (webserver)",
       "type": "row"
@@ -5111,9 +4687,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 265
+        "y": 240
       },
-      "id": 98,
+      "id": 90,
       "options": {
         "legend": {
           "calcs": [
@@ -5180,9 +4756,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 265
+        "y": 240
       },
-      "id": 99,
+      "id": 91,
       "options": {
         "legend": {
           "calcs": [
@@ -5231,9 +4807,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 265
+        "y": 240
       },
-      "id": 100,
+      "id": 92,
       "options": {
         "legend": {
           "calcs": [
@@ -5300,9 +4876,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 273
+        "y": 248
       },
-      "id": 101,
+      "id": 93,
       "options": {
         "legend": {
           "calcs": [
@@ -5351,9 +4927,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 273
+        "y": 248
       },
-      "id": 102,
+      "id": 94,
       "options": {
         "legend": {
           "calcs": [
@@ -5420,9 +4996,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 273
+        "y": 248
       },
-      "id": 103,
+      "id": 95,
       "options": {
         "legend": {
           "calcs": [
@@ -5471,9 +5047,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 281
+        "y": 256
       },
-      "id": 104,
+      "id": 96,
       "options": {
         "legend": {
           "calcs": [
@@ -5522,9 +5098,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 281
+        "y": 256
       },
-      "id": 105,
+      "id": 97,
       "options": {
         "legend": {
           "calcs": [
@@ -5573,9 +5149,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 281
+        "y": 256
       },
-      "id": 106,
+      "id": 98,
       "options": {
         "legend": {
           "calcs": [
@@ -5642,9 +5218,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 289
+        "y": 264
       },
-      "id": 107,
+      "id": 99,
       "options": {
         "legend": {
           "calcs": [
@@ -5693,9 +5269,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 289
+        "y": 264
       },
-      "id": 108,
+      "id": 100,
       "options": {
         "legend": {
           "calcs": [
@@ -5762,9 +5338,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 289
+        "y": 264
       },
-      "id": 109,
+      "id": 101,
       "options": {
         "legend": {
           "calcs": [
@@ -5813,9 +5389,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 297
+        "y": 272
       },
-      "id": 110,
+      "id": 102,
       "options": {
         "legend": {
           "calcs": [
@@ -5882,9 +5458,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 297
+        "y": 272
       },
-      "id": 111,
+      "id": 103,
       "options": {
         "legend": {
           "calcs": [
@@ -5933,9 +5509,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 297
+        "y": 272
       },
-      "id": 112,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [
@@ -5984,9 +5560,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 305
+        "y": 280
       },
-      "id": 113,
+      "id": 105,
       "options": {
         "legend": {
           "calcs": [
@@ -6053,9 +5629,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 305
+        "y": 280
       },
-      "id": 114,
+      "id": 106,
       "options": {
         "legend": {
           "calcs": [
@@ -6104,9 +5680,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 305
+        "y": 280
       },
-      "id": 115,
+      "id": 107,
       "options": {
         "legend": {
           "calcs": [
@@ -6155,9 +5731,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 313
+        "y": 288
       },
-      "id": 116,
+      "id": 108,
       "options": {
         "legend": {
           "calcs": [
@@ -6224,9 +5800,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 313
+        "y": 288
       },
-      "id": 117,
+      "id": 109,
       "options": {
         "legend": {
           "calcs": [
@@ -6275,9 +5851,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 313
+        "y": 288
       },
-      "id": 118,
+      "id": 110,
       "options": {
         "legend": {
           "calcs": [
@@ -6344,9 +5920,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 321
+        "y": 296
       },
-      "id": 119,
+      "id": 111,
       "options": {
         "legend": {
           "calcs": [
@@ -6380,9 +5956,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 304
       },
-      "id": 120,
+      "id": 112,
       "panels": [],
       "title": "Query engine — threat counters (webserver)",
       "type": "row"
@@ -6408,9 +5984,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 330
+        "y": 305
       },
-      "id": 121,
+      "id": 113,
       "options": {
         "legend": {
           "calcs": [
@@ -6444,9 +6020,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 338
+        "y": 313
       },
-      "id": 122,
+      "id": 114,
       "panels": [],
       "title": "Content resolution (webserver)",
       "type": "row"
@@ -6472,9 +6048,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 339
+        "y": 314
       },
-      "id": 123,
+      "id": 115,
       "options": {
         "legend": {
           "calcs": [
@@ -6541,9 +6117,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 339
+        "y": 314
       },
-      "id": 124,
+      "id": 116,
       "options": {
         "legend": {
           "calcs": [
@@ -6592,9 +6168,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 339
+        "y": 314
       },
-      "id": 125,
+      "id": 117,
       "options": {
         "legend": {
           "calcs": [
@@ -6643,9 +6219,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 347
+        "y": 322
       },
-      "id": 126,
+      "id": 118,
       "options": {
         "legend": {
           "calcs": [
@@ -6694,9 +6270,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 347
+        "y": 322
       },
-      "id": 127,
+      "id": 119,
       "options": {
         "legend": {
           "calcs": [
@@ -6745,9 +6321,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 347
+        "y": 322
       },
-      "id": 128,
+      "id": 120,
       "options": {
         "legend": {
           "calcs": [
@@ -6814,9 +6390,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 355
+        "y": 330
       },
-      "id": 129,
+      "id": 121,
       "options": {
         "legend": {
           "calcs": [
@@ -6865,9 +6441,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 355
+        "y": 330
       },
-      "id": 130,
+      "id": 122,
       "options": {
         "legend": {
           "calcs": [
@@ -6934,9 +6510,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 355
+        "y": 330
       },
-      "id": 131,
+      "id": 123,
       "options": {
         "legend": {
           "calcs": [
@@ -6970,9 +6546,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 363
+        "y": 338
       },
-      "id": 132,
+      "id": 124,
       "panels": [],
       "title": "Schema watcher (webserver)",
       "type": "row"
@@ -6998,9 +6574,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 364
+        "y": 339
       },
-      "id": 133,
+      "id": 125,
       "options": {
         "legend": {
           "calcs": [
@@ -7034,9 +6610,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 372
+        "y": 347
       },
-      "id": 134,
+      "id": 126,
       "panels": [],
       "title": "Billing events (webserver)",
       "type": "row"
@@ -7062,9 +6638,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 373
+        "y": 348
       },
-      "id": 135,
+      "id": 127,
       "options": {
         "legend": {
           "calcs": [
@@ -7113,9 +6689,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 373
+        "y": 348
       },
-      "id": 136,
+      "id": 128,
       "options": {
         "legend": {
           "calcs": [
@@ -7164,9 +6740,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 373
+        "y": 348
       },
-      "id": 137,
+      "id": 129,
       "options": {
         "legend": {
           "calcs": [
@@ -7215,9 +6791,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 381
+        "y": 356
       },
-      "id": 138,
+      "id": 130,
       "options": {
         "legend": {
           "calcs": [
@@ -7266,9 +6842,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 381
+        "y": 356
       },
-      "id": 139,
+      "id": 131,
       "options": {
         "legend": {
           "calcs": [
@@ -7302,9 +6878,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 389
+        "y": 364
       },
-      "id": 140,
+      "id": 132,
       "panels": [],
       "title": "Billing quota (webserver)",
       "type": "row"
@@ -7330,9 +6906,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 390
+        "y": 365
       },
-      "id": 141,
+      "id": 133,
       "options": {
         "legend": {
           "calcs": [
@@ -7381,9 +6957,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 390
+        "y": 365
       },
-      "id": 142,
+      "id": 134,
       "options": {
         "legend": {
           "calcs": [
@@ -7432,9 +7008,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 390
+        "y": 365
       },
-      "id": 143,
+      "id": 135,
       "options": {
         "legend": {
           "calcs": [
@@ -7501,9 +7077,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 398
+        "y": 373
       },
-      "id": 144,
+      "id": 136,
       "options": {
         "legend": {
           "calcs": [
@@ -7552,9 +7128,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 398
+        "y": 373
       },
-      "id": 145,
+      "id": 137,
       "options": {
         "legend": {
           "calcs": [
@@ -7588,9 +7164,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 406
+        "y": 381
       },
-      "id": 146,
+      "id": 138,
       "panels": [],
       "title": "Circuit breaker (CH / NATS / GitLab clients)",
       "type": "row"
@@ -7616,9 +7192,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 407
+        "y": 382
       },
-      "id": 147,
+      "id": 139,
       "options": {
         "legend": {
           "calcs": [
@@ -7667,9 +7243,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 407
+        "y": 382
       },
-      "id": 148,
+      "id": 140,
       "options": {
         "legend": {
           "calcs": [
@@ -7718,9 +7294,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 407
+        "y": 382
       },
-      "id": 149,
+      "id": 141,
       "options": {
         "legend": {
           "calcs": [
@@ -7754,9 +7330,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 415
+        "y": 390
       },
-      "id": 150,
+      "id": 142,
       "panels": [],
       "title": "Siphon producers",
       "type": "row"
@@ -7782,9 +7358,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 416
+        "y": 391
       },
-      "id": 151,
+      "id": 143,
       "options": {
         "legend": {
           "calcs": [
@@ -7818,9 +7394,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 424
+        "y": 399
       },
-      "id": 152,
+      "id": 144,
       "panels": [],
       "title": "Siphon ClickHouse consumers",
       "type": "row"
@@ -7846,9 +7422,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 425
+        "y": 400
       },
-      "id": 153,
+      "id": 145,
       "options": {
         "legend": {
           "calcs": [
@@ -7882,9 +7458,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 433
+        "y": 408
       },
-      "id": 154,
+      "id": 146,
       "panels": [],
       "title": "NATS JetStream + varz",
       "type": "row"
@@ -7910,9 +7486,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 434
+        "y": 409
       },
-      "id": 155,
+      "id": 147,
       "options": {
         "legend": {
           "calcs": [
@@ -7961,9 +7537,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 434
+        "y": 409
       },
-      "id": 156,
+      "id": 148,
       "options": {
         "legend": {
           "calcs": [
@@ -8012,9 +7588,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 434
+        "y": 409
       },
-      "id": 157,
+      "id": 149,
       "options": {
         "legend": {
           "calcs": [
@@ -8063,9 +7639,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 442
+        "y": 417
       },
-      "id": 158,
+      "id": 150,
       "options": {
         "legend": {
           "calcs": [
@@ -8114,9 +7690,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 442
+        "y": 417
       },
-      "id": 159,
+      "id": 151,
       "options": {
         "legend": {
           "calcs": [
@@ -8165,9 +7741,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 442
+        "y": 417
       },
-      "id": 160,
+      "id": 152,
       "options": {
         "legend": {
           "calcs": [
@@ -8216,9 +7792,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 450
+        "y": 425
       },
-      "id": 161,
+      "id": 153,
       "options": {
         "legend": {
           "calcs": [
@@ -8267,9 +7843,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 450
+        "y": 425
       },
-      "id": 162,
+      "id": 154,
       "options": {
         "legend": {
           "calcs": [
@@ -8318,9 +7894,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 450
+        "y": 425
       },
-      "id": 163,
+      "id": 155,
       "options": {
         "legend": {
           "calcs": [
@@ -8369,9 +7945,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 458
+        "y": 433
       },
-      "id": 164,
+      "id": 156,
       "options": {
         "legend": {
           "calcs": [
@@ -8405,9 +7981,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 466
+        "y": 441
       },
-      "id": 165,
+      "id": 157,
       "panels": [],
       "title": "Rails Orbit request path",
       "type": "row"
@@ -8433,9 +8009,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 467
+        "y": 442
       },
-      "id": 166,
+      "id": 158,
       "options": {
         "legend": {
           "calcs": [
@@ -8502,9 +8078,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 467
+        "y": 442
       },
-      "id": 167,
+      "id": 159,
       "options": {
         "legend": {
           "calcs": [
@@ -8553,9 +8129,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 467
+        "y": 442
       },
-      "id": 168,
+      "id": 160,
       "options": {
         "legend": {
           "calcs": [
@@ -8604,9 +8180,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 475
+        "y": 450
       },
-      "id": 169,
+      "id": 161,
       "options": {
         "legend": {
           "calcs": [
@@ -8673,9 +8249,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 475
+        "y": 450
       },
-      "id": 170,
+      "id": 162,
       "options": {
         "legend": {
           "calcs": [
@@ -8724,9 +8300,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 475
+        "y": 450
       },
-      "id": 171,
+      "id": 163,
       "options": {
         "legend": {
           "calcs": [
@@ -8793,9 +8369,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 483
+        "y": 458
       },
-      "id": 172,
+      "id": 164,
       "options": {
         "legend": {
           "calcs": [
@@ -8844,9 +8420,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 483
+        "y": 458
       },
-      "id": 173,
+      "id": 165,
       "options": {
         "legend": {
           "calcs": [
@@ -8913,9 +8489,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 483
+        "y": 458
       },
-      "id": 174,
+      "id": 166,
       "options": {
         "legend": {
           "calcs": [
@@ -8964,9 +8540,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 491
+        "y": 466
       },
-      "id": 175,
+      "id": 167,
       "options": {
         "legend": {
           "calcs": [
@@ -9033,9 +8609,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 491
+        "y": 466
       },
-      "id": 176,
+      "id": 168,
       "options": {
         "legend": {
           "calcs": [
@@ -9084,9 +8660,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 491
+        "y": 466
       },
-      "id": 177,
+      "id": 169,
       "options": {
         "legend": {
           "calcs": [
@@ -9153,9 +8729,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 499
+        "y": 474
       },
-      "id": 178,
+      "id": 170,
       "options": {
         "legend": {
           "calcs": [
@@ -9189,9 +8765,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 507
+        "y": 482
       },
-      "id": 179,
+      "id": 171,
       "panels": [],
       "title": "Rails Orbit traversal compaction",
       "type": "row"
@@ -9217,9 +8793,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 508
+        "y": 483
       },
-      "id": 180,
+      "id": 172,
       "options": {
         "legend": {
           "calcs": [
@@ -9286,9 +8862,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 508
+        "y": 483
       },
-      "id": 181,
+      "id": 173,
       "options": {
         "legend": {
           "calcs": [
@@ -9337,9 +8913,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 508
+        "y": 483
       },
-      "id": 182,
+      "id": 174,
       "options": {
         "legend": {
           "calcs": [
@@ -9406,9 +8982,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 516
+        "y": 491
       },
-      "id": 183,
+      "id": 175,
       "options": {
         "legend": {
           "calcs": [
@@ -9457,9 +9033,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 516
+        "y": 491
       },
-      "id": 184,
+      "id": 176,
       "options": {
         "legend": {
           "calcs": [
@@ -9508,9 +9084,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 516
+        "y": 491
       },
-      "id": 185,
+      "id": 177,
       "options": {
         "legend": {
           "calcs": [

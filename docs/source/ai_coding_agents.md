@@ -63,8 +63,8 @@ directory so it can find it:
 ln -s ../../.agents/skills/orbit ~/.claude/skills/orbit
 ```
 
-[`orbit setup`](local/access/cli.md#set-up-your-ai-agent) writes the local
-skill and this link for you.
+[`orbit setup`](local/access/cli.md#set-up-your-ai-agent) writes this link for
+you, along with a skill named `orbit`.
 
 ## Update the GitLab Orbit skill
 
@@ -80,7 +80,8 @@ The `orbit-wrapper` skill copies no guidance. It runs
 `glab orbit skills get orbit` and loads the skill your GitLab instance serves,
 composed with your installed GitLab Orbit CLI, so it can't drift from the binary.
 It needs `glab` and the GitLab Orbit CLI installed. Install it instead of the `orbit`
-skill, not alongside it. Install it with
+skill, not alongside it. If you ran `orbit setup`, skip this: it already installed a skill named `orbit`
+and, by default, the wrapper. Install it with
 [`npx skills`](https://github.com/vercel-labs/skills):
 
 ```shell
@@ -100,4 +101,5 @@ project's `.claude/settings.json`:
 ```
 
 With that rule the skill loads without a prompt. Running Claude Code with
-`--dangerously-skip-permissions` also works.
+`--dangerously-skip-permissions` also works. `orbit setup` adds the rule for you
+when it sets up Claude Code.

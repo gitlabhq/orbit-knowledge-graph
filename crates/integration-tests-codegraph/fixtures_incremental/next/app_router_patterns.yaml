@@ -1,5 +1,6 @@
 name: "Next.js app router graph patterns"
 pipeline: js
+
 fixtures:
   - path: tsconfig.json
     content: |

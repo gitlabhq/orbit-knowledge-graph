@@ -1,5 +1,5 @@
 //! Per-store limits. File size over the cap becomes `List("oversize")`.
-//! Resident overflow spills; file count, total bytes and scratch overflow fail loading.
+//! Resident overflow spills; kept file count, total bytes and scratch overflow fail loading.
 //! Failed reservations leave counters unchanged, and arithmetic never wraps.
 
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};

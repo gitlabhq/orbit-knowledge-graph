@@ -119,7 +119,7 @@ batching can buffer internally.
   `SessionContext` internally (register/deregister take `&self` via DataFusion's
   interior mutability, so no `&mut` and no leak). It registers the block as
   `source_data`, runs the ontology-generated SQL list, and returns `TableBatch`es.
-  Built from a plan's `TransformSpec::DataFusion(Vec<Transformation>)`.
+  Built from a plan's `TransformSpec::DataFusion(Vec<Transformation>)`. It lives in `indexer-datafusion`.
 - **`SystemNotesTransform`** (ADR 013, follow-up MR): hand-written Rust. It parses
   note bodies, collects distinct refs, calls `datalake.query_batches` for the
   `siphon_routes` and entity-table resolution hops, and emits edge rows. No DataFusion.
@@ -209,10 +209,10 @@ by the indexer's Docker integration scenarios.
 One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
 handler. It is an Arc-bundle of stateless collaborators (`datalake`,
 `checkpoint_store`, `metrics`, `retry_config`), so sharing one instance duplicates
-no logic. The pipeline carries a `TransformRegistry`, supplied via `with_registry`.
+no logic. The pipeline carries a `TransformRegistry`, passed to `Pipeline::new`.
 At the start of each run, `Pipeline::run` calls `registry.build(plan)`:
 
-- `TransformSpec::DataFusion(transforms)` builds a `DataFusionTransform` inline.
+- `TransformSpec::DataFusion(transforms)` calls the injected `SqlTransformFactory`.
 - `TransformSpec::Rust(name)` resolves a registered factory by name.
 
 `datafusion` is therefore *not* a registry entry; it is the default arm. The
@@ -221,13 +221,13 @@ registry holds only Rust transforms, which self-register from their own module
 
 ```rust
 // register_handlers
-let mut transform_registry = TransformRegistry::default();
+let mut transform_registry = TransformRegistry::new(sql_transform);
 transform::system_notes::register(&mut transform_registry);  // additive; one line per Rust transform
 let transform_registry = Arc::new(transform_registry);
 
 let pipeline = Arc::new(
-    Pipeline::new(datalake.clone(), checkpoint_store.clone(), metrics.clone(), retry.clone())
-        .with_registry(Arc::clone(&transform_registry)),
+    Pipeline::new(datalake.clone(), checkpoint_store.clone(), metrics.clone(), retry.clone(),
+        Arc::clone(&transform_registry)),
 );
 
 for plan in plans.namespaced {

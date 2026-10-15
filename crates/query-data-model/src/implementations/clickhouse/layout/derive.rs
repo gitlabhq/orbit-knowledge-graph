@@ -80,6 +80,8 @@ impl crate::Relational<ClickHouse> {
             });
         }
         let mut joins = Vec::new();
+        let mut copies = Vec::new();
+        let mut dependencies = BTreeMap::new();
         for declaration in ontology.denormalized_joins() {
             let anchor = declaration
                 .tables
@@ -183,17 +185,67 @@ impl crate::Relational<ClickHouse> {
             joins.push(MaterializedJoin {
                 table: declaration.table.clone(),
                 sources,
+                nodes: declaration
+                    .hops
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(slot, hop)| {
+                        let source = (slot == 0).then(|| JoinNode {
+                            entity: hop.source_kind.clone(),
+                            source_occurrence: hop.source_table,
+                            identity_column: declaration
+                                .column_for(hop.source_table, ontology::DEFAULT_PRIMARY_KEY),
+                        });
+                        source.into_iter().chain(std::iter::once(JoinNode {
+                            entity: hop.target_kind.clone(),
+                            source_occurrence: hop.target_table,
+                            identity_column: declaration
+                                .column_for(hop.target_table, ontology::DEFAULT_PRIMARY_KEY),
+                        }))
+                    })
+                    .collect(),
+                relationships: declaration
+                    .hops
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, hop)| JoinRelationship {
+                        kind: hop.relationship_kind.clone(),
+                        source_slot: slot,
+                        target_slot: slot + 1,
+                        edge_occurrence: hop.edge_table,
+                    })
+                    .collect(),
+            });
+            dependencies.insert(
+                declaration.table.clone(),
+                declaration
+                    .tables
+                    .iter()
+                    .map(|source| source.table.clone())
+                    .collect(),
+            );
+        }
+        for declaration in ontology.reordered_tables() {
+            let source = source_table(&tables, &declaration.source)?;
+            tables.push(Table {
+                name: declaration.name.clone(),
+                sort_key: declaration.sort_key.clone(),
+                primary_key: None,
+                options: TableOptions {
+                    projections: vec![],
+                    ..source.options.clone()
+                },
+                ..source.clone()
+            });
+            dependencies.insert(
+                declaration.name.clone(),
+                BTreeSet::from([declaration.source.clone()]),
+            );
+            copies.push(ReorderedCopy {
+                table: declaration.name.clone(),
+                source: declaration.source.clone(),
             });
         }
-        let relationship_tables: BTreeMap<_, BTreeSet<_>> = ontology
-            .edge_names()
-            .map(|kind| {
-                (
-                    kind.to_string(),
-                    BTreeSet::from([ontology.edge_table_for_relationship(kind).to_string()]),
-                )
-            })
-            .collect();
         let edge_routes = ontology
             .edges()
             .map(|edge| EdgeRoute {
@@ -204,34 +256,25 @@ impl crate::Relational<ClickHouse> {
                 foreign_key: edge.fk_column.clone(),
             })
             .collect();
-        let mut writers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for node in ontology.nodes() {
-            writers
-                .entry(node.destination_table.clone())
-                .or_default()
-                .insert(node.name.clone());
-        }
-        for entity in ontology
-            .node_names()
-            .chain(
-                ontology
-                    .derived_entities()
-                    .map(|entity| entity.name.as_str()),
-            )
-            .chain(ontology.edge_names())
-        {
-            for kind in ontology.relationship_kinds_emitted_by(entity) {
-                for table in relationship_tables.get(&kind).into_iter().flatten() {
-                    writers
-                        .entry(table.clone())
-                        .or_default()
-                        .insert(entity.to_string());
-                }
-            }
-        }
+        let relationship_tables = ontology
+            .edge_names()
+            .map(|kind| {
+                (
+                    kind.to_string(),
+                    ontology
+                        .edge_tables_for_relationship(kind)
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                )
+            })
+            .collect();
+        let writers = ontology.table_writers();
         Ok(Self {
             tables,
             metadata: Metadata {
+                copies,
+                dependencies,
                 entities: crate::implementations::entity_facts(ontology, false),
                 default_edge_table: ontology.edge_table().to_string(),
                 denormalized: ontology.denormalized_properties().to_vec(),

@@ -288,6 +288,36 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
 }
 
 #[test]
+fn the_file_limit_counts_kept_files_and_drops_listed_entries_past_it() {
+    let listed = |i| {
+        (
+            format!("assets/{i}.png"),
+            Put::Listed {
+                size: 0,
+                reason: "excluded_extension",
+            },
+        )
+    };
+    let kept = |name: &str| (name.to_string(), Put::Bytes(vec![1]));
+    let limits = Limits {
+        files: Some(2),
+        ..Limits::default()
+    };
+    let entries: Vec<_> = [kept("a"), kept("b")]
+        .into_iter()
+        .chain((0..5).map(listed))
+        .collect();
+    let vfs = Vfs::load(entries, (), limits, Options::default()).unwrap();
+    assert_eq!((vfs.usage().files, vfs.usage().dropped_listed), (4, 3));
+    let entries = vec![kept("a"), kept("a"), kept("b")];
+    let vfs = Vfs::load(entries, (), limits, Options::default()).unwrap();
+    assert_eq!((vfs.usage().files, vfs.usage().duplicate_paths), (2, 1));
+    let entries = vec![kept("a"), kept("b"), kept("c")];
+    let result = Vfs::load(entries, (), limits, Options::default());
+    assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
+}
+
+#[test]
 fn directory_classification_retains_accepted_bytes_in_memory_or_scratch() {
     for resident in [0, 1024] {
         let root = tempfile::tempdir().unwrap();

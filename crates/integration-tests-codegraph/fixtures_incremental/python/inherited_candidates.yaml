@@ -1,4 +1,5 @@
 name: "Python: a diamond emits every shallowest-depth candidate"
+
 fixtures:
   - path: shapes.py
     content: |

@@ -17,9 +17,11 @@ duckdb-client = { path = "../duckdb-client" }
 orbit-server = { path = "../orbit-server", features = ["testkit"] }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
+indexer-datafusion = { path = "../indexer/datafusion" }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
@@ -56,12 +58,11 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
-tower = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
 health-check = { path = "../health-check" }
-labkit = { workspace = true, features = ["http", "tls"] }
+labkit = { workspace = true, features = ["health", "tls"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio", "testing"] }

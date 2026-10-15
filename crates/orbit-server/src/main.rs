@@ -20,7 +20,6 @@ use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
 use orbit_server::probes;
 use orbit_server::shutdown;
-use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
@@ -48,9 +47,7 @@ async fn main() -> anyhow::Result<()> {
     orbit_server_config::query::init(config.query.clone());
     orbit_server_config::features::init(config.features.clone());
 
-    let mut builder = labkit::Builder::new(args.mode.service_name())
-        .propagate_correlation(true)
-        .echo_response_header(true);
+    let mut builder = labkit::Builder::new(args.mode.service_name()).propagate_correlation(true);
     if let Some(level) = config
         .metrics
         .log_level
@@ -97,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
                 include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
             )?;
 
-            let graph = config.graph.build_client();
+            let graph = config.graph.build_client("graph");
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
@@ -111,9 +108,15 @@ async fn main() -> anyhow::Result<()> {
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, serving, shutdown)
-                .await
-                .map_err(Into::into)
+            indexer::run(
+                &indexer_config,
+                ontology,
+                serving,
+                shutdown,
+                indexer_datafusion::sql_transform(),
+            )
+            .await
+            .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
@@ -155,9 +158,10 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
+    let graph = config.graph.build_client("graph");
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
-        Some(config.graph.build_client()),
+        Some(graph.clone()),
         Some(gitlab_client.clone()),
     )
     .into_arc();
@@ -182,15 +186,13 @@ async fn run_webserver(
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
     ActiveSchema::spawn(
         &active_schema,
-        Arc::new(config.graph.build_client()),
+        Arc::new(graph.clone()),
         archive,
         catalog,
         config,
         shutdown.clone(),
     );
 
-    let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
-    info!(addr = %config.bind_address, "HTTP server bound");
     let grpc_listener = tokio::net::TcpListener::bind(config.grpc_bind_address).await?;
     info!(addr = %config.grpc_bind_address, "gRPC server bound");
 
@@ -199,7 +201,7 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         validator,
         active_schema,
-        &config.graph,
+        graph,
         cluster_health,
         tls_config,
         config.grpc.clone(),
@@ -274,7 +276,6 @@ async fn run_webserver(
     serving.store(true, Ordering::Relaxed);
 
     let result = tokio::select! {
-        res = http_server.run() => res.map_err(Into::into),
         res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
     };

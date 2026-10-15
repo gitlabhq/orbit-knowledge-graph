@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use arrow::datatypes::UInt64Type;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TopLevelSplit;
 
 use crate::execute::{CHECKPOINT_TABLE, MigrationError};

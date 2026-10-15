@@ -15,7 +15,7 @@ const MAX_BACKOFF_INTERVAL: Duration = Duration::from_secs(30);
 enum SchemaReadiness {
     Ready,
     Pending,
-    Outdated,
+    Outdated { active: u32 },
 }
 
 fn classify_readiness(
@@ -29,7 +29,9 @@ fn classify_readiness(
     if let Some(active_version) = active
         && active_version > embedded
     {
-        return SchemaReadiness::Outdated;
+        return SchemaReadiness::Outdated {
+            active: active_version,
+        };
     }
     SchemaReadiness::Pending
 }
@@ -100,9 +102,9 @@ pub async fn wait_until_ready(
                     info!(target_version, "schema version is ready — proceeding");
                     Step::Done(())
                 }
-                SchemaReadiness::Outdated => Step::GiveUp(SchemaWaitError::Outdated {
+                SchemaReadiness::Outdated { active } => Step::GiveUp(SchemaWaitError::Outdated {
                     embedded: target_version,
-                    active: active.expect("Outdated requires a known active version"),
+                    active,
                 }),
                 SchemaReadiness::Pending => {
                     info!(
@@ -139,7 +141,7 @@ mod tests {
         assert_eq!(classify_readiness(None, None, 2), SchemaReadiness::Pending);
         assert_eq!(
             classify_readiness(Some(3), None, 2),
-            SchemaReadiness::Outdated
+            SchemaReadiness::Outdated { active: 3 }
         );
         assert_eq!(
             classify_readiness(Some(3), Some(2), 2),

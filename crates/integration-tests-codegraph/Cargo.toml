@@ -20,6 +20,7 @@ rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 tabled = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }

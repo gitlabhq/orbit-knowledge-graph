@@ -7,13 +7,14 @@ use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 use arrow::record_batch::RecordBatch;
-use orbit_utils::arrow::{BatchBuilder, ColumnType};
+use orbit_arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::dsl::types::Tf;
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
+use crate::sentinel::Sentinel;
 use crate::tree::{CallResolution, Compact};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -247,6 +248,7 @@ fn child(c: Cursor, kind: u16) -> Option<Cursor> {
 }
 
 /// One `(table, batch)` per local entity, then the edge table.
+#[allow(clippy::too_many_arguments)]
 pub fn export(
     trees: &[Tree],
     edges: &[crate::tree::Edge],
@@ -255,8 +257,10 @@ pub fn export(
     envelope: &Envelope,
     include_directories: bool,
     owns_file: &dyn Fn(&str) -> bool,
+    run: &Sentinel,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(plan)?;
+    run.check()?;
     let forest = Forest::new(trees, lang);
     let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
@@ -275,8 +279,10 @@ pub fn export(
                 "File" => owns_file(&tree.label),
                 _ => true,
             },
+            run,
         )?;
     }
+    run.check()?;
     for batch in write_edges(plan, edges, &forest, &ids, envelope)? {
         tables.push((plan.edge_table.clone(), batch));
     }
@@ -294,10 +300,12 @@ fn write_entity(
     envelope: &Envelope,
     ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
     emit: &dyn Fn(&Tree) -> bool,
+    run: &Sentinel,
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
     for (ti, tree) in forest.all() {
+        run.check()?;
         let root = tree.root();
         let nodes = std::iter::once(root)
             .chain(root.descendants())

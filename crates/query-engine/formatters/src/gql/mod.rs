@@ -31,3 +31,9 @@ impl ResultFormatter for GqlFormatter {
         Value::String(encode::encode(output))
     }
 }
+
+impl GqlFormatter {
+    pub fn table(&self, output: &PipelineOutput) -> (Vec<String>, Vec<Vec<String>>) {
+        encode::table(output)
+    }
+}

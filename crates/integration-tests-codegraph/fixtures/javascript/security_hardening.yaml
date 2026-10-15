@@ -1,5 +1,6 @@
 name: "JavaScript security hardening (MR 950)"
 pipeline: js
+
 fixtures:
   # --- H4: node-builtin alias smuggling refused ---
   - path: webpack.config.js

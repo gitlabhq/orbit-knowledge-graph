@@ -1,0 +1,138 @@
+# yaml-language-server: $schema=https://gitlab.com/gitlab-org/caproni/-/raw/main/schema/caproni-project.schema.json
+#
+# Orbit's Caproni edit-mode reloaders. The cluster, the Orbit Helm release, and
+# the dev stack live in gitlab-caproni (fragments/caproni.orbit.yaml). Caproni
+# merges this file in only when repositories.knowledge-graph is in edit mode.
+#
+# One reloader per Orbit deployment, because a mirrord session targets one pod
+# and each deployment has its own rendered config. For each reloader Caproni
+# scales the original deployment to zero and creates a <name>-caproni copy whose
+# container runs `sleep infinity` with no probes; mirrord targets that copy.
+# Nothing in the cluster does that deployment's work while the reloader is on.
+#
+# Each reloader has two processes. The `context: local` watcher builds on the
+# host, outside mirrord, and all four reloaders declare it so any subset of them
+# rebuilds on save; the wrapper lets one watcher per checkout run cargo. The
+# mirrord process runs the matching gkg-server mode with the pod's
+# /app/config/config.yaml and /etc/secrets served through mirrord, and restarts
+# it when the watcher finishes a build that changed the binary.
+#
+# The read-only patterns match the directories as well as the files under them:
+# the server stats /etc/secrets before walking it, and a pattern that only
+# covers the files makes that stat run locally and silently load no secrets.
+# /etc/tls is only populated when the chart's tls.internal is enabled; the
+# pattern is harmless otherwise. See docs/dev/local-development.md.
+
+lifecycle_hooks:
+  # Runs after clone or update, outside mirrord: tools for the processes below,
+  # and a first build so the mirrord processes have a binary to start.
+  - type: edit_mode_prepare
+    script: mise trust && mise install && scripts/dev/caproni-edit-mode.sh build
+
+reloaders:
+  gkg-webserver:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-webserver
+        container: gkg-webserver
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
+          - "^/etc/tls(/.*)?$"
+      network:
+        outgoing:
+          # Caproni's supervisor dials localhost:<port> before it starts a
+          # process. Without this the dial is intercepted and answered by the
+          # pod, which reports the port as taken when nothing listens on the
+          # host. With it, the check sees the host, so a native `mise run dev`
+          # holding 50054 is reported for what it is.
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-build:
+          command: scripts/dev/caproni-edit-mode.sh watch
+          context: local
+        gkg-webserver:
+          command: scripts/dev/caproni-edit-mode.sh webserver
+          port: 50054
+  gkg-indexer-sdlc:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-indexer-sdlc
+        container: gkg-indexer
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
+          - "^/etc/tls(/.*)?$"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-build:
+          command: scripts/dev/caproni-edit-mode.sh watch
+          context: local
+        gkg-indexer-sdlc:
+          command: scripts/dev/caproni-edit-mode.sh indexer-sdlc
+  gkg-indexer-code:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-indexer-code
+        container: gkg-indexer
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
+          - "^/etc/tls(/.*)?$"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-build:
+          command: scripts/dev/caproni-edit-mode.sh watch
+          context: local
+        gkg-indexer-code:
+          command: scripts/dev/caproni-edit-mode.sh indexer-code
+  gkg-dispatcher:
+    type: mirror
+    repository: knowledge-graph
+    edit_mode: false
+    mirror:
+      target:
+        namespace: gitlab
+        kubernetes_type: deployment
+        name: gkg-dispatcher
+        container: gkg-dispatcher
+      filesystem:
+        mode: localwithoverrides
+        read_only:
+          - "^/app/config(/.*)?$"
+          - "^/etc/secrets(/.*)?$"
+          - "^/etc/tls(/.*)?$"
+      network:
+        outgoing:
+          ignore_localhost: true
+      edit_mode_processes:
+        gkg-build:
+          command: scripts/dev/caproni-edit-mode.sh watch
+          context: local
+        gkg-dispatcher:
+          command: scripts/dev/caproni-edit-mode.sh dispatcher

@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::ClickHouseConfiguration;
+use clickhouse_client::ArrowClickHouseClient;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -23,9 +22,6 @@ pub enum WriteError {
 
     #[error("connection error: {0}")]
     Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
-
-    #[error("invalid configuration: {0}")]
-    InvalidConfiguration(String),
 }
 
 impl From<RetryExhausted> for WriteError {
@@ -53,28 +49,23 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
-    pub fn new(
-        configuration: ClickHouseConfiguration,
-        metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, WriteError> {
-        configuration
-            .validate()
-            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client();
-        Ok(Self {
+    pub fn new(client: ArrowClickHouseClient, metrics: Arc<EngineMetrics>) -> Self {
+        Self {
             client,
             metrics,
             noop: false,
-        })
+        }
     }
 
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
         Self {
             client: orbit_server_config::AppConfig::embedded_defaults()
                 .graph
-                .build_client(),
+                .build_client("graph"),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }
@@ -101,7 +92,7 @@ impl ClickHouseWriter {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
         let bytes: u64 = batches
             .iter()
-            .map(|batch| match orbit_utils::arrow::logical_byte_size(batch) {
+            .map(|batch| match orbit_arrow::logical_byte_size(batch) {
                 Ok(n) => n,
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
@@ -179,6 +170,7 @@ type Token = Arc<dyn FlushToken>;
 enum Msg {
     Submit(String, RecordBatch, Token),
     Flush(tokio::sync::oneshot::Sender<()>),
+    FlushFor(Token),
 }
 
 /// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
@@ -242,6 +234,13 @@ impl BufferedWriter {
         rx.await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
+
+    pub async fn start_flush(&self, token: Token) -> Result<(), WriteError> {
+        self.tx
+            .send(Msg::FlushFor(token))
+            .await
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+    }
 }
 
 #[derive(Default)]
@@ -287,6 +286,13 @@ async fn drain(
                     while writes.join_next().await.is_some() {}
                     let _ = ack.send(());
                 }
+                Some(Msg::FlushFor(token)) => {
+                    let holding = pending
+                        .extract_if(|_, buf| buf.tokens.iter().any(|t| Arc::ptr_eq(t, &token)));
+                    for (table, buf) in holding {
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
+                    }
+                }
                 Some(Msg::Submit(table, batch, token)) => {
                     let buf = pending.entry(table.clone()).or_default();
                     buf.first_buffered_at.get_or_insert_with(Instant::now);
@@ -294,6 +300,7 @@ async fn drain(
                     buf.batches.push(batch);
                     buf.tokens.push(token);
                     if buf.rows >= limits.max_rows {
+                        #[expect(clippy::unwrap_used, reason = "key was just inserted by `entry().or_default()` above")]
                         let buf = pending.remove(&table).unwrap();
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
@@ -312,6 +319,7 @@ async fn drain(
                     .map(|(table, _)| table.clone())
                     .collect();
                 for table in ripe {
+                    #[expect(clippy::unwrap_used, reason = "keys come from `pending` itself and are removed once each")]
                     let buf = pending.remove(&table).unwrap();
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
@@ -328,6 +336,7 @@ async fn drain(
 }
 
 /// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
+#[expect(clippy::expect_used, reason = "the write semaphore is never closed")]
 fn spawn_write(
     writes: &mut JoinSet<()>,
     sem: &Arc<tokio::sync::Semaphore>,
@@ -578,6 +587,37 @@ mod tests {
             1,
             "reaching max_rows flushes immediately, independent of floor or cap"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn start_flush_writes_only_the_tables_holding_the_tokens_rows() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 1_000_000,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1_000_000,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
+        );
+        let first: Arc<CountToken> = Arc::new(CountToken::default());
+        let second: Arc<CountToken> = Arc::new(CountToken::default());
+
+        submit(&w, "gl_edge", batch(10), first.clone()).await;
+        submit(&w, "gl_definition", batch(10), second.clone()).await;
+        w.start_flush(first.clone()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(first.flushed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            second.flushed.load(Ordering::SeqCst),
+            0,
+            "another producer's table must keep pooling"
+        );
+
+        w.flush().await.unwrap();
+        assert_eq!(second.flushed.load(Ordering::SeqCst), 1);
     }
 
     #[test]

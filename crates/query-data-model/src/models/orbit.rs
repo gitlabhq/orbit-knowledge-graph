@@ -1,3 +1,4 @@
+use crate::{RelationshipVariant, VariantRoute};
 use std::collections::{HashMap, HashSet};
 
 pub type ClickHouseDataModel = crate::DataModel<
@@ -55,6 +56,11 @@ pub trait OrbitQueryModel {
 
     fn property(&self, entity: &str, property: &str) -> Option<&Property> {
         self.graph().property_named(entity, property)
+    }
+
+    fn property_is_nullable(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| property.nullable)
     }
 
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
@@ -236,11 +242,24 @@ pub trait OrbitQueryModel {
         self.query_backend().edge_tables(&relationships)
     }
 
-    fn relationship_table_for_query(&self, relationships: &[String]) -> &str {
-        relationships
-            .iter()
-            .find_map(|relationship| self.relationship_table(relationship))
-            .unwrap_or_else(|| self.default_edge_table())
+    fn relationship_tables_between(
+        &self,
+        relationships: &[String],
+        source: &str,
+        target: &str,
+    ) -> Vec<String> {
+        self.graph()
+            .relationships()
+            .filter(|relationship| {
+                relationships.is_empty()
+                    || relationships.iter().any(|kind| kind == "*")
+                    || relationships.contains(&relationship.name)
+            })
+            .filter_map(|relationship| self.variant_route(&relationship.name, source, target))
+            .map(|route| route.table.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     fn redaction_id_column_named(&self, entity: &str) -> Option<&str> {
@@ -249,16 +268,40 @@ pub trait OrbitQueryModel {
     }
 
     fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {
+        let mut routes = self.relationship_routes(relationship);
+        (routes.len() == 1).then(|| routes.remove(0))
+    }
+
+    fn variant_route(
+        &self,
+        relationship: &str,
+        source: &str,
+        target: &str,
+    ) -> Option<&VariantRoute> {
         let relationship = self.graph().relationship_id(relationship)?;
-        let graph_relationship = self.graph().relationship(relationship);
-        Some(RelationshipRoute {
-            table: self
-                .query_backend()
-                .relationship_table(relationship)
-                .unwrap_or_else(|| self.default_edge_table()),
-            graph: self.graph(),
-            relationship: graph_relationship,
-        })
+        let source = self.graph().entity_id(source)?;
+        let target = self.graph().entity_id(target)?;
+        self.query_backend()
+            .variant_route(self.graph().variant_id(relationship, source, target)?)
+    }
+
+    fn relationship_routes(&self, relationship: &str) -> Vec<RelationshipRoute<'_>> {
+        let Some(relationship) = self.graph().relationship_id(relationship) else {
+            return Vec::new();
+        };
+        let mut routes = std::collections::BTreeMap::<&str, Vec<&RelationshipVariant>>::new();
+        for id in &self.graph().relationship(relationship).variants {
+            if let Some(route) = self.query_backend().variant_route(*id) {
+                routes
+                    .entry(&route.table)
+                    .or_default()
+                    .push(self.graph().variant(*id));
+            }
+        }
+        routes
+            .into_iter()
+            .map(|(table, variants)| RelationshipRoute { table, variants })
+            .collect()
     }
 
     fn foreign_key(

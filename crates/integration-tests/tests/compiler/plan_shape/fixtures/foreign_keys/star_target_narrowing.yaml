@@ -1,11 +1,14 @@
 name: Selective FK centers narrow unfiltered traversal targets
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
   gql: |
     MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT]->(p:Project) RETURN mr.title, p.name
+
 logical:
   expect: ["(Filter mr.id IN [1] (_))"]
+
 physical:
   clickhouse:
     planned:

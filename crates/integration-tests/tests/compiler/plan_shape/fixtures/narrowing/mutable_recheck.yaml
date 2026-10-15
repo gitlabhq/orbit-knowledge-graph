@@ -1,4 +1,5 @@
 name: Narrowed node reads recheck mutable fields outside latest-row resolution
+
 query:
   json: |
     {
@@ -16,9 +17,11 @@ query:
   gql: |
     MATCH (p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest {id: 9710})
     RETURN p.name, count(mr) AS c
+
 logical:
   expect:
     - (Filter p.star_count = 1 (NodeScan Project AS p))
+
 physical:
   clickhouse:
     planned:

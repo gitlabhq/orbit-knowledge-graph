@@ -1,4 +1,5 @@
 name: "Rust: local flow SSA"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -59,8 +60,8 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }
 
   - name: "mutable rebindings preserve prior and reassigned targets"
     query: |
@@ -69,8 +70,8 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }
 
   - name: "block-expression aliases resolve through inner locals"
     query: |
@@ -79,7 +80,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'foo' } }
+      - { row: { fqn: "foo" } }
 
   - name: "loop-carried aliases preserve both callable targets"
     query: |
@@ -88,8 +89,8 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }
 
   - name: "match-expression joins preserve both callable targets"
     query: |
@@ -98,5 +99,5 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }

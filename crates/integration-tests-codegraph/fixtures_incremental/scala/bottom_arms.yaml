@@ -1,9 +1,11 @@
 name: "Scala: a throw expression is bottom and does not take part in the join"
+
 fixtures:
   - path: bottom/A.scala
     content: |
       package bottom
       class A { def n(): Unit = () }
+
   - path: bottom/Use.scala
     content: |
       package bottom

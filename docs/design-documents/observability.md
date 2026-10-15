@@ -95,8 +95,8 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `gkg.indexer.code.errors` | Counter | count | `stage` (repository_fetch, checkpoint, thread_pool, sentinel, graph_node, arrow_conversion, sink_write, internal) | Task-level code indexing failures by pipeline stage. Increments only when a task ends with a fatal pipeline error. Per-file failures land in `file_faults` instead, so this rate is suitable for alerting. |
-| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, oversize_combined, line_too_long, minified, not_utf8, non_regular_file, unsafe_path, timeout_sentinel) | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
+| `gkg.indexer.code.errors` | Counter | count | `stage` (repository_fetch, repository_fetch_overload, checkpoint, thread_pool, sentinel, graph_node, arrow_conversion, sink_write, internal) | Task-level code indexing failures by pipeline stage. Increments only when a task ends with a fatal pipeline error. Per-file failures land in `file_faults` instead, so this rate is suitable for alerting. |
+| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, oversize_combined, line_too_long, minified, not_utf8, non_regular_file, unsafe_path, deeply_nested, stack_limit, too_many_edges, too_many_manifest_bytes, fqn_truncated, too_many_names, timeout_parse, timeout_walk, timeout_ssa, timeout_sentinel, timeout_resolve, timeout_cross_file) | Source files skipped by the code-graph indexer for policy or watchdog reasons. `too_many_names` and `timeout_cross_file` count a cross-file stop once per language family per run. `too_many_manifest_bytes` counts a manifest that stays in the graph but is not read for resolution, and `fqn_truncated` a file whose deepest definitions keep only the last 64 segments (or 4 KiB) of their qualified name. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
 | `gkg.indexer.code.file_faults` | Counter | count | `kind` (file_read, invalid_utf8, syntax_error, oxc_panic, oxc_semantic, analyzer_panic, deeply_nested, unknown_source_type, embedded_script_parse, rust_workspace_missing) | Per-file failures during code indexing, by kind. The task itself completes; individual files were excluded from the graph. |
 
 *Namespace deletion module metrics:*
@@ -161,7 +161,12 @@ The query engine fires a single counter during compilation, with a closed-enum `
 
 *Circuit breaker metrics (resilience):*
 
-The circuit breaker wraps external service calls (initially ClickHouse) and tracks state transitions and call outcomes. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
+The circuit breaker guards calls to the graph ClickHouse, the datalake ClickHouse, and the GitLab API. Each client creates its own breaker, and clones of a client share it. Each process builds one client per service and passes clones to its callers, so all calls to a service share one circuit. The `service` label is the name the client is built with: `graph`, `datalake`, or `gitlab`. Only failures that show the service itself is in trouble count toward opening a circuit:
+
+- ClickHouse: network errors, `TOO_MANY_PARTS`, `TOO_MANY_SIMULTANEOUS_QUERIES`, and `MEMORY_LIMIT_EXCEEDED` from the server-wide memory tracker (the only one that reports `current RSS`). A timeout or a query or user memory limit comes from one query, so it does not count.
+- GitLab: network errors. An HTTP error response is a reply about one project (for example, a 5xx for a missing repository), so it does not count.
+
+No client constructor skips the breaker. Health checks go through a breaker too, so an open circuit reports the service as down until a half-open probe succeeds. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
@@ -273,11 +278,9 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 ### Health Checks
 
 Every service serves `/-/liveness` and `/-/readiness` on the probe server port (default 9394), the
-same port that serves `/-/metrics`. The Webserver, Indexer, and Dispatcher also keep the `/live` and
-`/ready` endpoints that the Helm chart probes today. The Indexer and Dispatcher serve those on dedicated health ports
-(default 4202 and 4203 respectively). These pod-level probes report local serving state only.
+same port that serves `/-/metrics`. These pod-level probes report local serving state only.
 Liveness confirms that the process can answer HTTP. Readiness keeps a pod out of rotation until its
-schema gate has cleared. The HealthCheck service's `/health`
+startup and schema checks pass. The HealthCheck service's `/health`
 endpoint reports ClickHouse and Kubernetes Deployment and StatefulSet health; NATS queue depth is
 reported separately by `/queue-depth`. GitLab is not checked by the HealthCheck service.
 

@@ -1,4 +1,5 @@
 name: "Rust: macro expansion resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -50,7 +51,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
+      - { row: { src: "src/lib.rs", tgt: "src/lib.rs" } }
 
   - name: "macro-expanded method call resolves to impl method"
     query: |
@@ -59,4 +60,4 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Service::run', type: 'Method' } }
+      - { row: { fqn: "Service::run", type: "Method" } }

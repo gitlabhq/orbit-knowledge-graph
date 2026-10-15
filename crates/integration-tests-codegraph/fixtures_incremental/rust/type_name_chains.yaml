@@ -1,0 +1,133 @@
+name: "Rust: type names that chain through aliases and bounds"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "type_name_chains"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      mod alias_chain;
+      mod aliases;
+      mod bound_chain;
+      mod bounds;
+      mod error;
+      mod value;
+
+  - path: src/aliases.rs
+    content: |
+      pub type Looped = Looped;
+      pub type Ping = Pong;
+      pub type Pong = Ping;
+
+      pub fn target() {}
+
+      pub fn use_looped(v: Looped) {
+          v.go();
+          target();
+      }
+
+      pub fn use_ping(v: Ping) {
+          v.go();
+      }
+
+      pub fn construct_looped() {
+          Looped::new();
+      }
+
+  - path: src/bounds.rs
+    content: |
+      pub fn bounded<T: U, U: T>(t: T) {
+          t.go();
+      }
+
+  - path: src/alias_chain.rs
+    content:
+      - "pub struct Service;\n\nimpl Service {\n    pub fn run(&self) {}\n}\n\n"
+      - { repeat: 10000, text: "pub type Alias{i} = Alias{i+1};\n" }
+      - "pub type Alias10000 = Service;\n\npub fn use_alias_chain(a: Alias0) {\n    a.run();\n}\n"
+
+  - path: src/bound_chain.rs
+    content:
+      - "pub fn target() {}\n\npub fn bound_chain<\n"
+      - { repeat: 5000, text: "B{i}: B{i+1},\n" }
+      - "B5000>(b: B0) {\n    b.go();\n    target();\n}\n"
+
+  - path: src/error.rs
+    content: |
+      pub struct Error;
+
+      impl Error {
+          pub fn custom() -> Self {
+              Error
+          }
+      }
+
+  - path: src/value.rs
+    content: |
+      use crate::error::Error;
+
+      pub struct Value;
+
+      impl TryFrom<u8> for Value {
+          type Error = Error;
+
+          fn try_from(v: u8) -> Result<Value, Error> {
+              Err(Error::custom())
+          }
+      }
+
+tests:
+  - name: "cyclic aliases are still definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/aliases.rs' AND d.definition_type = 'TypeAlias'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 3 }
+      - column_values:
+          field: name
+          values: [Looped, Ping, Pong]
+
+  - name: "calls through cyclic aliases and cyclic bounds have no target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['use_looped', 'use_ping', 'construct_looped', 'bounded']
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: use_looped, callee: target } }
+
+  - name: "an associated type named after its imported target still resolves calls"
+    # Known gap: `Error` in the impl resolves to the associated type
+    # `type Error = Error;`, whose right-hand side resolves to itself, not to
+    # the import.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'try_from'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: custom, file: src/error.rs } }
+
+  - name: "a call through a long alias chain reaches the aliased type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_alias_chain'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: run } }
+
+  - name: "a function with a long bound chain still links its other calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'bound_chain'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: target } }

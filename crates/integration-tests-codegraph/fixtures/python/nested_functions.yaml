@@ -1,4 +1,5 @@
 name: "Python: nested function scope"
+
 fixtures:
   - path: main.py
     content: |

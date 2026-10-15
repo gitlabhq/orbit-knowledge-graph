@@ -5,7 +5,6 @@ use crate::input::{
     AggExpr, AggFunction, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
 
-use super::HydrationStrategy;
 use super::context::PlanningContext;
 use super::physical::{ExecutionPlan, PhysicalSource};
 use super::requirements::{Column, Predicate};
@@ -99,7 +98,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                         !self
                             .nodes
                             .get(&target.node)
-                            .is_some_and(|node| node.hydration == HydrationStrategy::Skip)
+                            .is_some_and(|node| node.hydration == super::HydrationStrategy::Skip)
                     })
                     .map(|property| Column::new(&target.node, property)),
                 AggExpr::Sum(property)

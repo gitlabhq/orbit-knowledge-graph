@@ -1,4 +1,5 @@
 name: Branches from variable-hop endpoints do not use single-hop cascade bounds
+
 query:
   json: |
     {
@@ -19,24 +20,26 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition),
           (a)-[:CALLS]->(c:Definition), (b)-[:CALLS]->(d:Definition)
     RETURN a.id, b.id, c.id, d.id
+
 logical:
   expect:
     - (EdgeScan CALLS a->b AS e0 HOPS 2..2)
     - (EdgeScan CALLS a->c AS e1)
     - (EdgeScan CALLS b->d AS e2)
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (Union ALL AS e0 (Project 2 AS depth, ... (_)))
-        - (Join ON e0.target_id = e2.source_id (Join ON e0.source_id = e1.source_id (_) (_)) (_))
+        - (Union ALL AS _orbit_edge_0 (Project 2 AS depth, ... (_)))
+        - (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (Join ON _orbit_edge_0.source_id = _orbit_edge_1.source_id (_) (_)) (_))
       reject:
-        - (SemiJoin e2.source_id IN subquery (_) (Project e0p.target_id AS target_id (_)))
+        - (SemiJoin _orbit_edge_2.source_id IN subquery (_) (Project e0p.target_id AS target_id (_)))
     emitted:
       expect:
-        - (Join ON e0.target_id = e2.source_id (Join ON e0.source_id = e1.source_id (_) (_)) (_))
+        - (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (Join ON _orbit_edge_0.source_id = _orbit_edge_1.source_id (_) (_)) (_))
       reject:
-        - (SemiJoin e2.source_id IN subquery (_) (Project e0p.target_id AS target_id (_)))
+        - (SemiJoin _orbit_edge_2.source_id IN subquery (_) (Project e0p.target_id AS target_id (_)))
   duckdb:
     planned:
       expect:

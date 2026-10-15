@@ -15,7 +15,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         &self,
         alias: &str,
         hop: &Hop,
-        tagged: &mut HashSet<(String, String)>,
+        tagged: &mut HashSet<(String, String, usize)>,
     ) -> Vec<Predicate> {
         let mut predicates = self.edge_predicates(alias, hop, false);
         predicates.extend(
@@ -57,7 +57,10 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         if !skip_deleted {
             predicates.push(live(alias));
         }
-        if let Some(columns) = self.model.table_columns(&hop.edge_table) {
+        if let Some(columns) = hop
+            .single_edge_table()
+            .and_then(|table| self.model.table_columns(table))
+        {
             let mut seen = HashSet::new();
             for node_alias in [&hop.from_node, &hop.to_node] {
                 if let Some(node) = self.nodes.get(node_alias) {
@@ -80,7 +83,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         predicates: &mut Vec<Predicate>,
         hop: &Hop,
         alias: &str,
-        tagged: &mut HashSet<(String, String)>,
+        tagged: &mut HashSet<(String, String, usize)>,
     ) {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
             return;
@@ -95,8 +98,8 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             } else {
                 query_data_model::DenormalizedDirection::Target
             };
-            for (property_name, filter) in &node.filters {
-                let tag = (node_alias.clone(), property_name.clone());
+            for (filter_index, (property_name, filter)) in node.filters.iter().enumerate() {
+                let tag = (node_alias.clone(), property_name.clone(), filter_index);
                 if tagged.contains(&tag) {
                     continue;
                 }
@@ -108,10 +111,17 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     direction,
                 };
                 if let Some(facts) = self.denormalized.get(&key)
-                    && hop
-                        .relationships
-                        .iter()
-                        .any(|relationship| facts.relationships.contains(relationship))
+                    && let Some(source) = self.nodes[&hop.from_node]
+                        .entity
+                        .as_deref()
+                        .and_then(|entity| self.model.graph().entity_id(entity))
+                    && let Some(target) = self.nodes[&hop.to_node]
+                        .entity
+                        .as_deref()
+                        .and_then(|entity| self.model.graph().entity_id(entity))
+                    && hop.relationships.iter().all(|relationship| {
+                        facts.variants.contains(&(*relationship, source, target))
+                    })
                     && let Some(predicate) =
                         tag_filter(alias, &facts.edge_column, &facts.tag_key, &filter.filter)
                 {

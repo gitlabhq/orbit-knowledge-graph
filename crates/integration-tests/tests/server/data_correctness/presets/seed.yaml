@@ -150,10 +150,6 @@ data_correctness:
     - { traversal_path: "1/102/1004/", source_id: 2003, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: [state:closed], target_tags: [] }
     - { traversal_path: "1/100/1000/", source_id: 2004, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: [state:merged], target_tags: [] }
     - { traversal_path: "1/100/1000/", source_id: 2005, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: [state:merged], target_tags: [] }
-    # Vulnerability IN_PROJECT
-    - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
-    - { traversal_path: "1/101/1001/", source_id: 8001, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: ["severity:high", "state:detected"], target_tags: [] }
-    - { traversal_path: "1/102/1004/", source_id: 8002, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
     # Organization 2: cross-org isolation
     - { traversal_path: "2/900/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 900, target_kind: Group, source_tags: [state:active], target_tags: [] }
     - { traversal_path: "2/900/9000/", source_id: 900, source_kind: Group, relationship_kind: CONTAINS, target_id: 9000, target_kind: Project, source_tags: [], target_tags: [] }
@@ -165,8 +161,12 @@ data_correctness:
     - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 5001, target_kind: MergeRequestDiff, source_tags: [state:opened], target_tags: [] }
     - { traversal_path: "1/100/1000/", source_id: 2001, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 5002, target_kind: MergeRequestDiff, source_tags: [state:opened], target_tags: [] }
 
+  gl_sec_edge:
+    - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
+    - { traversal_path: "1/101/1001/", source_id: 8001, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1001, target_kind: Project, source_tags: ["severity:high", "state:detected"], target_tags: [] }
+    - { traversal_path: "1/102/1004/", source_id: 8002, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1004, target_kind: Project, source_tags: ["severity:critical", "state:detected"], target_tags: [] }
+
   gl_code_edge:
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
     - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition }
     - { traversal_path: "1/101/1001/", project_id: 1001, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
-

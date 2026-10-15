@@ -26,6 +26,8 @@ impl Sizing<'_> {
 
 #[derive(Debug, thiserror::Error)]
 pub(in crate::modules::sdlc) enum PlanError {
+    #[error(transparent)]
+    Ontology(#[from] ontology::OntologyError),
     #[error(
         "duplicate plan name '{0}': plan names are handler names and checkpoint keys and must be unique"
     )]
@@ -87,7 +89,7 @@ fn build_node_plan(
     let transform_declaration =
         TransformDeclaration::from_node_entity_and_edge_mappings(node, pipeline.transform.edges());
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -125,7 +127,7 @@ fn build_edge_plan(
 
     let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -154,7 +156,7 @@ fn build_derived_plan(
     let spec = compile_extract_spec(&extract_declaration)?;
 
     let transform_declaration = TransformDeclaration::Rust(name.clone());
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -226,6 +228,24 @@ mod tests {
 
     fn test_ontology() -> Ontology {
         Ontology::load_embedded().expect("should load ontology")
+    }
+
+    #[test]
+    fn accepts_split_relationship_routes() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/variant_routes"
+        ))
+        .unwrap();
+        let result = build_plans(
+            &ontology,
+            Sizing {
+                global_batch_size: 100,
+                namespaced_batch_size: 100,
+                overrides: &HashMap::new(),
+            },
+        );
+        assert!(result.is_ok());
     }
 
     fn plans(ontology: &Ontology, batch_size: u64) -> Plans {

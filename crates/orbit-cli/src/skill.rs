@@ -18,16 +18,100 @@ use crate::remote::error::map_http_error;
 #[folder = "$SKILLS_DIR/orbit-cli"]
 struct SkillAssets;
 
+#[derive(Embed)]
+#[folder = "$SKILLS_DIR/orbit-wrapper"]
+struct WrapperAssets;
+
 const MANIFEST: &str = "SKILL.md";
 const CACHE_MANIFEST: &str = ".orbit-cache.json";
 const DEFAULT_SKILL: &str = "orbit";
 const LOCK_WAIT: Duration = Duration::from_secs(10);
 const STALE_CACHE_TEMP_AGE: Duration = Duration::from_secs(15 * 60);
-pub(crate) const INSTALL_DIR_NAME: &str = "orbit-cli";
+/// Fixed because the content, not the name, depends on whether the instance is reachable.
+pub(crate) const INSTALL_DIR_NAME: &str = "orbit";
+pub(crate) const LEGACY_INSTALL_DIR_NAME: &str = "orbit-cli";
+const GLAB_SKILLS_GET: &str = "glab orbit skills get orbit";
 
-pub(crate) fn embedded_files() -> impl Iterator<Item = (String, Vec<u8>)> {
+pub(crate) fn embedded_files() -> Vec<(String, Vec<u8>)> {
     SkillAssets::iter()
         .filter_map(|path| Some((path.to_string(), SkillAssets::get(&path)?.data.into_owned())))
+        .collect()
+}
+
+pub(crate) fn wrapper_tree() -> Result<BTreeMap<String, Vec<u8>>> {
+    wrapper_tree_for(crate::commands::setup::spec::launcher())
+}
+
+pub(crate) fn wrapper_tree_for(launcher: &str) -> Result<BTreeMap<String, Vec<u8>>> {
+    let mut tree = BTreeMap::new();
+    for path in WrapperAssets::iter() {
+        let Some(asset) = WrapperAssets::get(&path) else {
+            continue;
+        };
+        let mut contents = asset.data.into_owned();
+        if path == MANIFEST {
+            let manifest = String::from_utf8(contents).context("embedded wrapper is not UTF-8")?;
+            let manifest = rename_manifest(&manifest, DEFAULT_SKILL)?;
+            contents = manifest
+                .replace(GLAB_SKILLS_GET, &format!("{launcher} skills get orbit"))
+                .into_bytes();
+        }
+        tree.insert(path.to_string(), contents);
+    }
+    Ok(tree)
+}
+
+pub(crate) async fn full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
+    let view = resolved_view(DEFAULT_SKILL).await.unwrap_or_else(|error| {
+        eprintln!("warning: {error:#}; using the embedded local skill");
+        local_tree()
+    });
+    view.into_iter()
+        .map(|(path, contents)| {
+            let contents = match path == MANIFEST {
+                true => rename_manifest(&contents, DEFAULT_SKILL)?,
+                false => contents,
+            };
+            Ok((path, contents.into_bytes()))
+        })
+        .collect()
+}
+
+pub(crate) fn embedded_full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
+    local_tree()
+        .into_iter()
+        .map(|(path, contents)| {
+            let contents = match path == MANIFEST {
+                true => rename_manifest(&contents, DEFAULT_SKILL)?,
+                false => contents,
+            };
+            Ok((path, contents.into_bytes()))
+        })
+        .collect()
+}
+
+/// Installed trees are addressed by directory, so the manifest name must match it.
+fn rename_manifest(manifest: &str, name: &str) -> Result<String> {
+    let mut in_frontmatter = false;
+    let mut renamed = false;
+    let lines: Vec<String> = manifest
+        .split('\n')
+        .enumerate()
+        .map(|(index, line)| {
+            if line == "---" {
+                in_frontmatter = index == 0;
+            }
+            if in_frontmatter && !renamed && line.starts_with("name:") {
+                renamed = true;
+                return format!("name: {name}");
+            }
+            line.to_string()
+        })
+        .collect();
+    if !renamed {
+        bail!("{MANIFEST} has no name in its frontmatter");
+    }
+    Ok(lines.join("\n"))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -154,8 +238,22 @@ fn is_skill_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+fn skill_client() -> Option<OrbitClient> {
+    match OrbitClient::from_skill_env() {
+        Ok(Some(client)) => Some(client),
+        Ok(None) => {
+            eprintln!("warning: no GitLab credential found; using the embedded local skill");
+            None
+        }
+        Err(error) => {
+            eprintln!("warning: {error}; using the embedded local skill");
+            None
+        }
+    }
+}
+
 async fn list_skills() -> Result<()> {
-    let Some(client) = OrbitClient::from_skill_env()? else {
+    let Some(client) = skill_client() else {
         return print_local_list();
     };
     match client.list_skills().await {
@@ -209,23 +307,24 @@ fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
+async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {
     let local = local_tree();
-    let view = match OrbitClient::from_skill_env()? {
-        None => local,
-        Some(client) => match resolve_remote_tree(&client, name).await? {
-            Some(remote) => match compose_tree(remote.files, local.clone()) {
-                Ok(composed) => composed,
-                Err(error) => {
-                    eprintln!(
-                        "warning: could not compose the instance Orbit skill ({error}); using the embedded local skill"
-                    );
-                    local
-                }
-            },
-            None => local,
-        },
+    let Some(client) = skill_client() else {
+        return Ok(local);
     };
+    let Some(remote) = resolve_remote_tree(&client, name).await? else {
+        return Ok(local);
+    };
+    Ok(compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
+        eprintln!(
+            "warning: could not compose the instance Orbit skill ({error}); using the embedded local skill"
+        );
+        local
+    }))
+}
+
+async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
+    let view = resolved_view(name).await?;
 
     let Some(contents) = view.get(requested) else {
         bail!(

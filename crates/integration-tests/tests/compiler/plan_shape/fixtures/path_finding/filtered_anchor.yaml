@@ -1,11 +1,14 @@
 name: Filtered path endpoints use bounded current-row anchor keys
+
 query:
   json: |
     {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","filters":{"username":"alice"}},{"id":"b","entity":"Group","node_ids":[100]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":1,"rel_types":["MEMBER_OF"]}}
   gql: |
     MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:MEMBER_OF*1..1]->(b:Group {id: 100}) RETURN p
+
 logical:
   expect: ["(Filter a.username = 'alice' (_))"]
+
 physical:
   clickhouse:
     planned:

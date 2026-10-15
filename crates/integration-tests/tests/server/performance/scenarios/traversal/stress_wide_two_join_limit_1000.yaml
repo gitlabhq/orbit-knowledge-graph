@@ -1,4 +1,5 @@
 description: Stress - two-join traversal at the DSL limit cap (1000)
+
 query:
   json: |
     {
@@ -14,5 +15,6 @@ query:
       ],
       "limit": 1000
     }
+
 expect:
   compile_only: true

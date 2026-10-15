@@ -39,6 +39,10 @@ pub(super) fn limits(config: &CodeIndexingPipelineConfig) -> code_graph_incremen
         file_link_ms: budget(config.per_file_ssa_timeout_ms),
         file_resolve_ms: budget(config.per_file_timeout_ms),
         cross_file_resolve_ms: budget(config.cross_file_resolve_timeout_ms),
+        max_tree_depth: config.max_tree_depth,
+        max_cross_file_names: config.max_cross_file_names,
+        max_manifest_bytes: config.max_manifest_bytes,
+        max_file_edges: config.max_file_edges,
         ..code_graph_incremental::Limits::UNLIMITED
     }
 }
@@ -47,10 +51,13 @@ pub(super) async fn load(
     stream: ByteStream,
     config: &CodeIndexingPipelineConfig,
 ) -> Result<Repository, RepositoryCacheError> {
-    let to_cap = |value| (value > 0).then_some(value);
+    fn to_cap<T: Default + PartialOrd>(value: T) -> Option<T> {
+        (value > T::default()).then_some(value)
+    }
     let limits = Limits {
         file_bytes: to_cap(config.max_file_size_bytes),
         total_bytes: to_cap(config.max_total_bytes),
+        files: to_cap(config.max_repository_files),
         resident_bytes: Some(config.source_memory_budget_bytes),
         ..Limits::default()
     };
@@ -75,7 +82,7 @@ pub(super) async fn load(
     .map_err(|error| RepositoryCacheError::Archive(error.to_string()))?;
     result.map(Arc::new).map_err(|error| match error {
         SourceError::Empty => RepositoryCacheError::EmptyArchive,
-        SourceError::Cap(cap) if cap.metric == LimitKind::TotalBytes => {
+        SourceError::Cap(cap) if matches!(cap.metric, LimitKind::TotalBytes | LimitKind::Files) => {
             RepositoryCacheError::RepositoryTooLarge
         }
         other => RepositoryCacheError::Archive(other.to_string()),

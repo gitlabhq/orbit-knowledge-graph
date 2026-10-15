@@ -1,0 +1,18 @@
+grpc_bind_address: "0.0.0.0:50054"
+nats:
+  url: "nats://gitlab-dev-stack-nats.gitlab-dev-stack.svc.cluster.local:4222"
+graph:
+  url: "http://gitlab-dev-stack-clickhouse.gitlab-dev-stack.svc.cluster.local:8123"
+  database: "gkg"
+  username: "gitlab-dev-stack"
+gitlab:
+  base_url: "http://gitlab-webservice-default:8181"
+probe_server:
+  bind_address: "0.0.0.0:9394"
+metrics:
+  log_level: "info"
+  prometheus:
+    enabled: true
+    # The chart renders `enabled` only. The port is kept here to exercise the wrapper's
+    # guard, which exists for hand-edited configs that still carry the deprecated key.
+    port: 9394

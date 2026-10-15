@@ -13,6 +13,47 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 }
 
 #[test]
+fn cycles_are_rejected_and_cursor_pages_advance() {
+    let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("cycles.duckdb")).unwrap();
+    database.initialize_schema("CREATE TABLE gl_definition(id BIGINT, name VARCHAR, traversal_path VARCHAR); CREATE TABLE gl_edge(source_id BIGINT, source_kind VARCHAR, target_id BIGINT, target_kind VARCHAR, relationship_kind VARCHAR, traversal_path VARCHAR);").unwrap();
+    database.execute("INSERT INTO gl_definition (id, name, traversal_path) VALUES (1, 'a', '1/'), (2, 'b', '1/'), (3, 'c', '1/'), (4, 'd', '1/'); INSERT INTO gl_edge (source_id, source_kind, target_id, target_kind, relationship_kind, traversal_path) VALUES (1, 'Definition', 2, 'Definition', 'CALLS', '1/'), (2, 'Definition', 3, 'Definition', 'CALLS', '1/'), (3, 'Definition', 4, 'Definition', 'CALLS', '1/');", &[]).unwrap();
+    let cycle_query = serde_json::json!({"query_type":"traversal", "nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]},{"id":"c","entity":"Definition","columns":["id"]}], "relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"},{"type":"CALLS","from":"c","to":"a"}]});
+    let error = compile_local(&cycle_query.to_string(), Frontend::JsonDsl, &ontology).unwrap_err();
+    assert!(error.to_string().contains("exactly n-1 relationships"));
+    let error = compile_local("MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(a) RETURN a.id, b.id, c.id", Frontend::Gql, &ontology).unwrap_err();
+    assert!(error.to_string().contains("cycles are unsupported"));
+    database.execute("INSERT INTO gl_edge (source_id, source_kind, target_id, target_kind, relationship_kind, traversal_path) VALUES (3, 'Definition', 1, 'Definition', 'CALLS', '1/');", &[]).unwrap();
+
+    let mut query = serde_json::json!({"query_type":"traversal", "nodes":[{"id":"a","entity":"Definition","columns":["id"]},{"id":"b","entity":"Definition","columns":["id"]}], "relationships":[{"type":"CALLS","from":"a","to":"b"}], "cursor":{"page_size":1}});
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        let compiled = compile_local(&query.to_string(), Frontend::JsonDsl, &ontology).unwrap();
+        assert_eq!(compiled.pagination.key_count, 2);
+        let rows = database.query_arrow(&compiled.base.render()).unwrap();
+        let batch = &rows[0];
+        let keys: Vec<_> = (0..2)
+            .map(|index| {
+                let name = format!("_orbit_cursor_{index}");
+                let column = batch
+                    .column_by_name(&name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow::array::StringArray>()
+                    .unwrap();
+                Some(column.value(0).to_string())
+            })
+            .collect();
+        assert!(seen.insert(keys.clone()), "cursor repeated a page");
+        query["cursor"]["after"] =
+            compiler::passes::cursor::encode(compiled.pagination.query_hash, &keys).into();
+    }
+    assert_eq!(seen.len(), 4);
+}
+
+#[test]
 fn local_starts_with_folds_unicode_case() {
     let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
     let directory = tempfile::tempdir().unwrap();
@@ -46,7 +87,7 @@ fn fused_neighbors_execute_both_directions_including_self_loops() {
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("neighbors.duckdb")).unwrap();
-    database.initialize_schema("CREATE TABLE gl_edge(source_id BIGINT, source_kind VARCHAR, target_id BIGINT, target_kind VARCHAR, relationship_kind VARCHAR, traversal_path VARCHAR); INSERT INTO gl_edge VALUES (1,'Project',2,'Project','CONTAINS','1/'), (3,'Project',1,'Project','CONTAINS','1/'), (1,'Project',1,'Project','CONTAINS','1/');").unwrap();
+    database.initialize_schema("CREATE TABLE gl_project(id BIGINT, traversal_path VARCHAR); INSERT INTO gl_project VALUES (1, '1/'); CREATE TABLE gl_edge(source_id BIGINT, source_kind VARCHAR, target_id BIGINT, target_kind VARCHAR, relationship_kind VARCHAR, traversal_path VARCHAR); INSERT INTO gl_edge VALUES (1,'Project',2,'Project','CONTAINS','1/'), (3,'Project',1,'Project','CONTAINS','1/'), (1,'Project',1,'Project','CONTAINS','1/');").unwrap();
     let compiled = compile(
         r#"{"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}"#,
     );

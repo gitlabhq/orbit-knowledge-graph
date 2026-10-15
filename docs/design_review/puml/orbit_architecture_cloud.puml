@@ -16,7 +16,7 @@ rectangle "Orbit Module Boundary" as module #E8F4FD {
 
   rectangle "Query & Serving" as serve #B3D9FF {
     component "Graph Query Engine\n(JSON DSL -> ClickHouse SQL)\n13-phase compiler" as qe
-    component "gRPC Server (tonic)\n(11 RPCs)\n+ /live, /ready (Axum)" as http
+    component "gRPC Server (tonic)\n(11 RPCs)\n+ probe server /-/liveness, /-/readiness" as http
     component "JWT Auth\nMiddleware" as jwt
   }
 

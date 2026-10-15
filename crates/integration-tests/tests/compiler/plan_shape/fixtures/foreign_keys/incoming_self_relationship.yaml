@@ -1,4 +1,5 @@
 name: Incoming FK self-relationship retains the physical holder
+
 query:
   json: |
     {
@@ -12,9 +13,11 @@ query:
   gql: |
     MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline)
     RETURN canceling.id, canceled.id
+
 logical:
   expect:
     - (EdgeScan AUTO_CANCELED_BY canceled->canceling AS e0)
+
 physical:
   clickhouse:
     planned:

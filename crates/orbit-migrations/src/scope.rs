@@ -96,7 +96,11 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         names.insert(derived.name.clone());
     }
     for kind in ontology.edge_names() {
-        if !is_code_domain_table(ontology, ontology.edge_table_for_relationship(kind)) {
+        if ontology
+            .edge_tables_for_relationship(kind)
+            .iter()
+            .any(|table| !is_code_domain_table(ontology, table))
+        {
             names.insert(kind.to_string());
         }
     }
@@ -112,7 +116,12 @@ pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         }
     }
     for kind in ontology.edge_names() {
-        if is_code_domain_table(ontology, ontology.edge_table_for_relationship(kind)) {
+        let tables = ontology.edge_tables_for_relationship(kind);
+        if !tables.is_empty()
+            && tables
+                .iter()
+                .all(|table| is_code_domain_table(ontology, table))
+        {
             names.insert(kind.to_string());
         }
     }
@@ -129,6 +138,16 @@ pub fn widen_scope_for_shared_table_writers(
     }
 
     let invalidated = invalidated_entities(ontology, requested_scope);
+
+    if storage.joins().iter().any(|join| {
+        join.sources.iter().any(|source| {
+            storage
+                .writers(&source.table)
+                .is_some_and(|writers| !writers.is_disjoint(&invalidated))
+        })
+    }) {
+        return MigrationScope::Full;
+    }
 
     for table in storage.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
@@ -159,14 +178,31 @@ pub fn classify_tables_for_scope(
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
 
-    storage
+    let mut actions: BTreeMap<_, _> = storage
         .versioned_tables()
         .map(|table| table.name.clone())
         .map(|table| {
             let action = migration_action_for_table(storage, &table, scope, &invalidated);
             (table, action)
         })
-        .collect()
+        .collect();
+    let dependencies = storage.dependencies();
+    loop {
+        let mut changed = false;
+        for (table, sources) in dependencies {
+            if sources
+                .iter()
+                .any(|source| actions.get(source) == Some(&TableMigrationAction::RebuildEmpty))
+                && actions.get(table) != Some(&TableMigrationAction::RebuildEmpty)
+            {
+                actions.insert(table.clone(), TableMigrationAction::RebuildEmpty);
+                changed = true;
+            }
+        }
+        if !changed {
+            return actions;
+        }
+    }
 }
 
 pub fn find_invalidated_pipelines(
@@ -223,7 +259,15 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
             .chain(code_entity_names(ontology))
             .collect(),
         MigrationScope::Sdlc(entities) if entities.is_empty() => sdlc_entity_names(ontology),
-        MigrationScope::Sdlc(entities) => entities.clone(),
+        MigrationScope::Sdlc(entities) => {
+            let mut invalidated = entities.clone();
+            for descriptor in ontology.pipeline_descriptors() {
+                if !descriptor.reindex_targets.is_disjoint(entities) {
+                    invalidated.insert(descriptor.entity);
+                }
+            }
+            invalidated
+        }
         MigrationScope::Code => code_entity_names(ontology),
         MigrationScope::None => BTreeSet::new(),
     }
@@ -293,6 +337,10 @@ mod tests {
         );
         assert_eq!(
             widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["SystemNote"])),
+            MigrationScope::Full,
+        );
+        assert_eq!(
+            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["HAS_NOTE"])),
             MigrationScope::Full,
         );
         assert_eq!(

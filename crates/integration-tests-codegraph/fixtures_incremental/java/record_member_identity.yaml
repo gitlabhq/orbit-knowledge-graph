@@ -1,4 +1,5 @@
 name: "Java record member identity"
+
 fixtures:
   - path: Members.java
     content: |
@@ -17,6 +18,7 @@ fixtures:
               return value;
           }
       }
+
 tests:
   - name: "Each explicit accessor replaces its implicit member"
     query: |
@@ -28,6 +30,7 @@ tests:
       - { row_count: 2 }
       - { row: { fqn: "Explicit.first" } }
       - { row: { fqn: "Explicit.second" } }
+
   - name: "Member keys stay inside their record owner"
     query: |
       MATCH (d:Definition)
@@ -38,6 +41,7 @@ tests:
       - { row_count: 2 }
       - { row: { fqn: "Explicit.Nested.first" } }
       - { row: { fqn: "Other.first" } }
+
   - name: "An overload with parameters keeps the implicit accessor"
     query: |
       MATCH (d:Definition)
@@ -47,6 +51,7 @@ tests:
       - { row_count: 2 }
       - { row: { line: 6 } }
       - { row: { line: 7 } }
+
   - name: "An annotated accessor exports the full declaration range"
     query: |
       MATCH (d:Definition)

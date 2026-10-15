@@ -16,6 +16,9 @@ missing_frontends:
   json: The JSON frontend does not expose property-to-property comparisons.
 ```
 
+A file can hold several fixtures in a `cases` list. Every other top-level key
+is a default for each case, and each case needs its own `name`.
+
 The fixtures cover access-path choices and their important eligibility guards.
 
 CTE assertions refer to top-level named query definitions, not execution order.

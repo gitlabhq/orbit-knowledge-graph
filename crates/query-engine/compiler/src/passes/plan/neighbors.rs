@@ -4,7 +4,6 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::context::PlanningContext;
-use super::helpers::has_non_denorm_filters;
 use super::{EdgeTableConfig, Neighbors, Plan};
 use query_data_model::OrbitQueryModel;
 
@@ -38,24 +37,112 @@ where
     let center_np = context.resolve_node(center_node)?;
 
     context.denormalized = super::denormalized_facts(input, model);
-    let has_non_denorm = has_non_denorm_filters(&center_np.filters, &context.denormalized)
-        || center_np.id_range.is_some();
+    let relationships: Vec<&str> = if config.rel_types.is_empty() {
+        model
+            .graph()
+            .relationships()
+            .map(|relationship| relationship.name.as_str())
+            .collect()
+    } else {
+        config.rel_types.iter().map(String::as_str).collect()
+    };
+    let relationship_ids = |source: bool| {
+        relationships
+            .iter()
+            .filter_map(|relationship| {
+                let route = model.relationship_route(relationship)?;
+                let relationship_id = model.graph().relationship_id(relationship)?;
+                match source {
+                    true if route.has_source(center_entity_id) => Some(relationship_id),
+                    false if route.has_target(center_entity_id) => Some(relationship_id),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let outgoing_relationships = relationship_ids(true);
+    let incoming_relationships = relationship_ids(false);
+    let incoming_kinds: Vec<_> = relationships
+        .iter()
+        .filter(|relationship| {
+            model
+                .relationship_route(relationship)
+                .is_some_and(|route| route.has_target(center_entity_id))
+        })
+        .copied()
+        .collect();
+    let incoming_scope_preserving: Vec<_> = incoming_kinds
+        .iter()
+        .filter(|relationship| {
+            model.relationship_route(relationship).is_some_and(|route| {
+                route
+                    .variants()
+                    .filter(|variant| variant.target == center_entity_id)
+                    .all(|variant| {
+                        model
+                            .variant_scope(
+                                relationship,
+                                &model.graph().entity(variant.source).name,
+                                &model.graph().entity(variant.target).name,
+                            )
+                            .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                    })
+            })
+        })
+        .map(|relationship| relationship.to_string())
+        .collect();
+    let incoming_cross_scope = incoming_kinds
+        .into_iter()
+        .filter(|relationship| {
+            !incoming_scope_preserving
+                .iter()
+                .any(|kind| kind == relationship)
+        })
+        .map(str::to_string)
+        .collect();
+    let covered = |filter: &super::BoundFilter,
+                   direction: query_data_model::DenormalizedDirection,
+                   relationships: &[query_data_model::RelationshipId]| {
+        relationships.is_empty()
+            || super::helpers::lowerable_denorm(filter, direction, &context.denormalized)
+                .is_some_and(|facts| {
+                    relationships.iter().all(|relationship| {
+                        model
+                            .relationship_route(
+                                model.graph().relationship(*relationship).name.as_str(),
+                            )
+                            .is_some_and(|route| {
+                                route.source_entities().any(|source| {
+                                    route.target_entities().any(|target| {
+                                        facts.variants.contains(&(*relationship, source, target))
+                                    })
+                                })
+                            })
+                    })
+                })
+    };
+    let has_non_denorm = center_np.id_range.is_some()
+        || center_np.filters.iter().any(|(_, filter)| {
+            (config.direction != Direction::Incoming
+                && !covered(
+                    filter,
+                    query_data_model::DenormalizedDirection::Source,
+                    &outgoing_relationships,
+                ))
+                || (config.direction != Direction::Outgoing
+                    && !covered(
+                        filter,
+                        query_data_model::DenormalizedDirection::Target,
+                        &incoming_relationships,
+                    ))
+        });
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
-        let relationships: Vec<&str> = if config.rel_types.is_empty() {
-            model
-                .graph()
-                .relationships()
-                .map(|relationship| relationship.name.as_str())
-                .collect()
-        } else {
-            config.rel_types.iter().map(String::as_str).collect()
-        };
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = relationships
                 .iter()
-                .filter_map(|relationship| model.relationship_route(relationship))
+                .flat_map(|relationship| model.relationship_routes(relationship))
                 .filter(|route| match source {
                     true => route.has_source(center_entity_id),
                     false => route.has_target(center_entity_id),
@@ -96,10 +183,7 @@ where
         edge,
         has_non_denorm,
         fused_table,
-        center_tp_lookup: center_node
-            .entity
-            .as_deref()
-            .and_then(|entity| model.traversal_path_lookup(entity, ontology::TraversalPathKind::Id))
-            .map(|(table, column)| (table.to_string(), column.to_string())),
+        incoming_scope_preserving,
+        incoming_cross_scope,
     }))
 }

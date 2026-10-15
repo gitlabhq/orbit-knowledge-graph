@@ -5,7 +5,7 @@ fn service_without_schema() -> OrbitServiceImpl {
     OrbitServiceImpl::new(
         Arc::new(mock_validator()),
         Arc::new(ActiveSchema::default()),
-        &test_config(),
+        test_client(),
         ClusterHealthChecker::default().into_arc(),
         60,
         Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -377,7 +377,7 @@ async fn schema_rpc_and_command_use_the_supplied_ontology() {
     let service = OrbitServiceImpl::new(
         Arc::new(mock_validator()),
         ActiveSchema::pinned(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
-        &test_config(),
+        test_client(),
         ClusterHealthChecker::default().into_arc(),
         60,
         Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),

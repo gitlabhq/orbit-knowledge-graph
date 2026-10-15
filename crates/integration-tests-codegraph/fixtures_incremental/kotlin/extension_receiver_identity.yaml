@@ -1,4 +1,5 @@
 name: "Kotlin: same-named extensions resolve by receiver identity"
+
 fixtures:
   - path: src/main/kotlin/com/ex/ext/Ext.kt
     content: |
@@ -7,6 +8,7 @@ fixtures:
       class B
       fun A.show() {}
       fun B.show() {}
+
   - path: src/main/kotlin/com/ex/Main.kt
     content: |
       package com.ex

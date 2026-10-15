@@ -3,9 +3,6 @@
   "title": "AppConfig",
   "type": "object",
   "properties": {
-    "bind_address": {
-      "type": "string"
-    },
     "grpc_bind_address": {
       "type": "string"
     },
@@ -44,12 +41,6 @@
     "health_check": {
       "$ref": "#/$defs/HealthCheckConfig"
     },
-    "indexer_health_bind_address": {
-      "type": "string"
-    },
-    "dispatcher_health_bind_address": {
-      "type": "string"
-    },
     "metrics": {
       "$ref": "#/$defs/MetricsConfig"
     },
@@ -83,7 +74,6 @@
   },
   "additionalProperties": false,
   "required": [
-    "bind_address",
     "grpc_bind_address",
     "jwt_clock_skew_secs",
     "nats",
@@ -94,8 +84,6 @@
     "gitlab",
     "schedule",
     "health_check",
-    "indexer_health_bind_address",
-    "dispatcher_health_bind_address",
     "metrics",
     "probe_server",
     "tls",
@@ -564,6 +552,12 @@
           "format": "uint64",
           "minimum": 0
         },
+        "max_repository_files": {
+          "description": "Files that pass the content filter above which a repository is skipped\nentirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,\noversize, symlinks) do not count; past the same number they get no File\nrow and are counted as skipped. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
         "source_memory_budget_bytes": {
           "type": "integer",
           "format": "uint64",
@@ -607,9 +601,33 @@
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
-          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. 0 = no timeout.",
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. On a timeout the language family keeps its\nper-file graph, the cross-file edges of the waves that finished, and\nthe part of the last wave that finished, which depends on thread\nscheduling. 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
+          "minimum": 0
+        },
+        "max_tree_depth": {
+          "description": "Syntax tree depth above which the incremental engine skips a file as\ndeeply nested. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_cross_file_names": {
+          "description": "Names that cross-file resolution may make visible across all files of\none language family before it stops as an overrun. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_manifest_bytes": {
+          "description": "Manifest bytes (package.json, Cargo.toml, and the like) that one language\nfamily reads for resolution. A manifest past the limit is not read, keeps\nits File row, and is counted as too_many_manifest_bytes. 0 = no limit.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_file_edges": {
+          "description": "Edges that the incremental engine's linker may emit for one file. A file\npast the limit is skipped as too_many_edges. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
           "minimum": 0
         },
         "job_timeout_secs": {
@@ -690,6 +708,7 @@
         "max_file_size_bytes",
         "max_files",
         "max_total_bytes",
+        "max_repository_files",
         "source_memory_budget_bytes",
         "source_compress_spill",
         "worker_threads",
@@ -699,6 +718,10 @@
         "per_file_walk_timeout_ms",
         "per_file_ssa_timeout_ms",
         "cross_file_resolve_timeout_ms",
+        "max_tree_depth",
+        "max_cross_file_names",
+        "max_manifest_bytes",
+        "max_file_edges",
         "job_timeout_secs",
         "fetch_concurrency",
         "write_channel_capacity",

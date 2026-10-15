@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use gitlab_client::GitlabClient;
 use indexer::modules::code::repository::blob_stream::BlobStream;
-use orbit_utils::arrow::ColumnValue;
+use orbit_arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 use tracing::{debug, warn};
 

@@ -7,7 +7,7 @@ use serde_json::{Number, Value};
 
 use super::ast::*;
 use super::{QueryParser, Rule};
-use crate::input::{Direction, FilterOp, OrderDirection, TruncateUnit};
+use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, TruncateUnit};
 
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
@@ -52,7 +52,7 @@ impl QueryParser {
         Ok(Statement::SchemaCall { node })
     }
 
-    fn Matches(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
+    fn Matches(input: Node) -> Result<(Pattern, Vec<BooleanExpression<Predicate>>)> {
         let node = input.clone();
         let mut matches: Vec<_> = match_nodes!(input.into_children();
             [Match(matches)..] => matches.collect(),
@@ -72,10 +72,10 @@ impl QueryParser {
         Ok((Pattern::Elements(elements), predicates))
     }
 
-    fn Match(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
+    fn Match(input: Node) -> Result<(Pattern, Vec<BooleanExpression<Predicate>>)> {
         Ok(match_nodes!(input.into_children();
             [Pattern(pattern)] => (pattern, Vec::new()),
-            [Pattern(pattern), Where(predicates)] => (pattern, predicates),
+            [Pattern(pattern), Where(predicate)] => (pattern, vec![predicate]),
         ))
     }
 
@@ -221,44 +221,98 @@ impl QueryParser {
         Ok(())
     }
 
-    fn Where(input: Node) -> Result<Vec<Comparison>> {
+    fn Where(input: Node) -> Result<BooleanExpression<Predicate>> {
         Ok(match_nodes!(input.into_children();
-            [AndExpression(predicates)] => predicates,
+            [AndExpression(predicate)] => predicate,
         ))
     }
 
-    fn AndExpression(input: Node) -> Result<Vec<Comparison>> {
-        Ok(match_nodes!(input.into_children();
-            [predicate(predicates)..] => predicates.flatten().collect(),
-        ))
+    fn AndExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let mut children = Vec::new();
+        for child in input.into_children() {
+            match child.as_rule() {
+                Rule::NotExpression => children.push(Self::NotExpression(child)?),
+                Rule::UnsupportedBooleanOperator => {
+                    return Err(child.error(
+                        "OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values",
+                    ));
+                }
+                _ => return Err(mismatch(&child)),
+            }
+        }
+        Ok(if children.len() == 1 {
+            children.pop().expect("one condition")
+        } else {
+            BooleanExpression::And(children)
+        })
     }
 
-    #[alias(predicate)]
-    fn ParenthesizedExpression(input: Node) -> Result<Vec<Comparison>> {
-        Ok(match_nodes!(input.into_children();
-            [AndExpression(predicates)] => predicates,
-        ))
-    }
-
-    #[alias(predicate)]
-    fn ComparisonExpression(input: Node) -> Result<Vec<Comparison>> {
+    fn NotExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
+        let mut children: Vec<_> = input.into_children().collect();
+        let predicate = children
+            .pop()
+            .ok_or_else(|| error_at(span, "expected a condition"))?;
+        let mut expression = Self::predicate(predicate)?;
+        if children.len() + expression.depth() > super::MAX_NESTING {
+            return Err(error_at(span, "expression nesting is too deep"));
+        }
+        for _negation in children {
+            expression = BooleanExpression::Not(Box::new(expression));
+        }
+        Ok(expression)
+    }
+
+    #[alias(predicate)]
+    fn ParenthesizedExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         Ok(match_nodes!(input.into_children();
-            [PropertyExpression(property), operator(op)] => vec![Comparison {
-                span, property, op, value: None, rhs_property: None,
-            }],
-            [PropertyExpression(property), operator(op), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value), rhs_property: None,
-            }],
-            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Comparison {
-                span, property: lhs, op, value: None, rhs_property: Some(rhs),
-            }],
-            [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+            [AndExpression(predicate)] => predicate,
         ))
     }
 
     #[alias(predicate)]
-    fn FunctionPredicate(input: Node) -> Result<Vec<Comparison>> {
+    fn ComparisonExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let comparison = match_nodes!(input.into_children();
+            [PropertyExpression(property), operator(op)] => Comparison {
+                span, property, op, value: None, rhs_property: None,
+            },
+            [PropertyExpression(property), operator(op), value(value)] => Comparison {
+                span, property, op, value: Some(value), rhs_property: None,
+            },
+            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => Comparison {
+                span, property: lhs, op, value: None, rhs_property: Some(rhs),
+            },
+            [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+        );
+        Ok(leaf(comparison))
+    }
+
+    #[alias(predicate)]
+    fn TypePredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
+        let span = input.as_span();
+        let (variable, op, value) = match_nodes!(input.into_children();
+            [RelationshipType(variable), operator(op)] => (variable, op, None),
+            [RelationshipType(variable), operator(op), value(value)] => (variable, op, Some(value)),
+            [RelationshipType(variable), operator(op), PropertyExpression(_)] => (variable, op, None),
+            [RelationshipType(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+        );
+        Ok(BooleanExpression::Leaf(Predicate::RelationshipType {
+            span,
+            variable,
+            op,
+            value,
+        }))
+    }
+
+    fn RelationshipType(input: Node) -> Result<Name> {
+        Ok(match_nodes!(input.into_children();
+            [Variable(variable)] => variable,
+        ))
+    }
+
+    #[alias(predicate)]
+    fn FunctionPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let call = input.children().next().ok_or_else(|| mismatch(&input))?;
         Err(unsupported_function(&call))
     }
@@ -268,13 +322,14 @@ impl QueryParser {
     }
 
     #[alias(predicate)]
-    fn TokenPredicate(input: Node) -> Result<Vec<Comparison>> {
+    fn TokenPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
-        Ok(match_nodes!(input.into_children();
-            [TokenFunction(op), PropertyExpression(property), value(value)] => vec![Comparison {
+        let comparison = match_nodes!(input.into_children();
+            [TokenFunction(op), PropertyExpression(property), value(value)] => Comparison {
                 span, property, op, value: Some(value), rhs_property: None,
-            }],
-        ))
+            },
+        );
+        Ok(leaf(comparison))
     }
 
     fn TokenFunction(input: Node) -> Result<FilterOp> {
@@ -317,6 +372,11 @@ impl QueryParser {
     }
 
     #[alias(operator)]
+    fn NegatedInOperator(input: Node) -> Result<FilterOp> {
+        Err(input.error("write NOT n.property IN [...] to exclude values"))
+    }
+
+    #[alias(operator)]
     fn NullOperator(input: Node) -> Result<FilterOp> {
         Ok(match_nodes!(input.into_children();
             [] => FilterOp::IsNull,
@@ -356,10 +416,12 @@ impl QueryParser {
     }
 
     fn ProjectionExpression(input: Node) -> Result<Expression> {
+        let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [Aggregate(expression)] => expression,
             [DateTrunc(expression)] => expression,
             [AllProperties(expression)] => expression,
+            [RelationshipType(variable)] => Expression::RelationshipType { span, variable },
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [NodeProjection(expression)] => expression,
             [PropertyExpression(property)] => Expression::Property(property),
@@ -450,17 +512,23 @@ impl QueryParser {
         Ok(match_nodes!(input.into_children();
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [FunctionCall(_), SortDirection(_)] => unreachable!("FunctionCall always errors"),
+            [RelationshipType(variable)] => Sort {
+                span, key: SortKey::RelationshipType(variable), direction: OrderDirection::Asc,
+            },
             [PropertyExpression(property)] => Sort {
-                span, key: Target::Property(property), direction: OrderDirection::Asc,
+                span, key: SortKey::Property(property), direction: OrderDirection::Asc,
             },
             [Variable(variable)] => Sort {
-                span, key: Target::Variable(variable), direction: OrderDirection::Asc,
+                span, key: SortKey::Variable(variable), direction: OrderDirection::Asc,
+            },
+            [RelationshipType(variable), SortDirection(direction)] => Sort {
+                span, key: SortKey::RelationshipType(variable), direction,
             },
             [PropertyExpression(property), SortDirection(direction)] => Sort {
-                span, key: Target::Property(property), direction,
+                span, key: SortKey::Property(property), direction,
             },
             [Variable(variable), SortDirection(direction)] => Sort {
-                span, key: Target::Variable(variable), direction,
+                span, key: SortKey::Variable(variable), direction,
             },
         ))
     }
@@ -586,6 +654,10 @@ fn directed(input: Node, direction: Direction) -> Result<Relationship> {
     ))
 }
 
+fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {
+    BooleanExpression::Leaf(Predicate::Comparison(Box::new(comparison)))
+}
+
 fn row_count(value: &Value, span: Span<'_>, clause: &str) -> Result<u32> {
     value
         .as_u64()
@@ -606,12 +678,12 @@ fn unsupported_function(call: &Node) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
-            "match a typed relationship such as -[r:CLOSES]->; each edge type is listed under @edges in the response"
+            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
         "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
         | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",
         _ => {
-            "RETURN supports count, sum, avg, min, max, date_trunc, and properties; WHERE supports token_match, all_tokens, and any_tokens"
+            "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }
     };
     call.error(format!("function {name}() is not supported: {hint}"))

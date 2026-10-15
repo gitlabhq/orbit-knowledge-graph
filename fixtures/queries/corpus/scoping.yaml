@@ -204,7 +204,7 @@ proj_unknown_id_mr_in_project:
   desc: "Negative/guard. MergeRequest IN_PROJECT Project where the project id is nonexistent. Dict misses, resolves to '0/', scope must be treated as unknown (empty), NOT widened. Proves the rewrite fails closed."
   category: traversal
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -435,7 +435,7 @@ grp_unknown_id_no_widen:
   desc: "Scope by a nonexistent Group id. Dictionary miss must resolve to '0/' (unknown), returning ZERO rows. The rewrite must NOT fall back to an unscoped full-table scan that would leak other groups' data."
   category: traversal
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -502,7 +502,7 @@ ns_project_namespace_id_GAP:
   desc: "DOCUMENTED RESIDUAL GAP. namespace_id where the id is a PROJECT_NAMESPACE id (a project's leaf namespace, type='Project'). A project's traversal_path leaf == project_namespace_id, NOT project.id; the dict is keyed for group/namespace prefixes. Passing this id as Group.id must NOT widen scope and must stay correct."
   category: search
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -514,7 +514,7 @@ ns_unknown_id_no_widen:
   desc: "Unknown / nonexistent namespace_id. Dictionary miss must resolve to '0/' and be treated as unknown, returning 0 rows. Must NOT fall back to an unscoped (full-table) query."
   category: search
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -560,7 +560,7 @@ multihop_user_authored_mr_in_project_group_scoped:
   desc: "Intentionally encodes the common mistake (group_id stuffed into Project.id via a bogus id_property filter key). The harness must assert it is REJECTED at runtime ontology validation. The correct group-scoped multi-hop is multihop_group_scope_via_group_node."
   category: traversal
   suite: scoping
-  expect: error  # deliberate negative control: id_property is rejected by the ontology allowlist
+  expect: error # deliberate negative control: id_property is rejected by the ontology allowlist
   query: |
     {
       "query_type": "traversal",
@@ -620,7 +620,7 @@ path_finding_two_entities_in_project:
   desc: "PATH_FINDING between two seeded entities within one project. shortest path from a specific MergeRequest to its Project, both pinned by node_ids, scoped within {{PROJECT_ID}}. Confirms the path search frontier is bounded by the project prefix."
   category: path_finding
   suite: scoping
-  expect: empty  # bidirectional path-finding frontier OOMs at gitlab-org scope
+  expect: empty # bidirectional path-finding frontier OOMs at gitlab-org scope
   query: |
     {
       "query_type": "path_finding",
@@ -635,7 +635,7 @@ unknown_id_path_finding_no_widen:
   desc: "PATH_FINDING with an endpoint pinned to a nonexistent id. Proves the path frontier fails closed (dict-miss '0/') and returns no path rather than widening the gl_edge frontier scan."
   category: path_finding
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "path_finding",
@@ -651,7 +651,7 @@ path_finding_two_projects_in_group_by_full_path:
   desc: "PATH_FINDING between two seeded projects within the same group, endpoints pinned by full_path (engine resolves prefixes from the dictionary). rel_types is REQUIRED because endpoints use filters, not node_ids."
   category: path_finding
   suite: scoping
-  expect: empty  # CONTAINS is parent->child only; sibling projects share a Group parent so no directed path exists via [CONTAINS, IN_PROJECT]
+  expect: empty # CONTAINS is parent->child only; sibling projects share a Group parent so no directed path exists via [CONTAINS, IN_PROJECT]
   query: |
     {
       "query_type": "path_finding",
@@ -678,7 +678,7 @@ unknown_id_neighbors_no_widen:
   desc: "NEIGHBORS of a nonexistent center id. Proves the neighbors gl_edge scan fails closed ('0/' prefix) and returns zero neighbors rather than scanning the whole edge table."
   category: neighbors
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "neighbors",
@@ -866,7 +866,7 @@ unknown_project_id_mr_empty:
   desc: "Scope MRs to a nonexistent project_id. The rewrite resolves project_id -> project_namespace_id via the dict; a miss yields the '0/' sentinel, so startsWith(traversal_path,'0/') matches nothing. MUST return empty and MUST NOT widen to a full scan."
   category: traversal
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -883,7 +883,7 @@ unknown_full_path_proj_empty:
   desc: "Single-node Project scoped by a nonexistent full_path. The rewrite resolves full_path -> the project's own traversal_path prefix; an unresolvable path is a miss => unknown prefix ('0/'). MUST short-circuit to empty, not scan gl_project."
   category: search
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -896,7 +896,7 @@ full_path_trailing_slash:
   desc: "Scope a Project by its real full_path with a trailing slash appended. full_path in gl_project has no trailing slash; the rewrite must normalize (strip trailing '/') before dict lookup, else it misses and returns empty. Asserts the normalizer, not a leak."
   category: search
   suite: scoping
-  expect: empty  # normalizer not implemented today: trailing-slash full_path misses the dict and short-circuits empty (fail-closed)
+  expect: empty # normalizer not implemented today: trailing-slash full_path misses the dict and short-circuits empty (fail-closed)
   query: |
     {
       "query_type": "traversal",
@@ -909,7 +909,7 @@ full_path_case_variant:
   desc: "Scope a Project by an upper/mixed-case variant of its real full_path. GitLab paths are case-sensitive in storage; the rewrite/dict lookup must treat the case variant as a distinct (missing) key. Expect empty, never a widened scan, never an accidental case-insensitive match."
   category: search
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -953,7 +953,7 @@ out_of_scope_project_id_zero_leak:
   desc: "Scope MRs to a REAL project that exists but is OUTSIDE the calling user's authorized traversal paths. The security pass must AND the resolved scope prefix with the user's authorized prefixes; the conjunction is empty => zero rows, no leak."
   category: search
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -966,7 +966,7 @@ out_of_scope_full_path_group:
   desc: "Two-node WorkItem IN_GROUP Group scoped by a Group full_path the user is NOT authorized for. The rewrite resolves the group's prefix; the security AND with the user's auth prefixes empties it. Exercises the group-prefix path plus an edge join, ensuring the edge table's traversal_path is also ANDed down (no leak via edge join)."
   category: traversal
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "traversal",
@@ -995,7 +995,7 @@ unknown_namespace_id_group_empty:
   desc: "Aggregation (WorkItem count by state) scoped by namespace_id eq a fully nonexistent id. namespace_id dict lookup misses => '0/' sentinel. For an aggregation, Layer 3 redaction cannot run, so the empty result must come purely from the prefix/security predicate. MUST return zero buckets, never a full-table grouped scan."
   category: aggregation
   suite: scoping
-  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  expect: empty # fail-closed control: must return zero rows (no scope widening)
   query: |
     {
       "query_type": "aggregation",
@@ -1083,4 +1083,3 @@ pipeline_filter_changed_paths_agg:
       "aggregation_sort": "-changes",
       "limit": 60
     }
-

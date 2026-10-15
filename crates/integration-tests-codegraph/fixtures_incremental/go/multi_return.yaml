@@ -1,4 +1,5 @@
 name: "Go: chained calls and short var declarations"
+
 fixtures:
   - path: chain.go
     content: |

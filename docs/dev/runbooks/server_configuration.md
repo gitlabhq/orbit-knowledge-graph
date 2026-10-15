@@ -34,19 +34,22 @@ start and passes it as the single `--config` file. The file is a `yq` deep merge
 
 1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
    consumer name, database names and users, laptop tuning.
-2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
-   and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
-   password from the GitLab secret files.
+2. Values read from the Caproni cluster: the GitLab base URL from the cluster hostname, and the JWT
+   keys and ClickHouse password from the `gitlab-dev-stack-gkg-secrets` secret.
 3. The mode's probe server port, so the processes `mise run dev` starts side by side do not collide.
    Every mode binds this port for `/-/liveness` and `/-/readiness`, with or without metrics.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
+
+Caproni edit mode (`caproni run`) does not use this merge. There the local binary reads the pod's
+`/app/config/config.yaml` through mirrord, and `scripts/dev/caproni-edit-mode.sh` changes only the
+probe port. See [Local development](../local-development.md).
 
 Passing `--config` disables the default `config/config.yaml` lookup.
 
 Overlay example (`config/dev.local.yaml` or any `--config` file):
 
 ```yaml
-bind_address: "127.0.0.1:8091"
+grpc_bind_address: "127.0.0.1:50055"
 graph:
   database: "gkg-sandbox"
 engine:
@@ -59,7 +62,7 @@ The binary (`gkg-server`) runs in one of five modes via `--mode`:
 
 | Mode | Purpose | Key config sections |
 |------|---------|---------------------|
-| `Webserver` | HTTP/gRPC query server | `bind_address`, `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
+| `Webserver` | gRPC query server | `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
 | `Indexer` | Consumes NATS messages and runs indexing handlers | `nats`, `engine`, `graph`, `datalake`, `gitlab`, `schedule`, `schema` |
 | `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests | `nats`, `graph`, `datalake`, `schedule`, `schema` |
 | `HealthCheck` | Aggregate Kubernetes workload and ClickHouse health, plus NATS queue depth | `health_check`, `graph`, `datalake`, `nats` |
@@ -415,7 +418,6 @@ These settings are used by the Webserver mode.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `bind_address` | `127.0.0.1:4200` | HTTP server bind address |
 | `grpc_bind_address` | `127.0.0.1:50054` | gRPC server bind address |
 | `jwt_clock_skew_secs` | `60` | Allowed JWT clock skew in seconds |
 | `health_check_url` | None | Optional health check URL |
@@ -447,8 +449,6 @@ Enabling `tls.internal` changes what clients must send:
 - KEDA scalers that read `/queue-depth` need the same treatment.
 - The PodMonitor needs `scheme: https` and a `tlsConfig` that either trusts the issuing CA
   (with `serverName`, because Prometheus connects to the pod IP) or sets `insecureSkipVerify`.
-
-The legacy `/live` and `/ready` listeners stay plaintext until the chart probes the probe server.
 
 ### gRPC tuning
 
@@ -638,8 +638,6 @@ When `graph.replicated` is `true`, the mode first runs two checks. ClickHouse mu
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
-| `indexer_health_bind_address` | `0.0.0.0:4202` | `/live` and `/ready` address for Indexer mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
-| `dispatcher_health_bind_address` | `0.0.0.0:4203` | `/live` and `/ready` address for DispatchIndexing mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
 
 ## Tuning guide
 
@@ -813,11 +811,11 @@ engine:
   topics:
     global-handler:
       concurrency_group: sdlc
-      max_attempts: 1
+      max_attempts: 5
       retry_interval_secs: 60
     namespace-handler:
       concurrency_group: sdlc
-      max_attempts: 1
+      max_attempts: 5
       retry_interval_secs: 60
     code-indexing-task:
       concurrency_group: code

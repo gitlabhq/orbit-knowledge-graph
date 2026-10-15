@@ -1,0 +1,72 @@
+name: "Lua: module tables loaded through a chain of require calls"
+
+fixtures:
+  - path: a.lua
+    content: |
+      local M = {}
+
+      function M.helper()
+      end
+
+      return M
+
+  - path: b.lua
+    content: |
+      local a = require("a")
+      local M = {}
+
+      function M.middle()
+        a.helper()
+      end
+
+      return M
+
+  - path: c.lua
+    content: |
+      local b = require("b")
+
+      function run()
+        b.middle()
+      end
+
+tests:
+  - name: "each file defines its function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['helper', 'middle', 'run']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { row: { name: helper, file: a.lua } }
+      - { row: { name: middle, file: b.lua } }
+      - { row: { name: run, file: c.lua } }
+
+  - name: "each require call is an import"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path IN ['b.lua', 'c.lua']
+      RETURN i.file_path AS file, i.import_path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { file: b.lua, path: a } }
+      - { row: { file: c.lua, path: b } }
+
+  - name: "calls on required module tables link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'middle']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: middle, file: b.lua } }
+      - { row: { caller: middle, callee: helper, file: a.lua } }
+
+  - name: "a call to a global function from a required file links across files"
+    # Known gap: a global function that a required file defines does not link; only module tables do.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'helper'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }

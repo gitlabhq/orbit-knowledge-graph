@@ -1,5 +1,6 @@
 name: "React TSX type props and runtime helpers"
 pipeline: js
+
 fixtures:
   - path: src/types.ts
     content: |

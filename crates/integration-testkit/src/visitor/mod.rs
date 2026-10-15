@@ -807,6 +807,16 @@ impl ResponseView {
         }
     }
 
+    pub fn assert_filter_has_no_matches(&self, entity_type: &str, field: &str) {
+        self.tracker.satisfy(Requirement::Filter {
+            field: field.to_string(),
+        });
+        assert!(
+            self.nodes_of_type(entity_type).is_empty(),
+            "expected no {entity_type} nodes for filter on '{field}'"
+        );
+    }
+
     /// Assert that the IDs of nodes with `entity_type` match `expected` exactly (unordered).
     /// Satisfies [`Requirement::NodeIds`].
     pub fn assert_node_ids(&self, entity_type: &str, expected: &[i64]) {

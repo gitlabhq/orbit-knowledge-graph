@@ -1,7 +1,6 @@
 # config/ontology/edges/defines.yaml
 
 description: Definition relationships in source code
-table: gl_code_edge
 
 variants:
   - from_node: { type: File, id: id }

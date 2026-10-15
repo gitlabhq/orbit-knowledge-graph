@@ -12,6 +12,7 @@ set -euo pipefail
 
 args=(cargo nextest run --workspace \
   --features orbit-prompts/skill-validation \
+  --features code-graph-incremental/pretty-print \
   --exclude integration-tests \
   --exclude integration-tests-codegraph \
   --exclude orbit-fuzz \

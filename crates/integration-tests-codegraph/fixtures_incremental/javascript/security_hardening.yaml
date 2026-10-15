@@ -1,5 +1,6 @@
 name: "JavaScript security hardening (MR 950)"
 pipeline: js
+
 fixtures:
   # --- H4: node-builtin alias smuggling refused ---
   - path: webpack.config.js
@@ -107,6 +108,7 @@ tests:
       RETURN sym.import_path
     assert:
       - { empty: true }
+
   - name: Local alias resolves inside repo
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

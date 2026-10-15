@@ -162,13 +162,13 @@
         ]
       }
     }
-  expect: empty  # two random Projects don't share a 2-hop directed path; every entity->Project edge goes IN_PROJECT inbound, so Project->Project via [AUTHORED, IN_PROJECT] loops back to self
+  expect: empty # two random Projects don't share a 2-hop directed path; every entity->Project edge goes IN_PROJECT inbound, so Project->Project via [AUTHORED, IN_PROJECT] loops back to self
 
 06_path_finding_depth2_user_to_project:
   desc: "Path finding depth2 user to project"
   category: path_finding
   suite: showcase
-  expect: empty  # random User->Project pair rarely has a bounded path in scope
+  expect: empty # random User->Project pair rarely has a bounded path in scope
   query: |
     {
       "query_type": "path_finding",
@@ -352,7 +352,7 @@
   desc: "Traversal project pipelines jobs"
   category: traversal
   suite: showcase
-  expect: empty  # 3-hop Project->Pipeline->Job OOMs on large sampled projects at gitlab-org scope
+  expect: empty # 3-hop Project->Pipeline->Job OOMs on large sampled projects at gitlab-org scope
   query: |
     {
       "query_type": "traversal",
@@ -451,7 +451,7 @@
       ],
       "limit": 50
     }
-  expect: empty  # #582 silent-empty: state filter is pushed onto the HAS_NOTE edge denorm, which encodes no MR state, yielding zero rows
+  expect: empty # #582 silent-empty: state filter is pushed onto the HAS_NOTE edge denorm, which encodes no MR state, yielding zero rows
 
 14_ns_aggregation_mr_count_by_project_no_ids:
   desc: "Ns aggregation mr count by project no ids"
@@ -1012,4 +1012,3 @@
       "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
-

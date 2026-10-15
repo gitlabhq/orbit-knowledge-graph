@@ -1,5 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
+use clickhouse_client::ClickHouseConfigurationExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -17,8 +18,8 @@ use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::types::{Envelope, Event, Subscription};
+use orbit_arrow::ArrowUtils;
 use orbit_server_config::{ClickHouseConfiguration, NatsConfiguration, SubscriptionConfig};
-use orbit_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt, WaitFor};
@@ -203,6 +204,7 @@ impl TestContext {
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
+                "graph",
             );
 
             match client.execute("SELECT 1").await {
@@ -233,24 +235,22 @@ impl TestContext {
     }
 
     fn create_writer(&self) -> Arc<ClickHouseWriter> {
-        Arc::new(
-            ClickHouseWriter::new(
-                ClickHouseConfiguration {
-                    database: DATABASE.to_string(),
-                    url: self.clickhouse_endpoint.clone(),
-                    username: USERNAME.to_string(),
-                    password: Some(PASSWORD.to_string()),
-                    session_settings: std::collections::HashMap::new(),
-                    replicated: false,
-                    insert_settings: std::collections::HashMap::new(),
-                    profiling: orbit_server_config::AppConfig::embedded_defaults()
-                        .graph
-                        .profiling,
-                },
-                Arc::new(EngineMetrics::default()),
-            )
-            .expect("failed to create writer"),
-        )
+        Arc::new(ClickHouseWriter::new(
+            ClickHouseConfiguration {
+                database: DATABASE.to_string(),
+                url: self.clickhouse_endpoint.clone(),
+                username: USERNAME.to_string(),
+                password: Some(PASSWORD.to_string()),
+                session_settings: std::collections::HashMap::new(),
+                replicated: false,
+                insert_settings: std::collections::HashMap::new(),
+                profiling: orbit_server_config::AppConfig::embedded_defaults()
+                    .graph
+                    .profiling,
+            }
+            .build_client("graph"),
+            Arc::new(EngineMetrics::default()),
+        ))
     }
 
     async fn publish_event(&self, broker: &NatsBroker, id: i32, name: &str) {
@@ -273,6 +273,7 @@ impl TestContext {
             Some(PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         );
 
         let batches = client
@@ -287,10 +288,23 @@ impl TestContext {
 }
 
 async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
+    run_engine_with(
+        engine,
+        indexer::testkit::test_engine_configuration(),
+        duration,
+    )
+    .await;
+}
+
+async fn run_engine_with(
+    engine: Arc<Engine>,
+    configuration: orbit_server_config::EngineConfiguration,
+    duration: Duration,
+) {
     let engine_handle = engine.clone();
     let task = tokio::spawn(async move {
         engine_handle
-            .run(&indexer::testkit::test_engine_configuration())
+            .run(&configuration)
             .await
             .expect("engine failed");
     });
@@ -298,6 +312,124 @@ async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
     tokio::time::sleep(duration).await;
     engine.stop();
     task.await.expect("engine task panicked");
+}
+
+struct SlotReleasingHandler {
+    inner: TestHandler,
+    peers: Arc<tokio::sync::Barrier>,
+}
+
+#[async_trait]
+impl Handler for SlotReleasingHandler {
+    fn name(&self) -> &str {
+        "slot-releasing-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        test_subscription()
+    }
+
+    fn requires_worker_pool(&self) -> bool {
+        false
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        context.work.release();
+        tokio::time::timeout(Duration::from_secs(2), self.peers.wait())
+            .await
+            .map_err(|_| HandlerError::Processing("the next message never started".into()))?;
+        self.inner.handle(context, message).await
+    }
+}
+
+struct PanicOnceHandler {
+    inner: TestHandler,
+    panicked: AtomicBool,
+}
+
+#[async_trait]
+impl Handler for PanicOnceHandler {
+    fn name(&self) -> &str {
+        "panic-once-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        test_subscription()
+    }
+
+    fn requires_worker_pool(&self) -> bool {
+        false
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        if !self.panicked.swap(true, Ordering::SeqCst) {
+            panic!("intentional panic before the work permit is released");
+        }
+        self.inner.handle(context, message).await
+    }
+}
+
+#[tokio::test]
+async fn a_panicking_handler_returns_its_work_permit() {
+    let context = TestContext::new().await;
+    let broker = context.create_broker().await;
+    let handler = PanicOnceHandler {
+        inner: TestHandler {
+            writer: context.create_writer(),
+        },
+        panicked: AtomicBool::new(false),
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+
+    context.publish_event(&broker, 1, "panics").await;
+    context.publish_event(&broker, 2, "runs").await;
+    run_engine_with(
+        engine,
+        orbit_server_config::EngineConfiguration {
+            max_concurrent_workers: Some(1),
+            ..indexer::testkit::test_engine_configuration()
+        },
+        Duration::from_secs(4),
+    )
+    .await;
+
+    assert_eq!(
+        context.query_count().await,
+        1,
+        "the second message must get the only work permit after the first handler panicked"
+    );
+}
+
+#[tokio::test]
+async fn a_released_work_slot_admits_the_next_message() {
+    let context = TestContext::new().await;
+    let broker = context.create_broker().await;
+    let peers = Arc::new(tokio::sync::Barrier::new(2));
+    let handler = SlotReleasingHandler {
+        inner: TestHandler {
+            writer: context.create_writer(),
+        },
+        peers,
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+
+    context.publish_event(&broker, 1, "first").await;
+    context.publish_event(&broker, 2, "second").await;
+    run_engine_with(
+        engine,
+        orbit_server_config::EngineConfiguration {
+            max_concurrent_workers: Some(1),
+            ..indexer::testkit::test_engine_configuration()
+        },
+        Duration::from_secs(4),
+    )
+    .await;
+
+    assert_eq!(
+        context.query_count().await,
+        2,
+        "both messages must run while the first only waits"
+    );
 }
 
 fn create_engine(broker: Arc<NatsBroker>, handler: Box<dyn Handler>) -> Arc<Engine> {
@@ -684,5 +816,139 @@ async fn permanent_drop_error_drops_without_dlq() {
         dlq_message_count(&context.nats_url).await,
         0,
         "DLQ should be empty"
+    );
+}
+
+struct RecordingHandler {
+    subscription: Subscription,
+    seen: Arc<std::sync::Mutex<Vec<(u32, bool)>>>,
+}
+
+#[async_trait]
+impl Handler for RecordingHandler {
+    fn name(&self) -> &str {
+        "recording-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        self.subscription.clone()
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push((message.attempt, context.redelivered_on_failure));
+        Err(HandlerError::Processing("always fails".into()))
+    }
+}
+
+#[tokio::test]
+async fn the_context_tells_the_handler_whether_a_failure_is_redelivered() {
+    let context = TestContext::new().await;
+    let stream = "redelivery_flag_stream";
+    let subject = "redelivery_flag.events";
+    let subscription = Subscription::new(stream, subject).with_config(&SubscriptionConfig {
+        max_attempts: Some(2),
+        retry_interval_secs: Some(1),
+        dead_letter_on_exhaustion: Some(false),
+        ..Default::default()
+    });
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("redelivery-flag-consumer".into()),
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
+        })
+        .await;
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+
+    publish_test_event(&broker, &subscription).await;
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let handler = RecordingHandler {
+        subscription: subscription.clone(),
+        seen: seen.clone(),
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(4)).await;
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![(1, true), (2, false)],
+        "the engine's redelivery decision must reach the handler"
+    );
+}
+
+struct FailOnceHandler {
+    inner: TestHandler,
+    subscription: Subscription,
+    failed: AtomicBool,
+}
+
+#[async_trait]
+impl Handler for FailOnceHandler {
+    fn name(&self) -> &str {
+        "fail-once-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        self.subscription.clone()
+    }
+
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        if !self.failed.swap(true, Ordering::SeqCst) {
+            return Err(HandlerError::Processing(
+                "transient clickhouse error".into(),
+            ));
+        }
+        self.inner.handle(context, message).await
+    }
+}
+
+#[tokio::test]
+async fn sdlc_dispatch_policy_redelivers_a_transient_failure() {
+    let context = TestContext::new().await;
+    let stream = "sdlc_retry_stream";
+    let subject = "sdlc_retry.events";
+    let policy = SubscriptionConfig {
+        concurrency_group: None,
+        retry_interval_secs: Some(1),
+        ..indexer::modules::sdlc::sdlc_dispatch_topic_policy()
+    };
+    let subscription = Subscription::new(stream, subject).with_config(&policy);
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("sdlc-retry-consumer".into()),
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
+        })
+        .await;
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+
+    publish_test_event(&broker, &subscription).await;
+
+    let handler = FailOnceHandler {
+        inner: TestHandler {
+            writer: context.create_writer(),
+        },
+        subscription: subscription.clone(),
+        failed: AtomicBool::new(false),
+    };
+    let engine = create_engine(broker.clone(), Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(4)).await;
+
+    assert_eq!(
+        context.query_count().await,
+        1,
+        "a transient failure must be redelivered and then succeed"
     );
 }

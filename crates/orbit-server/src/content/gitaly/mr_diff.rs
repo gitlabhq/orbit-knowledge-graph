@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 use gitlab_client::{GitlabClient, MergeRequestDiffFileEntry};
-use orbit_utils::arrow::ColumnValue;
+use orbit_arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 use tracing::warn;

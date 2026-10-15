@@ -116,10 +116,21 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
                     aggregate_condition,
                     ..
                 } => {
-                    output
-                        .predicates
-                        .extend(aggregate_condition.iter().map(predicate));
-                    latest_row_dedup(alias, sort_key)
+                    let outer = aggregate_condition.iter().map(predicate).collect();
+                    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
+                    output.from = TableRef::subquery(
+                        Query {
+                            select: vec![SelectExpr::star()],
+                            from: output.from,
+                            where_clause: Expr::conjoin(std::mem::take(&mut output.predicates)),
+                            order_by,
+                            limit_by,
+                            ..Default::default()
+                        },
+                        alias,
+                    );
+                    output.predicates = outer;
+                    return output;
                 }
                 _ => (vec![], None),
             };

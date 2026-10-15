@@ -16,6 +16,16 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 106
+  scope: "*"
+- version: 105
+  scope: "*"
+  note: >-
+    Registers the AgentSession node and the CREATED_MR edge in schema.yaml. The
+    scope deriver widens any schema.yaml change to a full rebuild, so no narrower scope
+    is accepted.
+- version: 104
+  scope: "*"
 - version: 103
   scope: none
   note: >-

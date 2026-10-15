@@ -1,9 +1,11 @@
 name: Review standard C function coverage
+
 fixtures:
   - path: main.c
     content: |
       #include <math.h>
       double run(double x) { return trunc(x); }
+
 tests:
   - name: Standard trunc does not call the header
     query: |

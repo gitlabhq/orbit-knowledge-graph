@@ -1,0 +1,91 @@
+name: "C#: names from one namespace and from using directives"
+
+fixtures:
+  - path: App/Start.cs
+    content: |
+      namespace App;
+
+      public class Start
+      {
+          public void Run()
+          {
+              new Middle().Go();
+          }
+      }
+
+  - path: App/Middle.cs
+    content: |
+      namespace App;
+
+      public class Middle
+      {
+          public void Go()
+          {
+              new End().Stop();
+          }
+      }
+
+  - path: App/End.cs
+    content: |
+      namespace App;
+
+      public class End
+      {
+          public void Stop() {}
+      }
+
+  - path: One/Dup.cs
+    content: |
+      namespace One;
+
+      public class Dup
+      {
+          public void Hit() {}
+      }
+
+  - path: Two/Dup.cs
+    content: |
+      namespace Two;
+
+      public class Dup
+      {
+          public void Hit() {}
+      }
+
+  - path: Client/Client.cs
+    content: |
+      using One;
+      using Two;
+
+      namespace Client;
+
+      public class Client
+      {
+          public void Use()
+          {
+              new Dup().Hit();
+          }
+      }
+
+tests:
+  - name: "classes in one namespace call each other across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['Run', 'Go'] AND callee.name IN ['Go', 'Stop']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: Run, callee: Go, file: App/Middle.cs } }
+      - { row: { caller: Go, callee: Stop, file: App/End.cs } }
+
+  - name: "a class name that two using directives import links to both candidates"
+    # C# rejects the ambiguous name (CS0104); the engine keeps both candidates.
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Use' AND callee.name = 'Hit'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - column_values:
+          field: file
+          values: [One/Dup.cs, Two/Dup.cs]

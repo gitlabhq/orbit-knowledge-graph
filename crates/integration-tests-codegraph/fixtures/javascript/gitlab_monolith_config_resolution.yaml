@@ -1,5 +1,6 @@
 name: "JavaScript GitLab monolith CommonJS config patterns"
 pipeline: js
+
 fixtures:
   - path: config/helpers/patched_crypto.js
     content: |

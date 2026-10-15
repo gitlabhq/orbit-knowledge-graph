@@ -1,17 +1,19 @@
 # linting gates (task #2933).
 #
 # Deterministic gates that catch mechanical review feedback before it reaches a
-# human: a narration-comment scorer, an MR-description headline scorer, and a
-# prose linter for the text LLMs read. The scorers live in scripts/linting/ and
-# are documented in scripts/linting/README.md.
+# human: a narration-comment scorer, an MR-description headline scorer, a
+# prose linter for the text LLMs read, and a layout linter for the YAML suites.
+# The scorers live in scripts/linting/ and are documented in
+# scripts/linting/README.md.
 #
 # The narration and MR-description jobs are advisory (allow_failure: true →
-# yellow); the prose job blocks. The scripts exit non-zero on findings; remove
-# allow_failure here to promote a gate to blocking.
+# yellow); the prose and yaml jobs block. The scripts exit non-zero on
+# findings; remove allow_failure here to promote a gate to blocking.
 #
 # This file is the CI half of the linting kill-switch: deleting it plus
 # the scripts/linting/ folder, the `- local:` include in .gitlab-ci.yml, the
-# lefthook `narration` and `prose` jobs, and the mise `lint:prose*` tasks
+# lefthook `narration`, `prose`, and `yaml-suites` jobs, the mise `lint:prose*`
+# and `lint:yaml*` tasks, and the prettier dev dependency
 # removes the gates entirely.
 
 # Narration-comment lint. Dependency-free Python scorer
@@ -74,3 +76,16 @@ lint:prose:
       else
         uv run --quiet scripts/linting/prose_lint.py --all
       fi
+
+lint:yaml:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - apk add --no-cache nodejs npm
+    - uv run --quiet scripts/linting/yaml_lint_test.py
+    - uv run --quiet scripts/linting/yaml_lint.py

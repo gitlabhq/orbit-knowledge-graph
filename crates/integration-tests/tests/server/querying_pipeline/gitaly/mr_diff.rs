@@ -10,8 +10,8 @@ use axum::{Router, routing::get};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use gitlab_client::GitlabClient;
+use orbit_arrow::ColumnValue;
 use orbit_server::content::gitaly::mr_diff::MergeRequestDiffContentService;
-use orbit_utils::arrow::ColumnValue;
 use query_engine::shared::content::{ColumnResolver, ResolverContext};
 use tokio::net::TcpListener;
 

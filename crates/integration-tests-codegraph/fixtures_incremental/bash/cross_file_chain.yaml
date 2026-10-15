@@ -1,0 +1,56 @@
+name: "Bash: functions loaded through a chain of source commands"
+
+fixtures:
+  - path: a.sh
+    content: |
+      helper() {
+        echo "helper"
+      }
+
+  - path: b.sh
+    content: |
+      source ./a.sh
+
+      middle() {
+        helper
+      }
+
+  - path: c.sh
+    content: |
+      source ./b.sh
+
+      run() {
+        middle
+      }
+
+tests:
+  - name: "each file defines its function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['helper', 'middle', 'run']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { row: { name: helper, file: a.sh } }
+      - { row: { name: middle, file: b.sh } }
+      - { row: { name: run, file: c.sh } }
+
+  - name: "each source command is an import"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(s:ImportedSymbol)
+      WHERE f.path IN ['b.sh', 'c.sh']
+      RETURN f.path AS file, s.import_path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { file: b.sh, path: ./a.sh } }
+      - { row: { file: c.sh, path: ./b.sh } }
+
+  - name: "calls to loaded functions link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'middle']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: middle, file: b.sh } }
+      - { row: { caller: middle, callee: helper, file: a.sh } }

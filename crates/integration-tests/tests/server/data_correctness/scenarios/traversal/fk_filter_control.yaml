@@ -1,0 +1,15 @@
+description: FK branch traversal returns data when the pinned target filter matches
+
+query:
+  gql: |
+    MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1, state: 'active'})
+    RETURN v.id, v.state, mr.id, u.id, u.state
+
+expect:
+  node_count: 3
+  nodes:
+    User: { ids: [1, 2], filters: { state: active } }
+    MergeRequest: { ids: [2000] }
+  edges:
+    APPROVED: [[2, 2000]]
+    AUTHORED: [[1, 2000]]

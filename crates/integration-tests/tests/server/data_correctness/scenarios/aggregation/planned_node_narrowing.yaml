@@ -1,7 +1,9 @@
 description: A grouped CALLS target uses edge-derived keys with the filtered caller's cascade
+
 config:
   security:
     paths: ["1/100/1000/"]
+
 query:
   json: |
     {
@@ -21,6 +23,7 @@ query:
   gql: |
     MATCH (a:Definition {name: 'compile'})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
     RETURN c{.id, .name}, count(a) AS callers
+
 expect:
   skip_requirements: ["filter:name"]
   row_count: 1

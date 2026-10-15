@@ -1,0 +1,17 @@
+name: FK substitution retains exact two-hop paths
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr","hops":[2,2]}]}
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED*2]->(mr:MergeRequest) RETURN u, mr
+
+logical:
+  expect:
+    - (NodeScan User AS u)
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Scan Table(gl_edge) ...)

@@ -1,0 +1,8 @@
+description: Same-node property comparison checks operand types
+
+query:
+  gql: |
+    MATCH (a:Definition {id: 12000}) WHERE a.id = a.name RETURN a.id
+
+expect:
+  compile_error: "type mismatch"

@@ -1,12 +1,15 @@
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use futures::{Stream, StreamExt};
 use jsonwebtoken::dangerous::insecure_decode;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use orbit_observability::resilience::MetricsObserver;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -67,6 +70,7 @@ pub struct GitlabClient {
     http: reqwest::Client,
     base_url: String,
     signing_key: Vec<u8>,
+    circuit_breaker: CircuitBreaker,
 }
 
 impl GitlabClient {
@@ -77,7 +81,18 @@ impl GitlabClient {
             http,
             base_url: config.base_url,
             signing_key,
+            circuit_breaker: CircuitBreaker::new(
+                "gitlab",
+                CircuitConfig::default(),
+                Arc::new(MetricsObserver::new()),
+            ),
         })
+    }
+
+    #[cfg(test)]
+    fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
     }
 
     fn build_http_client(
@@ -328,12 +343,8 @@ impl GitlabClient {
         url: impl reqwest::IntoUrl,
     ) -> Result<reqwest::Response, GitlabClientError> {
         let token = self.sign_jwt()?;
-        Ok(self
-            .http
-            .get(url)
-            .header(AUTH_HEADER, &token)
-            .send()
-            .await?)
+        self.send(self.http.get(url).header(AUTH_HEADER, &token))
+            .await
     }
 
     async fn authenticated_post(
@@ -342,13 +353,17 @@ impl GitlabClient {
         body: &impl serde::Serialize,
     ) -> Result<reqwest::Response, GitlabClientError> {
         let token = self.sign_jwt()?;
-        Ok(self
-            .http
-            .post(url)
-            .header(AUTH_HEADER, &token)
-            .json(body)
-            .send()
-            .await?)
+        self.send(self.http.post(url).header(AUTH_HEADER, &token).json(body))
+            .await
+    }
+
+    async fn send(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, GitlabClientError> {
+        self.circuit_breaker
+            .call_transient(|| async { Ok(request.send().await?) })
+            .await
     }
 
     fn check_response_status(
@@ -360,6 +375,7 @@ impl GitlabClient {
             StatusCode::OK => Ok(()),
             StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
             StatusCode::NOT_FOUND => Err(GitlabClientError::NotFound(project_id)),
+            StatusCode::TOO_MANY_REQUESTS => Err(GitlabClientError::RateLimited { project_id }),
             _ if status.is_server_error() => Err(GitlabClientError::ServerError {
                 project_id,
                 status: status.as_u16(),
@@ -428,6 +444,8 @@ pub(crate) fn decode_token_exp(token: &str) -> Result<i64, GitlabClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{UNREACHABLE_URL, circuit_breaker};
+    use futures::future::BoxFuture;
 
     #[test]
     fn sign_jwt_base64_decodes_secret_and_produces_valid_token() {
@@ -611,5 +629,144 @@ mod tests {
             assert_eq!(result.token, expected_token);
             assert_eq!(result.exp, exp);
         }
+    }
+
+    fn client_with_breaker(base_url: &str, breaker: &CircuitBreaker) -> GitlabClient {
+        GitlabClient::new(config_with_resolve(base_url, None))
+            .unwrap()
+            .with_circuit_breaker(breaker.clone())
+    }
+
+    type RequestCall = for<'a> fn(&'a GitlabClient) -> BoxFuture<'a, Result<(), GitlabClientError>>;
+
+    const REQUEST_CALLS: [(&str, RequestCall); 8] = [
+        ("project_info", |client| {
+            Box::pin(async { client.project_info(1).await.map(drop) })
+        }),
+        ("cloud_connector_token", |client| {
+            Box::pin(async { client.cloud_connector_token().await.map(drop) })
+        }),
+        ("download_archive", |client| {
+            Box::pin(async { client.download_archive(1, "main").await.map(drop) })
+        }),
+        ("changed_paths", |client| {
+            Box::pin(async { client.changed_paths(1, "a", "b").await.map(drop) })
+        }),
+        ("list_blobs", |client| {
+            Box::pin(async { client.list_blobs(1, &["oid".to_string()]).await.map(drop) })
+        }),
+        ("list_merge_request_diff_files", |client| {
+            Box::pin(async {
+                client
+                    .list_merge_request_diff_files(1, 1, &[])
+                    .await
+                    .map(drop)
+            })
+        }),
+        ("get_merge_request_raw_diff", |client| {
+            Box::pin(async { client.get_merge_request_raw_diff(1, 1).await.map(drop) })
+        }),
+        ("get_merge_request_raw_diff_by_iid", |client| {
+            Box::pin(async {
+                client
+                    .get_merge_request_raw_diff_by_iid(1, 1)
+                    .await
+                    .map(drop)
+            })
+        }),
+    ];
+
+    #[tokio::test]
+    async fn every_request_counts_toward_the_circuit() {
+        for (name, call) in REQUEST_CALLS {
+            let breaker = circuit_breaker(1);
+            let client = client_with_breaker(UNREACHABLE_URL, &breaker);
+
+            let _ = call(&client).await;
+
+            assert!(
+                !breaker.is_available(),
+                "{name} bypassed the circuit breaker"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_open_circuit_rejects_every_request() {
+        let client = client_with_breaker(UNREACHABLE_URL, &circuit_breaker(1));
+        let err = client.project_info(1).await.unwrap_err();
+        assert!(matches!(err, GitlabClientError::Request(_)), "got {err:?}");
+
+        for (name, call) in REQUEST_CALLS {
+            let err = call(&client).await.unwrap_err();
+            assert!(
+                matches!(err, GitlabClientError::CircuitOpen { .. }),
+                "{name} returned {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn error_responses_never_open_the_circuit() {
+        use axum::Router;
+        use axum::http::StatusCode as AxumStatus;
+        use axum::routing::get;
+
+        for status in [
+            AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::TOO_MANY_REQUESTS,
+            AxumStatus::NOT_FOUND,
+            AxumStatus::UNAUTHORIZED,
+        ] {
+            let app = Router::new().route(
+                "/api/v4/internal/orbit/project/{id}/info",
+                get(move || async move { status }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let client = client_with_breaker(&format!("http://{addr}"), &circuit_breaker(2));
+
+            for _ in 0..5 {
+                let err = client.project_info(1).await.unwrap_err();
+                assert!(
+                    !matches!(err, GitlabClientError::CircuitOpen { .. }),
+                    "{status} opened the circuit"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn archive_overload_statuses_are_distinct_errors() {
+        use axum::Router;
+        use axum::http::StatusCode as AxumStatus;
+        use axum::routing::get;
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{id}/repository/archive",
+            get(
+                |axum::extract::Path(id): axum::extract::Path<i64>| async move {
+                    match id {
+                        1 => AxumStatus::INTERNAL_SERVER_ERROR,
+                        _ => AxumStatus::TOO_MANY_REQUESTS,
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = client_with_breaker(&format!("http://{addr}"), &circuit_breaker(2));
+
+        let err = |result: Result<ByteStream, GitlabClientError>| result.err().unwrap();
+        assert!(matches!(
+            err(client.download_archive(1, "main").await),
+            GitlabClientError::ServerError { status: 500, .. }
+        ));
+        assert!(matches!(
+            err(client.download_archive(2, "main").await),
+            GitlabClientError::RateLimited { .. }
+        ));
     }
 }

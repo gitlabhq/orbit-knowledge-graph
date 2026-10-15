@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 use crate::OntologyError;
 use crate::entities::{EdgeEntity, EdgeVariantScope};
@@ -11,8 +12,6 @@ use super::{EtlSettings, ReadOntologyFile};
 pub(crate) struct EdgeYaml {
     #[serde(default)]
     pub description: Option<String>,
-    /// Optional override for the ClickHouse table storing this edge type.
-    /// Defaults to the global `edge_table` from settings.
     #[serde(default)]
     pub table: Option<String>,
     #[serde(default)]
@@ -24,9 +23,14 @@ pub(crate) struct EdgeYaml {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EdgeVariantYaml {
+    #[serde(default, rename = "description")]
+    _description: Option<String>,
     from_node: EdgeNodeRef,
     to_node: EdgeNodeRef,
+    #[serde(default)]
+    table: Option<String>,
     #[serde(default)]
     fk_column: Option<String>,
     #[serde(default)]
@@ -45,19 +49,33 @@ impl EdgeYaml {
         &self,
         relationship_kind: String,
         default_table: &str,
+        node_domains: &BTreeMap<String, String>,
+        domain_tables: &BTreeMap<String, String>,
     ) -> Vec<EdgeEntity> {
-        let table = self.table.as_deref().unwrap_or(default_table).to_string();
         self.variants
             .iter()
-            .map(|v| EdgeEntity {
-                relationship_kind: relationship_kind.clone(),
-                source: v.from_node.id.clone(),
-                source_kind: v.from_node.node_type.clone(),
-                target: v.to_node.id.clone(),
-                target_kind: v.to_node.node_type.clone(),
-                destination_table: table.clone(),
-                fk_column: v.fk_column.clone(),
-                scope: v.scope,
+            .map(|variant| {
+                let domain_table = node_domains
+                    .get(&variant.from_node.node_type)
+                    .filter(|domain| node_domains.get(&variant.to_node.node_type) == Some(*domain))
+                    .and_then(|domain| domain_tables.get(domain));
+                let destination_table = variant
+                    .table
+                    .as_ref()
+                    .or(self.table.as_ref())
+                    .or(domain_table)
+                    .map_or_else(|| default_table.to_string(), Clone::clone);
+
+                EdgeEntity {
+                    relationship_kind: relationship_kind.clone(),
+                    source: variant.from_node.id.clone(),
+                    source_kind: variant.from_node.node_type.clone(),
+                    target: variant.to_node.id.clone(),
+                    target_kind: variant.to_node.node_type.clone(),
+                    destination_table,
+                    fk_column: variant.fk_column.clone(),
+                    scope: variant.scope,
+                }
             })
             .collect()
     }

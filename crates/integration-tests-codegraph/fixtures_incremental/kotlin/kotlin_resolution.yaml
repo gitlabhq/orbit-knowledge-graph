@@ -1,4 +1,5 @@
 name: Kotlin call resolution
+
 fixtures:
   - path: com/example/Service.kt
     content: |

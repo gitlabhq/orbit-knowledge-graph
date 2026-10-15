@@ -1,4 +1,5 @@
 name: "Rust: operator and control-flow resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -115,7 +116,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Number::neg' } }
+      - { row: { fqn: "Number::neg" } }
 
   - name: "binary operator calls resolve to the impl method"
     query: |
@@ -124,7 +125,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Number::add' } }
+      - { row: { fqn: "Number::add" } }
 
   - name: "index operator calls resolve to the impl method"
     query: |
@@ -133,7 +134,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Buffer::index' } }
+      - { row: { fqn: "Buffer::index" } }
 
   - name: "try expressions resolve to the local Try::branch impl"
     query: |
@@ -142,7 +143,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Maybe::branch' } }
+      - { row: { fqn: "Maybe::branch" } }
 
   - name: "await expressions resolve to the local Future::poll impl"
     query: |
@@ -151,4 +152,4 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Once::poll' } }
+      - { row: { fqn: "Once::poll" } }

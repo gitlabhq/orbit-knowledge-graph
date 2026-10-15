@@ -1,6 +1,14 @@
+use super::MaterializedJoin;
+use crate::RelationshipVariantId;
 use std::collections::{HashMap, HashSet};
 
-use crate::{EntityId, GraphCatalog, PropertyId, Relationship, RelationshipId};
+#[derive(Debug, Clone)]
+pub struct VariantRoute {
+    pub table: String,
+    pub foreign_key: Option<ForeignKey>,
+}
+
+use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariant};
 
 #[derive(Debug, Clone)]
 pub enum PropertyRealization {
@@ -36,23 +44,20 @@ pub struct PathColumn {
 #[derive(Debug)]
 pub struct RelationshipRoute<'a> {
     pub table: &'a str,
-    pub(crate) graph: &'a GraphCatalog,
-    pub(crate) relationship: &'a Relationship,
+    pub(crate) variants: Vec<&'a RelationshipVariant>,
 }
 
 impl RelationshipRoute<'_> {
+    pub fn variants(&self) -> impl Iterator<Item = &crate::RelationshipVariant> + '_ {
+        self.variants.iter().copied()
+    }
+
     pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.relationship
-            .variants
-            .iter()
-            .map(|variant| self.graph.variant(*variant).source)
+        self.variants.iter().map(|variant| variant.source)
     }
 
     pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.relationship
-            .variants
-            .iter()
-            .map(|variant| self.graph.variant(*variant).target)
+        self.variants.iter().map(|variant| variant.target)
     }
 
     pub fn has_source(&self, entity: EntityId) -> bool {
@@ -80,7 +85,8 @@ pub struct DenormalizedKey {
 pub struct DenormalizedProperty {
     pub edge_column: String,
     pub tag_key: String,
-    pub relationships: Vec<RelationshipId>,
+    pub variants: HashSet<(RelationshipId, EntityId, EntityId)>,
+    pub nullable: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -99,6 +105,13 @@ impl DenormalizedCatalog {
 }
 
 pub trait RelationalMapping: Send + Sync {
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute>;
+    fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
+        Vec::new()
+    }
+    fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &[]
+    }
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;

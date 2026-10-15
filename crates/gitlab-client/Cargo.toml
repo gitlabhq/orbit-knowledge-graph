@@ -10,6 +10,7 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 jsonwebtoken = { workspace = true }
 rand = { workspace = true }

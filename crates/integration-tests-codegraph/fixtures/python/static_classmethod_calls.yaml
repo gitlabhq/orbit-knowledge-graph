@@ -1,4 +1,5 @@
 name: "Python: static and classmethod cross-calls"
+
 fixtures:
   - path: main.py
     content: |

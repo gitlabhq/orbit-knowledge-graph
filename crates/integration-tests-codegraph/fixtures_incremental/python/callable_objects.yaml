@@ -1,4 +1,5 @@
 name: "Python: callable object resolution"
+
 fixtures:
   - path: main.py
     content: |

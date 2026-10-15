@@ -1,9 +1,11 @@
 name: "TypeScript JS module resolution"
 pipeline: js
+
 fixtures:
   - path: named/util.ts
     content: |
       export function helper() {}
+
   - path: named/main.ts
     content: |
       import { helper } from './util';
@@ -15,6 +17,7 @@ fixtures:
   - path: default/util.ts
     content: |
       export default function helper() {}
+
   - path: default/main.ts
     content: |
       import helper from './util';
@@ -26,6 +29,7 @@ fixtures:
   - path: namespace/util.ts
     content: |
       export function helper() {}
+
   - path: namespace/main.ts
     content: |
       import * as util from './util';
@@ -37,9 +41,11 @@ fixtures:
   - path: explicit/util.ts
     content: |
       export function helper() {}
+
   - path: explicit/index.ts
     content: |
       export { helper } from './util';
+
   - path: explicit/main.ts
     content: |
       import { helper } from './index';
@@ -51,9 +57,11 @@ fixtures:
   - path: star/util.ts
     content: |
       export function helper() {}
+
   - path: star/index.ts
     content: |
       export * from './util';
+
   - path: star/main.ts
     content: |
       import { helper } from './index';
@@ -67,6 +75,7 @@ fixtures:
       export function formatPrecision() {
         return 2;
       }
+
   - path: alias/main.ts
     content: |
       import { formatPrecision as fmt } from './constants';
@@ -86,6 +95,7 @@ fixtures:
       export function formatPrecision() {
         return 2;
       }
+
   - path: identity/consumer.ts
     content: |
       import {
@@ -105,6 +115,7 @@ fixtures:
       export function formatter(value: string): string {
         return value.trim();
       }
+
   - path: no_false_call/main.ts
     content: |
       import { HTTP_STATUS_OK, formatter } from './constants';
@@ -220,6 +231,7 @@ fixtures:
   - path: namespace_chain/barrel.ts
     content: |
       export { default as Suggestions } from "./suggestions";
+
   - path: namespace_chain/suggestions.ts
     content: |
       export default class Suggestions {
@@ -227,6 +239,7 @@ fixtures:
           return "configured";
         }
       }
+
   - path: namespace_chain/consumer.ts
     content: |
       import * as extensions from "./barrel";
@@ -239,16 +252,19 @@ fixtures:
     content: |
       export { default as formatValue } from './direct';
       export * as toolkit from './toolkit';
+
   - path: combo/direct.ts
     content: |
       export default function defaultFormat(value: string): string {
         return value.trim();
       }
+
   - path: combo/toolkit.ts
     content: |
       export function normalize(value: string): string {
         return value.toLowerCase();
       }
+
   - path: combo/consumer.ts
     content: |
       import { formatValue, toolkit } from './barrel';
@@ -262,9 +278,11 @@ fixtures:
       export function runToolkit(value: string): string {
         return toolkit.normalize(value);
       }
+
   - path: unresolved/util.ts
     content: |
       export const ready = 'ready';
+
   - path: unresolved/main.ts
     content: |
       import missingDefault, { missingNamed } from './util';
@@ -272,6 +290,7 @@ fixtures:
       export function inspectImports() {
         return [missingDefault(), missingNamed()];
       }
+
   - path: unresolved/external_aliases.ts
     content: |
       import { track as firstTrack, track as secondTrack } from '@external/analytics';
@@ -284,6 +303,7 @@ fixtures:
         secondTrack();
         emit();
       }
+
   - path: unresolved/type_only_call.ts
     content: |
       import type { MissingFactory } from '@external/types';
@@ -291,6 +311,7 @@ fixtures:
       export function inspectTypeOnlyCall() {
         return MissingFactory();
       }
+
   - path: unresolved/side_effect_call.ts
     content: |
       import '@external/polyfill';
@@ -298,6 +319,7 @@ fixtures:
       export function inspectSideEffectCall() {
         return polyfillInit();
       }
+
   - path: unresolved/shadowed_external.ts
     content: |
       import { track } from '@external/analytics';
@@ -306,6 +328,7 @@ fixtures:
         const track = () => 'local';
         return track();
       }
+
   - path: unresolved/global_calls.ts
     content: |
       import { track } from '@external/analytics';
@@ -314,11 +337,13 @@ fixtures:
         console.log('ready');
         return fetch('/status');
       }
+
   - path: namespace_missing/util.ts
     content: |
       export function existing(): string {
         return 'ok';
       }
+
   - path: namespace_missing/main.ts
     content: |
       import * as util from './util';
@@ -326,16 +351,20 @@ fixtures:
       export function inspectMissingMember() {
         return util.missing();
       }
+
   - path: ambiguous/left.ts
     content: |
       export const shared = 'left';
+
   - path: ambiguous/right.ts
     content: |
       export const shared = 'right';
+
   - path: ambiguous/index.ts
     content: |
       export * from './left';
       export * from './right';
+
   - path: ambiguous/main.ts
     content: |
       import { shared } from './index';
@@ -349,13 +378,23 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Module'
+        AND d.fqn IN ['named/util.ts', 'default/util.ts', 'namespace/util.ts', 'explicit/index.ts', 'star/index.ts']
       RETURN d.fqn AS fqn
     assert:
+      - { row_count: 5 }
       - { row: { fqn: "named/util.ts" } }
       - { row: { fqn: "default/util.ts" } }
       - { row: { fqn: "namespace/util.ts" } }
       - { row: { fqn: "explicit/index.ts" } }
       - { row: { fqn: "star/index.ts" } }
+
+  - name: Synthesizes one module definition per file
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Module'
+      RETURN count(d) AS modules
+    assert:
+      - { row: { modules: 42 } }
 
   - name: Named import targets export proxy
     query: |

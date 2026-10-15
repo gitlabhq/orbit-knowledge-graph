@@ -1,0 +1,21 @@
+description: Denormalized equality does not replace a property operand with an empty literal
+
+config:
+  security:
+    paths: ["1/100/1000/"]
+  extra_seed:
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition, source_tags: ["definition_type:function"] }
+    gl_definition:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: function, fqn: function, definition_type: function }
+
+query:
+  gql: |
+    MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)
+    WHERE a.definition_type = a.name
+    RETURN count(b) AS n
+
+expect:
+  skip_requirements: ["node_ids", "filter:definition_type"]
+  row_count: 1
+  row_values: [{ n: 1 }]

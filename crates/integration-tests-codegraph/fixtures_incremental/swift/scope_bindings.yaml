@@ -1,4 +1,5 @@
 name: "Swift: lexical binding ownership"
+
 fixtures:
   - path: local/main.swift
     content: |
@@ -12,6 +13,7 @@ fixtures:
           }
           f()
       }
+
   - path: callable/main.swift
     content: |
       func first() {}
@@ -20,6 +22,7 @@ fixtures:
           let f = first
           f()
       }
+
   - path: shadow/main.swift
     content: |
       class First {
@@ -37,6 +40,7 @@ fixtures:
           }
           f.ping()
       }
+
   - path: control/main.swift
     content: |
       class First {
@@ -47,6 +51,7 @@ fixtures:
           let f = First()
           f.ping()
       }
+
   - path: typed/main.swift
     content: |
       class First {
@@ -56,6 +61,7 @@ fixtures:
       func run(f: First) {
           f.ping()
       }
+
   - path: parameter/main.swift
     content: |
       class First {
@@ -72,6 +78,7 @@ fixtures:
           }
           f.ping()
       }
+
 tests:
   - name: "Local shadows preserve callable and receiver bindings"
     query: |

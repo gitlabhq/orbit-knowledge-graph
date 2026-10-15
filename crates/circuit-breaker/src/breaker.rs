@@ -1,95 +1,14 @@
-use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 
-use parking_lot::RwLock;
-
 use crate::classifiable::CircuitBreakableError;
 use crate::config::CircuitConfig;
 use crate::error::CircuitBreakerError;
-use crate::observer::{CircuitBreakerObserver, NoopObserver};
-use crate::service::ServiceName;
+use crate::observer::CircuitBreakerObserver;
 use crate::state::{AcquireResult, Circuit};
 
-/// Creates [`CircuitBreaker`] handles for each service.
-///
-/// ```ignore
-/// let registry = CircuitBreakerRegistry::new(configs, observer);
-/// let db = registry.circuit_breaker(ExternalService::Database);
-/// let nats = registry.circuit_breaker(ExternalService::Nats);
-/// let handler = Handler::new(db, nats);
-/// ```
-pub struct CircuitBreakerRegistry {
-    circuits: RwLock<HashMap<&'static str, Arc<Circuit>>>,
-    observer: Arc<dyn CircuitBreakerObserver>,
-}
-
-impl CircuitBreakerRegistry {
-    pub fn new(
-        configs: HashMap<&'static str, CircuitConfig>,
-        observer: Arc<dyn CircuitBreakerObserver>,
-    ) -> Self {
-        let circuits = configs
-            .into_iter()
-            .map(|(name, config)| (name, Arc::new(Circuit::new(config))))
-            .collect();
-
-        Self {
-            circuits: RwLock::new(circuits),
-            observer,
-        }
-    }
-
-    pub fn without_observer(configs: HashMap<&'static str, CircuitConfig>) -> Self {
-        Self::new(configs, Arc::new(NoopObserver))
-    }
-
-    /// All handles for the same service share state.
-    pub fn circuit_breaker<S: ServiceName>(&self, service: S) -> CircuitBreaker {
-        let name = service.as_str();
-        CircuitBreaker {
-            name,
-            circuit: self.get_or_create(name),
-            observer: self.observer.clone(),
-        }
-    }
-
-    /// Returns `true` if the service's circuit is closed, or if no
-    /// circuit exists yet.
-    pub fn is_available<S: ServiceName>(&self, service: S) -> bool {
-        let name = service.as_str();
-        let circuits = self.circuits.read();
-        circuits
-            .get(name)
-            .is_none_or(|circuit| circuit.is_available())
-    }
-
-    pub fn unavailable_services(&self) -> Vec<&'static str> {
-        let circuits = self.circuits.read();
-        circuits
-            .iter()
-            .filter(|(_, circuit)| !circuit.is_available())
-            .map(|(name, _)| *name)
-            .collect()
-    }
-
-    fn get_or_create(&self, name: &'static str) -> Arc<Circuit> {
-        {
-            let circuits = self.circuits.read();
-            if let Some(circuit) = circuits.get(name) {
-                return circuit.clone();
-            }
-        }
-        let mut circuits = self.circuits.write();
-        circuits
-            .entry(name)
-            .or_insert_with(|| Arc::new(Circuit::new(CircuitConfig::default())))
-            .clone()
-    }
-}
-
-/// Circuit breaker for a single service. Clone is cheap (`Arc`).
+/// Circuit breaker for a single service. Clones share one circuit (`Arc`).
 ///
 /// ```ignore
 /// self.db.call(|| async { client.execute(query).await }).await?;
@@ -102,6 +21,18 @@ pub struct CircuitBreaker {
 }
 
 impl CircuitBreaker {
+    pub fn new(
+        name: &'static str,
+        config: CircuitConfig,
+        observer: Arc<dyn CircuitBreakerObserver>,
+    ) -> Self {
+        Self {
+            name,
+            circuit: Arc::new(Circuit::new(config)),
+            observer,
+        }
+    }
+
     /// Run `f` if the circuit is closed. Returns [`CircuitBreakerError::Open`]
     /// without calling `f` if open.
     pub async fn call<F, Fut, T, E>(&self, f: F) -> Result<T, CircuitBreakerError<E>>
@@ -186,46 +117,19 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
-    #[derive(Clone, Copy)]
-    enum TestService {
-        Db,
-        Api,
-    }
-
-    impl ServiceName for TestService {
-        fn as_str(&self) -> &'static str {
-            match self {
-                Self::Db => "db",
-                Self::Api => "api",
-            }
-        }
-    }
-
     const COOLDOWN: Duration = Duration::from_millis(50);
 
-    fn test_registry() -> CircuitBreakerRegistry {
-        let mut configs = HashMap::new();
-        configs.insert(
-            "db",
-            CircuitConfig {
-                failure_threshold: 2,
-                window: Duration::from_secs(10),
-                cooldown: COOLDOWN,
-            },
-        );
-        configs.insert(
-            "api",
-            CircuitConfig {
-                failure_threshold: 3,
-                window: Duration::from_secs(10),
-                cooldown: COOLDOWN,
-            },
-        );
-        CircuitBreakerRegistry::without_observer(configs)
+    fn breaker(name: &'static str, failure_threshold: u32) -> CircuitBreaker {
+        let config = CircuitConfig {
+            failure_threshold,
+            window: Duration::from_secs(10),
+            cooldown: COOLDOWN,
+        };
+        CircuitBreaker::new(name, config, Arc::new(crate::NoopObserver))
     }
 
-    fn db(registry: &CircuitBreakerRegistry) -> CircuitBreaker {
-        registry.circuit_breaker(TestService::Db)
+    fn db() -> CircuitBreaker {
+        breaker("db", 2)
     }
 
     async fn trip(breaker: &CircuitBreaker) {
@@ -240,21 +144,21 @@ mod tests {
 
     #[tokio::test]
     async fn successful_calls_flow_through() {
-        let db = db(&test_registry());
+        let db = db();
         let result = db.call(|| async { Ok::<_, &str>(42) }).await;
         assert_eq!(result.unwrap(), 42);
     }
 
     #[tokio::test]
     async fn errors_flow_through_as_inner() {
-        let db = db(&test_registry());
+        let db = db();
         let result = db.call(|| async { Err::<i32, _>("boom") }).await;
         assert_eq!(result.unwrap_err().into_inner().unwrap(), "boom");
     }
 
     #[tokio::test]
     async fn circuit_opens_after_threshold() {
-        let db = db(&test_registry());
+        let db = db();
         trip(&db).await;
 
         let result = db.call(|| async { Ok::<_, &str>(1) }).await;
@@ -263,7 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_circuit_does_not_execute_function() {
-        let db = db(&test_registry());
+        let db = db();
         let executed = AtomicU32::new(0);
         trip(&db).await;
 
@@ -279,9 +183,8 @@ mod tests {
 
     #[tokio::test]
     async fn circuits_are_independent() {
-        let registry = test_registry();
-        let db = registry.circuit_breaker(TestService::Db);
-        let api = registry.circuit_breaker(TestService::Api);
+        let db = db();
+        let api = breaker("api", 3);
 
         trip(&db).await;
 
@@ -291,9 +194,8 @@ mod tests {
 
     #[tokio::test]
     async fn clones_share_state() {
-        let registry = test_registry();
-        let db_a = registry.circuit_breaker(TestService::Db);
-        let db_b = registry.circuit_breaker(TestService::Db);
+        let db_a = db();
+        let db_b = db_a.clone();
 
         trip(&db_a).await;
 
@@ -303,24 +205,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unconfigured_service_uses_defaults() {
-        let registry = test_registry();
-
-        struct Other;
-        impl ServiceName for Other {
-            fn as_str(&self) -> &'static str {
-                "other"
-            }
-        }
-
-        let other = registry.circuit_breaker(Other);
-        let result = other.call(|| async { Ok::<_, &str>(42) }).await;
-        assert_eq!(result.unwrap(), 42);
-    }
-
-    #[tokio::test]
     async fn classifier_controls_failure_counting() {
-        let db = db(&test_registry());
+        let db = db();
 
         for _ in 0..5 {
             let result = db
@@ -335,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn recovery_after_cooldown() {
-        let db = db(&test_registry());
+        let db = db();
         trip(&db).await;
         assert!(!db.is_available());
 
@@ -347,20 +233,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unavailable_services_reports_open_circuits() {
-        let registry = test_registry();
-        let db = registry.circuit_breaker(TestService::Db);
-        assert!(registry.unavailable_services().is_empty());
-
-        trip(&db).await;
-
-        assert_eq!(registry.unavailable_services(), vec!["db"]);
-        assert!(registry.is_available(TestService::Api));
-    }
-
-    #[tokio::test]
     async fn failed_probe_reopens_circuit() {
-        let db = db(&test_registry());
+        let db = db();
         trip(&db).await;
         wait_for_cooldown().await;
 
@@ -409,17 +283,12 @@ mod tests {
             transitions: AtomicU32::new(0),
         });
 
-        let mut configs = HashMap::new();
-        configs.insert(
-            "db",
-            CircuitConfig {
-                failure_threshold: 2,
-                window: Duration::from_secs(10),
-                cooldown: Duration::from_secs(60),
-            },
-        );
-        let registry = CircuitBreakerRegistry::new(configs, observer.clone());
-        let db = registry.circuit_breaker(TestService::Db);
+        let config = CircuitConfig {
+            failure_threshold: 2,
+            window: Duration::from_secs(10),
+            cooldown: Duration::from_secs(60),
+        };
+        let db = CircuitBreaker::new("db", config, observer.clone());
 
         let _ = db.call(|| async { Ok::<_, &str>(1) }).await;
         assert_eq!(observer.successes.load(Ordering::Relaxed), 1);
@@ -461,7 +330,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_transient_returns_concrete_error_type() {
-        let db = db(&test_registry());
+        let db = db();
         let result: Result<i32, ClassifiedError> = db
             .call_transient(|| async { Err(ClassifiedError::Transient) })
             .await;
@@ -470,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_transient_trips_on_transient_errors() {
-        let db = db(&test_registry());
+        let db = db();
         trip_transient(&db).await;
 
         let result: Result<i32, ClassifiedError> = db.call_transient(|| async { Ok(1) }).await;
@@ -482,7 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_transient_ignores_permanent_errors() {
-        let db = db(&test_registry());
+        let db = db();
 
         for _ in 0..5 {
             let result: Result<i32, ClassifiedError> = db
@@ -493,19 +362,5 @@ mod tests {
 
         let result: Result<i32, ClassifiedError> = db.call_transient(|| async { Ok(42) }).await;
         assert_eq!(result.unwrap(), 42);
-    }
-
-    #[test]
-    fn is_available_returns_true_for_unknown_service() {
-        let registry = test_registry();
-
-        struct Unknown;
-        impl ServiceName for Unknown {
-            fn as_str(&self) -> &'static str {
-                "unknown"
-            }
-        }
-
-        assert!(registry.is_available(Unknown));
     }
 }
