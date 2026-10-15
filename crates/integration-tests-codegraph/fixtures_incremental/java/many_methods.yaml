@@ -1,0 +1,17 @@
+name: "Java: a class with many methods links in linear work"
+
+fixtures:
+  - path: C.java
+    content:
+      - "class C {\nvoid target() {}\n"
+      - { repeat: 20000, text: "void f{i}() { target(); }\n" }
+      - "}\n"
+
+tests:
+  - name: "every method of a large class calls its sibling"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN count(caller) AS n
+    assert:
+      - { count_equals: { field: n, value: 20000 } }

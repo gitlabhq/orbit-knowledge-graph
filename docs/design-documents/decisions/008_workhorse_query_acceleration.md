@@ -272,7 +272,7 @@ There are three network legs in this architecture, each with different security 
 
 **Client → Workhorse (external):** TLS terminated by NGINX/Workhorse as it is today. No change.
 
-**Workhorse → GKG gRPC (internal):** The GKG gRPC endpoint address is configured in `gitlab.yml` (`knowledge_graph.grpc_endpoint`). When the address uses a `tls://` or `dns+tls:` scheme, Workhorse dials with TLS using the system certificate pool. When the address is plaintext (e.g., `localhost:50054` in development), it uses insecure credentials. This matches the existing Ruby `GrpcClient.channel_credentials` behavior. In production, GKG runs in the same cluster as Workhorse with mTLS handled by the service mesh (Istio). So the plaintext path is only used in GDK.
+**Workhorse → GKG gRPC (internal):** The GKG gRPC endpoint address is configured in `gitlab.yml` (`knowledge_graph.grpc_endpoint`). When the address uses a `tls://` or `dns+tls:` scheme, Workhorse dials with TLS using the system certificate pool. When the address is plaintext (e.g., `localhost:50054` in development), it uses insecure credentials. This matches the existing Ruby `GrpcClient.channel_credentials` behavior. In production, GKG runs in the same cluster as Workhorse with mTLS handled by the service mesh (Istio). So the plaintext path is only used in local development.
 
 **Workhorse → Rails internal API (internal):** The redaction callback uses the same `secret.NewRoundTripper` signing that all Workhorse-to-Rails internal requests use. The request is signed with a JWT derived from the shared `.gitlab_workhorse_secret` file. This is the same mechanism that protects `/api/v4/internal/*` endpoints for Gitaly, GOB, and other services.
 

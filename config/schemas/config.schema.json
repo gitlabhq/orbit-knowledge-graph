@@ -601,7 +601,7 @@
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
-          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. 0 = no timeout.",
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. On a timeout the language family keeps its\nper-file graph, the cross-file edges of the waves that finished, and\nthe part of the last wave that finished, which depends on thread\nscheduling. 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -622,6 +622,12 @@
           "description": "Manifest bytes (package.json, Cargo.toml, and the like) that one language\nfamily reads for resolution. A manifest past the limit is not read, keeps\nits File row, and is counted as too_many_manifest_bytes. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
+          "minimum": 0
+        },
+        "max_file_edges": {
+          "description": "Edges that the incremental engine's linker may emit for one file. A file\npast the limit is skipped as too_many_edges. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
           "minimum": 0
         },
         "job_timeout_secs": {
@@ -715,6 +721,7 @@
         "max_tree_depth",
         "max_cross_file_names",
         "max_manifest_bytes",
+        "max_file_edges",
         "job_timeout_secs",
         "fetch_concurrency",
         "write_channel_capacity",

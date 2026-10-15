@@ -31,6 +31,7 @@ pub enum Tf {
     ParentSym(u16),
     AncestorSym(u16),
     Concat(Box<str>, Box<Tf>, Box<Tf>),
+    KeepLast(Box<str>, usize, usize),
     Stem,
     CollapseIndex(Vec<Box<str>>),
     Map(Vec<(Box<str>, Box<str>)>),
@@ -212,6 +213,7 @@ pub struct TagEntry {
     pub key: u32,
     pub slot: u16,
     pub val: Tf,
+    pub keep_last: Option<Tf>,
 }
 
 pub enum Out {

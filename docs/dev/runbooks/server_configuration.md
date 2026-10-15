@@ -34,12 +34,15 @@ start and passes it as the single `--config` file. The file is a `yq` deep merge
 
 1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
    consumer name, database names and users, laptop tuning.
-2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
-   and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
-   password from the GitLab secret files.
+2. Values read from the Caproni cluster: the GitLab base URL from the cluster hostname, and the JWT
+   keys and ClickHouse password from the `gitlab-dev-stack-gkg-secrets` secret.
 3. The mode's probe server port, so the processes `mise run dev` starts side by side do not collide.
    Every mode binds this port for `/-/liveness` and `/-/readiness`, with or without metrics.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
+
+Caproni edit mode (`caproni run`) does not use this merge. There the local binary reads the pod's
+`/app/config/config.yaml` through mirrord, and `scripts/dev/caproni-edit-mode.sh` changes only the
+probe port. See [Local development](../local-development.md).
 
 Passing `--config` disables the default `config/config.yaml` lookup.
 

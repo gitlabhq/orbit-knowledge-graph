@@ -458,8 +458,22 @@ fn compile_tags(
         .iter()
         .map(|(k, v)| {
             let key = ctx.lang.syms.intern(k);
-            let (slot, val) = compile_tag_value(v, ctx)?;
-            Ok(TagEntry { key, slot, val })
+            let (slot, mut val) = compile_tag_value(v, ctx)?;
+            let mut keep_last = None;
+            if let Tf::Pipeline(steps) = &mut val
+                && matches!(steps.last(), Some(Tf::KeepLast(..)))
+            {
+                keep_last = steps.pop();
+                if steps.len() == 1 {
+                    val = steps.remove(0);
+                }
+            }
+            Ok(TagEntry {
+                key,
+                slot,
+                val,
+                keep_last,
+            })
         })
         .collect()
 }

@@ -127,6 +127,7 @@ pub fn repository<E: std::fmt::Display>(
                 envelope,
                 true,
                 &|_| true,
+                &run,
             )?)
         })?;
         return Ok(result);
@@ -194,6 +195,7 @@ pub fn repository<E: std::fmt::Display>(
                                     envelope,
                                     family == first,
                                     &|path| owns(family, path),
+                                    run,
                                 )?;
                                 (report, batches)
                             };

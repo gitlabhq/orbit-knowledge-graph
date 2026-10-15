@@ -78,7 +78,7 @@ fn per_file_budgets_count_thread_cpu_time_not_time_asleep() {
     .map(|killed| killed.label)
     .collect();
 
-    assert_eq!(killed, Vec::<&str>::new());
+    assert!(killed.is_empty(), "{killed:?}");
 }
 
 #[test]
@@ -103,8 +103,11 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
     }
 }
 
-fn skipped(killed: &[Killed]) -> Vec<(&'static str, &str)> {
-    let mut found: Vec<_> = killed.iter().map(|k| (k.label, k.path.as_str())).collect();
+fn skipped(killed: &[Killed]) -> Vec<(&str, &str)> {
+    let mut found: Vec<_> = killed
+        .iter()
+        .map(|k| (k.label.as_ref(), k.path.as_str()))
+        .collect();
     found.sort();
     found
 }
