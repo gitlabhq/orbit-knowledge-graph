@@ -101,7 +101,8 @@ struct Fold<'t> {
     member_memo: FxHashMap<(u32, u32), Vec<Value>>,
     member_busy: FxHashSet<(u32, u32)>,
     member_memo_at: (BlockId, usize, usize, usize),
-    loops: Vec<(BlockId, FxHashSet<u32>)>,
+    loops: Vec<(BlockId, (u32, u32))>,
+    loop_names: LoopNames,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
@@ -110,6 +111,57 @@ struct Fold<'t> {
     scopes: Vec<(u32, FxHashMap<u32, u32>)>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
     arm_exits: Vec<BlockId>,
+}
+
+#[derive(Default)]
+struct LoopNames {
+    spans: FxHashMap<u32, (u32, u32)>,
+    assigned: FxHashMap<u32, Vec<u32>>,
+    next: u32,
+}
+
+impl LoopNames {
+    fn span(&mut self, c: Cursor) -> (u32, u32) {
+        if !self.spans.contains_key(&c.index()) {
+            self.number(c);
+        }
+        self.spans[&c.index()]
+    }
+
+    fn number(&mut self, root: Cursor) {
+        let mut stack = vec![(root, None)];
+        while let Some((node, start)) = stack.pop() {
+            if let Some(start) = start {
+                self.spans.insert(node.index(), (start, self.next));
+                continue;
+            }
+            let at = self.next;
+            self.next += 1;
+            if node.is(C::Import) || node.is(C::ImportType) {
+                for name in std::iter::once(node).chain(node.descendants()) {
+                    self.assigned.entry(name.sym()).or_default().push(at);
+                }
+                continue;
+            }
+            if [C::Binding, C::DefName, C::Alias, C::SsaHint]
+                .into_iter()
+                .any(|kind| node.is(kind))
+                || node.has(C::Declaration)
+            {
+                self.assigned.entry(node.sym()).or_default().push(at);
+            }
+            if node.is(C::SsaLoop) {
+                stack.push((node, Some(at)));
+            }
+            stack.extend(node.children().map(|child| (child, None)));
+        }
+    }
+
+    fn assigns(&self, sym: u32, (start, end): (u32, u32)) -> bool {
+        let at = self.assigned.get(&sym).map_or(&[][..], Vec::as_slice);
+        at.get(at.partition_point(|&n| n < start))
+            .is_some_and(|&n| n < end)
+    }
 }
 
 impl<'t> Fold<'t> {
@@ -251,7 +303,7 @@ impl<'t> Fold<'t> {
             Self::handle_branch(c, sink, stack);
             return;
         } else if k == C::SsaLoop {
-            self.loops.push((self.cur, Self::assigned_names(c)));
+            self.loops.push((self.cur, self.loop_names.span(c)));
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
@@ -994,34 +1046,12 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn assigned_names(c: Cursor) -> FxHashSet<u32> {
-        let mut names = FxHashSet::default();
-        let mut walk = c.walk();
-        while let Some(node) = walk.next() {
-            if node.is(C::Import) || node.is(C::ImportType) {
-                names.extend(
-                    std::iter::once(node)
-                        .chain(node.descendants())
-                        .map(|n| n.sym()),
-                );
-                walk.skip_subtree();
-            } else if [C::Binding, C::DefName, C::Alias, C::SsaHint]
-                .into_iter()
-                .any(|kind| node.is(kind))
-                || node.has(C::Declaration)
-            {
-                names.insert(node.sym());
-            }
-        }
-        names
-    }
-
     fn name_block(&self, sym: u32) -> BlockId {
+        let inner = self
+            .loops
+            .partition_point(|&(_, span)| self.loop_names.assigns(sym, span));
         self.loops
-            .iter()
-            .rev()
-            .take_while(|(_, assigned)| !assigned.contains(&sym))
-            .last()
+            .get(inner)
             .map_or(self.cur, |&(preheader, _)| preheader)
     }
 
@@ -1387,6 +1417,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         member_busy: FxHashSet::default(),
         member_memo_at: (entry, 0, 0, 0),
         loops: Vec::new(),
+        loop_names: LoopNames::default(),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
