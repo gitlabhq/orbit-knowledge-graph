@@ -5,6 +5,7 @@
 //! and template values live in `config/setup/setup.yaml`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use ontology::migrations::sha256_hex;
@@ -64,7 +65,8 @@ fn render_instructions(launcher: &str, remote: bool) -> String {
     substitute_launcher(&text, launcher)
 }
 
-static REACHES_GITLAB: LazyLock<bool> = LazyLock::new(crate::remote::client::credentials_available);
+static REACHES_GITLAB: LazyLock<bool> =
+    LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
 
 static RENDERED_INSTRUCTIONS: LazyLock<String> =
     LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
