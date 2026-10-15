@@ -1,4 +1,4 @@
-description: Only link_type 1 (created) rows become DuoWorkflow CREATED_MR MergeRequest edges, sitting in the workflow's namespace for same-project, sibling-project and group-scoped links
+description: Only link_type 1 (created) rows become DuoWorkflow CREATED_MR MergeRequest edges, sitting in the workflow's namespace for same-project and sibling-project links; namespace-level sessions have no node, so their links are skipped
 scope: { namespace: 100 }
 
 seed:
@@ -22,8 +22,7 @@ expect:
     - kind: CREATED_MR
       from: DuoWorkflow
       to: MergeRequest
-      count: 3
+      count: 2
       rows:
         - { source_id: 1, target_id: 10, traversal_path: "1/100/1000/" }
         - { source_id: 1, target_id: 20, traversal_path: "1/100/1000/" }
-        - { source_id: 2, target_id: 20, traversal_path: "1/100/" }

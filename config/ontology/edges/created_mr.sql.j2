@@ -1,3 +1,8 @@
+-- Best effort for deletes: a tombstone keeps the sort key (traversal_path,
+-- workflow_id, id) but zeroes merge_request_id and link_type, so _prev recovers
+-- them from the last live version of the row. Once ClickHouse merges the source
+-- parts only the tombstone is left, _prev is empty and the edge is not removed.
+-- This is the generic delete gap tracked in knowledge-graph#1308 (CLOSES shares it).
 WITH
   _batch AS (SELECT
     id,
@@ -8,31 +13,34 @@ WITH
     {{version_column}} AS _version,
     {{deleted_column}} AS _deleted
   FROM siphon_duo_workflows_workflow_merge_requests
-  WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
-  ORDER BY traversal_path, id
+  -- Namespace-level sessions have no DuoWorkflow node (project sessions only),
+  -- so their links would dangle. Tombstones carry no project_id and pass through.
+  WHERE startsWith(traversal_path, {traversal_path:String})
+    AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
+  ORDER BY traversal_path, workflow_id, id
   LIMIT {{batch_size}}),
   -- Only tombstones need the previous values; bounding by their ids keeps this small.
   _prev AS (SELECT
     id,
-    argMax(workflow_id, {{version_column}}) AS workflow_id,
-    argMax(merge_request_id, {{version_column}}) AS merge_request_id,
-    argMax(link_type, {{version_column}}) AS link_type
+    argMax(workflow_id, {{version_column}}) AS prev_workflow_id,
+    argMax(merge_request_id, {{version_column}}) AS prev_merge_request_id,
+    argMax(link_type, {{version_column}}) AS prev_link_type
   FROM siphon_duo_workflows_workflow_merge_requests
-  WHERE id IN (SELECT id FROM _batch WHERE _deleted)
-    AND startsWith(traversal_path, {traversal_path:String})
+  WHERE (traversal_path, workflow_id, id) IN (SELECT traversal_path, workflow_id, id FROM _batch WHERE _deleted)
     AND {{deleted_column}} = false
   GROUP BY id)
 SELECT
   _batch.traversal_path AS traversal_path,
   _batch.id AS id,
-  if(if(_batch._deleted, _prev.link_type, _batch.link_type) = 1,
-     nullIf(if(_batch._deleted, _prev.workflow_id, _batch.workflow_id), 0),
+  _batch.workflow_id AS workflow_id,
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
+     nullIf(if(_batch._deleted, _prev.prev_workflow_id, _batch.workflow_id), 0),
      NULL) AS source_id,
-  if(if(_batch._deleted, _prev.link_type, _batch.link_type) = 1,
-     nullIf(if(_batch._deleted, _prev.merge_request_id, _batch.merge_request_id), 0),
+  if(if(_batch._deleted, _prev.prev_link_type, _batch.link_type) = 1,
+     nullIf(if(_batch._deleted, _prev.prev_merge_request_id, _batch.merge_request_id), 0),
      NULL) AS target_id,
   _batch._version AS _version,
   _batch._deleted AS _deleted
 FROM _batch
 LEFT JOIN _prev ON _prev.id = _batch.id
-ORDER BY traversal_path, id
+ORDER BY traversal_path, workflow_id, id

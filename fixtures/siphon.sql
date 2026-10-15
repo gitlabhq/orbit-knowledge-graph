@@ -1586,8 +1586,8 @@ CREATE TABLE IF NOT EXISTS siphon_duo_workflows_workflow_merge_requests
     `_siphon_deleted` Bool DEFAULT FALSE
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY (traversal_path, id)
-ORDER BY (traversal_path, id);
+PRIMARY KEY (traversal_path, workflow_id, id)
+ORDER BY (traversal_path, workflow_id, id);
 
 -- Siphon source table for package file build infos (join table: package file -> pipeline)
 CREATE TABLE IF NOT EXISTS siphon_packages_package_file_build_infos

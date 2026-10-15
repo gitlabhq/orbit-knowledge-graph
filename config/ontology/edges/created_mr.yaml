@@ -11,8 +11,13 @@ variants:
 # link_type 0 (source) is the MR a flow was started against, not one it made.
 # The row's traversal_path is the workflow's, so the edge sits in the workflow's
 # namespace even when the MR lives in a sibling project.
-# Siphon tombstones carry only key columns (workflow_id / merge_request_id / link_type
-# come back as 0), so the extract takes them from the last live version of the same id.
+# Only project-scoped sessions have a DuoWorkflow node, so links with no project_id
+# (namespace-level sessions) are skipped.
+# Deletes are best effort. A Siphon tombstone keeps the sort key (traversal_path,
+# workflow_id, id) but zeroes merge_request_id and link_type, so the extract reads
+# them from the last live version of the row. After ClickHouse merges the source
+# parts only the tombstone remains and the edge stays. CLOSES has the same gap;
+# the general fix is tracked in knowledge-graph#1308.
 indexer:
   reindex: [siphon_duo_workflows_workflow_merge_requests]
 pipelines:
@@ -20,7 +25,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_duo_workflows_workflow_merge_requests]
-      order_by: [traversal_path, id]
+      order_by: [traversal_path, workflow_id, id]
       query: created_mr.sql.j2
     transform:
       type: datafusion

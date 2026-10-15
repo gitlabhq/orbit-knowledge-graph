@@ -31,7 +31,7 @@ properties:
     type: enum
     source: flow_type
     nullable: false
-    description: "Kind of flow, from the workflow definition with its version dropped (developer/v1 becomes developer). Unrecognized definitions are 'other'."
+    description: "Kind of flow, from the workflow definition with its version dropped (developer/v1 becomes developer). Unrecognized definitions, and flows addressed by display name, are 'other'."
     enum_type: string
     selectivity: low
     values:
@@ -58,7 +58,16 @@ properties:
       20: resolve_dependency_bump
       21: bl_security
       22: business_context_security_guidelines
-      23: other
+      23: orbit_agent
+      24: duo_planner
+      25: security_analyst_agent
+      26: analytics_agent
+      27: ci_expert_agent
+      28: duo_permissions_assistant
+      29: support_assistant
+      30: onboarding_guide
+      31: flow_creator
+      32: other
 
   environment:
     type: enum
@@ -145,6 +154,6 @@ storage:
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_flow_type, column: flow_type, type: "set(32)", granularity: 2}
+    - {name: idx_flow_type, column: flow_type, type: "set(64)", granularity: 2}
     - {name: idx_environment, column: environment, type: "set(8)", granularity: 2}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

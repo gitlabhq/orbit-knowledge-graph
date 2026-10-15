@@ -19,8 +19,8 @@ sources:
   edges/confirmed_by.yaml: e8dcee69f55d9e0c6103d2b4ca8dce6936835fb5f41022aa49bf4682aa245cc6
   edges/contains.yaml: b4a3905b09aec3bec730800f18d4e9a12eec8275bca0cb39046eaa9f4654dacc
   edges/created_for_mr.yaml: 7f8f38fc94b419d52eb1cba66c5745b5a354506a75509875fa2563788d3f66fb
-  edges/created_mr.sql.j2: 60f0687248efafff99e35d2a658afde287086e18ebe923beca6d19b4e8edee05
-  edges/created_mr.yaml: 5825a10e487b42d3654b55463ce6b9d7a9dbed030249b01fbee5f9b85db9dd2a
+  edges/created_mr.sql.j2: c51fa5bbaed5add4d034d511cb2d64c6b38ac22bb7e2619e78262e639aa30492
+  edges/created_mr.yaml: 09ad39b7801627a09cfe04f8a87e714ebab3b841b8f6918c13a1ac8a3322ab26
   edges/creator.yaml: 2243d0abd596ed283d48eb2414c9218f76bedc307b70481e9844ccd6a4fa1bbf
   edges/declares_dependency.yaml: ef1a154afb72b22a24f3289bf72c167c942ca9d45dcbd1e30f1db05429c3592f
   edges/defines.yaml: 42d9f2f4cb1552cc582cf241f375f2fd2521d68d5e7e39fbb650264c28f0cbc0
@@ -87,8 +87,8 @@ sources:
   nodes/core/project.sql.j2: 1cdbd21aa2ae071d16918148ecf0aa6e67596257d21826c9899c21b1ea223228
   nodes/core/project.yaml: a885825eac1e9479b779928ce0082d2a9f62d85ab7c766b9583ed5e718e8f7ea
   nodes/core/user.yaml: ea9141ee1b34a46c679611da3ada290ebb66d71ac0c9e582374717d47bb27712
-  nodes/duo/duo_workflow.sql.j2: 9977aab1b4d37eaa85105fcbffb98e04cea2b75fead9c0389abd7cb572f8f6c0
-  nodes/duo/duo_workflow.yaml: a72ebdcfa0130d22b070c7cb32e280ec5b97530753a0fc9753952086e5fa77a6
+  nodes/duo/duo_workflow.sql.j2: 7494bfc6a0a0506b374a36967b7e41c640b44927262bcebb887a2b417bfc3eba
+  nodes/duo/duo_workflow.yaml: cad67ec25c4ddd73972f0e736dd5b5dd253d97067bedffa508eb9d105ec2f8c4
   nodes/packages/dependency.yaml: 3e82e649bc4951c0ab254772a292a8a7ca267b427b679f7addc062bbaeec7a0b
   nodes/packages/package.yaml: ee4de01811ee9bf14761158a12288ca5dd7ab421860117a0346703038227edf6
   nodes/packages/package_file.sql.j2: 4472d28726b4714b0e615ebe030a3ff4778796c95d3c83cbf7a4ea2a9c298f4f
@@ -125,7 +125,7 @@ ddl:
   gl_deployment: cef16e847290e0661ec205d3397a6351a56999cbddc04c6aef9fcdf71b79e17f
   gl_diff_edge: 0d4f70609ae57c716946ecb7f3b30429ed7b1450f834309fbc972e821f606d64
   gl_directory: 52d71865ce72eb38c294fe3c60197ee848c39596c9c1ba797f57b9ee4401b5db
-  gl_duo_workflow: d2c61b8b64dfcc542529f9b093fa7d6852e21125fff70ba6703ab9a1a25cbe58
+  gl_duo_workflow: 2b5461bfe2cde71bfe8959b6649bab132f0e919ed82cec0f71d001c9f3c8203f
   gl_edge: 3f355591ef872208e24ca92d6de746b48d8d21091604d2adeaf61482b3489a37
   gl_environment: d950afaad165180d762d744582680d9b08a4aa4f80175861718c44733cf477c5
   gl_file: d35f0eafdd8d494109f56673d954d0d20cf299c15a75ffb1f2d3c04c00cafe34

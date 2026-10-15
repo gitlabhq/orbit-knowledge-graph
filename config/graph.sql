@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS gl_duo_workflow (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_flow_type flow_type TYPE set(32) GRANULARITY 2,
+    INDEX idx_flow_type flow_type TYPE set(64) GRANULARITY 2,
     INDEX idx_environment environment TYPE set(8) GRANULARITY 2,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
