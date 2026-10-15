@@ -109,6 +109,7 @@ struct Fold<'t> {
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, FxHashMap<u32, u32>)>,
+    bound: FxHashMap<u32, Vec<(usize, u32)>>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
     arm_exits: Vec<BlockId>,
 }
@@ -189,7 +190,7 @@ impl<'t> Fold<'t> {
             }
             match item {
                 WorkItem::ExitScope { wildcards, block } => {
-                    self.scopes.pop();
+                    self.exit_scope();
                     if self.wildcards.len() > wildcards {
                         Rc::make_mut(&mut self.wildcards).truncate(wildcards);
                     }
@@ -432,9 +433,7 @@ impl<'t> Fold<'t> {
                 .into_iter()
                 .filter_map(|kind| n.child_sym(kind))
             {
-                if let Some((_, scope)) = self.scopes.last_mut() {
-                    scope.insert(alias, binding);
-                }
+                self.bind(alias, binding);
             }
         }
     }
@@ -790,8 +789,8 @@ impl<'t> Fold<'t> {
                 self.bind_fields(lhs, tail);
             }
         }
-        if declaration && let Some((_, scope)) = self.scopes.last_mut() {
-            scope.insert(c.sym(), lhs);
+        if declaration {
+            self.bind(c.sym(), lhs);
         }
     }
 
@@ -803,11 +802,37 @@ impl<'t> Fold<'t> {
     }
 
     fn binding(&self, name: u32) -> u32 {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|(_, scope)| scope.get(&name).copied())
-            .unwrap_or_else(|| self.key(BindingKey::Name(name)))
+        self.bound
+            .get(&name)
+            .and_then(|stack| stack.last())
+            .map_or_else(|| self.key(BindingKey::Name(name)), |&(_, binding)| binding)
+    }
+
+    fn bind(&mut self, name: u32, binding: u32) {
+        let depth = self.scopes.len() - 1;
+        let Some((_, scope)) = self.scopes.last_mut() else {
+            return;
+        };
+        scope.insert(name, binding);
+        let stack = self.bound.entry(name).or_default();
+        match stack.last_mut() {
+            Some((at, bound)) if *at == depth => *bound = binding,
+            _ => stack.push((depth, binding)),
+        }
+    }
+
+    fn exit_scope(&mut self) {
+        let Some((_, scope)) = self.scopes.pop() else {
+            return;
+        };
+        let depth = self.scopes.len();
+        for name in scope.keys() {
+            if let Some(stack) = self.bound.get_mut(name)
+                && stack.last().is_some_and(|&(at, _)| at == depth)
+            {
+                stack.pop();
+            }
+        }
     }
 
     fn binding_key(&self, node: Cursor<'_>, name: u32) -> u32 {
@@ -829,9 +854,7 @@ impl<'t> Fold<'t> {
         } else {
             self.binding_key(node, name)
         };
-        if let Some((_, scope)) = self.scopes.last_mut() {
-            scope.insert(name, binding);
-        }
+        self.bind(name, binding);
         binding
     }
 
@@ -858,22 +881,23 @@ impl<'t> Fold<'t> {
                 .unwrap_or(declaration.sym());
             let key = self.binding_key(declaration, name);
             let unbound = self.key(BindingKey::Name(name));
-            let Some(((_, current), parents)) = self.scopes.split_last_mut() else {
+            let Some(((_, current), parents)) = self.scopes.split_last() else {
                 return;
             };
-            if !current.contains_key(&name) {
-                if let Some(owner) = declaration.child_sym(C::Alias) {
-                    let binding = parents.iter().rev().find_map(|(label, names)| {
-                        (*label == owner).then(|| names.get(&name).copied().unwrap_or(unbound))
-                    });
-                    if let Some(binding) = binding {
-                        current.insert(name, binding);
-                    }
-                    continue;
-                }
-                current.insert(name, key);
-                self.ssa.write_variable(key, self.cur, Value::Opaque);
+            if current.contains_key(&name) {
+                continue;
             }
+            if let Some(owner) = declaration.child_sym(C::Alias) {
+                let binding = parents.iter().rev().find_map(|(label, names)| {
+                    (*label == owner).then(|| names.get(&name).copied().unwrap_or(unbound))
+                });
+                if let Some(binding) = binding {
+                    self.bind(name, binding);
+                }
+                continue;
+            }
+            self.bind(name, key);
+            self.ssa.write_variable(key, self.cur, Value::Opaque);
         }
     }
 
@@ -1428,6 +1452,7 @@ fn walk<'t>(
         pending_calls: Vec::new(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, FxHashMap::default())],
+        bound: FxHashMap::default(),
         keys: RefCell::default(),
         arm_exits: Vec::new(),
     };

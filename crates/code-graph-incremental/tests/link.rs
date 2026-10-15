@@ -163,3 +163,39 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
     );
     assert!(graph.state.edges.is_empty());
 }
+
+#[test]
+fn linking_deeply_nested_blocks_grows_linearly() {
+    use code_graph_incremental::pipeline::SourceFile;
+    use code_graph_incremental::{Sentinel, templates};
+    use std::time::Instant;
+
+    fn link_ms(levels: usize) -> f64 {
+        let mut source = String::from("function f(x) {\nlet y = 0;\n");
+        for i in 0..levels {
+            source += &format!("if (x) {{\nlet v{i} = {i};\ny = y + 1;\n");
+        }
+        source += &"}\n".repeat(levels);
+        source += "return y;\n}\n";
+        let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
+        let free = Sentinel::disabled();
+        let file = SourceFile::from(("deep.js".to_string(), source));
+        let parsed = Parse.run(&env, &free, file).unwrap();
+        let rewritten = Rewrite.run(&env, &free, parsed).unwrap();
+        let canonical = Canonicalize.run(&env, &free, rewritten).unwrap();
+        let started = Instant::now();
+        Link.run(&env, &free, canonical).unwrap();
+        started.elapsed().as_secs_f64() * 1000.0
+    }
+
+    let (small, large) = std::thread::Builder::new()
+        .stack_size(templates::WORKER_STACK_BYTES)
+        .spawn(|| (link_ms(2_000), link_ms(8_000)))
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(
+        large < 8.0 * small.max(1.0),
+        "linking 4x the nesting went from {small:.0} ms to {large:.0} ms"
+    );
+}
