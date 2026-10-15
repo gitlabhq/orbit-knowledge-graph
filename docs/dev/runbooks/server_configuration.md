@@ -808,11 +808,11 @@ engine:
   topics:
     global-handler:
       concurrency_group: sdlc
-      max_attempts: 1
+      max_attempts: 5
       retry_interval_secs: 60
     namespace-handler:
       concurrency_group: sdlc
-      max_attempts: 1
+      max_attempts: 5
       retry_interval_secs: 60
     code-indexing-task:
       concurrency_group: code
