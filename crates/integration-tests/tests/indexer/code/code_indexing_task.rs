@@ -1246,6 +1246,64 @@ async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold()
 }
 
 #[tokio::test]
+async fn a_lost_lock_does_not_refund_over_the_new_holders_attempt() {
+    let project_id: i64 = 66;
+    let traversal_path = "1/66/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_slow_archive(project_id, "main");
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_secs(3));
+    let locks = Arc::new(MockLockService::new());
+
+    let new_holder = {
+        let locks = Arc::clone(&locks);
+        let store = Arc::clone(&deps.checkpoint_store);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            locks.steal_leases();
+            let mut checkpoint = indexer::modules::code::CodeCheckpoint::new(
+                TraversalPath::new_unchecked(traversal_path),
+                project_id,
+                "main",
+            );
+            checkpoint.attempts = 7;
+            store.save(&checkpoint).await.expect("new holder's start");
+        })
+    };
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let error = handler
+        .handle(
+            handler_context_with_lock_service(locks).with_redelivery(true),
+            envelope,
+        )
+        .await
+        .expect_err("a lost lock cancels the run");
+    assert!(
+        matches!(
+            error,
+            indexer::handler::HandlerError::Processing(_)
+                | indexer::handler::HandlerError::Backpressure(_)
+        ),
+        "unexpected error: {error}"
+    );
+    new_holder.await.expect("new holder");
+
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [7],
+        "a run that lost its lock must not refund over the new holder's checkpoint"
+    );
+}
+
+#[tokio::test]
 async fn a_redelivery_after_one_unended_attempt_still_runs() {
     let project_id: i64 = 63;
     let traversal_path = "1/63/";

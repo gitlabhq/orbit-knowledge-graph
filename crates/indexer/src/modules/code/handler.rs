@@ -430,9 +430,19 @@ impl CodeIndexingTaskHandler {
             _ => false,
         };
         if redelivered {
-            checkpoint.refund_attempt();
-            if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
-                warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
+            match guard.renew(self.lock_ttl).await {
+                Ok(()) => {
+                    checkpoint.refund_attempt();
+                    if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
+                        warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
+                    }
+                }
+                Err(error) => warn!(
+                    project_id,
+                    branch = %branch,
+                    %error,
+                    "lock not held at the end of the run; the attempt stays counted"
+                ),
             }
         }
 
@@ -826,8 +836,11 @@ mod tests {
             .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap()
-            .expect("the refunded attempt is saved");
-        assert_eq!(checkpoint.attempts, 0);
+            .expect("the started attempt is saved");
+        assert_eq!(
+            checkpoint.attempts, 1,
+            "a run that lost its lock must not write a refund over a new holder"
+        );
     }
 
     #[tokio::test(start_paused = true)]
