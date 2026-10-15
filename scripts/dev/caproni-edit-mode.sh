@@ -123,11 +123,21 @@ build() {
   fi
 }
 
+# Command line of a process. /proc is authoritative on Linux and needs no ps, which the
+# CI image lacks; macOS has no /proc, so ps answers there.
+process_command() { # pid
+  if [[ -r "/proc/$1/cmdline" ]]; then
+    tr '\0' ' ' <"/proc/$1/cmdline"
+  else
+    ps -o command= -p "$1" 2>/dev/null
+  fi
+}
+
 # True when the pid in the lock still belongs to a build watcher: alive, and running either
 # watchexec or this script (the holder is this script until it execs watchexec), rather
 # than whatever reused the number since.
 lock_holder_alive() { # pid
-  kill -0 "$1" 2>/dev/null && ps -o command= -p "$1" 2>/dev/null | grep -qE 'watchexec|caproni-edit-mode'
+  kill -0 "$1" 2>/dev/null && process_command "$1" | grep -qE 'watchexec|caproni-edit-mode'
 }
 
 # Every reloader declares the build watcher so that any subset of reloaders rebuilds on
