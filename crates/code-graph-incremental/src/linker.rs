@@ -101,6 +101,7 @@ struct Fold<'t> {
     member_memo: FxHashMap<(u32, u32), Vec<Value>>,
     member_busy: FxHashSet<(u32, u32)>,
     member_memo_at: (BlockId, usize, usize, usize),
+    loops: Vec<(BlockId, FxHashSet<u32>)>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
@@ -162,7 +163,10 @@ impl<'t> Fold<'t> {
                     let exits = exits.chain(lhs.is_none().then_some(pre));
                     self.cur = self.ssa.add_sealed_join(exits);
                 }
-                WorkItem::ExitLoop(header) => self.cur = self.ssa.finish_loop(header, self.cur),
+                WorkItem::ExitLoop(header) => {
+                    self.loops.pop();
+                    self.cur = self.ssa.finish_loop(header, self.cur);
+                }
                 WorkItem::ExitBinding {
                     binding,
                     lhs,
@@ -247,6 +251,7 @@ impl<'t> Fold<'t> {
             Self::handle_branch(c, sink, stack);
             return;
         } else if k == C::SsaLoop {
+            self.loops.push((self.cur, Self::assigned_names(c)));
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
@@ -566,7 +571,8 @@ impl<'t> Fold<'t> {
                 let sym = callee
                     .sym_opt()
                     .filter(|_| !c.has_tag(self.tags.implicit_self))?;
-                let value = self.ssa.read_variable_internal(self.binding(sym), self.cur);
+                let block = self.name_block(sym);
+                let value = self.ssa.read_variable_internal(self.binding(sym), block);
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
@@ -966,7 +972,11 @@ impl<'t> Fold<'t> {
         if sym == 0 {
             return Value::Opaque;
         }
-        let value = self.read_value(self.binding(sym));
+        let block = self.name_block(sym);
+        let value = match self.ssa.read_variable_internal(self.binding(sym), block) {
+            Value::Undefined => Value::Opaque,
+            value => value,
+        };
         if let Value::LocalDef(node) = value
             && self.tree.cursor(node).is_class()
         {
@@ -984,8 +994,39 @@ impl<'t> Fold<'t> {
         }
     }
 
+    fn assigned_names(c: Cursor) -> FxHashSet<u32> {
+        let mut names = FxHashSet::default();
+        let mut walk = c.walk();
+        while let Some(node) = walk.next() {
+            if node.is(C::Import) || node.is(C::ImportType) {
+                names.extend(
+                    std::iter::once(node)
+                        .chain(node.descendants())
+                        .map(|n| n.sym()),
+                );
+                walk.skip_subtree();
+            } else if [C::Binding, C::DefName, C::Alias, C::SsaHint]
+                .into_iter()
+                .any(|kind| node.is(kind))
+                || node.has(C::Declaration)
+            {
+                names.insert(node.sym());
+            }
+        }
+        names
+    }
+
+    fn name_block(&self, sym: u32) -> BlockId {
+        self.loops
+            .iter()
+            .rev()
+            .take_while(|(_, assigned)| !assigned.contains(&sym))
+            .last()
+            .map_or(self.cur, |&(preheader, _)| preheader)
+    }
+
     fn lookup(&mut self, sym: u32) -> Vec<Value> {
-        for block in [self.cur, BlockId(0)] {
+        for block in [self.name_block(sym), BlockId(0)] {
             let result = self.ssa.read_variable(self.binding(sym), block);
             if !result.is_empty() {
                 return result;
@@ -1052,11 +1093,13 @@ impl<'t> Fold<'t> {
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
-            bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
-            for r in &bound {
-                self.emit(r, from);
+            if !bound.is_empty() {
+                bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
+                for r in &bound {
+                    self.emit(r, from);
+                }
+                return;
             }
-            return;
         }
         let members = self
             .enclosing_class(from)
@@ -1343,6 +1386,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         member_memo: FxHashMap::default(),
         member_busy: FxHashSet::default(),
         member_memo_at: (entry, 0, 0, 0),
+        loops: Vec::new(),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),

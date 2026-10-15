@@ -1,0 +1,37 @@
+SELECT
+  id,
+  -- flow_type is free-form user input: keep only known families, else 'other'.
+  -- Keep in sync with agent_session.yaml.
+  if(
+    splitByChar('/', coalesce(flow_type, ''))[1] IN (
+      'software_development', 'external_agent', 'ai_catalog_agent',
+      'claude_code_compliance_api', 'chat', 'agentic_chat',
+      'developer', 'code_review', 'deep_code_review', 'fix_pipeline',
+      'convert_to_gl_ci', 'resolve_sast_vulnerability', 'sast_fp_detection',
+      'secrets_fp_detection', 'security_review', 'recommend_reviewers',
+      'risk_classification', 'workplan', 'readiness_score', 'slack_assistant',
+      'resolve_dependency_bump', 'bl_security',
+      'business_context_security_guidelines',
+      'orbit_agent', 'duo_planner', 'security_analyst_agent', 'analytics_agent',
+      'ci_expert_agent', 'duo_permissions_assistant', 'support_assistant',
+      'onboarding_guide', 'flow_creator',
+      'ambient', 'issue_to_merge_request', 'convert_to_gitlab_ci'
+    ),
+    splitByChar('/', coalesce(flow_type, ''))[1],
+    'other'
+  ) AS flow_type,
+  source,
+  session_started_at,
+  project_id,
+  traversal_path,
+  {{version_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_ai_governance_sessions
+WHERE startsWith(traversal_path, {traversal_path:String})
+  -- Only GitLab Duo sessions for now (source 0). External sessions (glab, MCP,
+  -- Claude compliance API) wait for a privacy ruling. Slack and other
+  -- invoker-private sessions are never written to this table by Rails.
+  -- A tombstone may not carry project_id or source, so it must not be filtered out.
+  AND ((source = 0 AND project_id IS NOT NULL) OR {{deleted_column}}) {{filters}}
+ORDER BY traversal_path, id
+LIMIT {{batch_size}}
