@@ -14,11 +14,8 @@ pub enum GitlabClientError {
     #[error("server error for project {project_id}: status {status}")]
     ServerError { project_id: i64, status: u16 },
 
-    #[error("rate limited (429) for project {project_id}{}", retry_after_suffix(*retry_after_secs))]
-    RateLimited {
-        project_id: i64,
-        retry_after_secs: Option<u64>,
-    },
+    #[error("rate limited (429) for project {project_id}")]
+    RateLimited { project_id: i64 },
 
     #[error("force push detected for project {0}")]
     ForcePush(i64),
@@ -37,12 +34,6 @@ pub enum GitlabClientError {
 
     #[error("circuit open for service {service}")]
     CircuitOpen { service: &'static str },
-}
-
-fn retry_after_suffix(retry_after_secs: Option<u64>) -> String {
-    retry_after_secs
-        .map(|secs| format!("; retry after {secs}s"))
-        .unwrap_or_default()
 }
 
 impl CircuitBreakableError for GitlabClientError {
@@ -64,27 +55,5 @@ impl CircuitBreakableError for GitlabClientError {
 
     fn circuit_open(service: &'static str) -> Self {
         Self::CircuitOpen { service }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rate_limited_message_mentions_retry_after_only_when_present() {
-        let with = GitlabClientError::RateLimited {
-            project_id: 1,
-            retry_after_secs: Some(30),
-        };
-        let without = GitlabClientError::RateLimited {
-            project_id: 1,
-            retry_after_secs: None,
-        };
-        assert_eq!(
-            with.to_string(),
-            "rate limited (429) for project 1; retry after 30s"
-        );
-        assert_eq!(without.to_string(), "rate limited (429) for project 1");
     }
 }

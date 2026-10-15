@@ -25,7 +25,6 @@ pub enum ResolveError {
         detail: String,
     },
 
-    /// A 429, 502, 503 or 504 says nothing about the repository, so it is never a checkpoint.
     #[error("archive endpoint overloaded: {0}")]
     Overloaded(String),
 
@@ -43,7 +42,7 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
-    /// HTTP 500 or another non-gateway 5xx: Rails raises 500 for a repository that does not exist, until it returns 404.
+    /// Rails raises 500 for a repository that does not exist.
     ServerError,
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
@@ -80,9 +79,8 @@ impl std::fmt::Display for EmptyRepositoryReason {
     }
 }
 
-/// Workhorse maps Gitaly's not-found, invalid-argument and failed-precondition
-/// to 404. Backfill tasks resolve the branch through `project_info` first, so
-/// the project exists and a 404 means it has no repository or no refs.
+/// Backfill resolves the branch through `project_info` first, so the project exists
+/// and a 404 means it has no repository or no refs.
 fn classify_download_error(
     err: &RepositoryServiceError,
 ) -> Option<(EmptyRepositoryReason, String)> {
@@ -104,14 +102,10 @@ fn classify_download_error(
     }
 }
 
-/// Gateway errors from Workhorse or its proxy are transient. A plain 500 is not
-/// listed: Rails raises it for a missing repository.
 fn is_overload_status(status: u16) -> bool {
     matches!(status, 502..=504)
 }
 
-/// Workhorse answers 429 for Gitaly's `ResourceExhausted` once
-/// gitlab-org/gitlab!262112 ships, and 502-504 for transient proxy failures.
 fn overload_detail(err: &RepositoryServiceError) -> Option<String> {
     match err {
         RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
@@ -624,10 +618,7 @@ mod tests {
                 project_id: 42,
                 status: 504,
             },
-            || GitlabClientError::RateLimited {
-                project_id: 42,
-                retry_after_secs: Some(30),
-            },
+            || GitlabClientError::RateLimited { project_id: 42 },
         ];
         for overload in overloads {
             let service = ScriptedRepositoryService::with_download_error(move || {
@@ -635,7 +626,6 @@ mod tests {
             });
             let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-            // Overload is retried whether or not the task carries a commit SHA.
             for commit_sha in [None, Some("abc123")] {
                 let err = resolver.resolve(42, "main", commit_sha).await.unwrap_err();
                 assert!(matches!(err, ResolveError::Overloaded(_)), "got {err:?}");

@@ -402,8 +402,7 @@ impl CodeIndexingTaskHandler {
                 )))
             }
             Err(IndexError::Overloaded(detail)) => {
-                // Redeliveries share one dispatch, so counting each one would use up
-                // MAX_CODE_ATTEMPTS and skip CODE_RETRY_AFTER.
+                // Redeliveries share one dispatch; counting each would exhaust MAX_CODE_ATTEMPTS.
                 if attempt > 1 {
                     checkpoint.refund_attempt();
                     if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
@@ -879,12 +878,8 @@ mod tests {
                 project_id: 123,
                 status: 502,
             },
-            || GitlabClientError::RateLimited {
-                project_id: 123,
-                retry_after_secs: None,
-            },
+            || GitlabClientError::RateLimited { project_id: 123 },
         ];
-        // Only the first delivery counts toward the dispatcher cap, whatever max_attempts is.
         for (overload, attempt) in overloads
             .into_iter()
             .flat_map(|overload| [(overload, 1), (overload, 2), (overload, 9)])
