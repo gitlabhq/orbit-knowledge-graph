@@ -1546,42 +1546,19 @@ fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
+    use crate::Limits;
+    use crate::pipeline::{Canonical, Canonicalize, ItemPhase, Parse, Rewrite, SourceFile};
     use crate::treesitter::SupportLang;
-    use crate::{Context, Limits, templates};
-    use orbit_utils::vfs::{Decision, File, Pass, Vfs, sources::Directory};
-
-    struct KeepAll;
-
-    impl Pass for KeepAll {
-        type Tag = ();
-        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
-            Decision::Pending
-        }
-        fn content(&self, _: &File<'_, ()>) -> Decision<()> {
-            Decision::Keep(())
-        }
-    }
 
     fn phis(lang: SupportLang, path: &str, source: &str) -> usize {
-        let repo = tempfile::tempdir().unwrap();
-        std::fs::write(repo.path().join(path), source).unwrap();
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let repository = Arc::new(
-            Vfs::load(
-                Directory(repo.path()),
-                KeepAll,
-                Default::default(),
-                Default::default(),
-            )
-            .unwrap(),
-        );
-        let graph = templates::index(Context::new(&env, repository)).unwrap();
-        let tree = &graph.value().state.trees[0];
-        let run = Sentinel::new("link", path, u64::MAX);
-        walk(tree, &env, &run).unwrap().0.ssa.phi_count()
+        let free = Sentinel::disabled();
+        let file = SourceFile::from((path.to_string(), source.to_string()));
+        let parsed = Parse.run(&env, &free, file).unwrap();
+        let rewritten = Rewrite.run(&env, &free, parsed).unwrap();
+        let Canonical(tree) = Canonicalize.run(&env, &free, rewritten).unwrap();
+        walk(&tree, &env, &free).unwrap().0.ssa.phi_count()
     }
 
     #[test]
