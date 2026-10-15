@@ -86,7 +86,7 @@ entry for the one token. Each entry carries the PostgreSQL summary and an
 later add entries and need no new field. `expansion` is `null` when expansion
 was not requested or the token was not found. Those two cases take precedence
 over every error. For a found token whose type has no expansion query,
-`expansion` is `{"error": {"code": "expansion_not_supported"}}`. Otherwise it
+`expansion` is `{"error": {"code": "expansion_unsupported_type"}}`. Otherwise it
 is `{"result": ...}` with the deduplicated graph, or `{"error": {"code": ...}}`. An expansion failure never fails the summaries.
 
 **Transport.** The expansion is an ordinary named query, so the contract does
@@ -95,10 +95,9 @@ the summary, and adds the graph result to the body. We do not add Workhorse
 merge logic, so `expand` runs only on the Rails path, behind
 `orbit_query_in_rails` (checked per user). While the flag is off for a user,
 `expand: true` still returns the summaries, with
-`expansion: {"error": {"code": "expansion_unavailable"}}`, which also covers
-Orbit not being enabled for the user. The error carries a `fallback` naming the
-query and its parameters, so the client can call it itself through
-`/api/v4/orbit/query/:name`, which runs on Workhorse. The trade-off is that `expand` rollout follows #1381.
+`expansion: {"error": {"code": "expansion_unavailable"}}`. The client can call
+the named query itself through `/api/v4/orbit/query/:name`, which runs on
+Workhorse. The trade-off is that `expand` rollout follows #1381.
 In return, the merge and the error mapping stay in Ruby, and no Go change is
 needed. If #1381 slips, the fallback is Workhorse merge logic for a single
 stream. The contract stays the same.
@@ -174,8 +173,8 @@ explicit MCP tool and agent command are deferred.
 - Edges in an expansion identify their endpoints by the pair (`from`,
   `from_id`) or (`to`, `to_id`), because IDs are per type.
 - `expansion.error.code` is one of these:
-  - `expansion_unavailable`: rollout, or Orbit not enabled for the user.
-  - `expansion_not_supported`: the type has no expand query.
+  - `expansion_unavailable`: expansion is not enabled for the user yet.
+  - `expansion_unsupported_type`: the type has no expand query.
   - `outside_graph_scope`: the record is outside the user's graph scope.
   - A code that the Rails handler maps from the query path:
     `billing_namespace_required`, `quota_exhausted`, `timeout` or
@@ -272,6 +271,8 @@ Raw results carry `format_version`. TOON output carries its own version
   envelope.
   Whether `Type:ID` is an accepted token form is open.
 - Future work, not decided here:
+  - A `fallback` field on `expansion_unavailable` that names the query and its
+    parameters.
   - Epic tokens, an `expansion.query` echo, and more types (Note, Milestone,
     User, Project, Group) through the generic `expand_neighbors` query.
   - File and Definition tokens resolved from the graph, never Gitaly, from a
