@@ -1,0 +1,38 @@
+WITH
+  _batch AS (SELECT
+    id,
+    workflow_id,
+    merge_request_id,
+    link_type,
+    traversal_path,
+    {{version_column}} AS _version,
+    {{deleted_column}} AS _deleted
+  FROM siphon_duo_workflows_workflow_merge_requests
+  WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
+  ORDER BY traversal_path, id
+  LIMIT {{batch_size}}),
+  -- Only tombstones need the previous values; bounding by their ids keeps this small.
+  _prev AS (SELECT
+    id,
+    argMax(workflow_id, {{version_column}}) AS workflow_id,
+    argMax(merge_request_id, {{version_column}}) AS merge_request_id,
+    argMax(link_type, {{version_column}}) AS link_type
+  FROM siphon_duo_workflows_workflow_merge_requests
+  WHERE id IN (SELECT id FROM _batch WHERE _deleted)
+    AND startsWith(traversal_path, {traversal_path:String})
+    AND {{deleted_column}} = false
+  GROUP BY id)
+SELECT
+  _batch.traversal_path AS traversal_path,
+  _batch.id AS id,
+  if(if(_batch._deleted, _prev.link_type, _batch.link_type) = 1,
+     nullIf(if(_batch._deleted, _prev.workflow_id, _batch.workflow_id), 0),
+     NULL) AS source_id,
+  if(if(_batch._deleted, _prev.link_type, _batch.link_type) = 1,
+     nullIf(if(_batch._deleted, _prev.merge_request_id, _batch.merge_request_id), 0),
+     NULL) AS target_id,
+  _batch._version AS _version,
+  _batch._deleted AS _deleted
+FROM _batch
+LEFT JOIN _prev ON _prev.id = _batch.id
+ORDER BY traversal_path, id

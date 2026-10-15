@@ -321,6 +321,55 @@ or `"-node.property"` (leading `-`) for descending, where `node` is the node `id
 }
 ```
 
+## Merge requests created by Duo
+
+`DuoWorkflow` is a Duo Agent Platform session. It records only that a session
+ran and what kind of flow it was, never its goal, title, summary, status, or
+invoker. `DuoWorkflow --CREATED_MR--> MergeRequest` links a session to the
+merge requests it created. It does not include the MR a flow was started
+against.
+
+`flow_type` is the workflow definition with its version dropped, so
+`developer/v1` is `developer`. A definition Orbit does not recognize is
+`other`. Only project sessions are indexed, and you see a session only with
+Reporter access or higher on its project. Filter `environment` (`ide`, `web`,
+`chat_partial`, `chat`, `ambient`, `external`) to separate chat from flow runs.
+
+Merge requests created by the `developer` flow:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "w", "entity": "DuoWorkflow", "filters": {"flow_type": {"eq": "developer"}}},
+      {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]}
+    ],
+    "relationships": [{"type": "CREATED_MR", "from": "w", "to": "mr"}],
+    "limit": 25
+  }
+}
+```
+
+Count Duo-created merge requests per flow type:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "w", "entity": "DuoWorkflow"},
+      {"id": "mr", "entity": "MergeRequest"}
+    ],
+    "relationships": [{"type": "CREATED_MR", "from": "w", "to": "mr"}],
+    "group_by": ["w.flow_type"],
+    "aggregations": [{"count": "mr", "as": "mrs"}],
+    "aggregation_sort": "-mrs",
+    "limit": 25
+  }
+}
+```
+
 ## Work items in a project
 
 GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity. There

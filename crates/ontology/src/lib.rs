@@ -2587,6 +2587,37 @@ mod tests {
     }
 
     #[test]
+    fn duo_workflow_is_project_delegated_and_exposes_only_allowlisted_properties() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(
+            &ontology,
+            "DuoWorkflow",
+            "project",
+            "project_id",
+            "read_code",
+        );
+
+        let node = ontology.get_node("DuoWorkflow").expect("DuoWorkflow node");
+        let mut properties: Vec<&str> = node.fields.iter().map(|f| f.name.as_str()).collect();
+        properties.sort_unstable();
+        assert_eq!(
+            properties,
+            [
+                "created_at",
+                "environment",
+                "flow_type",
+                "id",
+                "namespace_id",
+                "project_id",
+                "traversal_path",
+                "updated_at",
+            ],
+            "session detail columns must never become properties"
+        );
+    }
+
+    #[test]
     fn sort_key_settings_are_non_empty() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 

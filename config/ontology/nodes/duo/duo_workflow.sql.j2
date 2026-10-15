@@ -1,0 +1,34 @@
+SELECT
+  id,
+  -- workflow_definition is free-form user input on the create API: only the
+  -- family (the part before the version) of a known flow type is ingested,
+  -- everything else is bucketed as 'other'. Keep in sync with the flow_type
+  -- values in duo_workflow.yaml.
+  if(
+    splitByChar('/', workflow_definition)[1] IN (
+      'software_development', 'external_agent', 'ai_catalog_agent',
+      'claude_code_compliance_api', 'chat', 'agentic_chat',
+      'developer', 'code_review', 'deep_code_review', 'fix_pipeline',
+      'convert_to_gl_ci', 'resolve_sast_vulnerability', 'sast_fp_detection',
+      'secrets_fp_detection', 'security_review', 'recommend_reviewers',
+      'risk_classification', 'workplan', 'readiness_score', 'slack_assistant',
+      'resolve_dependency_bump', 'bl_security',
+      'business_context_security_guidelines'
+    ),
+    splitByChar('/', workflow_definition)[1],
+    'other'
+  ) AS flow_type,
+  environment,
+  created_at,
+  updated_at,
+  project_id,
+  namespace_id,
+  traversal_path,
+  {{version_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_duo_workflows_workflows
+WHERE startsWith(traversal_path, {traversal_path:String})
+  -- A tombstone may not carry project_id, so it must not be filtered out.
+  AND (project_id IS NOT NULL OR {{deleted_column}}) {{filters}}
+ORDER BY traversal_path, id
+LIMIT {{batch_size}}

@@ -19,6 +19,8 @@ sources:
   edges/confirmed_by.yaml: e8dcee69f55d9e0c6103d2b4ca8dce6936835fb5f41022aa49bf4682aa245cc6
   edges/contains.yaml: b4a3905b09aec3bec730800f18d4e9a12eec8275bca0cb39046eaa9f4654dacc
   edges/created_for_mr.yaml: 7f8f38fc94b419d52eb1cba66c5745b5a354506a75509875fa2563788d3f66fb
+  edges/created_mr.sql.j2: 60f0687248efafff99e35d2a658afde287086e18ebe923beca6d19b4e8edee05
+  edges/created_mr.yaml: 5825a10e487b42d3654b55463ce6b9d7a9dbed030249b01fbee5f9b85db9dd2a
   edges/creator.yaml: 2243d0abd596ed283d48eb2414c9218f76bedc307b70481e9844ccd6a4fa1bbf
   edges/declares_dependency.yaml: ef1a154afb72b22a24f3289bf72c167c942ca9d45dcbd1e30f1db05429c3592f
   edges/defines.yaml: 42d9f2f4cb1552cc582cf241f375f2fd2521d68d5e7e39fbb650264c28f0cbc0
@@ -46,7 +48,7 @@ sources:
   edges/in_group.yaml: a6c385e0ebc28d641bf2c44cb9fabb16f6796240d8c82f1c95c4237df4efa525
   edges/in_milestone.yaml: 2c22f20e5ac6a43e21a7a77a74536050abeb4a7b5b9cf154d751fac3df68fc55
   edges/in_pipeline.yaml: 2706b8c87108abd68b5cc09f7e42b890ea088f378acf6b52b34ca704f5721fb0
-  edges/in_project.yaml: f190fcc0e2b2eb87d0d4966500b801cddb5716495f24c8b41eb33c3cbd355590
+  edges/in_project.yaml: feb806b4455e667543ec1b599afeac1dba126429f46c6be8370129d4c37dce78
   edges/last_edited_by.yaml: dc25970c048bff75283ba357c4d205609c10ce5780dd859b3da14e3ceb225002
   edges/member_of.yaml: 9d0c85847ceda9ea897a268ff35843bea10f38905cb58bd644d4c038b7011aef
   edges/mentions.yaml: 1e1b3da72a234f906b506ef40a03093d4fa328b3d145c9faaec0cec25db97b28
@@ -85,6 +87,8 @@ sources:
   nodes/core/project.sql.j2: 1cdbd21aa2ae071d16918148ecf0aa6e67596257d21826c9899c21b1ea223228
   nodes/core/project.yaml: a885825eac1e9479b779928ce0082d2a9f62d85ab7c766b9583ed5e718e8f7ea
   nodes/core/user.yaml: ea9141ee1b34a46c679611da3ada290ebb66d71ac0c9e582374717d47bb27712
+  nodes/duo/duo_workflow.sql.j2: 9977aab1b4d37eaa85105fcbffb98e04cea2b75fead9c0389abd7cb572f8f6c0
+  nodes/duo/duo_workflow.yaml: a72ebdcfa0130d22b070c7cb32e280ec5b97530753a0fc9753952086e5fa77a6
   nodes/packages/dependency.yaml: 3e82e649bc4951c0ab254772a292a8a7ca267b427b679f7addc062bbaeec7a0b
   nodes/packages/package.yaml: ee4de01811ee9bf14761158a12288ca5dd7ab421860117a0346703038227edf6
   nodes/packages/package_file.sql.j2: 4472d28726b4714b0e615ebe030a3ff4778796c95d3c83cbf7a4ea2a9c298f4f
@@ -107,7 +111,7 @@ sources:
   nodes/source_code/file.yaml: 61a5a724245ce5a2185d174c8abd7cdfe4e87413800bae340f25b3d041d5a6e1
   nodes/source_code/imported_symbol.yaml: c5ef53aea749796a422e99a86272d7ac599ece43efa7ad8bdf49353fa707f44d
   reference.yaml: d8c0a796601ace0a0d34c705c36b1a2d6286b3a4e78ecf0d8c9a2fb7763e518b
-  schema.yaml: fb15908f486c88a29acb3ca8a80a2092a7bd1ae3dbb23db135afe5c791c33cf5
+  schema.yaml: 830d534fc6ea59eed73e20c2976ecb9467bed2f2984c16da59c4c060442d369f
 ddl:
   checkpoint: 3be0fa82664e33b12a6f249f5b2cbf3391c5bde4e621289268cd623ef86e2ccf
   code_indexing_checkpoint: 714a3917d7883a5d0594b6e3c2ec9f2b3b9b0df02ac2e352e49136c13c48e775
@@ -121,6 +125,7 @@ ddl:
   gl_deployment: cef16e847290e0661ec205d3397a6351a56999cbddc04c6aef9fcdf71b79e17f
   gl_diff_edge: 0d4f70609ae57c716946ecb7f3b30429ed7b1450f834309fbc972e821f606d64
   gl_directory: 52d71865ce72eb38c294fe3c60197ee848c39596c9c1ba797f57b9ee4401b5db
+  gl_duo_workflow: d2c61b8b64dfcc542529f9b093fa7d6852e21125fff70ba6703ab9a1a25cbe58
   gl_edge: 3f355591ef872208e24ca92d6de746b48d8d21091604d2adeaf61482b3489a37
   gl_environment: d950afaad165180d762d744582680d9b08a4aa4f80175861718c44733cf477c5
   gl_file: d35f0eafdd8d494109f56673d954d0d20cf299c15a75ffb1f2d3c04c00cafe34
@@ -150,5 +155,5 @@ ddl:
   gl_work_item: 8c8fb00981a84fe0ba7c1f3942486d30f39408f631e2140c5bf74f92dd98a7db
   namespace_deletion_schedule: 1243179ddd8d67e8bfdd5d1073e99e40856697a2bbb9b647341923b55d85894e
 auxiliary_schema:
-  materialized_view/namespace_storage_snapshot_refresh: f640de1b1ad6a5005c7360028af68a82db8095556b948d1cb96a117ad266cd50
+  materialized_view/namespace_storage_snapshot_refresh: d914cb84e669598adaf8baf718d3c0892ed2c28475bc5bf7986054a4fcd03e2c
   table/namespace_storage_snapshot: 9e6da9ad7893d070a6931808a7a38e07436a0112712994d9ed956d4773f1a4a5

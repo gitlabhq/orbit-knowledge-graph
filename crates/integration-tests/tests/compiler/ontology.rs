@@ -1690,3 +1690,48 @@ fn code_graph_edge_union_routes_to_code_table() {
         "code-graph edges should not touch SDLC gl_edge: {rendered}"
     );
 }
+
+#[test]
+fn duo_workflow_detail_columns_are_not_queryable() {
+    for column in [
+        "goal",
+        "title",
+        "summary",
+        "status",
+        "user_id",
+        "workflow_definition",
+    ] {
+        let json = format!(
+            r#"{{
+            "query_type": "traversal",
+            "nodes": [{{"id": "w", "entity": "DuoWorkflow", "columns": ["{column}"]}}],
+            "limit": 10
+        }}"#
+        );
+        assert!(
+            compile(&json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).is_err(),
+            "DuoWorkflow.{column} must not be selectable"
+        );
+    }
+}
+
+#[test]
+fn duo_workflow_created_mr_traversal_compiles() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "w", "entity": "DuoWorkflow", "columns": ["flow_type"], "filters": {"flow_type": "developer"}},
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+        ],
+        "relationships": [{"type": "CREATED_MR", "from": "w", "to": "mr"}],
+        "limit": 25
+    }"#;
+
+    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    assert!(rendered.contains("gl_duo_workflow"));
+    assert!(rendered.contains("'CREATED_MR'"));
+    assert!(rendered.contains("(_orbit_edge_0.source_kind = 'DuoWorkflow')"));
+    assert!(rendered.contains("(_orbit_edge_0.target_kind = 'MergeRequest')"));
+}

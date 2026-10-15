@@ -1,0 +1,30 @@
+# config/ontology/edges/created_mr.yaml
+
+description: Duo Agent Platform session created a merge request
+
+variants:
+  - from_node: { type: DuoWorkflow, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "Duo session created the merge request."
+
+# Source rows are duo_workflows_workflow_merge_requests with link_type = 1 (created);
+# link_type 0 (source) is the MR a flow was started against, not one it made.
+# The row's traversal_path is the workflow's, so the edge sits in the workflow's
+# namespace even when the MR lives in a sibling project.
+# Siphon tombstones carry only key columns (workflow_id / merge_request_id / link_type
+# come back as 0), so the extract takes them from the last live version of the same id.
+indexer:
+  reindex: [siphon_duo_workflows_workflow_merge_requests]
+pipelines:
+  - name: CREATED_MR_siphon_duo_workflows_workflow_merge_requests_MergeRequest
+    extract:
+      type: clickhouse
+      tables: [siphon_duo_workflows_workflow_merge_requests]
+      order_by: [traversal_path, id]
+      query: created_mr.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: DuoWorkflow }
+          to: { field: target_id, kind: MergeRequest }
+          label: CREATED_MR
