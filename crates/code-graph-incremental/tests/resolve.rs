@@ -438,3 +438,48 @@ fn file_stats_keep_files_killed_by_the_resolve_budget() {
     assert!(skipped.iter().all(|killed| killed.label == "resolve"));
     assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
+
+fn alias_chain(hops: usize) -> String {
+    let aliases: String = (1..=hops)
+        .map(|i| format!("type A{i} = A{};\n", i - 1))
+        .collect();
+    format!(
+        "struct A0;\nimpl A0 {{\n    fn m(&self) {{}}\n}}\n{aliases}fn f(x: A{hops}) {{\n    x.m();\n}}\n"
+    )
+}
+
+fn calls_in(env: &Env, state: &State) -> Vec<(String, String)> {
+    let mut found: Vec<_> = state
+        .edges
+        .iter()
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .map(|e| {
+            (
+                label(env, state, e.from_fi(), e.from_node),
+                label(env, state, e.to_fi(), e.to_node),
+            )
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+#[test]
+fn a_type_alias_chain_resolves_within_the_resolve_depth_and_is_cut_past_it() {
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let within = tempfile::tempdir().unwrap();
+    write_all(within.path(), &[("lib.rs", &alias_chain(1000))]);
+    let (resolved, skipped) = resolve_repo(&env, within.path());
+    assert!(skipped.is_empty());
+    assert_eq!(
+        calls_in(&env, &resolved.state),
+        [pair("lib.rs:f", "lib.rs:m")]
+    );
+
+    let past = tempfile::tempdir().unwrap();
+    write_all(past.path(), &[("lib.rs", &alias_chain(1100))]);
+    let (resolved, skipped) = resolve_repo(&env, past.path());
+    assert!(skipped.is_empty());
+    assert_eq!(calls_in(&env, &resolved.state), []);
+}

@@ -163,3 +163,30 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
     );
     assert!(graph.state.edges.is_empty());
 }
+
+fn link_on_small_stack(env: &Env, root: &Path) -> DirtyGraph {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .stack_size(512 * 1024)
+        .build()
+        .unwrap()
+        .install(|| link_repo(env, root))
+}
+
+#[test]
+fn a_branch_arm_ending_in_a_member_of_deeply_nested_calls_links_on_a_small_stack() {
+    let levels = 20_000;
+    let source = format!(
+        "fun g(c: Boolean) {{\n    val v = if (c) {}0{}.x else 0\n}}\n",
+        "f(".repeat(levels),
+        ")".repeat(levels)
+    );
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("a.kt", source.as_bytes())]);
+    let env = Env::with_limits(SupportLang::Kotlin, Limits::UNLIMITED).unwrap();
+    let graph = link_on_small_stack(&env, repo.path());
+    let tree = &graph.state.trees[0];
+    assert_eq!(tree.label, "a.kt");
+    assert!(tree.root().descendants().count() > 2 * levels);
+    assert_eq!(graph.dirty.len(), 1);
+}

@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
+use crate::constants::{MAX_RESOLVE_DEPTH, PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::file_tree::LookupConfig;
 use crate::intern::Lang;
@@ -1541,7 +1541,9 @@ struct Resolving((u32, u32));
 
 impl Resolving {
     fn enter(key: (u32, u32)) -> Option<Self> {
-        let entered = RESOLVING.with_borrow_mut(|resolving| resolving.insert(key));
+        let entered = RESOLVING.with_borrow_mut(|resolving| {
+            resolving.len() < MAX_RESOLVE_DEPTH && resolving.insert(key)
+        });
         CUT.set(CUT.get() || !entered);
         entered.then_some(Self(key))
     }

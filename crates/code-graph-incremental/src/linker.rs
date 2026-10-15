@@ -986,12 +986,14 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn tail_sym(&self, node: Cursor<'_>) -> u32 {
-        match node.last_named() {
-            Some(c) if c.size() > 1 => self.tail_sym(c),
-            Some(c) => c.sym(),
-            None => node.sym(),
+    fn tail_sym(&self, mut node: Cursor<'_>) -> u32 {
+        while let Some(child) = node.last_named() {
+            if child.children().next().is_none() {
+                return child.sym();
+            }
+            node = child;
         }
+        node.sym()
     }
 
     fn assigned_names(c: Cursor) -> FxHashSet<u32> {
