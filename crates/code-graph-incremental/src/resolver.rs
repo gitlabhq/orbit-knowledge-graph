@@ -1421,9 +1421,13 @@ fn dispatch(
             let class = match reaching {
                 Some(reaching) if reaching.len() > 1 => lub(
                     ctx,
-                    reaching
-                        .iter()
-                        .map(|e| producer_class(ctx, ctx.corpus.follow(e))),
+                    reaching.iter().map(|e| {
+                        let reached = ctx.corpus.follow(e);
+                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
+                            true => class,
+                            false => producer_class(ctx, reached),
+                        }
+                    }),
                 ),
                 _ => class,
             };

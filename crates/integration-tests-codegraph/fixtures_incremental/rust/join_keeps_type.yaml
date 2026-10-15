@@ -1,0 +1,46 @@
+name: "Rust: a value merged by a join keeps its type"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "join_keeps_type"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub struct Node;
+
+      impl Node {
+          pub fn new() -> Node {
+              Node
+          }
+
+          pub fn next(&self) -> Node {
+              Node
+          }
+
+          pub fn visit(&self) {}
+      }
+
+      pub fn walk(c: bool) {
+          let mut n = Node::new();
+          if c {
+              n = n.next();
+          }
+          n.visit();
+      }
+
+tests:
+  - name: "walk calls visit on the value that the join merges"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'walk'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: new } }
+      - { row: { callee: next } }
+      - { row: { callee: visit } }
