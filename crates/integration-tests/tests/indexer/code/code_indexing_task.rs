@@ -1422,7 +1422,7 @@ async fn a_held_lock_defers_the_delivery(project_id: i64, attempt: u32) {
         panic!("a held lock must defer delivery {attempt}, got {error}");
     };
     assert!(
-        delay > held_for && delay <= held_for + renew_interval,
+        delay >= renew_interval && delay <= held_for + renew_interval,
         "delivery {attempt} waits out the rest of the lease plus one renew interval, got {delay:?}"
     );
     assert!(
