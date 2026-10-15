@@ -534,7 +534,11 @@ impl<'t> Fold<'t> {
             .child(C::Member)
             .and_then(|member| member.child(C::Object))
             .map_or(callee, |object| object.chain_root());
-        if !callee.has(C::Ivar) && !self.lookup(root.sym()).iter().all(is_name) {
+        if !callee.has(C::Ivar)
+            && !root.is(C::Call)
+            && !root.has(C::Call)
+            && !self.lookup(root.sym()).iter().all(is_name)
+        {
             self.shadowed_calls.insert(c.index());
         }
         let from = self.enclosing();
