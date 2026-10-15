@@ -327,10 +327,13 @@ impl ItemPhase<Parsed> for Rewrite {
     ) -> Result<Rewritten, Killed> {
         let budget =
             Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms).on_thread_cpu();
+        let root = tree.root;
+        if tree.root().kind() == 0 {
+            tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
+        }
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
-        let root = tree.root;
         if !tree.root().is(crate::canonical::Canonical::SourceFile) {
             tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
         }
