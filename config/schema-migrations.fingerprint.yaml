@@ -69,8 +69,8 @@ sources:
   edges/triggered_by_pipeline.yaml: 4ecbaa1df33f6b0beb1b64355e27b77455c7ebced8339cd75c30a0177382d244
   edges/triggers_pipeline.yaml: f229246cf2a6876dc81ed2e17605ed4647c65b2bf16bb94744ccb2690b1c0717
   edges/updated_by.yaml: 2d2d05f5d0884adda323a6f9f5183e1b8be16db58148bf3dfbfbe86717b73624
-  nodes/agents/agent_session.sql.j2: 105b1d23836f77ad8f886c5ff4bde581389f6b3789399be6a31930c624a92099
-  nodes/agents/agent_session.yaml: 1ccfdc1eb1cb8037f441263925a655e6b680f17336bc9703ed642f5d8e44bb13
+  nodes/agents/agent_session.sql.j2: 88d85a02b796efc9390b9f36f88ecf6f142637183040f6ce18af0443baf8445d
+  nodes/agents/agent_session.yaml: c66a88dbba864ed5400a8356cfe6e05133300aeb926c07564ccc4d2f0f5b60cb
   nodes/ci/deployment.yaml: b4a5d3cc1accf84e1cbeaecca9f5d596000112017e1bb2d279b426fdb5229bf9
   nodes/ci/environment.yaml: 04d0c5581ffe98db93ab22d9100c891ffb94d8b7784b5b08b52d6c7ae309712f
   nodes/ci/job.yaml: 10872a99c1ce0bfa7febf852e2434adf4be2e558c30a5674f9ed8067677d7e7f

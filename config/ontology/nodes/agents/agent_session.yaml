@@ -69,6 +69,9 @@ properties:
       30: onboarding_guide
       31: flow_creator
       32: other
+      33: ambient
+      34: issue_to_merge_request
+      35: convert_to_gitlab_ci
 
   source:
     type: enum

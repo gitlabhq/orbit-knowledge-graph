@@ -14,7 +14,8 @@ SELECT
       'business_context_security_guidelines',
       'orbit_agent', 'duo_planner', 'security_analyst_agent', 'analytics_agent',
       'ci_expert_agent', 'duo_permissions_assistant', 'support_assistant',
-      'onboarding_guide', 'flow_creator'
+      'onboarding_guide', 'flow_creator',
+      'ambient', 'issue_to_merge_request', 'convert_to_gitlab_ci'
     ),
     splitByChar('/', coalesce(flow_type, ''))[1],
     'other'
