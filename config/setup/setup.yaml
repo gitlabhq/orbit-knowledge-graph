@@ -15,8 +15,8 @@ instructions: |
   - Reuse shown source instead of rereading unchanged files.
 
 remote:
-  remote_grep: " Also finds GitLab issues, MRs, commits, comments; a `group/project` path searches its code."
-  remote_context: " and GitLab entities"
+  remote_grep: " Also finds GitLab issues, MRs, commits, comments, `group/project` code."
+  remote_context: " and GitLab entities (`--branch x`: a branch's MR and CI)"
   remote_context_example: " MergeRequest[42]"
 
 nudge_search: |

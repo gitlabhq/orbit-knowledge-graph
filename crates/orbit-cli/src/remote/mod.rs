@@ -2,6 +2,7 @@ use std::io::Write;
 
 use self::error::{EXIT_GENERIC, RemoteError};
 
+pub(crate) mod branch;
 pub(crate) mod client;
 pub(crate) mod context;
 pub(crate) mod dsl;

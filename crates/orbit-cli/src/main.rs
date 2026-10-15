@@ -362,8 +362,13 @@ fn sql_long_about() -> String {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
-    #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
+    #[arg(value_name = "TARGET", help = context_target_help())]
     target: Vec<String>,
+
+    /// GitLab merge request, or else latest pipeline, of a branch: its name or
+    /// words from it. Without a value, or without targets, the current branch.
+    #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "")]
+    branch: Option<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -1301,7 +1306,22 @@ mod tests {
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
-        assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
+        let Commands::Context(bare) = Cli::parse_from(["orbit", "context"]).command else {
+            panic!("expected context");
+        };
+        assert!(bare.target.is_empty() && bare.branch.is_none());
+        let Commands::Context(current) = Cli::parse_from(["orbit", "context", "--branch"]).command
+        else {
+            panic!("expected context");
+        };
+        assert_eq!(current.branch.as_deref(), Some(""));
+        let Commands::Context(named) =
+            Cli::parse_from(["orbit", "context", "--branch", "fix-ci", "a.rs"]).command
+        else {
+            panic!("expected context");
+        };
+        assert_eq!(named.branch.as_deref(), Some("fix-ci"));
+        assert_eq!(named.target, vec!["a.rs"]);
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
         for removed in ["--outline", "--related", "--tests"] {
             assert!(
