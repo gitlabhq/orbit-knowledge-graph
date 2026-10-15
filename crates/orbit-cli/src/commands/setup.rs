@@ -1003,29 +1003,38 @@ mod tests {
         assert!(skills.join("orbit.orbit-backup").is_dir());
     }
 
-    #[test]
-    fn an_edited_wrapper_is_backed_up_on_setup_and_kept_on_uninstall() {
-        let dir = tempfile::tempdir().unwrap();
-        let skills = dir.path().join(".agents/skills");
-        let manifest = skills.join("orbit/SKILL.md");
-        install_with_mcp(&["codex"], dir.path());
+    fn install_then_edit_wrapper(dir: &Path) -> (PathBuf, String) {
+        let manifest = dir.join(".agents/skills/orbit/SKILL.md");
+        install_with_mcp(&["codex"], dir);
         let edited = format!(
             "{}Always use project X.\n",
             std::fs::read_to_string(&manifest).unwrap()
         );
-
         std::fs::write(&manifest, &edited).unwrap();
+        (manifest, edited)
+    }
+
+    #[test]
+    fn an_edited_wrapper_is_backed_up_on_setup() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, edited) = install_then_edit_wrapper(dir.path());
+
+        install_with_mcp(&["codex"], dir.path());
+
+        let backup = dir
+            .path()
+            .join(".agents/skills/orbit.orbit-backup/SKILL.md.orbit-backup");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), edited);
+    }
+
+    #[test]
+    fn an_edited_wrapper_is_kept_on_uninstall() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, edited) = install_then_edit_wrapper(dir.path());
+
         uninstall_named(&["codex"], dir.path());
-        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), edited);
 
-        install_with_mcp(&["codex"], dir.path());
-        std::fs::write(&manifest, &edited).unwrap();
-        install_with_mcp(&["codex"], dir.path());
-        assert_eq!(
-            std::fs::read_to_string(skills.join("orbit.orbit-backup/SKILL.md.orbit-backup"))
-                .unwrap(),
-            edited
-        );
+        assert_eq!(std::fs::read_to_string(manifest).unwrap(), edited);
     }
 
     #[test]
