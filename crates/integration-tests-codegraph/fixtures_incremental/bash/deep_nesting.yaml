@@ -14,9 +14,9 @@ fixtures:
       - "target\n}\n\nelse_if() {\nif true; then\n:\n"
       - { repeat: 10000, text: "elif true; then\n:\n" }
       - "fi\ntarget\n}\n\nnested_loop() {\n"
-      - { repeat: 3000, text: "while true; do\n" }
+      - { repeat: 10000, text: "while true; do\n" }
       - ":\n"
-      - { repeat: 3000, text: "done\n" }
+      - { repeat: 10000, text: "done\n" }
       - "target\n}\n\nnested_group() {\n"
       - { repeat: 10000, text: "{\n" }
       - ":\n"

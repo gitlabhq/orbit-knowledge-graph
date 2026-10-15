@@ -176,7 +176,7 @@ display:
       - match: '(__def !(__impl))'
         tag:
           entity: Definition
-          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
       - match: '(__def (__impl))'
         tag:

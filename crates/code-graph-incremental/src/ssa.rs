@@ -27,7 +27,6 @@ pub enum Value {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
 struct PhiNode {
     block: BlockId,
     variable: u32,
@@ -61,11 +60,13 @@ pub struct SsaEngine {
     blocks: Vec<Block>,
     phis: Vec<PhiNode>,
     users: Vec<SmallVec<[PhiId; 2]>>,
+    replaced: Vec<Option<Value>>,
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     frames: Vec<Frame>,
     written: FxHashSet<u32>,
     unsealed: usize,
+    writes: usize,
 }
 
 impl SsaEngine {
@@ -74,11 +75,13 @@ impl SsaEngine {
             blocks: Vec::with_capacity(32),
             phis: Vec::with_capacity(8),
             users: Vec::with_capacity(8),
+            replaced: Vec::with_capacity(8),
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
             frames: Vec::new(),
             written: FxHashSet::default(),
             unsealed: 0,
+            writes: 0,
         }
     }
 
@@ -145,6 +148,10 @@ impl SsaEngine {
         self.add_sealed_successor(header)
     }
 
+    pub fn writes(&self) -> usize {
+        self.writes
+    }
+
     pub fn has_variable_in_block(&self, variable: u32, block: BlockId) -> bool {
         self.current_def
             .get(&variable)
@@ -169,6 +176,7 @@ impl SsaEngine {
     }
 
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
+        self.writes += 1;
         self.written.insert(variable);
         self.current_def
             .entry(variable)
@@ -211,7 +219,9 @@ impl SsaEngine {
                     let block = *block;
                     frames.pop();
                     let value = ret.take().expect("a read returns a value");
-                    self.set(variable, block, value.clone());
+                    if value != Value::Marker {
+                        self.set(variable, block, value.clone());
+                    }
                     ret = Some(value);
                 }
                 Frame::Phi(block) => {
@@ -344,6 +354,7 @@ impl SsaEngine {
             witnesses: [None, None],
         });
         self.users.push(SmallVec::new());
+        self.replaced.push(None);
         id
     }
 
@@ -357,6 +368,7 @@ impl SsaEngine {
     }
 
     fn add_operand(&mut self, phi_id: PhiId, val: Value) {
+        let val = self.forward(&val);
         if val != Value::Phi(phi_id) {
             let phi = &mut self.phis[phi_id.0 as usize];
             if phi.witnesses[0].is_none() {
@@ -404,6 +416,7 @@ impl SsaEngine {
         }
 
         let replacement = same.unwrap_or(Value::Opaque);
+        self.replaced[phi_id.0 as usize] = Some(replacement.clone());
 
         let variable = self.phis[phi_id.0 as usize].variable;
         let block = self.phis[phi_id.0 as usize].block;
@@ -416,7 +429,8 @@ impl SsaEngine {
         let phi_val = Value::Phi(phi_id);
         let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
         phi_users.retain(|user| {
-            *user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
+            self.replaced[user.0 as usize].is_none()
+                && self.phis[user.0 as usize].operands.contains(&phi_val)
         });
         phi_users.sort_unstable_by_key(|user| user.0);
         phi_users.dedup();
@@ -510,7 +524,6 @@ impl SsaEngine {
                     .into_iter()
                     .next()
                     .expect("a trivial phi has exactly one outer value");
-                let phi_vals: Vec<Value> = scc.iter().map(|&p| Value::Phi(p)).collect();
                 for &pid in &scc {
                     let variable = self.phis[pid.0 as usize].variable;
                     let block = self.phis[pid.0 as usize].block;
@@ -520,20 +533,25 @@ impl SsaEngine {
                         block_defs.insert(block, replacement.clone());
                     }
                 }
-                for (i, phi) in self.phis.iter_mut().enumerate() {
+                let in_scc = |value: &Value| matches!(value, Value::Phi(p) if scc_set.contains(p));
+                let mut users: Vec<PhiId> = scc
+                    .iter()
+                    .flat_map(|p| self.users[p.0 as usize].iter().copied())
+                    .collect();
+                users.sort_unstable_by_key(|user| user.0);
+                users.dedup();
+                for user in users {
+                    let phi = &mut self.phis[user.0 as usize];
                     for op in &mut phi.operands {
-                        if phi_vals.contains(op) {
+                        if in_scc(op) {
                             *op = replacement.clone();
                             if let Value::Phi(used) = replacement {
-                                self.users[used.0 as usize]
-                                    .push(PhiId(u32::try_from(i).expect("phi index exceeds u32")));
+                                self.users[used.0 as usize].push(user);
                             }
                         }
                     }
                     for w in &mut phi.witnesses {
-                        if let Some(wv) = w
-                            && phi_vals.contains(wv)
-                        {
+                        if w.as_ref().is_some_and(in_scc) {
                             *w = None;
                         }
                     }
@@ -544,7 +562,25 @@ impl SsaEngine {
         }
     }
 
-    pub(crate) fn resolve_value(&self, value: &Value) -> Vec<Value> {
+    fn forward(&mut self, value: &Value) -> Value {
+        let mut end = value.clone();
+        while let Value::Phi(phi) = end
+            && let Some(next) = &self.replaced[phi.0 as usize]
+        {
+            end = next.clone();
+        }
+        let mut cur = value.clone();
+        while let Value::Phi(phi) = cur
+            && let Some(next) = self.replaced[phi.0 as usize].as_mut()
+            && *next != end
+        {
+            cur = std::mem::replace(next, end.clone());
+        }
+        end
+    }
+
+    pub(crate) fn resolve_value(&mut self, value: &Value) -> Vec<Value> {
+        let value = &self.forward(value);
         if !matches!(value, Value::Phi(_)) {
             return match value {
                 Value::Undefined | Value::Marker => vec![],
@@ -690,10 +726,12 @@ mod tests {
                 self.oracle_marker(variable, block)
             };
 
-            self.current_def
-                .entry(variable)
-                .or_default()
-                .insert(block, val.clone());
+            if val != Value::Marker {
+                self.current_def
+                    .entry(variable)
+                    .or_default()
+                    .insert(block, val.clone());
+            }
             val
         }
 
@@ -790,12 +828,12 @@ mod tests {
             }
 
             let phi_val = Value::Phi(phi_id);
-            let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
-            phi_users.retain(|user| {
-                *user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
-            });
-            phi_users.sort_unstable_by_key(|user| user.0);
-            phi_users.dedup();
+            let phi_users: Vec<PhiId> = (0..self.phis.len() as u32)
+                .map(PhiId)
+                .filter(|&user| {
+                    user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
+                })
+                .collect();
 
             for user_id in &phi_users {
                 let user = &mut self.phis[user_id.0 as usize];
@@ -804,10 +842,6 @@ mod tests {
                         *op = replacement.clone();
                     }
                 }
-                if let Value::Phi(used) = replacement {
-                    self.users[used.0 as usize].push(*user_id);
-                }
-                let user = &mut self.phis[user_id.0 as usize];
                 for w in &mut user.witnesses {
                     if w.as_ref() == Some(&phi_val) {
                         *w = None;
@@ -865,8 +899,8 @@ mod tests {
                 _ => {}
             }
         }
-        let mut ops = Vec::new();
-        let mut unsealed: Vec<usize> = (0..n).collect();
+        let mut ops: Vec<Op> = [0].into_iter().chain(spine..n).map(Op::Seal).collect();
+        let mut unsealed: Vec<usize> = (1..spine).collect();
         for _ in 0..3 * n {
             match next(&mut state) % 4 {
                 0 => ops.push(Op::Write(
@@ -887,13 +921,7 @@ mod tests {
         (preds, ops)
     }
 
-    type Replay = (
-        Vec<Vec<Value>>,
-        Vec<PhiNode>,
-        Vec<SmallVec<[PhiId; 2]>>,
-        FxHashMap<u32, FxHashMap<BlockId, Value>>,
-        FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
-    );
+    type Replay = (Vec<Vec<Value>>, FxHashMap<BlockId, FxHashMap<u32, PhiId>>);
 
     fn replay(preds: &[Vec<usize>], ops: &[Op], oracle: bool) -> Replay {
         let mut ssa = SsaEngine::new();
@@ -930,13 +958,7 @@ mod tests {
                 reads.push(read(&mut ssa, variable, id));
             }
         }
-        (
-            reads,
-            ssa.phis,
-            ssa.users,
-            ssa.current_def,
-            ssa.incomplete_phis,
-        )
+        (reads, ssa.incomplete_phis)
     }
 
     #[test]
@@ -1011,6 +1033,72 @@ mod tests {
         }
         ssa.write_variable(1, elsewhere, Value::LocalDef(0));
         assert_eq!(ssa.read_variable(1, a), vec![Value::Opaque]);
+    }
+
+    #[test]
+    fn a_read_after_a_loop_leaves_no_marker_in_the_body() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable(1, entry, Value::LocalDef(0));
+        let (header, body) = ssa.begin_loop(entry);
+        let exit = ssa.finish_loop(header, body);
+        assert_eq!(ssa.read_variable(1, exit), vec![Value::LocalDef(0)]);
+        assert_eq!(ssa.read_variable(1, body), vec![Value::LocalDef(0)]);
+        assert!(
+            ssa.phis
+                .iter()
+                .all(|phi| !phi.operands.contains(&Value::Marker))
+        );
+    }
+
+    #[test]
+    fn many_redundant_phi_cycles_collapse_through_their_users() {
+        let mut ssa = SsaEngine::new();
+        let block = ssa.add_block();
+        let cycles: Vec<_> = (0..10_000)
+            .map(|k| {
+                let (a, b) = (ssa.new_phi(block, 1), ssa.new_phi(block, 1));
+                ssa.add_operand(a, Value::LocalDef(k));
+                ssa.add_operand(a, Value::Phi(b));
+                ssa.add_operand(b, Value::Phi(a));
+                ssa.add_operand(b, Value::Phi(a));
+                (k, a)
+            })
+            .collect();
+        ssa.remove_redundant_phi_sccs();
+        for (k, a) in cycles {
+            assert_eq!(ssa.resolve_value(&Value::Phi(a)), vec![Value::LocalDef(k)]);
+        }
+    }
+
+    #[test]
+    fn nested_loops_keep_short_users_lists_and_direct_pointers() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable(1, entry, Value::LocalDef(0));
+        let (mut headers, mut reads) = (Vec::new(), Vec::new());
+        let mut block = entry;
+        for _ in 0..1_000 {
+            let (header, body) = ssa.begin_loop(block);
+            headers.push(header);
+            reads.push(ssa.read_variable_internal(1, body));
+            block = body;
+        }
+        for header in headers.into_iter().rev() {
+            block = ssa.finish_loop(header, block);
+            assert!(ssa.users.iter().all(|users| users.len() <= 2));
+        }
+        for read in &reads {
+            assert_eq!(ssa.resolve_value(read), vec![Value::LocalDef(0)]);
+        }
+        assert!(
+            ssa.replaced
+                .iter()
+                .flatten()
+                .all(|value| !matches!(value, Value::Phi(_)))
+        );
     }
 
     #[test]

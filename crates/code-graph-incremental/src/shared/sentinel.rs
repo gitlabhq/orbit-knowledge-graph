@@ -1,6 +1,7 @@
 //! Cooperative deadlines: hot loops call `check()`, and past the budget it
 //! returns `Killed` and the caller unwinds.
 
+use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use cpu_time::ThreadTime;
@@ -17,6 +18,7 @@ pub struct Limits {
     pub max_tree_depth: usize,
     pub max_cross_file_names: usize,
     pub max_manifest_bytes: u64,
+    pub max_file_edges: usize,
 }
 
 impl Limits {
@@ -31,6 +33,7 @@ impl Limits {
         max_tree_depth: 0,
         max_cross_file_names: 0,
         max_manifest_bytes: 0,
+        max_file_edges: 0,
     };
 }
 
@@ -44,23 +47,30 @@ pub enum Stop {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Killed {
     pub cancelled: bool,
-    pub label: &'static str,
+    pub label: Cow<'static, str>,
     pub path: String,
+    pub family: Option<crate::treesitter::SupportLang>,
     pub elapsed: Duration,
     pub budget: Duration,
     pub stop: Option<Stop>,
 }
 
 impl Killed {
-    pub fn limit(label: &'static str, path: &str, observed: usize, cap: usize) -> Self {
+    pub fn limit(
+        label: impl Into<Cow<'static, str>>,
+        path: &str,
+        observed: usize,
+        cap: usize,
+    ) -> Self {
         Self::stopped(label, path, Stop::Reached { observed, cap })
     }
 
-    pub fn stopped(label: &'static str, path: &str, stop: Stop) -> Self {
+    pub fn stopped(label: impl Into<Cow<'static, str>>, path: &str, stop: Stop) -> Self {
         Self {
             cancelled: false,
-            label,
+            label: label.into(),
             path: path.to_string(),
+            family: None,
             elapsed: Duration::ZERO,
             budget: Duration::ZERO,
             stop: Some(stop),
@@ -73,7 +83,7 @@ impl std::fmt::Display for Killed {
         if self.cancelled {
             return write!(f, "{} cancelled", self.label);
         }
-        let (label, path) = (self.label, &self.path);
+        let (label, path) = (&self.label, &self.path);
         let (e, b) = (self.elapsed.as_millis(), self.budget.as_millis());
         match (self.stop, path.is_empty()) {
             (Some(Stop::Reached { observed, cap }), true) => {
@@ -179,8 +189,9 @@ impl Sentinel {
         if over.is_some() || cancelled {
             return Err(Killed {
                 cancelled,
-                label: self.label,
+                label: self.label.into(),
                 path: self.path.clone(),
+                family: None,
                 elapsed: over.unwrap_or_else(|| self.started.elapsed()),
                 budget: self.budget,
                 stop: None,
@@ -225,7 +236,7 @@ mod tests {
         assert!(s.check().is_ok());
         std::thread::sleep(Duration::from_millis(3));
         let k = s.check().unwrap_err();
-        assert_eq!((k.label, k.path.as_str()), ("link", "a.py"));
+        assert_eq!((k.label.as_ref(), k.path.as_str()), ("link", "a.py"));
     }
 
     #[test]

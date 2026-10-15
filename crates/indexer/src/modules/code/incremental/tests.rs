@@ -32,7 +32,17 @@ impl IndexFixture {
         options: Options,
         sink: Arc<OnBatch>,
     ) -> Result<IndexingReport, SinkError> {
-        let repository = load(stream(build_tar_gz(files)), &config()).await.unwrap();
+        self.run_with(&config(), files, options, sink).await
+    }
+
+    async fn run_with(
+        &self,
+        config: &CodeIndexingPipelineConfig,
+        files: &[(&str, &[u8])],
+        options: Options,
+        sink: Arc<OnBatch>,
+    ) -> Result<IndexingReport, SinkError> {
+        let repository = load(stream(build_tar_gz(files)), config).await.unwrap();
         run(
             repository,
             options,
@@ -94,6 +104,7 @@ struct Timings {
     errors: usize,
     skipped_paths: Vec<String>,
     skipped_reasons: Vec<&'static str>,
+    skipped_families: Vec<Option<String>>,
     limited_reasons: Vec<&'static str>,
 }
 
@@ -140,6 +151,11 @@ async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Li
         errors: report.errors.len(),
         skipped_paths,
         skipped_reasons,
+        skipped_families: report
+            .skipped
+            .iter()
+            .map(|file| file.family.clone())
+            .collect(),
         limited_reasons,
     }
 }
@@ -191,6 +207,20 @@ async fn files_nested_past_the_default_depth_limit_are_skipped() {
     let timings = timings_for(files, limits).await;
     assert_eq!(timings.skipped_paths, ["nested.js"]);
     assert_eq!(timings.skipped_reasons, ["deeply_nested"]);
+    assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+}
+
+#[tokio::test]
+async fn a_long_operator_chain_is_indexed_under_the_default_depth_limit() {
+    let terms = vec!["c"; 5_000].join(" +\n");
+    let source = format!("function t() {{}}\nfunction f(c) {{\nt();\nreturn {terms};\n}}\n");
+    let files: &[(&str, &[u8])] = &[("root/sum.js", source.as_bytes())];
+    let limits = code_graph_incremental::Limits {
+        max_tree_depth: limits(&config()).max_tree_depth,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    let timings = timings_for(files, limits).await;
+    assert!(timings.skipped_paths.is_empty());
     assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
 }
 
@@ -265,6 +295,7 @@ async fn the_cross_file_budget_stops_package_reexports() {
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
     assert_eq!(timings.skipped_reasons, ["timeout_cross_file"]);
+    assert_eq!(timings.skipped_families, [Some("csharp".to_owned())]);
     assert_eq!(timings.languages, [("csharp".to_owned(), 600)]);
 }
 
@@ -283,6 +314,7 @@ async fn cross_file_resolution_stops_at_the_name_limit() {
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
     assert_eq!(timings.skipped_reasons, ["too_many_names"]);
+    assert_eq!(timings.skipped_families, [Some("csharp".to_owned())]);
     assert_eq!(timings.languages, [("csharp".to_owned(), 200)]);
 }
 
@@ -321,8 +353,8 @@ async fn a_read_inside_deeply_nested_loops_links_inside_the_budget() {
 }
 
 #[tokio::test]
-async fn a_value_copied_into_its_own_fields_is_reported_at_the_copy_limit() {
-    let copies = "a.x = a;\na.y = a;\n".repeat(40);
+async fn a_value_copied_into_its_own_fields_links_without_a_copy_limit() {
+    let copies = "a.x = a;\na.y = a;\n".repeat(5_000);
     let body = format!("fn target() {{}}\nfn self_fields(mut a: Node) {{\n{copies}target();\n}}\n");
     let files: &[(&str, &[u8])] = &[
         ("root/src/lib.rs", body.as_bytes()),
@@ -330,25 +362,29 @@ async fn a_value_copied_into_its_own_fields_is_reported_at_the_copy_limit() {
     ];
     let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
     assert!(timings.skipped_paths.is_empty());
-    assert_eq!(timings.limited_reasons, ["too_many_field_copies"]);
+    assert!(timings.limited_reasons.is_empty());
 }
 
 #[tokio::test]
 async fn a_file_with_more_edges_than_the_limit_is_skipped() {
-    let functions: String = (0..2_000)
-        .map(|i| format!("function a{i}() {{}}\n"))
-        .collect();
-    let assigns: String = (0..2_000)
+    let functions: String = (0..50).map(|i| format!("function a{i}() {{}}\n")).collect();
+    let assigns: String = (0..50)
         .map(|i| format!("if (c) {{ f = a{i}; }}\n"))
         .collect();
-    let calls = "f();\n".repeat(2_000);
+    let calls = "f();\n".repeat(50);
     let wide = format!("{functions}function m(c) {{\nlet f = a0;\n{assigns}{calls}}}\n");
     let files: &[(&str, &[u8])] = &[
         ("root/wide.js", wide.as_bytes()),
         ("root/flat.js", b"function flat() {}\n"),
     ];
-    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
-    assert_eq!(timings.skipped_paths, ["wide.js"]);
+    let limits = code_graph_incremental::Limits {
+        max_file_edges: 1_000,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    assert_eq!(timings_for(files, limits).await.skipped_paths, ["wide.js"]);
+    let unlimited = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert!(unlimited.skipped_paths.is_empty());
+    let timings = timings_for(files, limits).await;
     assert_eq!(timings.skipped_reasons, ["too_many_edges"]);
 }
 
@@ -720,6 +756,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
     assert_eq!(mapped.max_tree_depth, configured.max_tree_depth);
     assert_eq!(mapped.max_cross_file_names, configured.max_cross_file_names);
     assert_eq!(mapped.max_manifest_bytes, configured.max_manifest_bytes);
+    assert_eq!(mapped.max_file_edges, configured.max_file_edges);
 
     let unlimited = limits(&CodeIndexingPipelineConfig {
         max_files: 0,
@@ -731,6 +768,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         max_tree_depth: 0,
         max_cross_file_names: 0,
         max_manifest_bytes: 0,
+        max_file_edges: 0,
         ..configured
     });
     assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);
@@ -821,13 +859,39 @@ async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
     let repository = load(stream(build_tar_gz(&files)), &config).await.unwrap();
     assert_eq!(repository.usage().files, 5);
     assert_eq!(repository.usage().dropped_listed, 7);
+    let logs = Logs::default();
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
     let sink = Arc::new(|_: &str, _: RecordBatch| Ok(()));
     let report = IndexFixture::new()
-        .run(&files, options(), sink)
+        .run_with(&config, &files, options(), sink)
         .await
         .unwrap();
     assert!(report.errors.is_empty());
     assert_eq!(report.stats.files_parsed, 2);
+    assert_eq!(report.stats.files_discovered, 12);
+    assert_eq!(report.stats.files_skipped, 10);
+    let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("WARN"), "{logs}");
+    assert!(logs.contains("dropped=7"), "{logs}");
+}
+
+#[derive(Clone, Default)]
+struct Logs(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Logs {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -880,7 +944,7 @@ async fn manifests_past_the_byte_limit_are_reported_and_not_read() {
 }
 
 #[tokio::test]
-async fn nested_definitions_past_the_member_limits_are_reported_without_a_skip() {
+async fn nested_definitions_index_without_a_member_limit() {
     let files: Vec<(String, String)> = (0..26)
         .map(|file| {
             let opens: String = (0..500)
@@ -901,12 +965,19 @@ async fn nested_definitions_past_the_member_limits_are_reported_without_a_skip()
         .collect();
     let timings = timings_for(&files, code_graph_incremental::Limits::UNLIMITED).await;
     assert!(timings.skipped_paths.is_empty());
-    assert_eq!(timings.limited_reasons.len(), 27);
-    assert!(
-        timings
-            .limited_reasons
-            .iter()
-            .all(|reason| *reason == "too_many_members")
-    );
+    assert_eq!(timings.limited_reasons, vec!["fqn_truncated"; 26]);
+    assert_eq!(timings.errors, 0);
+}
+
+#[tokio::test]
+async fn qualified_names_past_the_segment_limit_keep_their_innermost_segments() {
+    let opens: String = (0..70)
+        .map(|level| format!("function f{level}() {{\n"))
+        .collect();
+    let source = format!("{opens}{}", "}\n".repeat(70));
+    let files: &[(&str, &[u8])] = &[("root/deep.js", source.as_bytes())];
+    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.limited_reasons, ["fqn_truncated"]);
     assert_eq!(timings.errors, 0);
 }
