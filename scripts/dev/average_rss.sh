@@ -14,7 +14,7 @@ set -- "${POSITIONAL[@]}"
 
 if [ -z "$1" ]; then
   echo '{"error": "Usage: ./average_rss.sh [--legacy] <path> [sampling_interval_seconds]"}'
-  echo '{"example": "./average_rss.sh ../gdk/gitlab 0.025"}'
+  echo '{"example": "./average_rss.sh ../gitlab-caproni/repos/gitlab 0.025"}'
   exit 1
 fi
 
