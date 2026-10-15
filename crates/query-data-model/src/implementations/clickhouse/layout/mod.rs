@@ -222,7 +222,7 @@ impl crate::Relational<ClickHouse> {
     pub fn dependencies(&self) -> &BTreeMap<String, BTreeSet<String>> {
         &self.metadata.dependencies
     }
-    fn deployed_tables(&self) -> impl Iterator<Item = &Table> {
+    pub fn deployed_tables(&self) -> impl Iterator<Item = &Table> {
         self.tables()
             .iter()
             .filter(|table| !self.copies().iter().any(|copy| copy.table == table.name))

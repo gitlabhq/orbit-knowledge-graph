@@ -47,7 +47,7 @@ cases:
       duckdb:
         planned:
           ctes:
-            exact_order: [_filter_a, _narrow_b]
+            absent: true
           expect:
             - "(Filter NOT (b.name IN ['skip', 'other']), ... (_))"
 

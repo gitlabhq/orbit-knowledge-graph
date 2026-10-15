@@ -8,7 +8,7 @@ pub struct VariantRoute {
     pub foreign_key: Option<ForeignKey>,
 }
 
-use crate::{EntityId, GraphCatalog, PropertyId, Relationship, RelationshipId};
+use crate::{EntityId, GraphCatalog, PropertyId, RelationshipId, RelationshipVariant};
 
 #[derive(Debug, Clone)]
 pub enum PropertyRealization {
@@ -44,24 +44,20 @@ pub struct PathColumn {
 #[derive(Debug)]
 pub struct RelationshipRoute<'a> {
     pub table: &'a str,
-    pub(crate) graph: &'a GraphCatalog,
-    pub(crate) relationship: &'a Relationship,
+    pub(crate) variants: Vec<&'a RelationshipVariant>,
 }
 
 impl RelationshipRoute<'_> {
     pub fn variants(&self) -> impl Iterator<Item = &crate::RelationshipVariant> + '_ {
-        self.relationship
-            .variants
-            .iter()
-            .map(|variant| self.graph.variant(*variant))
+        self.variants.iter().copied()
     }
 
     pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.variants().map(|variant| variant.source)
+        self.variants.iter().map(|variant| variant.source)
     }
 
     pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.variants().map(|variant| variant.target)
+        self.variants.iter().map(|variant| variant.target)
     }
 
     pub fn has_source(&self, entity: EntityId) -> bool {
