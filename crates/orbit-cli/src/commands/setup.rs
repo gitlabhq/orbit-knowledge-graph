@@ -808,6 +808,22 @@ mod tests {
     }
 
     #[test]
+    fn a_legacy_orbit_cli_copy_in_the_claude_dir_is_migrated_and_uninstalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_copy = dir.path().join(".claude/skills/orbit-cli");
+        write_legacy_skill(&legacy_copy);
+
+        install_with_mcp(&["claude"], dir.path());
+
+        assert!(!legacy_copy.exists());
+        assert!(dir.path().join(".claude/skills/orbit/SKILL.md").is_file());
+
+        write_legacy_skill(&legacy_copy);
+        uninstall_named(&["claude"], dir.path());
+        assert!(!legacy_copy.exists());
+    }
+
+    #[test]
     fn uninstall_removes_a_legacy_skill_and_keeps_one_the_user_owns() {
         let dir = tempfile::tempdir().unwrap();
         let legacy = dir.path().join(".agents/skills/orbit-cli");

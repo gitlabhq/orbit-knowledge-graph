@@ -51,6 +51,8 @@ impl Installer for Skill<'_> {
                     target,
                     report,
                 )?;
+                // Where symlinks fail, the earlier release wrote a real copy instead.
+                remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
             }
             remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
             write_skill_files(&skill.root, &skill.label, self.tree, report)?;
@@ -81,6 +83,8 @@ impl Installer for Skill<'_> {
                     target,
                     report,
                 )?;
+                // Where symlinks fail, the earlier release wrote a real copy instead.
+                remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
             }
             remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
             if let Some(link) = &skill.link {
