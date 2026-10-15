@@ -1,0 +1,90 @@
+stage: coerce
+parity: false
+
+cases:
+  - name: Integer enum values coerce to their labels
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":1}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.state = 1 RETURN mr
+    expect: { input: { nodes: [{ filters: { state: [{ value: opened }] } }] } }
+
+  - name: Integer enum lists coerce every member
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"in":[1,2,3,4]}}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.state IN [1, 2, 3, 4] RETURN mr
+    expect: { input: { nodes: [{ filters: { state: [{ value: [opened, closed, merged, locked] }] } }] } }
+
+  - name: Unknown integers in enum lists pass through
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"in":[1,999,3]}}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.state IN [1, 999, 3] RETURN mr
+    expect: { input: { nodes: [{ filters: { state: [{ value: [opened, 999, merged] }] } }] } }
+
+  - name: String enum values stay unchanged
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.state = 'opened' RETURN mr
+    expect: { input: { nodes: [{ filters: { state: [{ value: opened }] } }] } }
+
+  - name: Unknown integer enum values pass through
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":999}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.state = 999 RETURN mr
+    expect: { input: { nodes: [{ filters: { state: [{ value: 999 }] } }] } }
+
+  - name: Null checks on enums carry no value
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"is_null":true}}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.state IS NULL RETURN mr
+    expect: { input: { nodes: [{ filters: { state: [{ value: null }] } }] } }
+
+  - name: Unknown properties pass through normalization
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"nonexistent_field":42}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.nonexistent_field = 42 RETURN mr
+    expect: { input: { nodes: [{ filters: { nonexistent_field: [{ value: 42 }] } }] } }
+
+  - name: Boolean properties stay unchanged
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"squash":true}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.squash = true RETURN mr
+    expect: { input: { nodes: [{ filters: { squash: [{ value: true }] } }] } }
+
+  - name: String lists stay unchanged
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"source_branch":{"in":["main","develop"]}}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.source_branch IN ['main', 'develop'] RETURN mr
+    expect: { input: { nodes: [{ filters: { source_branch: [{ value: [main, develop] }] } }] } }
+
+  - name: Traversals coerce enums on every node and leave other values alone
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"admin","id":42}},{"id":"mr","entity":"MergeRequest","filters":{"state":3,"draft":false,"title":{"contains":"fix"}}},{"id":"p","entity":"Pipeline","filters":{"source":10,"failure_reason":1}},{"id":"n"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"TRIGGERED","from":"mr","to":"p"}]}'
+      gql: "MATCH (u:User {username: 'admin'})-[:AUTHORED]->(mr:MergeRequest {state: 3, draft: false})-[:TRIGGERED]->(p:Pipeline {source: 10, failure_reason: 1}) WHERE mr.title CONTAINS 'fix' RETURN u, mr, p"
+    expect:
+      input:
+        nodes:
+          $contains:
+            - id: u
+              filters: { username: [{ value: admin }] }
+            - id: mr
+              filters: { state: [{ value: merged }], draft: [{ value: false }], title: [{ value: fix }] }
+            - id: p
+              filters: { source: [{ value: merge_request_event }], failure_reason: [{ value: config_error }] }
+      json: { input: { nodes: { $contains: [{ id: u, filters: { id: [{ value: 42 }] } }] } } }
+
+  - name: Work item enums coerce to their labels
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","filters":{"state":2,"work_item_type":8}}]}'
+      gql: "MATCH (wi:WorkItem {state: 2, work_item_type: 8}) RETURN wi"
+    expect: { input: { nodes: [{ id: wi, filters: { state: [{ value: closed }], work_item_type: [{ value: epic }] } }] } }
+
+  - name: Integer ID filters stay unchanged
+    query: { json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"id":1}}]}' }
+    missing_frontends: { gql: GQL promotes id equality into node_ids before normalization. }
+    expect: { input: { nodes: [{ id: u, filters: { id: [{ value: 1 }] } }] } }
+
+  - name: Unknown entities reject during normalization
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"x","entity":"UnknownEntity","filters":{"foo":123}}]}'
+      gql: "MATCH (x:UnknownEntity {foo: 123}) RETURN x"
+    expect: { error: { reason: ontology } }

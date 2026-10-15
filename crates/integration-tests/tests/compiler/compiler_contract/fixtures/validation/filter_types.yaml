@@ -1,0 +1,184 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: String values match string properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}}]}'
+      gql: MATCH (u:User) WHERE u.username = 'alice' RETURN u
+
+  - name: Integer values match integer properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":42}}]}'
+      gql: MATCH (n:Note) WHERE n.noteable_id = 42 RETURN n
+
+  - name: Integers beyond i64 still count as integers
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":9223372036854775808}}]}'
+      gql: MATCH (n:Note) WHERE n.noteable_id = 9223372036854775808 RETURN n
+
+  - name: Boolean values match boolean properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"confidential":true}}]}'
+      gql: MATCH (n:Note) WHERE n.confidential = true RETURN n
+
+  - name: String lists match string properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"in":["alice","bob"]}}}]}'
+      gql: MATCH (u:User) WHERE u.username IN ['alice', 'bob'] RETURN u
+
+  - name: Integer lists match integer properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":{"in":[1,2,3]}}}]}'
+      gql: MATCH (n:Note) WHERE n.noteable_id IN [1, 2, 3] RETURN n
+
+  - name: Null checks skip value type checks
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":{"is_null":true}}}]}'
+      gql: MATCH (u:User) WHERE u.username IS NULL RETURN u
+
+  - name: Integers reject on string properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":42}}]}'
+      gql: MATCH (u:User) WHERE u.username = 42 RETURN u
+    expect: { error: { contains: [expected String] } }
+
+  - name: Strings reject on integer properties
+    query:
+      json:
+        - '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":"abc"}}]}'
+        - '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":"bad"}}]}'
+      gql:
+        - MATCH (n:Note) WHERE n.noteable_id = 'abc' RETURN n
+        - MATCH (n:Note) WHERE n.noteable_id = 'bad' RETURN n
+    expect: { error: { contains: [expected Int] } }
+
+  - name: Strings reject on boolean properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"confidential":"yes"}}]}'
+      gql: MATCH (n:Note) WHERE n.confidential = 'yes' RETURN n
+    expect: { error: { contains: [expected Bool] } }
+
+  - name: Mixed-type lists name the mismatched element
+    query:
+      json:
+        - '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":{"in":[1,"two",3]}}}]}'
+        - '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":{"in":[1,"bad",3]}}}]}'
+      gql:
+        - MATCH (n:Note) WHERE n.noteable_id IN [1, 'two', 3] RETURN n
+        - MATCH (n:Note) WHERE n.noteable_id IN [1, 'bad', 3] RETURN n
+    expect: { error: { contains: ["element [1]"] } }
+
+  - name: Floats reject on integer properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"noteable_id":3.14}}]}'
+      gql: MATCH (n:Note) WHERE n.noteable_id = 3.14 RETURN n
+    expect: { error: { contains: ["is a float, not an integer"] } }
+
+  - name: Integers widen to float properties
+    ontology: { nodes: { Metric: { score: float } } }
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"m","entity":"Metric","filters":{"score":42}}]}'
+      gql: MATCH (m:Metric) WHERE m.score = 42 RETURN m
+
+  - name: Strings match enum properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":"human"}}]}'
+      gql: MATCH (u:User) WHERE u.user_type = 'human' RETURN u
+
+  - name: Integers match enum properties before coercion
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":0}}]}'
+      gql: MATCH (u:User) WHERE u.user_type = 0 RETURN u
+
+  - name: Booleans reject on enum properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"user_type":true}}]}'
+      gql: MATCH (u:User) WHERE u.user_type = true RETURN u
+    expect: { error: { contains: [not a string or integer] } }
+
+  - name: Range entries may combine
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"created_at":[{"gte":"2026-04-01T00:00:00Z"},{"lt":"2026-05-01T00:00:00Z"}]}}]}'
+      gql: "MATCH (u:User {id: 1}) WHERE u.created_at >= '2026-04-01T00:00:00Z' AND u.created_at < '2026-05-01T00:00:00Z' RETURN u"
+
+  - name: Every range entry is type checked
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"created_at":[{"gte":"2026-04-01T00:00:00Z"},{"lt":12345}]}}]}'
+      gql: "MATCH (u:User {id: 1}) WHERE u.created_at >= '2026-04-01T00:00:00Z' AND u.created_at < 12345 RETURN u"
+    expect: { error: { contains: [not a string] } }
+
+  - name: Integer edge columns accept integers
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_id":42}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_id = 42 RETURN u, n"
+
+  - name: String edge columns accept strings
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_kind":"User"}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_kind = 'User' RETURN u, n"
+
+  - name: Edge columns accept null checks
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"target_kind":{"is_null":true}}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.target_kind IS NULL RETURN u, n"
+
+  - name: Integer edge columns accept integer lists
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"target_id":{"in":[1,2,3]}}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.target_id IN [1, 2, 3] RETURN u, n"
+
+  - name: Integer edge columns reject strings
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_id":"not-a-number"}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_id = 'not-a-number' RETURN u, n"
+    expect: { error: { contains: [expected Int] } }
+
+  - name: String edge columns reject integers
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"target_kind":123}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.target_kind = 123 RETURN u, n"
+    expect: { error: { contains: [expected String] } }
+
+  - name: Unknown edge columns reject
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"bogus_column":42}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.bogus_column = 42 RETURN u, n"
+    expect: { error: { contains: [unknown edge column "bogus_column"] } }
+
+  - name: Edge column lists name the mismatched element
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_id":{"in":[1,"bad",3]}}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_id IN [1, 'bad', 3] RETURN u, n"
+    expect: { error: { contains: ["element [1]"] } }
+
+  - name: Edge column types come from the ontology
+    ontology:
+      nodes: { User: {}, Note: {} }
+      edges: [AUTHORED]
+      edge_columns:
+        traversal_path: string
+        relationship_kind: string
+        source_id: string
+        source_kind: string
+        target_id: int
+        target_kind: string
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_id":42}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_id = 42 RETURN u, n"
+    expect: { error: { contains: [source_id] } }
+
+  - name: Edge filters pass when the ontology types match
+    ontology:
+      nodes: { User: {}, Note: {} }
+      edges: [AUTHORED]
+      edge_columns:
+        traversal_path: string
+        relationship_kind: string
+        source_id: int
+        source_kind: string
+        target_id: int
+        target_kind: string
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n","filters":{"source_id":42}}]}'
+      gql: "MATCH (u:User {id: 1})-[r:AUTHORED]->(n:Note) WHERE r.source_id = 42 RETURN u, n"

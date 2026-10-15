@@ -1,0 +1,66 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: collect is not a supported aggregation
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"collect":"u.username","as":"usernames"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN collect(u.username) AS usernames"
+    expect:
+      error: { reason: schema }
+      json: { error: { contains: ['"collect" is not supported'] } }
+      gql: { error: { contains: [function collect() is not supported] } }
+
+  - name: Counts accept a bare node
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"count":"u","as":"total"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN count(u) AS total"
+
+  - name: Sums need a numeric property
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"sum":"u.username","as":"username_sum"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN sum(u.username) AS username_sum"
+    expect: { error: { contains: [requires a numeric property] } }
+
+  - name: Averages need a numeric property
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"avg":"u.username","as":"username_avg"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN avg(u.username) AS username_avg"
+    expect: { error: { contains: [requires a numeric property] } }
+
+  - name: Minimums accept string properties
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"min":"u.username","as":"first_username"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN min(u.username) AS first_username"
+
+  - name: A top-level group key serves every aggregation
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["u"],"aggregations":[{"count":"u","as":"total"},{"count":"g","as":"group_count"}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, count(u) AS total, count(g) AS group_count"
+
+  - name: Disconnected multi-node aggregations need a group key or relationships
+    query:
+      json:
+        - '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"aggregations":[{"count":"mr","as":"total"}]}'
+        - '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[9970]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"count":"mr","as":"open_mr_count"}],"limit":1}'
+      gql:
+        - "MATCH (mr:MergeRequest), (p:Project {id: 278964}) RETURN count(mr) AS total"
+        - "MATCH (g:Group {id: 9970}), (p:Project), (mr:MergeRequest {state: 'opened'}) RETURN count(mr) AS open_mr_count LIMIT 1"
+    expect:
+      error: { reason: schema }
+      json: { error: { contains: ['"group_by" is a required property'] } }
+      gql: { error: { contains: [all declared nodes must belong to one connected pattern] } }
+
+  - name: Single-node aggregations need no group key
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"count":"u","as":"total"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN count(u) AS total"
+
+  - name: Aggregations reject undirected relationships
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr","direction":"both"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"count"}]}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED]-(mr:MergeRequest) RETURN u, count(mr) AS count"
+    expect:
+      error: { reason: schema }
+      json: { error: { contains: ['"both" is not an allowed value'] } }
+      gql: { error: { contains: [undirected relationships are only supported for neighbors] } }

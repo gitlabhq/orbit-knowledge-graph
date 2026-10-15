@@ -1,0 +1,155 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: Pinned path endpoints are selective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":3,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Group {id: 1})-[:CONTAINS*1..3]->(b:Project {id: 2}) RETURN p"
+
+  - name: Filtered path endpoints are selective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"User","filters":{"username":"alice"}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:MEMBER_OF|CONTAINS*1..2]->(b:Project {id: 2}) RETURN p"
+
+  - name: Narrow ID ranges make path endpoints selective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"User","id_range":{"start":1,"end":100}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:User)-[:MEMBER_OF|CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 100 RETURN p"
+
+  - name: Wide ID ranges leave a path start unselective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"User","id_range":{"start":1,"end":10000}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:User)-[:MEMBER_OF|CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 10000 RETURN p"
+    expect: { error: { contains: [endpoint "a"] } }
+
+  - name: Unfiltered path starts are unselective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"User"},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:User)-[:MEMBER_OF|CONTAINS*1..2]->(b:Project {id: 2}) RETURN p"
+    expect: { error: { contains: [endpoint "a"] } }
+
+  - name: Unfiltered path ends are unselective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project"}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(b:Project) RETURN p"
+    expect: { error: { contains: [endpoint "b"] } }
+
+  - name: Path ID ranges have a tighter cap
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","id_range":{"start":1,"end":1000}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Group)-[:CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 1000 RETURN p"
+    expect: { error: { contains: [endpoint "a"] } }
+
+  - name: Path ID ranges within the cap are selective
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","id_range":{"start":1,"end":100}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Group)-[:CONTAINS*1..2]->(b:Project {id: 2}) WHERE a.id >= 1 AND a.id <= 100 RETURN p"
+
+  - name: Paths need relationship types
+    query:
+      json:
+        - '{"query_type":"path_finding","nodes":[{"id":"a","entity":"User","filters":{"username":"alice"}},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2}}'
+        - '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2}}'
+    missing_frontends: { gql: A GQL path always names its relationship types or the * wildcard. }
+    expect: { error: { reason: schema, contains: [rel_types] } }
+
+  - name: Pinned neighbor centers are selective
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}'
+      gql: "MATCH (u:User {id: 1})--(n) RETURN n"
+
+  - name: Filtered neighbor centers are selective
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","filters":{"username":"root"}}],"neighbors":{"direction":"both"}}'
+      gql: "MATCH (u:User {username: 'root'})--(n) RETURN n"
+
+  - name: Unfiltered neighbor centers are unselective
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User"}],"neighbors":{"direction":"both"}}'
+      gql: MATCH (u:User)--(n) RETURN n
+    expect: { error: { ends_with: on the center node to avoid scanning all edges } }
+
+  - name: Wide ID ranges leave a neighbor center unselective
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":999999999}}],"neighbors":{"direction":"both"}}'
+      gql: MATCH (u:User)--(n) WHERE u.id >= 1 AND u.id <= 999999999 RETURN n
+    expect:
+      error: { ends_with: avoid scanning all edges (an id_range counts only with a span of at most 100000) }
+
+  - name: Filtered searches are selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"root"}}]}'
+      gql: "MATCH (u:User {username: 'root'}) RETURN u"
+
+  - name: Pinned searches are selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN u"
+
+  - name: Unfiltered searches are unselective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}'
+      gql: MATCH (u:User) RETURN u
+    expect: { error: { ends_with: add filters or node_ids to at least one node } }
+
+  - name: One pinned node makes a traversal selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u, p"
+
+  - name: One filtered node makes a traversal selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project","filters":{"name":"gitlab"}}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: "MATCH (u:User)-[:MEMBER_OF]->(p:Project {name: 'gitlab'}) RETURN u, p"
+
+  - name: Unfiltered traversals are unselective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: MATCH (u:User)-[:MEMBER_OF]->(p:Project) RETURN u, p
+    expect: { error: { contains: [filters or node_ids to at least one node] } }
+
+  - name: One pinned node makes a variable-hop traversal selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g","hops":[1,2]}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF*1..2]->(g:Group) RETURN u, g"
+
+  - name: Unfiltered variable-hop traversals are unselective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g","hops":[1,2]}]}'
+      gql: MATCH (u:User)-[:MEMBER_OF*1..2]->(g:Group) RETURN u, g
+    expect: { error: { contains: [filters or node_ids to at least one node] } }
+
+  - name: One filtered node makes an aggregation selective
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"username":"root"}},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}],"group_by":["p"],"aggregations":[{"count":"u","as":"c"}]}'
+      gql: "MATCH (u:User {username: 'root'})-[:MEMBER_OF]->(p:Project) RETURN p, count(u) AS c"
+
+  - name: Unfiltered aggregations are unselective
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}],"group_by":["p"],"aggregations":[{"count":"u","as":"c"}]}'
+      gql: MATCH (u:User)-[:MEMBER_OF]->(p:Project) RETURN p, count(u) AS c
+    expect: { error: { contains: [filters or node_ids to at least one node] } }
+
+  - name: Narrow ID ranges make a search selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":100}}]}'
+      gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 100 RETURN u
+
+  - name: Wide ID ranges leave a search unselective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":999999999}}]}'
+      gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 999999999 RETURN u
+    expect:
+      error:
+        ends_with: add filters or node_ids to at least one node (an id_range counts only with a span of at most 100000)
+
+  - name: Narrow ID ranges make a traversal selective
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":100}},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: MATCH (u:User)-[:MEMBER_OF]->(p:Project) WHERE u.id >= 1 AND u.id <= 100 RETURN u, p
+
+  - name: Narrow ID ranges make an aggregation selective
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":100}},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}],"group_by":["p"],"aggregations":[{"count":"u","as":"c"}]}'
+      gql: MATCH (u:User)-[:MEMBER_OF]->(p:Project) WHERE u.id >= 1 AND u.id <= 100 RETURN p, count(u) AS c

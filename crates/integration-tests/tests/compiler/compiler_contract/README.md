@@ -16,15 +16,15 @@ default for each case, and nested maps merge key by key.
 | `name` | Required and unique within the file |
 | `query` | `json` and `gql` strings. `gql` may be a list of equivalent spellings |
 | `missing_frontends` | Reason a frontend is absent. Required when a stage frontend has no query |
-| `stage` | `decode` (raw JSON input), `parse` (frontend), `normalize`, `compile` (default), or `prepare` (GQL schema calls) |
+| `stage` | `decode` (JSON deserialization or GQL lowering), `coerce` (decode, then normalize without validation), `parse` (frontend with schema checks), `normalize` (validation and normalization), `compile` (default), or `prepare` (GQL schema calls) |
 | `backend` | `clickhouse` (default) or `duckdb` for local compilation |
 | `scope` | `all` (default) or `local` for `prepare` |
 | `security` | `default`, `admin`, or `{paths, authorized_paths, access_level, org_id, admin, scope_proofs}` |
-| `ontology` | `{overlay, schema_prefix, path_scopable, rename_tables}` |
+| `ontology` | `{overlay, schema_prefix, path_scopable, rename_tables, fields}` on the embedded catalog, or `{nodes, edges, edge_columns}` for a synthetic catalog. `fields` maps `Node.field` to `{filterable, like_allowed, virtual}` |
 | `cursor` | `{from: {json\|gql: query}, keys: [...]}` mints a token for `{{cursor}}` in queries |
 | `parity` | Defaults to on for `compile`: every query must produce the same SQL, parameters, and hydration, or the same rejection reason |
 | `same_output` | Other queries that must compile identically to the first query |
-| `same_hash`, `different_hash` | Other queries whose statement hash must match or differ |
+| `same_hash`, `different_hash` | Other queries whose statement hash must match or differ from the first query in the same frontend |
 
 Queries can generate long inputs with
 `{{for i in 0..4000 sep ","}}(a{i}){{end}}`. Use `..=` for an inclusive range.
@@ -62,3 +62,6 @@ rendered SQL for matching queries.
 | `compiler::tests::compile_rejections_increment_the_rejection_counter` | Reads a test-only metrics counter |
 | `compiler::tests::native_conditions_need_a_column`, `validate::tests::native_predicate_trees_are_bounded_before_planning` | Build inputs that no frontend can produce |
 | `codegen::{clickhouse,duckdb}::tests::time_buckets_*` | Check dialect function rendering for each truncation unit |
+| `validate::tests::rejects_inputs_the_frontends_block_first` | The JSON schema and GQL lowering reject these inputs first, so only inputs built in code reach the validator branches |
+| `validate::tests::edge_column_type_covers_all_reserved_columns`, `json_dsl::tests::accepts_declared_columns_and_only_filterable_fields` | Sweep the whole embedded catalog |
+| `input::tests` for hops, `order_by`, `aggregation_sort`, and `group_by` keys | Deserialize single JSON fields, not queries |

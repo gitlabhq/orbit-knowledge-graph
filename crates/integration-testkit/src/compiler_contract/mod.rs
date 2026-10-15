@@ -17,6 +17,7 @@ use crate::query_scenario::SecurityOverride;
 #[serde(rename_all = "snake_case")]
 enum Stage {
     Decode,
+    Coerce,
     Parse,
     Normalize,
     #[default]
@@ -90,6 +91,57 @@ pub(crate) struct OntologySetup {
     schema_prefix: Option<String>,
     path_scopable: Vec<String>,
     rename_tables: BTreeMap<String, String>,
+    nodes: BTreeMap<String, BTreeMap<String, String>>,
+    edges: Vec<String>,
+    edge_columns: BTreeMap<String, String>,
+    fields: BTreeMap<String, FieldChange>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct FieldChange {
+    filterable: Option<bool>,
+    like_allowed: Option<bool>,
+    #[serde(rename = "virtual")]
+    virtual_service: Option<String>,
+}
+
+fn data_type(name: &str) -> ontology::DataType {
+    use ontology::DataType;
+    match name {
+        "string" => DataType::String,
+        "int" => DataType::Int,
+        "float" => DataType::Float,
+        "bool" => DataType::Bool,
+        "date" => DataType::Date,
+        "date_time" => DataType::DateTime,
+        "enum" => DataType::Enum,
+        "uuid" => DataType::Uuid,
+        _ => panic!("unknown data type '{name}'"),
+    }
+}
+
+fn synthetic_ontology(setup: &OntologySetup) -> ontology::Ontology {
+    let mut ontology = ontology::Ontology::new()
+        .with_nodes(setup.nodes.keys())
+        .with_edges(&setup.edges);
+    for (node, fields) in &setup.nodes {
+        ontology = ontology.with_fields(
+            node,
+            fields
+                .iter()
+                .map(|(name, kind)| (name.as_str(), data_type(kind))),
+        );
+    }
+    if !setup.edge_columns.is_empty() {
+        ontology = ontology.with_edge_columns(
+            setup
+                .edge_columns
+                .iter()
+                .map(|(name, kind)| (name.as_str(), data_type(kind))),
+        );
+    }
+    ontology
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -240,8 +292,36 @@ pub(crate) fn load_ontology(
                 .load_ontology()
                 .expect("renamed archive should load")
         }
+        None if !setup.nodes.is_empty() => synthetic_ontology(setup),
         None => (**embedded).clone(),
     };
+    for (target, change) in &setup.fields {
+        let (node, field) = target
+            .split_once('.')
+            .unwrap_or_else(|| panic!("field change '{target}' must be Node.field"));
+        ontology = ontology
+            .modify_field(node, field, |field| {
+                if let Some(filterable) = change.filterable {
+                    field.filterable = filterable;
+                }
+                if let Some(like_allowed) = change.like_allowed {
+                    field.like_allowed = like_allowed;
+                }
+                if let Some(service) = &change.virtual_service {
+                    field.source = ontology::FieldSource::Virtual(ontology::VirtualSource {
+                        service: service.clone(),
+                        lookup: field.name.clone(),
+                        disabled: false,
+                        depends_on: vec![],
+                        allowed_ops: ontology::VirtualSource::DEFAULT_ALLOWED_OPS
+                            .iter()
+                            .map(|op| op.to_string())
+                            .collect(),
+                    });
+                }
+            })
+            .unwrap_or_else(|error| panic!("field change '{target}': {error}"));
+    }
     if !setup.path_scopable.is_empty() {
         ontology =
             ontology.with_path_scopable_nodes(setup.path_scopable.iter().map(String::as_str));
@@ -314,16 +394,22 @@ fn run(
     environment: &Environment,
 ) -> Result<Output, QueryError> {
     match stage {
-        Stage::Decode => {
-            assert_eq!(language, "json", "stage decode only applies to JSON");
-            compiler::parse_input(raw)
-                .map_err(QueryError::Parse)
-                .map(|input| Output {
-                    input,
-                    hash: None,
-                    compiled: None,
-                    schema: None,
-                })
+        Stage::Decode | Stage::Coerce => {
+            let input = match language {
+                "json" => compiler::parse_input(raw).map_err(QueryError::Parse),
+                _ => compiler::passes::frontend::gql::parse(raw),
+            }?;
+            let input = if stage == Stage::Coerce {
+                compiler::passes::normalize::normalize(input, environment.model.as_ref())?
+            } else {
+                input
+            };
+            Ok(Output {
+                input,
+                hash: None,
+                compiled: None,
+                schema: None,
+            })
         }
         Stage::Parse => match language {
             "json" => compiler::passes::frontend::json_dsl::parse(raw, environment.model.as_ref())
@@ -694,11 +780,7 @@ fn check_case(case: &Case, path: &Path, embedded: &Arc<ontology::Ontology>) {
             "{label}: unknown frontend {language}"
         );
     }
-    let applicable = |language: &str| match case.stage {
-        Stage::Decode => language == "json",
-        Stage::Prepare => language == "gql",
-        _ => true,
-    };
+    let applicable = |language: &str| case.stage != Stage::Prepare || language == "gql";
     for language in ["json", "gql"] {
         if !applicable(language) {
             assert!(
@@ -855,7 +937,7 @@ fn check_case(case: &Case, path: &Path, embedded: &Arc<ontology::Ontology>) {
         }
     }
     if !case.same_hash.is_empty() || !case.different_hash.is_empty() {
-        let hash_stage = case.stage.max(Stage::Parse).min(Stage::Compile);
+        let hash_stage = case.stage.clamp(Stage::Parse, Stage::Compile);
         let hash_of = |language: &str, raw: &str| {
             run(
                 hash_stage,
@@ -869,12 +951,18 @@ fn check_case(case: &Case, path: &Path, embedded: &Arc<ontology::Ontology>) {
             .hash
             .unwrap()
         };
-        let (language, raw) = base();
-        let expected = hash_of(&language, &raw);
+        let expected: BTreeMap<&String, u64> = case
+            .query
+            .iter()
+            .map(|(language, queries)| (language, hash_of(language, &prepare(queries.items()[0]))))
+            .collect();
         for (entries, same) in [(&case.same_hash, true), (&case.different_hash, false)] {
             for entry in entries {
                 let (language, raw) = single_query(entry, &label);
                 let raw = prepare(&raw);
+                let expected = *expected.get(&language).unwrap_or_else(|| {
+                    panic!("{label}: hash comparison needs a query.{language} base")
+                });
                 assert_eq!(
                     expected == hash_of(&language, &raw),
                     same,

@@ -1,0 +1,18 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: Global entities have no filterable traversal path
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"traversal_path":{"starts_with":"1/"}}}]}'
+      gql: "MATCH (u:User {id: 1}) WHERE u.traversal_path STARTS WITH '1/' RETURN u"
+    expect:
+      error: { reason: ontology }
+      json: { error: { contains: ['"traversal_path" is not an allowed value'] } }
+      gql: { error: { contains: [field "traversal_path" does not exist on node type "User"] } }
+
+  - name: Relationship traversal paths accept only eq, in, and starts_with
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"b","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"a","to":"b","filters":{"traversal_path":{"ends_with":"100/"}}}]}'
+      gql: "MATCH (a:Group {id: 1})-[r:CONTAINS]->(b:Project) WHERE r.traversal_path ENDS WITH '100/' RETURN a, b"
+    expect: { error: { contains: ["only eq, in, and starts_with"] } }

@@ -320,20 +320,6 @@ mod tests {
     }
 
     #[test]
-    fn canonical_hash_ignores_cursor_and_key_order() {
-        let a: serde_json::Value =
-            serde_json::from_str(r#"{"limit":5,"query_type":"traversal"}"#).unwrap();
-        let b: serde_json::Value = serde_json::from_str(
-            r#"{"query_type":"traversal","cursor":{"page_size":10},"limit":5}"#,
-        )
-        .unwrap();
-        let c: serde_json::Value =
-            serde_json::from_str(r#"{"limit":6,"query_type":"traversal"}"#).unwrap();
-        assert_eq!(canonical_hash(&a), canonical_hash(&b));
-        assert_ne!(canonical_hash(&a), canonical_hash(&c));
-    }
-
-    #[test]
     fn seek_predicate_is_lexicographic_dnf() {
         let order = vec![
             OrderExpr::desc(Expr::col("mr", "created_at")),

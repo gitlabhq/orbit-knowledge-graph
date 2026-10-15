@@ -42,3 +42,13 @@ cases:
           expect:
             - (Filter StartsWith(_orbit_edge_0.traversal_path, '1/'), _orbit_edge_0.target_id IN _filter_p.id, _orbit_edge_0._deleted = false, StartsWith(_orbit_edge_0.traversal_path, scalar(SELECT Coalesce ? AS traversal_path FROM gl_project AS _scope WHERE StartsWith(_scope.traversal_path, '1/') AND (_scope.id = 1))) OR ? (_))
             - (Filter StartsWith(_orbit_edge_1.traversal_path, '1/') (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1)))
+
+  - name: Scope-preserving relationships carry the anchor scope to their target
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}]}'
+      gql: "MATCH (mr:MergeRequest {id: 1})-[:HAS_DIFF]->(diff:MergeRequestDiff) RETURN mr, diff"
+    physical:
+      clickhouse:
+        compiled:
+          expect:
+            - "(Filter StartsWith(diff.traversal_path, scalar(SELECT Coalesce ? AS traversal_path FROM gl_merge_request AS _scope WHERE StartsWith(_scope.traversal_path, '1/') AND (_scope.id = 1))) OR ?, ... (Scan Table(gl_merge_request_diff) AS diff))"

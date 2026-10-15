@@ -1,0 +1,245 @@
+stage: decode
+parity: false
+
+cases:
+  - name: Traversals decode nodes, relationships, and limit
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","filters":{"system":false}},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}],"limit":25}'
+      gql: "MATCH (n:Note {system: false})<-[:AUTHORED]-(u:User) RETURN n, u LIMIT 25"
+    expect:
+      input:
+        query_type: traversal
+        limit: 25
+        nodes: [{ id: n, entity: Note }, { id: u }]
+        relationships: [{ types: [AUTHORED], from: u, to: n }]
+
+  - name: Comparison and membership operators decode
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":{"gte":"2024-01-01"},"state":{"in":["active","blocked"]}}}]}'
+      gql: MATCH (u:User) WHERE u.created_at >= '2024-01-01' AND u.state IN ['active', 'blocked'] RETURN u
+    expect: { input: { nodes: [{ filters: { created_at: [{ op: gte }], state: [{ op: in }] } }] } }
+
+  - name: Range filters keep each bound in order beside a scalar equality
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"created_at":[{"gte":"2026-04-01T00:00:00Z"},{"lt":"2026-05-01T00:00:00Z"}],"state":"merged"}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.created_at >= '2026-04-01T00:00:00Z' AND mr.created_at < '2026-05-01T00:00:00Z' AND mr.state = 'merged' RETURN mr
+    expect:
+      input:
+        nodes:
+          - filters:
+              created_at: [{ op: gte, value: "2026-04-01T00:00:00Z" }, { op: lt, value: "2026-05-01T00:00:00Z" }]
+              state: [{ value: merged }]
+      json: { input: { nodes: [{ filters: { state: [{ op: null }] } }] } }
+
+  - name: A bare array is one equality filter
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":[1,2,3]}}]}'
+      gql: "MATCH (u:User {state: [1, 2, 3]}) RETURN u"
+    expect:
+      input: { nodes: [{ filters: { state: [{ value: [1, 2, 3] }] } }] }
+      json: { input: { nodes: [{ filters: { state: [{ op: null }] } }] } }
+
+  - name: Several operators on one property decode in order
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"created_at":{"gte":"2026-04-01","lt":"2026-05-01"}}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.created_at >= '2026-04-01' AND mr.created_at < '2026-05-01' RETURN mr
+    expect:
+      input:
+        nodes: [{ filters: { created_at: [{ op: gte, value: "2026-04-01" }, { op: lt, value: "2026-05-01" }] } }]
+
+  - name: Unknown operators list the candidates
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":{"op":"eq","value":"active"}}}]}'
+    missing_frontends:
+      gql: GQL has no operator-object syntax, so this JSON-only mistake cannot be written in it.
+    expect: { error: { reason: parse, contains: [unknown operator "op", token_match] } }
+
+  - name: Nullability operators take booleans and invert on false
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"merged_at":{"is_null":true},"closed_at":{"is_null":false},"created_at":{"is_not_null":false}}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.merged_at IS NULL AND mr.closed_at IS NOT NULL AND mr.created_at IS NULL RETURN mr
+    expect:
+      input:
+        nodes:
+          - filters:
+              merged_at: [{ op: is_null, value: null }]
+              closed_at: [{ op: is_not_null }]
+              created_at: [{ op: is_null }]
+
+  - name: Nullability operators reject non-boolean values
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"merged_at":{"is_null":1}}}]}'
+    missing_frontends:
+      gql: GQL has no operator-object syntax, so this JSON-only mistake cannot be written in it.
+    expect: { error: { reason: parse, contains: [takes a boolean] } }
+
+  - name: Empty operator objects reject
+    query: { json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":{}}}]}' }
+    missing_frontends:
+      gql: GQL has no operator-object syntax, so this JSON-only mistake cannot be written in it.
+    expect: { error: { reason: parse, contains: [at least one operator] } }
+
+  - name: Filter arrays cannot mix values and operator objects
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":[{"gte":1},5]}}]}'
+    missing_frontends:
+      gql: GQL has no operator-object syntax, so this JSON-only mistake cannot be written in it.
+    expect: { error: { reason: parse, contains: [must not mix] } }
+
+  - name: Repeated operators on one property decode as separate entries
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":[{"contains":"foo"},{"contains":"bar"}]}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.title CONTAINS 'foo' AND mr.title CONTAINS 'bar' RETURN mr
+    expect: { input: { nodes: [{ filters: { title: [{ op: contains, value: foo }, { op: contains, value: bar }] } }] } }
+
+  - name: Relationship alternatives decode as a type list
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"a"},{"id":"b"}],"relationships":[{"type":["BLOCKS","RELATES_TO"],"from":"a","to":"b"}]}'
+      gql: MATCH (a:WorkItem)-[:BLOCKS|RELATES_TO]->(b:WorkItem) RETURN a, b
+    expect: { input: { relationships: [{ types: [BLOCKS, RELATES_TO] }] } }
+
+  - name: Aggregations decode the function, target, alias, and sort
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"n"},{"id":"u"}],"group_by":["u"],"aggregations":[{"count":"n","as":"note_count"}],"aggregation_sort":"-note_count"}'
+      gql: MATCH (u:User)-[:AUTHORED]->(n:Note) RETURN u, count(n) AS note_count ORDER BY note_count DESC
+    expect:
+      input:
+        query_type: aggregation
+        aggregations: [{ function: count, node: n, property: null, name: note_count }]
+        aggregation_sort: { column: note_count, direction: desc }
+
+  - name: Counts accept properties and other functions require them
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"mr"}],"aggregations":[{"count":"mr.merged_at","as":"merged"},{"avg":"mr.merge_duration","as":"avg_dur"}]}'
+      gql: MATCH (mr:MergeRequest) RETURN count(mr.merged_at) AS merged, avg(mr.merge_duration) AS avg_dur
+    expect:
+      input:
+        aggregations:
+          - function: count
+            kind: target
+            node: mr
+            property: merged_at
+          - function: avg
+            kind: property
+            node: mr
+            property: merge_duration
+
+  - name: Property aggregations reject a bare node target
+    query:
+      json:
+        - '{"query_type":"aggregation","nodes":[{"id":"mr"}],"aggregations":[{"sum":"mr","as":"total"}]}'
+        - '{"query_type":"aggregation","nodes":[{"id":"mr"}],"aggregations":[{"avg":"mr","as":"total"}]}'
+        - '{"query_type":"aggregation","nodes":[{"id":"mr"}],"aggregations":[{"min":"mr","as":"total"}]}'
+        - '{"query_type":"aggregation","nodes":[{"id":"mr"}],"aggregations":[{"max":"mr","as":"total"}]}'
+      gql:
+        - MATCH (mr:MergeRequest) RETURN sum(mr) AS total
+        - MATCH (mr:MergeRequest) RETURN avg(mr) AS total
+        - MATCH (mr:MergeRequest) RETURN min(mr) AS total
+        - MATCH (mr:MergeRequest) RETURN max(mr) AS total
+    expect: { error: {}, json: { error: { reason: parse, contains: [node.property] } } }
+
+  - name: Aggregations without aliases derive output names
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"mr"}],"aggregations":[{"count":"mr"},{"avg":"mr.merge_duration"},{"max":"mr.additions","as":"biggest"}]}'
+      gql: MATCH (mr:MergeRequest) RETURN count(mr), avg(mr.merge_duration), max(mr.additions) AS biggest
+    expect: { input: { aggregations: [{ name: count_mr }, { name: avg_mr_merge_duration }, { name: biggest }] } }
+
+  - name: Group keys derive output names unless aliased
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u"},{"id":"mr"}],"group_by":["u","mr.state",{"key":"mr.created_at","truncate":"month"},{"key":"mr.target_branch","as":"branch"}],"aggregations":[{"count":"mr","as":"count"}]}'
+      gql: MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr.state, date_trunc('month', mr.created_at), mr.target_branch AS branch, count(mr) AS count
+    expect: { input: { group_by: [{ name: u }, { name: mr_state }, { name: mr_created_at_month }, { name: branch }] } }
+
+  - name: Path finding decodes the path type and depth
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3}}'
+      gql: "MATCH p = ANY SHORTEST (start:Project {id: 100})-[*1..3]->(`end`:Project {id: 200}) RETURN p"
+    expect: { input: { query_type: path_finding, path: { type: shortest, max_depth: 3 } } }
+
+  - name: Omitted fields take their defaults
+    query: { json: '{"query_type":"traversal","nodes":[{"id":"n"}]}', gql: MATCH (n:Note) RETURN n }
+    expect: { input: { limit: 30, relationships: [], aggregations: [] } }
+
+  - name: A single node traversal is a search
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"admin"}}]}'
+      gql: "MATCH (u:User {username: 'admin'}) RETURN u"
+    expect: { input: { query_type: traversal, search: true, nodes: [{ id: u }] } }
+
+  - name: All columns decode as a wildcard
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":"*"}]}'
+      gql: MATCH (u:User) RETURN properties(u)
+    expect: { input: { nodes: [{ columns: "*" }] } }
+
+  - name: Column lists keep their order
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username","email","created_at"]}]}'
+      gql: MATCH (u:User) RETURN u.username, u.email, u.created_at
+    expect: { input: { nodes: [{ columns: [username, email, created_at] }] } }
+
+  - name: Omitted columns stay unset
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}'
+      gql: MATCH (u:User) RETURN u
+    expect: { input: { nodes: [{ columns: null }] } }
+
+  - name: Traversals decode columns per node
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"]},{"id":"p","entity":"Project","columns":"*"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: MATCH (u:User)-[:MEMBER_OF]->(p:Project) RETURN u.username, properties(p)
+    expect: { input: { nodes: [{ columns: [username] }, { columns: "*" }] } }
+
+  - name: Neighbors decode their direction
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[100]}],"neighbors":{"direction":"both"}}'
+      gql: "MATCH (u:User {id: 100})--(n) RETURN n"
+    expect: { input: { query_type: neighbors, neighbors: { direction: both } } }
+
+  - name: Options default when omitted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}'
+      gql: MATCH (u:User) RETURN u
+    expect: { input: { options: { dynamic_columns: default, include_debug_sql: false } } }
+
+  - name: Dynamic columns accept all
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{},"options":{"dynamic_columns":"*"}}'
+      gql: "MATCH (u:User {id: 1})-->(n) RETURN properties(n)"
+    expect: { input: { options: { dynamic_columns: all } } }
+
+  - name: Dynamic columns accept default
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{},"options":{"dynamic_columns":"default"}}'
+      gql: "MATCH (u:User {id: 1})-->(n) RETURN n"
+    expect: { input: { options: { dynamic_columns: default } } }
+
+  - name: An empty options object uses defaults
+    query: { json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"options":{}}' }
+    missing_frontends:
+      gql: GQL has no options object; a GQL query without DEBUG is covered by the omitted-options case.
+    expect: { input: { options: { dynamic_columns: default, include_debug_sql: false } } }
+
+  - name: Debug SQL can be requested
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"options":{"include_debug_sql":true}}'
+      gql: MATCH (u:User) RETURN u DEBUG
+    expect: { input: { options: { include_debug_sql: true } } }
+
+  - name: Debug SQL defaults off beside other options
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"options":{"dynamic_columns":"*"}}'
+      gql: MATCH (u:User) RETURN properties(u)
+    expect: { input: { options: { include_debug_sql: false } } }
+
+  - name: Node IDs accept integers and digit strings
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,"9007199254740993",-42]}]}'
+      gql: MATCH (u:User) WHERE u.id IN [1, '9007199254740993', -42] RETURN u
+    expect: { input: { nodes: [{ node_ids: [1, 9007199254740993, -42] }] } }
+
+  - name: ID ranges accept integers and digit strings
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":"9007199254740993"}}]}'
+      gql: MATCH (u:User) WHERE u.id >= 1 AND u.id <= 9007199254740993 RETURN u
+    expect: { input: { nodes: [{ id_range: { start: 1, end: 9007199254740993 } }] } }

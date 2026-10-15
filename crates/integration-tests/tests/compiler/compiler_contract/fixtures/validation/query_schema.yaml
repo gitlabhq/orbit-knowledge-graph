@@ -1,0 +1,43 @@
+stage: parse
+parity: false
+
+cases:
+  - name: Aggregations may omit aliases
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"count":"mr"},{"avg":"mr.added_lines"}],"limit":1}'
+      gql: "MATCH (mr:MergeRequest {state: 'opened'}) RETURN count(mr), avg(mr.added_lines) LIMIT 1"
+
+  - name: An aggregation needs exactly one function
+    query:
+      json:
+        - '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"count":"mr","sum":"mr.added_lines"}],"limit":1}'
+        - '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"as":"total"}],"limit":1}'
+    missing_frontends:
+      gql: GQL writes one function per RETURN item, so it cannot express this JSON object shape.
+    expect: { error: { reason: schema } }
+
+  - name: Related multi-node scalar aggregations need no group key
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","filters":{"archived":false}},{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"merged_mr_count"}],"limit":1}'
+      gql: "MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {archived: false}) RETURN count(mr) AS merged_mr_count LIMIT 1"
+
+  - name: Single-node scalar aggregations need no group key
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"aggregations":[{"count":"mr","as":"open_mr_count"}],"limit":1}'
+      gql: "MATCH (mr:MergeRequest {state: 'opened'}) RETURN count(mr) AS open_mr_count LIMIT 1"
+
+  - name: Grouped multi-node aggregations are accepted
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":"opened"}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"open_mr_count"}],"limit":1}'
+      gql: "MATCH (mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project) RETURN p, count(mr) AS open_mr_count LIMIT 1"
+
+  - name: Path relationship types cannot be empty
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[278964]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":[]}}'
+    missing_frontends: { gql: A GQL path always names at least one relationship type or the * wildcard. }
+    expect: { error: { reason: schema } }
+
+  - name: Paths accept listed relationship types
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[278964]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["AUTHORED","IN_PROJECT"]}}'
+      gql: "MATCH p = ANY SHORTEST (start:User {id: 1})-[:AUTHORED|IN_PROJECT*1..2]->(`end`:Project {id: 278964}) RETURN p"

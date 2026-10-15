@@ -1,0 +1,155 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: Traversals may reference declared nodes
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note) RETURN u, n"
+
+  - name: Aggregations may group and count declared nodes
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}],"group_by":["u"],"aggregations":[{"count":"n","as":"note_count"}]}'
+      gql: "MATCH (u:User {id: 1})-[:AUTHORED]->(n:Note) RETURN u{.username}, count(n) AS note_count"
+
+  - name: Ordering may reference a selected property
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]}],"order_by":"u.username"}'
+      gql: "MATCH (u:User {id: 1}) RETURN u.username ORDER BY u.username"
+
+  - name: Paths may reference declared endpoints
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}'
+      gql: "MATCH p = ANY SHORTEST (a:Group {id: 1})-[:CONTAINS*1..2]->(b:Project {id: 2}) RETURN p"
+
+  - name: Neighbors may reference the declared center
+    query:
+      json: '{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}'
+      gql: "MATCH (u:User {id: 1})--(n) RETURN n"
+
+  - name: Relationships cannot start at an undeclared node
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"ghost","to":"u"}]}'
+    missing_frontends:
+      gql: A GQL pattern declares every node it names, so it cannot reference an undeclared node.
+    expect: { error: { reason: schema } }
+
+  - name: Relationships cannot end at an undeclared node
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"ghost"}]}'
+    missing_frontends:
+      gql: A GQL pattern declares every node it names, so it cannot reference an undeclared node.
+    expect: { error: { reason: schema } }
+
+  - name: Counts cannot target an undeclared node
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"count":"missing","as":"c"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN count(missing) AS c"
+    expect: { error: { contains: [undefined node "missing"] } }
+
+  - name: Group keys cannot name an undeclared node
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"group_by":["missing"],"aggregations":[{"count":"u","as":"c"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN missing, count(u) AS c"
+    expect: { error: { contains: [undefined node "missing"] } }
+
+  - name: Aggregations cannot read an unknown property
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"aggregations":[{"sum":"u.nonexistent","as":"total"}]}'
+      gql: "MATCH (u:User {id: 1}) RETURN sum(u.nonexistent) AS total"
+    expect: { error: { contains: [invalid property] } }
+
+  - name: Property group keys may name a declared property
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level"],"aggregations":[{"count":"p","as":"project_count"}]}'
+      gql: "MATCH (p:Project {id: 1}) RETURN p.visibility_level, count(p) AS project_count"
+
+  - name: Property group keys cannot name an undeclared node
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["missing.visibility_level"],"aggregations":[{"count":"p","as":"project_count"}]}'
+      gql: "MATCH (p:Project {id: 1}) RETURN missing.visibility_level, count(p) AS project_count"
+    expect: { error: { contains: [undefined node "missing"] } }
+
+  - name: Property group keys cannot name an unknown property
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.not_real"],"aggregations":[{"count":"p","as":"project_count"}]}'
+      gql: "MATCH (p:Project {id: 1}) RETURN p.not_real, count(p) AS project_count"
+    expect: { error: { contains: [invalid property] } }
+
+  - name: Group keys are only supported for aggregation
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level"]}'
+    missing_frontends: { gql: GQL makes any query with a group key and an aggregate an aggregation. }
+    expect: { error: { reason: schema, contains: [group_by] } }
+
+  - name: Group keys cannot repeat an output column
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level","p.visibility_level"],"aggregations":[{"count":"p","as":"project_count"}]}'
+      gql: "MATCH (p:Project {id: 1}) RETURN p.visibility_level, p.visibility_level, count(p) AS project_count"
+    expect: { error: { contains: [duplicate group_by output column] } }
+
+  - name: Aggregate aliases cannot collide with group key columns
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"group_by":["p.visibility_level"],"aggregations":[{"count":"p","as":"p_visibility_level"}]}'
+      gql: "MATCH (p:Project {id: 1}) RETURN p.visibility_level, count(p) AS p_visibility_level"
+    expect: { error: { contains: [conflicts with another output column] } }
+
+  - name: Ordering cannot name an undeclared node
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"order_by":"missing.username"}'
+      gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY missing.username"
+    expect: { error: { contains: [undefined node "missing"] } }
+
+  - name: Ordering cannot name an unknown property
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"order_by":"u.nonexistent"}'
+      gql: "MATCH (u:User {id: 1}) RETURN u ORDER BY u.nonexistent"
+    expect: { error: { contains: [does not exist] } }
+
+  - name: Paths cannot start at an undeclared node
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"ghost","to":"b","max_depth":2,"rel_types":["CONTAINS"]}}'
+    missing_frontends:
+      gql: A GQL pattern declares every node it names, so it cannot reference an undeclared node.
+    expect: { error: { contains: [undefined node "ghost"] } }
+
+  - name: Paths cannot end at an undeclared node
+    query:
+      json: '{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"ghost","max_depth":2,"rel_types":["CONTAINS"]}}'
+    missing_frontends:
+      gql: A GQL pattern declares every node it names, so it cannot reference an undeclared node.
+    expect: { error: { contains: [undefined node "ghost"] } }
+
+  - name: Node IDs must be unique
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"u","entity":"Project"}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(u:Project) RETURN u"
+    expect:
+      error: { reason: schema }
+      json: { error: { reason: schema } }
+      gql: { error: { contains: [a repeated node must keep its original label] } }
+
+  - name: Distinct node IDs are accepted
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) RETURN u, p"
+
+  - name: Virtual properties cannot be group keys
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"f","entity":"File","node_ids":[1]}],"group_by":["f.content"],"aggregations":[{"count":"f","as":"file_count"}]}'
+      gql: "MATCH (f:File {id: 1}) RETURN f.content, count(f) AS file_count"
+    expect: { error: { contains: [field is virtual] } }
+
+  - name: Traversals need n-1 relationships for n nodes
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"orphan","entity":"Note"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p"}]}'
+      gql: "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project), (orphan:Note) RETURN u, p, orphan"
+    expect:
+      error: { reason: schema }
+      json: { error: { contains: [n-1 relationships] } }
+      gql: { error: { contains: [all declared nodes must belong to one connected pattern] } }
+
+  - name: A count may be the only reference to its node
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"aggregations":[{"count":"p","as":"total"}]}'
+      gql: "MATCH (p:Project {id: 1}) RETURN count(p) AS total"

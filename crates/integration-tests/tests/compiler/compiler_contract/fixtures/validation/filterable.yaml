@@ -1,0 +1,29 @@
+stage: normalize
+ontology: { fields: { Group.full_path: { filterable: false } } }
+parity: false
+
+cases:
+  - name: Unfilterable properties reject filters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"secret"}}]}'
+      gql: "MATCH (g:Group {full_path: 'secret'}) RETURN g"
+    expect:
+      error: { client_safe: true }
+      json: { error: { reason: ontology, contains: ['"full_path" is not an allowed value'] } }
+      gql: { error: { contains: [not filterable] } }
+
+  - name: Unfilterable properties reject group keys
+    query:
+      json: '{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[1]}],"group_by":["g.full_path"],"aggregations":[{"count":"g","as":"group_count"}]}'
+      gql: "MATCH (g:Group {id: 1}) RETURN g.full_path, count(g) AS group_count"
+    expect: { error: { contains: [not filterable] } }
+
+  - name: Traversal paths stay filterable when the field is marked unfilterable
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"traversal_path":{"starts_with":"1/"}}}]}'
+      gql: MATCH (g:Group) WHERE g.traversal_path STARTS WITH '1/' RETURN g
+
+  - name: Filterable properties accept filters
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","filters":{"name":"Public Group"}}]}'
+      gql: "MATCH (g:Group {name: 'Public Group'}) RETURN g"

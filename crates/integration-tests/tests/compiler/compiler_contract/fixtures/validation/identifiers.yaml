@@ -1,0 +1,28 @@
+stage: parse
+parity: false
+
+cases:
+  - name: ASCII identifiers are accepted
+    query:
+      json:
+        - '{"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]}]}'
+        - '{"query_type":"traversal","nodes":[{"id":"_foo","entity":"User","node_ids":[1]}]}'
+        - '{"query_type":"traversal","nodes":[{"id":"User123","entity":"User","node_ids":[1]}]}'
+      gql:
+        - "MATCH (user:User {id: 1}) RETURN user"
+        - "MATCH (_foo:User {id: 1}) RETURN _foo"
+        - "MATCH (User123:User {id: 1}) RETURN User123"
+
+  - name: Non-ASCII identifiers reject
+    query:
+      json:
+        - "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"us\u0435r\",\"entity\":\"User\",\"node_ids\":[1]}]}"
+        - "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"\u1d1cser\",\"entity\":\"User\",\"node_ids\":[1]}]}"
+        - "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"\u00fcser\",\"entity\":\"User\",\"node_ids\":[1]}]}"
+        - "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"\u7528\u6237\",\"entity\":\"User\",\"node_ids\":[1]}]}"
+      gql:
+        - "MATCH (us\u0435r:User {id: 1}) RETURN us\u0435r"
+        - "MATCH (\u1d1cser:User {id: 1}) RETURN \u1d1cser"
+        - "MATCH (\u00fcser:User {id: 1}) RETURN \u00fcser"
+        - "MATCH (\u7528\u6237:User {id: 1}) RETURN \u7528\u6237"
+    expect: { error: { client_safe: true } }

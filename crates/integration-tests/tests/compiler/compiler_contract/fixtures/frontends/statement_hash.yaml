@@ -1,0 +1,123 @@
+stage: parse
+
+cases:
+  - name: Statement hashes ignore page size, after tokens, and formatting
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"cursor":{"page_size":5}}'
+      gql: MATCH (u:User) RETURN u PAGE 5
+    same_hash:
+      - gql: MATCH (u:User) RETURN u PAGE 7 AFTER 'x'
+      - gql: MATCH (u:User) RETURN u  PAGE 5
+      - gql: "\nMATCH ( u : User )\nRETURN\tu\nPAGE 7\nAFTER 'x'\n"
+      - gql: MATCH/*match*/(u:User) RETURN u/*before*/PAGE 7/*after*/
+      - gql: |-
+          MATCH (u:User) RETURN u // before
+          PAGE 7 AFTER 'x' // after
+      - gql: "MATCH\u2003(u:User) RETURN u\u00a0PAGE 5\u3000"
+      - json: '{"cursor":{"page_size":7,"after":"x"},"nodes":[{"entity":"User","id":"u"}],"query_type":"traversal"}'
+      - json: |-
+          {
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User"}],
+            "cursor": {"page_size": 5}
+          }
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}]}'
+    expect: { pagination: { query_hash: nonzero } }
+
+  - name: Debug statement hashes ignore page details
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"cursor":{"page_size":5},"options":{"include_debug_sql":true}}'
+      gql: MATCH (u:User) RETURN u PAGE 5 DEBUG
+    same_hash:
+      - gql: |
+          MATCH (u:User) RETURN u
+          PAGE 7 AFTER 'x'
+          DEBUG
+      - json: '{"options":{"include_debug_sql":true},"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"cursor":{"page_size":7,"after":"x"}}'
+
+  - name: Unpaged GQL statements have no statement hash
+    query: { gql: MATCH (u:User) RETURN u LIMIT 5 }
+    missing_frontends:
+      json: The JSON frontend hashes every query; the unpaged JSON hash is covered by the first case.
+    expect: { pagination: { query_hash: zero } }
+
+  - name: Query changes alter the statement hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"cursor":{"page_size":5}}'
+      gql: MATCH (u:User) RETURN u PAGE 5
+    different_hash:
+      - gql: MATCH (u:User) RETURN u.id PAGE 5
+      - gql: "MATCH (u:User {id: 1}) RETURN u PAGE 5"
+      - gql: MATCH (u:User) RETURN u PAGE 5 DEBUG
+      - gql: MATCH (u:User) RETURN u PAGE 5;
+      - gql: match (u:User) RETURN u PAGE 5
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["id"]}],"cursor":{"page_size":5}}'
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"cursor":{"page_size":5}}'
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"cursor":{"page_size":5},"options":{"include_debug_sql":true}}'
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User"}],"cursor":{"page_size":5},"limit":6}'
+
+  - name: String literal 'a b' keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a b"}}],"cursor":{"page_size":5}}'
+      gql: "MATCH (u:User {name: 'a b'}) RETURN u PAGE 5"
+    different_hash:
+      - gql: "MATCH (u:User {name: 'ab'}) RETURN u PAGE 5"
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"ab"}}],"cursor":{"page_size":5}}'
+
+  - name: String literal 'a  b' keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a  b"}}],"cursor":{"page_size":5}}'
+      gql: "MATCH (u:User {name: 'a  b'}) RETURN u PAGE 5"
+    different_hash:
+      - gql: "MATCH (u:User {name: 'a b'}) RETURN u PAGE 5"
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a b"}}],"cursor":{"page_size":5}}'
+
+  - name: String literal 'a<newline>b' keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a\nb"}}],"cursor":{"page_size":5}}'
+      gql: |-
+        MATCH (u:User {name: 'a
+        b'}) RETURN u PAGE 5
+    different_hash:
+      - gql: "MATCH (u:User {name: 'a b'}) RETURN u PAGE 5"
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a b"}}],"cursor":{"page_size":5}}'
+
+  - name: String literal 'a/*b*/c' keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a/*b*/c"}}],"cursor":{"page_size":5}}'
+      gql: "MATCH (u:User {name: 'a/*b*/c'}) RETURN u PAGE 5"
+    different_hash:
+      - gql: "MATCH (u:User {name: 'ac'}) RETURN u PAGE 5"
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"ac"}}],"cursor":{"page_size":5}}'
+
+  - name: String literal 'a//b' keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a//b"}}],"cursor":{"page_size":5}}'
+      gql: "MATCH (u:User {name: 'a//b'}) RETURN u PAGE 5"
+    different_hash:
+      - gql: "MATCH (u:User {name: 'a'}) RETURN u PAGE 5"
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a"}}],"cursor":{"page_size":5}}'
+
+  - name: String literal 'é PAGE 5' keeps its own hash
+    query:
+      json: "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"u\",\"entity\":\"User\",\"filters\":{\"name\":\"\u00e9 PAGE 5\"}}],\"cursor\":{\"page_size\":5}}"
+      gql: "MATCH (u:User {name: '\u00e9 PAGE 5'}) RETURN u PAGE 5"
+    different_hash:
+      - gql: "MATCH (u:User {name: '\u00e9 PAGE 7'}) RETURN u PAGE 5"
+      - json: "{\"query_type\":\"traversal\",\"nodes\":[{\"id\":\"u\",\"entity\":\"User\",\"filters\":{\"name\":\"\u00e9 PAGE 7\"}}],\"cursor\":{\"page_size\":5}}"
+
+  - name: String literal 'a\' b' keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a'' b"}}],"cursor":{"page_size":5}}'
+      gql: "MATCH (u:User {name: 'a\\' b'}) RETURN u PAGE 5"
+    different_hash:
+      - gql: "MATCH (u:User {name: 'a\\'b'}) RETURN u PAGE 5"
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a''b"}}],"cursor":{"page_size":5}}'
+
+  - name: String literal "a b" keeps its own hash
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"a b"}}],"cursor":{"page_size":5}}'
+      gql: 'MATCH (u:User {name: "a b"}) RETURN u PAGE 5'
+    different_hash:
+      - gql: 'MATCH (u:User {name: "ab"}) RETURN u PAGE 5'
+      - json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"ab"}}],"cursor":{"page_size":5}}'

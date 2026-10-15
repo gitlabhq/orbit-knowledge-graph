@@ -1,0 +1,26 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: Filter caps count property keys, not entries
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":[{"gte":"2020-01-01"},{"lt":"2020-02-01"},{"gte":"2020-03-01"},{"lt":"2020-04-01"},{"gte":"2020-05-01"},{"lt":"2020-06-01"}],"username":[{"contains":"aaa"},{"contains":"bbb"},{"contains":"ccc"},{"contains":"ddd"},{"contains":"eee"},{"contains":"fff"}]}}]}'
+      gql: MATCH (u:User) WHERE u.created_at >= '2020-01-01' AND u.created_at < '2020-02-01' AND u.created_at >= '2020-03-01' AND u.created_at < '2020-04-01' AND u.created_at >= '2020-05-01' AND u.created_at < '2020-06-01' AND u.username CONTAINS 'aaa' AND u.username CONTAINS 'bbb' AND u.username CONTAINS 'ccc' AND u.username CONTAINS 'ddd' AND u.username CONTAINS 'eee' AND u.username CONTAINS 'fff' RETURN u
+
+  - name: More than ten filtered properties on one node reject
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":"abc","description":"abc","source_branch":"abc","target_branch":"abc","merge_status":"abc","merge_commit_sha":"abc","iid":1,"diff_size":1,"commits_count":1,"added_lines":1,"removed_lines":1}}]}'
+      gql: MATCH (mr:MergeRequest) WHERE mr.title = 'abc' AND mr.description = 'abc' AND mr.source_branch = 'abc' AND mr.target_branch = 'abc' AND mr.merge_status = 'abc' AND mr.merge_commit_sha = 'abc' AND mr.iid = 1 AND mr.diff_size = 1 AND mr.commits_count = 1 AND mr.added_lines = 1 AND mr.removed_lines = 1 RETURN mr
+    expect:
+      error: { reason: schema }
+      json: { error: { contains: [value has more than 10 properties] } }
+      gql: { error: { contains: [filter property count (11)] } }
+
+  - name: More than ten entries on one property reject
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":[{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"},{"gte":"2020-01-01"}]}}]}'
+      gql: MATCH (u:User) WHERE u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' AND u.created_at >= '2020-01-01' RETURN u
+    expect:
+      error: { reason: schema }
+      json: { error: { contains: [/nodes/0/filters/created_at] } }
+      gql: { error: { contains: [needs between 1 and 10 predicates] } }

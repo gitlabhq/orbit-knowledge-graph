@@ -1,0 +1,14 @@
+stage: normalize
+parity: false
+
+cases:
+  - name: Text operators require a text property
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"created_at":{"contains":"2024"}}}]}'
+      gql: MATCH (u:User) WHERE u.created_at CONTAINS '2024' RETURN u
+    expect: { error: { contains: [require a text field] } }
+
+  - name: Text operators accept enum properties
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":{"contains":"act"}}}]}'
+      gql: MATCH (u:User) WHERE u.state CONTAINS 'act' RETURN u
