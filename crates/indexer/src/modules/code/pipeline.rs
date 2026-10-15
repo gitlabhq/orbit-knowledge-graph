@@ -34,6 +34,8 @@ pub struct IndexingRequest {
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub checkpoint: CodeCheckpoint,
+    /// Gitaly storage from the project lookup; `None` uses the tenant-wide archive budget.
+    pub repository_storage: Option<String>,
 }
 
 /// Keeps the NATS message alive during long pipeline runs so it is not redelivered.
@@ -440,6 +442,7 @@ impl CodeIndexer {
                 request.traversal_path.top_level_namespace_id(),
                 &self.pipeline_config,
                 &leases,
+                request.repository_storage.as_deref(),
             )
             .await
         {
@@ -1011,6 +1014,7 @@ mod tests {
                 task_id: 7,
                 commit_sha: None,
                 checkpoint,
+                repository_storage: None,
             },
             indexed_at: Utc::now(),
             store,

@@ -158,6 +158,10 @@ impl RepositoryResolver {
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one download's inputs, all supplied by the pipeline; a params struct would only move the arity"
+    )]
     pub async fn resolve(
         &self,
         project_id: i64,
@@ -166,6 +170,7 @@ impl RepositoryResolver {
         namespace_id: Option<i64>,
         config: &orbit_server_config::CodeIndexingPipelineConfig,
         leases: &ArchiveLeases,
+        storage: Option<&str>,
     ) -> Result<Repository, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
         let virtual_config = orbit_server_config::features::enabled_for(
@@ -173,7 +178,6 @@ impl RepositoryResolver {
             namespace_id,
         )
         .then_some(config);
-        let storage = self.repository_storage(project_id).await;
         self.full_download(
             project_id,
             branch,
@@ -181,19 +185,9 @@ impl RepositoryResolver {
             virtual_config,
             commit_sha.is_some(),
             leases,
-            storage.as_deref(),
+            storage,
         )
         .await
-    }
-
-    async fn repository_storage(&self, project_id: i64) -> Option<String> {
-        match self.repository_service.project_info(project_id).await {
-            Ok(info) => info.repository_storage,
-            Err(error) => {
-                warn!(project_id, %error, "repository storage lookup failed; using the tenant-wide archive budget");
-                None
-            }
-        }
     }
 
     #[allow(
@@ -327,7 +321,6 @@ mod tests {
         download_error: Mutex<Option<ErrorFactory>>,
         transient_failures: AtomicUsize,
         download_count: AtomicUsize,
-        storage: Mutex<Option<String>>,
     }
 
     impl ScriptedRepositoryService {
@@ -338,12 +331,7 @@ mod tests {
                 download_error: Mutex::new(None),
                 transient_failures: AtomicUsize::new(0),
                 download_count: AtomicUsize::new(0),
-                storage: Mutex::new(None),
             }
-        }
-
-        fn set_storage(&self, storage: &str) {
-            *self.storage.lock() = Some(storage.to_string());
         }
 
         fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
@@ -388,7 +376,7 @@ mod tests {
             Ok(gitlab_client::ProjectInfo {
                 project_id,
                 default_branch: "main".to_string(),
-                repository_storage: self.storage.lock().clone(),
+                repository_storage: None,
             })
         }
 
@@ -497,7 +485,15 @@ mod tests {
                 .pipeline;
             match self
                 .0
-                .resolve(project, branch, commit, None, &config, &no_lease_limit())
+                .resolve(
+                    project,
+                    branch,
+                    commit,
+                    None,
+                    &config,
+                    &no_lease_limit(),
+                    None,
+                )
                 .await?
             {
                 Repository::Extracted(repository) => Ok(repository),
@@ -529,6 +525,7 @@ mod tests {
     async fn resolve_leased(
         resolver: &RepositoryResolver,
         leases: &ArchiveLeases,
+        storage: Option<&str>,
     ) -> Result<Repository, ResolveError> {
         let config = orbit_server_config::AppConfig::embedded_defaults()
             .engine
@@ -536,7 +533,7 @@ mod tests {
             .code_indexing_task
             .pipeline;
         resolver
-            .resolve(1, "main", Some("abc123"), None, &config, leases)
+            .resolve(1, "main", Some("abc123"), None, &config, leases, storage)
             .await
     }
 
@@ -544,12 +541,12 @@ mod tests {
     async fn a_saturated_storage_returns_the_task_to_the_queue() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        service.set_storage("gitaly-1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
         let locks = Arc::new(MockLockService::new());
         locks.set_lock(&slot_key(Some("gitaly-1"), 0));
 
-        let result = resolve_leased(&resolver.0, &leases_with_budget(locks, 1)).await;
+        let result =
+            resolve_leased(&resolver.0, &leases_with_budget(locks, 1), Some("gitaly-1")).await;
 
         assert!(matches!(result, Err(ResolveError::NoArchiveSlot { .. })));
         assert_eq!(
@@ -563,13 +560,17 @@ mod tests {
     async fn another_storages_slots_do_not_block_this_download() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        service.set_storage("gitaly-1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
         let locks = Arc::new(MockLockService::new());
         locks.set_lock(&slot_key(Some("gitaly-2"), 0));
         locks.set_lock(&slot_key(None, 0));
 
-        let result = resolve_leased(&resolver.0, &leases_with_budget(locks.clone(), 1)).await;
+        let result = resolve_leased(
+            &resolver.0,
+            &leases_with_budget(locks.clone(), 1),
+            Some("gitaly-1"),
+        )
+        .await;
 
         assert!(result.is_ok());
         assert_eq!(service.download_count(), 1);
@@ -586,11 +587,15 @@ mod tests {
                 project_id: 42,
             })
         });
-        service.set_storage("gitaly-1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
         let locks = Arc::new(MockLockService::new());
 
-        let result = resolve_leased(&resolver.0, &leases_with_budget(locks.clone(), 1)).await;
+        let result = resolve_leased(
+            &resolver.0,
+            &leases_with_budget(locks.clone(), 1),
+            Some("gitaly-1"),
+        )
+        .await;
 
         assert!(matches!(result, Err(ResolveError::Overloaded(_))));
         assert_eq!(
@@ -609,7 +614,7 @@ mod tests {
         let locks = Arc::new(MockLockService::new());
         locks.set_lock(&slot_key(None, 0));
 
-        let result = resolve_leased(&resolver.0, &leases_with_budget(locks, 1)).await;
+        let result = resolve_leased(&resolver.0, &leases_with_budget(locks, 1), None).await;
 
         assert!(matches!(result, Err(ResolveError::NoArchiveSlot { .. })));
         assert_eq!(service.download_count(), 0);

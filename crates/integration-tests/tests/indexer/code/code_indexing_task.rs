@@ -2459,6 +2459,7 @@ async fn run_with_cancelled_token(
             project_id,
             "main",
         ),
+        repository_storage: None,
     };
 
     let cancel = code_graph::v2::CancellationToken::new();
