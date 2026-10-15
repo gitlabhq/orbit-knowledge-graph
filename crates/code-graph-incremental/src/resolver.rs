@@ -676,8 +676,10 @@ fn expand(
         .collect();
     while !wave.is_empty() {
         ctx.run.check()?;
-        for e in wave.iter() {
-            if let Some(site) = e.site {
+        for e in wave.iter().filter(|e| e.kind == EdgeKind::Calls) {
+            if let Some(site) = e.site
+                && !ctx.call_at_site.contains_key(&(e.from_tree, site))
+            {
                 ctx.wave_callees
                     .entry((e.from_tree, site))
                     .or_insert(e.to());
@@ -1430,9 +1432,13 @@ fn dispatch(
             let class = match reaching {
                 Some(reaching) if reaching.len() > 1 => lub(
                     ctx,
-                    reaching
-                        .iter()
-                        .map(|e| producer_class(ctx, ctx.corpus.follow(e))),
+                    reaching.iter().map(|e| {
+                        let reached = ctx.corpus.follow(e);
+                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
+                            true => class,
+                            false => producer_class(ctx, reached),
+                        }
+                    }),
                 ),
                 _ => class,
             };
