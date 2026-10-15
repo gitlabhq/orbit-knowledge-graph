@@ -1112,8 +1112,10 @@ async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // One dispatch is up to `max_attempts` (5) deliveries.
-    for delivery in 1..=5 {
+    let max_attempts = indexer::modules::code::code_indexing_task_topic_policy()
+        .max_attempts
+        .expect("the code topic sets max_attempts");
+    for delivery in 1..=max_attempts {
         let status = if delivery % 2 == 1 {
             axum::http::StatusCode::BAD_GATEWAY
         } else {

@@ -714,6 +714,7 @@ mod tests {
 
         for status in [
             AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::TOO_MANY_REQUESTS,
             AxumStatus::NOT_FOUND,
             AxumStatus::UNAUTHORIZED,
         ] {
@@ -739,7 +740,7 @@ mod tests {
     #[tokio::test]
     async fn archive_overload_statuses_are_distinct_errors() {
         use axum::Router;
-        use axum::http::{HeaderMap, StatusCode as AxumStatus};
+        use axum::http::StatusCode as AxumStatus;
         use axum::routing::get;
 
         let app = Router::new().route(
@@ -747,8 +748,8 @@ mod tests {
             get(
                 |axum::extract::Path(id): axum::extract::Path<i64>| async move {
                     match id {
-                        1 => (AxumStatus::INTERNAL_SERVER_ERROR, HeaderMap::new()),
-                        _ => (AxumStatus::TOO_MANY_REQUESTS, HeaderMap::new()),
+                        1 => AxumStatus::INTERNAL_SERVER_ERROR,
+                        _ => AxumStatus::TOO_MANY_REQUESTS,
                     }
                 },
             ),
@@ -763,12 +764,9 @@ mod tests {
             err(client.download_archive(1, "main").await),
             GitlabClientError::ServerError { status: 500, .. }
         ));
-        // Breaker threshold is 2: a third 429 would be CircuitOpen if 429 counted as transient.
-        for _ in 0..3 {
-            assert!(matches!(
-                err(client.download_archive(2, "main").await),
-                GitlabClientError::RateLimited { .. }
-            ));
-        }
+        assert!(matches!(
+            err(client.download_archive(2, "main").await),
+            GitlabClientError::RateLimited { .. }
+        ));
     }
 }

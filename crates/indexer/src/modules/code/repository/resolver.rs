@@ -26,7 +26,7 @@ pub enum ResolveError {
     },
 
     #[error("archive endpoint overloaded: {0}")]
-    Overloaded(String),
+    Overloaded(GitlabClientError),
 
     #[error(transparent)]
     Other(#[from] HandlerError),
@@ -81,31 +81,37 @@ impl std::fmt::Display for EmptyRepositoryReason {
 
 /// Backfill resolves the branch through `project_info` first, so the project exists
 /// and a 404 means it has no repository or no refs.
-fn classify_download_error(err: &RepositoryServiceError) -> Option<ResolveError> {
-    let RepositoryServiceError::GitlabApi(err) = err else {
-        return None;
+fn classify_download_error(
+    err: RepositoryServiceError,
+) -> Result<ResolveError, RepositoryServiceError> {
+    let RepositoryServiceError::GitlabApi(api_error) = err else {
+        return Err(err);
     };
-    match err {
-        GitlabClientError::NotFound(id) => Some(ResolveError::EmptyRepository {
+    match &api_error {
+        GitlabClientError::NotFound(id) => Ok(ResolveError::EmptyRepository {
             reason: EmptyRepositoryReason::NotFound,
             detail: format!("project {id} not found (404)"),
         }),
         GitlabClientError::ServerError {
-            project_id,
-            status: status @ 502..=504,
-        } => Some(ResolveError::Overloaded(format!(
-            "{status} for project {project_id}"
-        ))),
+            status: 502..=504, ..
+        }
+        | GitlabClientError::RateLimited { .. } => Ok(ResolveError::Overloaded(api_error)),
         GitlabClientError::ServerError { project_id, status } => {
-            Some(ResolveError::EmptyRepository {
+            Ok(ResolveError::EmptyRepository {
                 reason: EmptyRepositoryReason::ServerError,
                 detail: format!(
                     "archive endpoint returned {status} for project {project_id} (repository likely missing)"
                 ),
             })
         }
-        GitlabClientError::RateLimited { .. } => Some(ResolveError::Overloaded(err.to_string())),
-        _ => None,
+        GitlabClientError::Request(_)
+        | GitlabClientError::Unauthorized
+        | GitlabClientError::ForcePush(_)
+        | GitlabClientError::JwtSigning(_)
+        | GitlabClientError::JwtDecoding(_)
+        | GitlabClientError::InvalidSecret(_)
+        | GitlabClientError::Unexpected(_)
+        | GitlabClientError::CircuitOpen { .. } => Err(api_error.into()),
     }
 }
 
@@ -188,13 +194,10 @@ impl RepositoryResolver {
             {
                 Ok(stream) => stream,
                 Err(err) => {
-                    if let Some(resolved) = classify_download_error(&err) {
-                        if matches!(resolved, ResolveError::Overloaded(_)) {
-                            warn!(project_id, ref_name, error = %err, "archive endpoint overloaded");
-                        }
-                        // Local retries would hit an overloaded server again within the same delivery.
-                        return Step::GiveUp(resolved);
-                    }
+                    let err = match classify_download_error(err) {
+                        Ok(resolved) => return Step::GiveUp(resolved),
+                        Err(err) => err,
+                    };
                     warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
                     let e = HandlerError::Processing(format!("failed to download archive: {err}"));
                     return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
