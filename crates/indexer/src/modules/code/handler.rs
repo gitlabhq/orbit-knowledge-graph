@@ -309,29 +309,27 @@ impl CodeIndexingTaskHandler {
         key: &str,
         attempt: u32,
     ) -> Result<Option<LockGuard>, HandlerError> {
-        let acquire = || async {
-            LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
-                .await
-                .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))
-        };
-        let mut held = acquire().await?;
+        let held = LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
         if held.is_some() || attempt == 1 {
             return Ok(held);
         }
-        let deadline = tokio::time::Instant::now() + self.lock_ttl;
-        let poll = self.lock_ttl / 30;
-        while held.is_none() && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(poll).await;
-            context.progress.notify_in_progress().await;
-            held = acquire().await?;
-        }
-        if held.is_none() {
-            return Err(HandlerError::Backpressure(format!(
-                "lock {key} still held after {}s on redelivery {attempt}",
-                self.lock_ttl.as_secs()
-            )));
-        }
-        Ok(held)
+        let time_left = match context.lock_service.time_left(key).await {
+            Ok(time_left) => time_left.unwrap_or_default(),
+            Err(error) => {
+                warn!(lock_key = %key, %error, "lock expiry read failed; deferring for a full lease");
+                self.lock_ttl
+            }
+        };
+        Err(HandlerError::Deferred {
+            reason: format!("lock {key} held on redelivery {attempt}"),
+            delay: time_left + self.renew_interval(),
+        })
+    }
+
+    fn renew_interval(&self) -> Duration {
+        self.lock_ttl / 3
     }
 
     #[allow(
@@ -394,7 +392,7 @@ impl CodeIndexingTaskHandler {
             checkpoint: checkpoint.clone(),
         };
         let cancel = CancellationToken::new();
-        let heartbeat_interval = self.lock_ttl / 3;
+        let heartbeat_interval = self.renew_interval();
         let indexing = self.pipeline.index_project(
             context,
             &indexing_request,

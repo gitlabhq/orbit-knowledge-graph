@@ -304,6 +304,9 @@ mod tests {
         async fn release(&self, _key: &str) -> Result<(), LockError> {
             Ok(())
         }
+        async fn time_left(&self, _key: &str) -> Result<Option<Duration>, LockError> {
+            Ok(None)
+        }
     }
 
     /// Yield enough times for spawned tasks to process through their await points.

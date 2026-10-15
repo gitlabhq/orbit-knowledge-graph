@@ -39,6 +39,9 @@ pub trait LockService: Send + Sync {
     ) -> Result<Option<LockRevision>, LockError>;
 
     async fn release(&self, key: &str) -> Result<(), LockError>;
+
+    /// `Ok(None)`: no holder, or the lease has already expired.
+    async fn time_left(&self, key: &str) -> Result<Option<Duration>, LockError>;
 }
 
 struct Lease {
@@ -258,6 +261,17 @@ impl LockService for NatsLockService {
         debug!(key, "lock released");
         result
     }
+
+    async fn time_left(&self, key: &str) -> Result<Option<Duration>, LockError> {
+        let entry = self
+            .nats
+            .kv_get(INDEXING_LOCKS_BUCKET, key)
+            .await
+            .map_err(|e| LockError::Backend(e.to_string()))?;
+        Ok(entry
+            .and_then(|entry| decode_expiration(&entry.value))
+            .and_then(|at| (at - Utc::now()).to_std().ok()))
+    }
 }
 
 #[cfg(test)]
@@ -428,6 +442,27 @@ mod tests {
                     .unwrap(),
                 "expired lock must be reclaimable",
             );
+        }
+
+        #[tokio::test]
+        async fn time_left_reads_the_stored_expiry() {
+            let (nats, svc) = new_service();
+            assert_eq!(svc.time_left("p6").await.unwrap(), None);
+
+            assert!(
+                svc.try_acquire("p6", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+            let left = svc.time_left("p6").await.unwrap().expect("held");
+            assert!(left > Duration::from_secs(28) && left <= Duration::from_secs(30));
+
+            nats.set_kv(
+                INDEXING_LOCKS_BUCKET,
+                "p6",
+                encode_expiration(Utc::now() - chrono::Duration::seconds(1)),
+            );
+            assert_eq!(svc.time_left("p6").await.unwrap(), None);
         }
 
         #[tokio::test]

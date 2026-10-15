@@ -5,12 +5,11 @@ use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::handler::Handler;
-use indexer::locking::LockService;
 use indexer::modules::code::{
     ClickHouseStaleDataCleaner, CodeCheckpointStore, StaleDataCleaner, config::CodeTableNames,
     project_lock_key,
 };
-use indexer::testkit::{CountingAcker, MockLockService};
+use indexer::testkit::MockLockService;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
@@ -1432,7 +1431,7 @@ async fn a_lost_lock_does_not_refund_over_the_new_holders_attempt() {
 }
 
 #[tokio::test]
-async fn a_redelivery_waits_out_a_held_lock_before_backing_off() {
+async fn a_redelivery_defers_for_the_rest_of_a_held_lock() {
     let project_id: i64 = 68;
     let traversal_path = "1/68/";
 
@@ -1449,39 +1448,37 @@ async fn a_redelivery_waits_out_a_held_lock_before_backing_off() {
         &[("src/Main.java", "public class Main {}")],
     );
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let lock_ttl = std::time::Duration::from_secs(1);
+    let lock_ttl = std::time::Duration::from_secs(3);
+    let renew_interval = lock_ttl / 3;
     let handler = deps.code_indexing_task_handler_with_lock_ttl(lock_ttl);
+    let held_for = std::time::Duration::from_secs(2);
     let locks = Arc::new(MockLockService::new());
-    locks.set_lock(&project_lock_key(project_id, "main"));
-    let acker = CountingAcker::new();
+    locks.set_lock_for(&project_lock_key(project_id, "main"), held_for);
 
     let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     envelope.attempt = 2;
-    let started = std::time::Instant::now();
     let error = handler
-        .handle(handler_context_with_acker(locks, acker.clone()), envelope)
+        .handle(handler_context_with_lock_service(locks), envelope)
         .await
-        .expect_err("a lock still held after a full TTL backs off");
+        .expect_err("a held lock defers the redelivery");
 
+    let indexer::handler::HandlerError::Deferred { delay, .. } = error else {
+        panic!("a held lock must defer the redelivery, got {error}");
+    };
     assert!(
-        matches!(error, indexer::handler::HandlerError::Backpressure(_)),
-        "a lock still held after a full TTL backs off without an ack, got {error}"
-    );
-    assert!(started.elapsed() >= lock_ttl);
-    assert!(
-        acker.progress_count() >= 10,
-        "the delivery must be kept alive while the handler waits for the lock"
+        delay > held_for && delay <= held_for + renew_interval,
+        "the redelivery waits out the rest of the lease plus one renew interval, got {delay:?}"
     );
     assert!(
         attempts(&clickhouse, traversal_path, project_id)
             .await
             .is_empty(),
-        "no attempt is started while the lock is held elsewhere"
+        "a deferred redelivery starts no attempt"
     );
 }
 
 #[tokio::test]
-async fn a_redelivery_runs_once_the_stale_lock_expires() {
+async fn a_deferred_redelivery_runs_once_the_lock_expires() {
     let project_id: i64 = 69;
     let traversal_path = "1/69/";
 
@@ -1498,27 +1495,34 @@ async fn a_redelivery_runs_once_the_stale_lock_expires() {
         &[("src/Main.java", "public class Main {}")],
     );
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_secs(3));
-    let key = project_lock_key(project_id, "main");
+    let handler =
+        deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_millis(900));
     let locks = Arc::new(MockLockService::new());
-    locks.set_lock(&key);
-    let acker = CountingAcker::new();
-
-    let expiry = {
-        let locks = Arc::clone(&locks);
-        let acker = acker.clone();
-        tokio::spawn(async move {
-            acker.progressed().await;
-            locks.release(&key).await.expect("release");
-        })
-    };
+    locks.set_lock_for(
+        &project_lock_key(project_id, "main"),
+        std::time::Duration::from_millis(300),
+    );
 
     let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     envelope.attempt = 2;
-    handler
-        .handle(handler_context_with_acker(locks, acker), envelope)
+    let error = handler
+        .handle(
+            handler_context_with_lock_service(Arc::clone(&locks)),
+            envelope,
+        )
         .await
-        .expect("the same delivery must run once the stale lock is gone");
+        .expect_err("a held lock defers the redelivery");
+    let indexer::handler::HandlerError::Deferred { delay, .. } = error else {
+        panic!("a held lock must defer the redelivery, got {error}");
+    };
+
+    tokio::time::sleep(delay).await;
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 3;
+    handler
+        .handle(handler_context_with_lock_service(locks), envelope)
+        .await
+        .expect("the delivery after the lease expires runs");
     handler.flush().await.expect("flush");
 
     assert_eq!(
@@ -1527,7 +1531,6 @@ async fn a_redelivery_runs_once_the_stale_lock_expires() {
     );
     assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    expiry.await.expect("expiry");
 }
 
 #[tokio::test]

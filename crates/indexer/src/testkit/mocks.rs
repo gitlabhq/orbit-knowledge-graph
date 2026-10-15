@@ -8,14 +8,12 @@ use bytes::Bytes;
 use chrono::Utc;
 use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockRevision, LockService};
 use crate::nats::{
-    KvEntry, KvPutOptions, KvPutResult, MessageAcker, NatsError, NatsMessage, NatsServices,
-    NoopAcker,
+    KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
 
@@ -245,6 +243,10 @@ impl Handler for MockHandler {
                 }
                 HandlerError::Processing(msg) => Err(HandlerError::Processing(msg.clone())),
                 HandlerError::Backpressure(msg) => Err(HandlerError::Backpressure(msg.clone())),
+                HandlerError::Deferred { reason, delay } => Err(HandlerError::Deferred {
+                    reason: reason.clone(),
+                    delay: *delay,
+                }),
             };
         }
 
@@ -255,6 +257,7 @@ impl Handler for MockHandler {
 #[derive(Clone, Default)]
 pub struct MockLockService {
     held: Arc<Mutex<HashMap<String, LockRevision>>>,
+    expires_at: Arc<Mutex<HashMap<String, tokio::time::Instant>>>,
     next_revision: Arc<AtomicU64>,
     leases_stolen: Arc<AtomicBool>,
     renew_backend_errors: Arc<AtomicBool>,
@@ -269,6 +272,13 @@ impl MockLockService {
     pub fn set_lock(&self, key: &str) {
         let revision = self.bump_revision();
         self.held.lock().insert(key.to_string(), revision);
+    }
+
+    pub fn set_lock_for(&self, key: &str, ttl: Duration) {
+        self.set_lock(key);
+        self.expires_at
+            .lock()
+            .insert(key.to_string(), tokio::time::Instant::now() + ttl);
     }
 
     pub fn is_held(&self, key: &str) -> bool {
@@ -304,9 +314,14 @@ impl LockService for MockLockService {
         _ttl: Duration,
     ) -> Result<Option<LockRevision>, LockError> {
         let mut held = self.held.lock();
-        if held.contains_key(key) {
+        let mut expires_at = self.expires_at.lock();
+        let expired = expires_at
+            .get(key)
+            .is_some_and(|at| *at <= tokio::time::Instant::now());
+        if held.contains_key(key) && !expired {
             Ok(None)
         } else {
+            expires_at.remove(key);
             let revision = self.bump_revision();
             held.insert(key.to_string(), revision);
             Ok(Some(revision))
@@ -343,46 +358,16 @@ impl LockService for MockLockService {
         self.held.lock().remove(key);
         Ok(())
     }
-}
 
-#[derive(Clone, Default)]
-pub struct CountingAcker {
-    progress_acks: Arc<AtomicUsize>,
-    progressed: Arc<Notify>,
-}
-
-impl CountingAcker {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn progress_count(&self) -> usize {
-        self.progress_acks.load(Ordering::SeqCst)
-    }
-
-    pub async fn progressed(&self) {
-        self.progressed.notified().await;
-    }
-}
-
-#[async_trait]
-impl MessageAcker for CountingAcker {
-    async fn ack(&self) -> Result<(), NatsError> {
-        Ok(())
-    }
-
-    async fn ack_term(&self) -> Result<(), NatsError> {
-        Ok(())
-    }
-
-    async fn ack_progress(&self) -> Result<(), NatsError> {
-        self.progress_acks.fetch_add(1, Ordering::SeqCst);
-        self.progressed.notify_one();
-        Ok(())
-    }
-
-    async fn nack(&self, _delay: Option<Duration>) -> Result<(), NatsError> {
-        Ok(())
+    async fn time_left(&self, key: &str) -> Result<Option<Duration>, LockError> {
+        if !self.is_held(key) {
+            return Ok(None);
+        }
+        Ok(self
+            .expires_at
+            .lock()
+            .get(key)
+            .map(|at| at.saturating_duration_since(tokio::time::Instant::now())))
     }
 }
 

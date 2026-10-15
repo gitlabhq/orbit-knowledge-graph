@@ -184,7 +184,7 @@ A namespace whose every project is checkpointed is drained. Once per schema vers
 
 ##### Handler
 
-The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
+The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently. If a redelivery finds the lock held, the handler returns the task to NATS for the time left on the lease plus one renew interval. That redelivery spends no attempt. A first delivery that finds the lock held is acked, because a concurrent run holds the lock.
 
 Example NATS KV:
 
