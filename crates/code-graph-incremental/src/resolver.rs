@@ -901,19 +901,34 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let target_path = match mapped {
-                        Some(path) => path,
-                        None if raw_path == "." => tree
-                            .root()
-                            .tag(root_relative)
-                            .and_then(|rel| tree.label.strip_suffix(lang.syms.resolve(rel)))
-                            .map_or_else(String::new, |root| {
-                                root.trim_end_matches(PATH_SEP).to_owned()
-                            }),
+                    let own_root = tree
+                        .root()
+                        .tag(root_relative)
+                        .and_then(|rel| tree.label.strip_suffix(lang.syms.resolve(rel)))
+                        .map(|root| root.trim_end_matches(PATH_SEP));
+                    let mut target_path = match mapped {
+                        Some(ref path) => path.clone(),
+                        None if raw_path == "." => own_root.unwrap_or_default().to_owned(),
                         None => raw_path.to_owned(),
                     };
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
+                    if let Some(root) = own_root.filter(|root| mapped.is_none() && !root.is_empty())
+                        && !direct.is_empty()
+                        && direct.iter().all(|loc| {
+                            !trees[loc.fi as usize]
+                                .label
+                                .starts_with(&format!("{root}{PATH_SEP}"))
+                        })
+                    {
+                        let local = format!("{root}{PATH_SEP}{target_path}");
+                        let mut found = resolve_glob(&local, file_index, prefixes);
+                        found.retain(|loc| loc.fi != fi);
+                        if !found.is_empty() {
+                            direct = found;
+                            target_path = local;
+                        }
+                    }
                     if direct.is_empty() && stdlib {
                         return;
                     }
