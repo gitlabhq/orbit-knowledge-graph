@@ -244,7 +244,7 @@ fn from_tree_sitter(
     field_map: &[u16],
     label: &str,
     max_depth: usize,
-) -> Option<Tree> {
+) -> (Tree, bool) {
     let ts_root = ts_tree.root_node();
     let mut cursor = ts_root.walk();
 
@@ -286,8 +286,9 @@ fn from_tree_sitter(
     let mut parent_stack = vec![(root_nid, ts_root.kind_id(), 1)];
 
     if !cursor.goto_first_child() {
-        return Some(tree);
+        return (tree, false);
     }
+    let mut truncated = false;
 
     loop {
         let ts = cursor.node();
@@ -320,11 +321,12 @@ fn from_tree_sitter(
         let chained = ts.kind_id() == parent_kind && cursor.field_name() == Some("left");
         if cursor.goto_first_child() {
             let depth = parent_depth + usize::from(!chained);
-            parent_stack.push((nid, ts.kind_id(), depth));
-            if max_depth > 0 && depth > max_depth {
-                return None;
+            if max_depth == 0 || depth <= max_depth {
+                parent_stack.push((nid, ts.kind_id(), depth));
+                continue;
             }
-            continue;
+            cursor.goto_parent();
+            truncated = true;
         }
 
         if cursor.goto_next_sibling() {
@@ -333,7 +335,7 @@ fn from_tree_sitter(
 
         loop {
             if !cursor.goto_parent() {
-                return Some(tree);
+                return (tree, truncated);
             }
             parent_stack.pop();
             if cursor.goto_next_sibling() {
@@ -395,6 +397,7 @@ pub fn parse(
         &crate::sentinel::Sentinel::disabled(),
         0,
     )
+    .map(|(tree, _)| tree)
 }
 
 pub fn parse_with_sentinel(
@@ -404,7 +407,7 @@ pub fn parse_with_sentinel(
     label: &str,
     sentinel: &crate::sentinel::Sentinel,
     max_depth: usize,
-) -> Result<Tree, Killed> {
+) -> Result<(Tree, Option<Killed>), Killed> {
     sentinel.check()?;
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
@@ -433,12 +436,12 @@ pub fn parse_with_sentinel(
                 stopped.unwrap_or_else(|| Killed::stopped("tree-sitter", label, Stop::Failed))
             })?;
         sentinel.check()?;
-        let tree = from_tree_sitter(
+        let (tree, truncated) = from_tree_sitter(
             source, &ts_tree, lang, &c.kinds, &c.fields, label, max_depth,
-        )
-        .ok_or_else(|| Killed::limit("depth", label, depth_of(&ts_tree), max_depth))?;
+        );
         sentinel.check()?;
-        Ok(tree)
+        let cut = truncated.then(|| Killed::limit("depth", label, depth_of(&ts_tree), max_depth));
+        Ok((tree, cut))
     })
 }
 
@@ -529,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_far_past_the_depth_limit_stops_in_linear_time() {
+    fn a_tree_far_past_the_depth_limit_is_cut_in_linear_time() {
         let levels = 50_000;
         let source = format!("{}{}", "{\n".repeat(levels), "}\n".repeat(levels));
         let started = cpu_time::ThreadTime::now();
@@ -541,7 +544,8 @@ mod tests {
             &crate::sentinel::Sentinel::disabled(),
             10,
         )
-        .err()
+        .unwrap()
+        .1
         .unwrap();
         assert!(
             matches!(killed.stop, Some(Stop::Reached { observed, cap: 10 }) if observed > levels)
@@ -550,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_past_the_depth_limit_reports_its_real_depth() {
+    fn a_tree_cut_at_the_depth_limit_reports_its_real_depth() {
         let source = format!("x = {}1{}\n", "[".repeat(50), "]".repeat(50));
         let killed = parse_with_sentinel(
             &source,
@@ -560,7 +564,8 @@ mod tests {
             &crate::sentinel::Sentinel::disabled(),
             10,
         )
-        .err()
+        .unwrap()
+        .1
         .unwrap();
         assert!(matches!(killed.stop, Some(Stop::Reached { observed, cap: 10 }) if observed > 50));
     }

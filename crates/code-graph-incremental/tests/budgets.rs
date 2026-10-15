@@ -111,3 +111,34 @@ fn skipped(killed: &[Killed]) -> Vec<(&str, &str)> {
     found.sort();
     found
 }
+
+#[test]
+fn a_file_nested_past_the_depth_limit_keeps_what_lies_above_the_cut() {
+    let repo = tempfile::tempdir().unwrap();
+    let nested = format!(
+        "function top() {{}}\nfunction nested(c) {{\ntop();\n{}{}}}\n",
+        "if (c) {\n".repeat(200),
+        "}\n".repeat(200)
+    );
+    write_all(repo.path(), &[("nested.js", &nested)]);
+    let env = Env::with_limits(
+        SupportLang::JavaScript,
+        Limits {
+            max_tree_depth: 64,
+            ..Limits::UNLIMITED
+        },
+    )
+    .unwrap();
+    let graph = templates::index(Context::new(&env, common::walk(repo.path()))).unwrap();
+    let report = &graph.context().report;
+    assert!(report.skipped.is_empty());
+    assert_eq!(skipped(&report.limited), [("depth", "nested.js")]);
+    assert!(
+        graph
+            .value()
+            .state
+            .edges
+            .iter()
+            .any(|e| e.kind == code_graph_incremental::tree::EdgeKind::Calls)
+    );
+}

@@ -190,7 +190,7 @@ async fn language_timings_exclude_files_beyond_max_files() {
 }
 
 #[tokio::test]
-async fn files_nested_past_the_default_depth_limit_are_skipped() {
+async fn files_nested_past_the_default_depth_limit_are_indexed_up_to_the_limit() {
     let nested = format!(
         "function nested(c) {{\n{}{}}}\n",
         "if (c) {\n".repeat(5_000),
@@ -205,9 +205,9 @@ async fn files_nested_past_the_default_depth_limit_are_skipped() {
         ..code_graph_incremental::Limits::UNLIMITED
     };
     let timings = timings_for(files, limits).await;
-    assert_eq!(timings.skipped_paths, ["nested.js"]);
-    assert_eq!(timings.skipped_reasons, ["deeply_nested"]);
-    assert_eq!(timings.languages, [("javascript".to_owned(), 1)]);
+    assert!(timings.skipped_paths.is_empty());
+    assert_eq!(timings.limited_reasons, ["deeply_nested"]);
+    assert_eq!(timings.languages, [("javascript".to_owned(), 2)]);
 }
 
 #[tokio::test]
