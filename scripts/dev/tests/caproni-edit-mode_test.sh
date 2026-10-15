@@ -53,20 +53,21 @@ check "no overlay left behind" "no" "$([[ -f "$TMP/.dev/caproni-dispatcher.yaml"
 out="$(ORBIT_POD_CONFIG="$TMP/does-not-exist.yaml" bash "$SCRIPT" webserver 2>&1 || true)"
 check "missing pod config names caproni run" "yes" "$(grep -q 'caproni run' <<<"$out" && echo yes || echo no)"
 
-# build_stamps_only_on_relink: the build step rewrites the stamp the mirrord-side processes
-# watch only when cargo says it relinked gkg-server. A no-op build must not restart four
-# servers, and a failed build must leave the running ones alone.
-fake_cargo() { # fresh|fail -> prints what cargo's JSON stream would say
+# build_stamps_only_on_relink: the stamp the mirrord-side processes watch follows the linked
+# artifact under deps/, so a no-op build restarts nothing, a failed build leaves the running
+# servers alone, and a relink by any cargo (the watcher's or one run by hand) is noticed.
+FAKE_ARTIFACT="$FAKE_TARGET/deps/gkg_server-0123456789abcdef"
+mkdir -p "$FAKE_TARGET/deps"; printf 'linked once\n' >"$FAKE_ARTIFACT"
+fake_cargo() { # ok|fail -> prints what cargo's JSON stream would say
   case "$1" in
     fail) echo '{"reason":"build-finished","success":false}'; return 101 ;;
-    *) printf '{"reason":"compiler-artifact","target":{"name":"orbit-server"},"fresh":false}\n{"reason":"compiler-artifact","target":{"name":"gkg-server"},"fresh":%s}\n{"reason":"build-finished","success":true}\n' "$1" ;;
+    *) printf '{"reason":"compiler-artifact","target":{"name":"orbit-server"},"filenames":["/elsewhere"],"fresh":false}\n{"reason":"compiler-artifact","target":{"name":"gkg-server"},"filenames":["%s"],"fresh":true}\n{"reason":"build-finished","success":true}\n' "$FAKE_ARTIFACT" ;;
   esac
 }
-cargo_build() { fake_cargo true; }
+cargo_build() { fake_cargo ok; }
 build >/dev/null
 check "first build writes the stamp" "yes" "$([[ -s "$STAMP" ]] && echo yes || echo no)"
 touch "$TMP/marker"; sleep 1
-cargo_build() { fake_cargo true; }
 build >/dev/null
 check "no-op build leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
 cargo_build() { fake_cargo fail; }
@@ -74,33 +75,55 @@ rc=0; build >/dev/null 2>&1 || rc=$?
 check "failed build reports failure" "1" "$rc"
 check "failed build leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
 check "failed build leaves no message file" "0" "$(ls "$TMP"/.dev/cargo-messages.* 2>/dev/null | wc -l | tr -d ' ')"
-cargo_build() { fake_cargo false; }
+cargo_build() { fake_cargo ok; }
+printf 'linked again by some cargo\n' >"$FAKE_ARTIFACT" # an external relink, then a fresh watcher build
 build >/dev/null
-check "relinked binary refreshes the stamp" "yes" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
+check "relink by any cargo refreshes the stamp" "yes" "$([[ "$STAMP" -nt "$TMP/marker" ]] && echo yes || echo no)"
+cp "$FAKE_BINARY" "$FAKE_BINARY.new" && mv "$FAKE_BINARY.new" "$FAKE_BINARY" # macOS re-copies the uplifted binary every build
+touch "$TMP/marker2"; sleep 1
+build >/dev/null
+check "re-copied uplift without a relink leaves the stamp alone" "no" "$([[ "$STAMP" -nt "$TMP/marker2" ]] && echo yes || echo no)"
 
 # one_watcher_per_checkout: every reloader declares the build watcher, so whichever starts
-# first owns the lock and the rest idle instead of racing cargo.
+# first owns the lock and the rest idle instead of racing cargo. Caproni starts all four in
+# the same instant, and after a normal exit the lock is stale, so both cases are raced here.
+race_for_lock() { # label -> files race.<label>.N holding won|lost
+  local label="$1" i
+  for i in 1 2 3 4; do
+    (bash -c "sleep 0.3; ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; if acquire_watch_lock; then echo won; sleep 2; else echo lost; fi" >"$TMP/race.$label.$i") &
+  done
+  wait
+  cat "$TMP"/race."$label".* | grep -c won
+}
+rm -f "$WATCH_LOCK"
 check "first watcher takes the lock" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
-sleep 60 & live_pid=$!
-echo "$live_pid" >"$WATCH_LOCK"
+# A live holder looks like a watcher that has not exec'd watchexec yet: this script, sourced.
+# (the trailing `:` stops bash from exec'ing sleep in place of itself)
+bash -c "ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; sleep 60; :" & live_pid=$!
+sleep 0.5; echo "$live_pid" >"$WATCH_LOCK"
 check "second watcher is refused while the first lives" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
 kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null || true
 echo 999999999 >"$WATCH_LOCK"
 check "stale lock from a dead pid is taken over" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
-# Caproni starts the four watchers in the same instant; exactly one may win.
+sleep 60 & reused_pid=$!
+echo "$reused_pid" >"$WATCH_LOCK"
+check "a reused pid that is not watchexec counts as stale" "0" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
+kill "$reused_pid" 2>/dev/null; wait "$reused_pid" 2>/dev/null || true
+: >"$WATCH_LOCK"
+check "an empty lock counts as held" "1" "$(acquire_watch_lock >/dev/null 2>&1; echo $?)"
 rm -f "$WATCH_LOCK"
-for i in 1 2 3 4; do
-  (bash -c "sleep 0.3; ORBIT_POD_CONFIG='$FIXTURE' GENERATED_DIR_OVERRIDE='$TMP/.dev' source '$SCRIPT'; if acquire_watch_lock; then echo won; sleep 2; else echo lost; fi" >"$TMP/race.$i") &
-done
-wait
-check "simultaneous watchers: one lock holder" "1" "$(cat "$TMP"/race.* | grep -c won)"
+check "simultaneous watchers, no lock: one holder" "1" "$(race_for_lock fresh)"
+echo 999999999 >"$WATCH_LOCK"
+check "simultaneous watchers, stale lock: one holder" "1" "$(race_for_lock stale)"
+check "no stale remnants left behind" "0" "$(ls "$TMP"/.dev/gkg-build.pid.stale.* 2>/dev/null | wc -l | tr -d ' ')"
 
 # watcher_shape: the build watcher must see a checkout under an ignored parent path and must
 # not kill a running cargo when a second save lands.
 watch_args="${WATCH_ARGS[*]}"
 check "watcher ignores no gitignore" "yes" "$(grep -q -- '--ignore-nothing' <<<"$watch_args" && echo yes || echo no)"
 check "watcher queues instead of restarting cargo" "yes" "$(grep -q -- '--on-busy-update=queue' <<<"$watch_args" && echo yes || echo no)"
-check "watcher covers crates and config" "yes" "$(grep -q -- '-w crates' <<<"$watch_args" && grep -q -- '-w config' <<<"$watch_args" && echo yes || echo no)"
+check "watcher covers crates, config and the root manifests" "yes" "$(grep -q -- '-w crates' <<<"$watch_args" && grep -q -- '-w config' <<<"$watch_args" && grep -q -- '-w Cargo.toml' <<<"$watch_args" && grep -q -- '-w Cargo.lock' <<<"$watch_args" && echo yes || echo no)"
+check "watcher does not watch the repo root itself" "no" "$(grep -qE -- '(-W|--watch-non-recursive) ' <<<"$watch_args" && echo yes || echo no)"
 
 # launch_sets_library_path: a raw gkg-server needs the aws-lc-fips-sys artifacts on the
 # loader path, which cargo run would have added for us.

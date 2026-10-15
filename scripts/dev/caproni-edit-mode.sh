@@ -35,7 +35,9 @@ WATCH_LOCK="$GENERATED_DIR/gkg-build.pid"
 # honours every .gitignore up the tree, and a checkout under an ignored parent directory
 # (a worktree under .claude/, for instance) would never trigger a build and never say why.
 # queue lets a running cargo finish and runs once more, instead of killing it mid-build.
-WATCH_ARGS=(--ignore-nothing --on-busy-update=queue -d 500ms -w crates -w config -W "$REPO_ROOT")
+# The two root manifests are listed by name so that nothing else written at the root (editor
+# swap files, notes) starts a build.
+WATCH_ARGS=(--ignore-nothing --on-busy-update=queue -d 500ms -w crates -w config -w Cargo.toml -w Cargo.lock)
 
 usage() {
   printf 'Usage: %s {build|watch|webserver|indexer-sdlc|indexer-code|dispatcher}\n' "$(basename "$0")" >&2
@@ -90,34 +92,50 @@ cargo_build() {
   (cd "$REPO_ROOT" && mise exec -- cargo build --bin gkg-server --message-format=json-render-diagnostics)
 }
 
-# True when the message stream in the given file says cargo relinked gkg-server. The
-# binary's inode, size, and mtime are no use here: cargo copies the artifact into
-# target/debug on every build, no-op or not, so the file looks new each time.
-relinked_in() { # path to the message stream
-  yq -p json -o json 'select(.reason == "compiler-artifact" and .target.name == "gkg-server") | .fresh' "$1" 2>/dev/null | grep -qx false
+# Identity of the linker's output for gkg-server, read from the message stream in the given
+# file: the artifact under target/debug/deps that rustc writes only when it relinks. That file
+# changes whenever any cargo relinks the binary, including one run by hand in another
+# terminal, and stays put on a no-op build. target/debug/gkg-server itself would not do: on
+# macOS cargo copies it from deps on every build, so it has a new inode each time, while on
+# Linux it is a hard link and keeps the inode.
+artifact_identity() { # path to the message stream
+  local artifact
+  artifact="$(yq -p json -o json -r 'select(.reason == "compiler-artifact" and .target.name == "gkg-server") | .filenames[0]' "$1" 2>/dev/null | tail -1)"
+  [[ -n "$artifact" && -e "$artifact" ]] || return 1
+  stat -c '%i:%s:%Y' "$artifact" 2>/dev/null || stat -f '%i:%z:%m' "$artifact"
 }
 
-# One build. Rewrites the stamp only when cargo relinked the binary, so the mirrord-side
-# watchers restart on real builds and ignore the no-op ones. A failed build leaves the
-# stamp and the running servers alone.
+# One build. Rewrites the stamp only when the linked artifact changed since the stamp was
+# written, so the mirrord-side watchers restart on real builds and ignore the no-op ones.
+# A failed build leaves the stamp and the running servers alone.
 build() {
-  local msgs
+  local msgs identity
   mkdir -p "$GENERATED_DIR"
   msgs="$(mktemp "$GENERATED_DIR/cargo-messages.XXXXXX")"
   if ! cargo_build >"$msgs"; then
     rm -f "$msgs"
     return 1
   fi
-  if relinked_in "$msgs" || [[ ! -s "$STAMP" ]]; then
-    date +%s >"$STAMP"
-  fi
+  identity="$(artifact_identity "$msgs")" || identity="unknown-$(date +%s)"
   rm -f "$msgs"
+  if [[ "$(cat "$STAMP" 2>/dev/null)" != "$identity" ]]; then
+    printf '%s\n' "$identity" >"$STAMP"
+  fi
+}
+
+# True when the pid in the lock still belongs to a build watcher: alive, and running either
+# watchexec or this script (the holder is this script until it execs watchexec), rather
+# than whatever reused the number since.
+lock_holder_alive() { # pid
+  kill -0 "$1" 2>/dev/null && ps -o command= -p "$1" 2>/dev/null | grep -qE 'watchexec|caproni-edit-mode'
 }
 
 # Every reloader declares the build watcher so that any subset of reloaders rebuilds on
 # save. Only one watcher per checkout may run cargo; the lock holds its pid. Caproni starts
-# all four at the same instant, so the create must be atomic: noclobber opens with O_EXCL.
-# A lock whose pid is gone (a killed terminal) is taken over.
+# all four at the same instant, so every step must be atomic: noclobber creates with O_EXCL,
+# and a stale lock (the watcher execs watchexec, so nothing removes it on exit) is claimed by
+# rename, which only one caller can win, before anyone creates a fresh one. A lock that
+# exists but is still empty belongs to a writer mid-create and counts as held.
 acquire_watch_lock() {
   local holder attempt
   mkdir -p "$GENERATED_DIR"
@@ -126,10 +144,14 @@ acquire_watch_lock() {
       return 0
     fi
     holder="$(cat "$WATCH_LOCK" 2>/dev/null || true)"
-    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+    if [[ -z "$holder" ]] || lock_holder_alive "$holder"; then
       return 1
     fi
-    [[ "$attempt" -eq 1 ]] && rm -f "$WATCH_LOCK"
+    if [[ "$attempt" -eq 1 ]] && mv "$WATCH_LOCK" "$WATCH_LOCK.stale.$$" 2>/dev/null; then
+      rm -f "$WATCH_LOCK.stale.$$"
+    else
+      return 1
+    fi
   done
   return 1
 }
