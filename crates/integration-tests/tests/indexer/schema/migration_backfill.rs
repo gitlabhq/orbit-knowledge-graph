@@ -816,6 +816,5 @@ fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
         datalake: context.clickhouse.config.clone(),
         schedule: orbit_server_config::AppConfig::embedded_defaults().schedule,
         schema: orbit_server_config::AppConfig::embedded_defaults().schema,
-        health_bind_address: "127.0.0.1:0".parse().unwrap(),
     }
 }

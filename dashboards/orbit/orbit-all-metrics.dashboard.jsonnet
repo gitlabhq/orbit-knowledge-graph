@@ -4,8 +4,7 @@ local o = import 'lib/orbit.libsonnet';
 local ext = import 'lib/external.libsonnet';
 
 local items =
-  o.externalSection('HTTP transport (webserver)', ext.GKG_HTTP, 'ORBIT_DS', o.GKG_WEB_SEL)
-  + o.externalSection('gRPC transport (webserver)', ext.GKG_GRPC, 'ORBIT_DS', o.GKG_WEB_SEL)
+  o.externalSection('gRPC transport (webserver)', ext.GKG_GRPC, 'ORBIT_DS', o.GKG_WEB_SEL)
   + o.section('ETL engine (indexer)', o.metricsInDomain('indexer.etl'), 'ORBIT_DS', o.GKG_IDX_SEL)
   + o.section('Code pipeline (indexer)', o.metricsInDomain('indexer.code'), 'ORBIT_DS', o.GKG_IDX_SEL)
   + o.section('SDLC pipeline (indexer)', o.metricsInDomain('indexer.sdlc'), 'ORBIT_DS', o.GKG_IDX_SEL)

@@ -4,12 +4,10 @@
 #
 # The mise dev tasks do not pass this file to --config directly: scripts/dev/orbit-native-dev.sh
 # deep-merges it with the values it reads from the GDK checkout (ClickHouse URLs, GitLab URL, Siphon
-# stream name, JWT keys, ClickHouse password), the mode's Prometheus port, and the Git-ignored
+# stream name, JWT keys, ClickHouse password), the mode's probe server port, and the Git-ignored
 # config/dev.local.yaml (personal overrides, highest priority) into .dev/<mode>.yaml.
 
-bind_address: "127.0.0.1:8090"
 grpc_bind_address: "127.0.0.1:50054"
-indexer_health_bind_address: "127.0.0.1:4202"
 
 nats:
   url: "nats://127.0.0.1:4222"

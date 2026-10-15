@@ -31,8 +31,8 @@ APIs Exposed
 ------------
 
 The cloud ``gkg-server`` is a **gRPC (tonic) service**.  It does not serve a
-public REST or MCP surface directly --- the only HTTP endpoints it exposes are
-the ``GET /live`` and ``GET /ready`` health probes.  The customer-facing REST
+public REST or MCP surface directly --- its only HTTP endpoints are the probe
+server routes ``/-/liveness``, ``/-/readiness`` and ``/-/metrics``.  The customer-facing REST
 API and MCP endpoints live in the **Rails monolith** and proxy to ``gkg-server``
 over gRPC.
 
@@ -73,9 +73,9 @@ client, stub-cached):
    * - ``GetItemCounts``
      - Entity counts per domain that the caller can see
 
-Thirteen RPCs in total.  ``gkg-server`` health is served over HTTP as ``GET /live``
-and ``GET /ready``; there is no ``/health`` route.  Metrics are exported via
-OpenTelemetry (labkit), not a ``/metrics`` HTTP route.
+Thirteen RPCs in total.  The probe server serves ``GET /-/liveness`` and
+``GET /-/readiness`` in every mode; HealthCheck mode also serves ``/health``.
+Metrics are exported on ``/-/metrics`` and via OpenTelemetry (labkit).
 
 **Rails REST surface** (JWT-authenticated via DAP, under ``/api/v4/orbit/*``,
 proxying to the gRPC service):
