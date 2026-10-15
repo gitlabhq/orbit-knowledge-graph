@@ -184,7 +184,7 @@ A namespace whose every project is checkpointed is drained. Once per schema vers
 
 ##### Handler
 
-The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently. If the lock is held, the handler returns the task to NATS for the time left on the lease plus one renew interval. That delivery spends no attempt. The checkpoint check skips the task later if the other run already indexed past it.
+The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently. If the lock is held, the handler returns the task to NATS for the time left on the lease plus one renew interval. That delivery spends no checkpoint attempt and skips the engine retry check. NATS still counts it against `nats.max_deliver` (5 by default). At the default lock TTL a task survives about four deferrals. After the last delivery NATS stops redelivery, and the max-deliveries reconciler deletes the message. The checkpoint check skips the task later if the other run already indexed past it.
 
 Example NATS KV:
 
@@ -483,7 +483,7 @@ A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s
                            \- 9. Release lock and ack
 ```
 
-The handler acks only after the project's parts are written and its checkpoint is saved. It does not force a flush. It releases its intake permit and waits for the writer's own size, floor-and-age, or cap flush, so small repositories keep pooling into one part. The age check runs on the `write_buffer_age_secs` tick. So the wait is bounded by `write_max_flush_age_secs` plus one tick plus the write retries, about 190 s at the defaults. The heartbeat progress acks keep the delivery under `nats.ack_wait_secs` and renew the lock during the wait. The two diagrams below show that durable-write path.
+The handler acks only after the project's parts are written and its checkpoint is saved. It does not force a flush. It releases its intake permit and waits for the writer's own size, floor-and-age, or cap flush, so small repositories keep pooling into one part. The age check runs on the `write_buffer_age_secs` tick. While the writer's drain task is healthy, the wait ends within `write_max_flush_age_secs` plus one tick plus the write retries. Nothing else bounds it. An insert that hangs, or a drain task that stops, holds the job, its lock, and its NATS delivery. The heartbeat progress acks keep the delivery under `nats.ack_wait_secs` and renew the lock during the wait. The two diagrams below show that durable-write path.
 
 ##### ProjectCommit state machine
 
