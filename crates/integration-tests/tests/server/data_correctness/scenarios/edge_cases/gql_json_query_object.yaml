@@ -1,0 +1,9 @@
+description: A JSON query object sent as GQL is named as JSON and points the client at an update
+
+query:
+  gql: |
+    {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]}
+
+expect:
+  compile_error: "Orbit queries are GQL text"
+  compile_error_not_contains: ["Orbit query syntax"]

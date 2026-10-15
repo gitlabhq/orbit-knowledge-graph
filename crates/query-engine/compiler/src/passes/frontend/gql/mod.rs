@@ -9,7 +9,7 @@ use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
 use crate::passes::codegen::PaginationContext;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
-use errors::{invalid, parse_failure, syntax_error};
+use errors::{invalid, json_query, parse_failure, syntax_error};
 use ontology::introspection::{
     IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
 };
@@ -148,6 +148,9 @@ fn resolve_schema(
 }
 
 fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
+    if raw.trim_start().starts_with('{') {
+        return Err(json_query());
+    }
     check_bounds(raw)?;
     let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
         .map_err(parse_failure)?

@@ -5,4 +5,4 @@ query:
     MATCH (u:User) RETURN count(*)
 
 expect:
-  compile_error: "function count() is not supported: this function does not accept these arguments here"
+  compile_error: "function count() is not supported: aggregates take one variable or property in RETURN"

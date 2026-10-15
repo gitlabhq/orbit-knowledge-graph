@@ -680,8 +680,16 @@ fn unsupported_function(call: &Node) -> Error<Rule> {
         "type" => {
             "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
-        "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
-        | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",
+        "count" | "sum" | "avg" | "min" | "max" => {
+            "aggregates take one variable or property in RETURN, as in count(mr) or max(mr.created_at); count(*) and DISTINCT are not supported, and ORDER BY uses the aggregate's alias"
+        }
+        "date_trunc" => {
+            "date_trunc takes a unit and a property in RETURN, as in date_trunc('month', mr.created_at)"
+        }
+        "properties" => "properties takes one node variable in RETURN, as in properties(mr)",
+        "token_match" | "all_tokens" | "any_tokens" => {
+            "token functions take a property and a value in WHERE, as in token_match(d.name, 'parse')"
+        }
         _ => {
             "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }

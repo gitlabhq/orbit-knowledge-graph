@@ -20,6 +20,12 @@ pub(super) fn parse_failure(error: Error<Rule>) -> QueryError {
     ))
 }
 
+pub(super) fn json_query() -> QueryError {
+    QueryError::Validation(
+        "Orbit queries are GQL text such as MATCH (p:Project {full_path: 'group/project'}) RETURN p.id, not JSON query objects. Run CALL db.schema('NodeName') for properties. A client or skill that still sends JSON needs an update: run glab orbit --update, then reload the skill with glab orbit skills get orbit.".into(),
+    )
+}
+
 fn expected_message(variant: &ErrorVariant<Rule>) -> String {
     match variant {
         ErrorVariant::ParsingError {
