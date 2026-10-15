@@ -1,0 +1,32 @@
+name: "JavaScript: a parameter named like a function does not type its call result"
+
+fixtures:
+  - path: main.js
+    content: |
+      class Foo {
+        bar() {}
+      }
+
+      function make() {
+        return new Foo();
+      }
+
+      function f(make) {
+        const x = make();
+        x.bar();
+      }
+
+      function g() {
+        const x = make();
+        x.bar();
+      }
+
+tests:
+  - name: "only the call to the top-level make types x"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'bar'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: g } }
