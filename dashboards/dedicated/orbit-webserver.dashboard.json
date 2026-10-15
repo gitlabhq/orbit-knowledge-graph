@@ -106,7 +106,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of overall pipeline duration on the Orbit webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
+      "description": "p95 of pipeline duration for successful queries on the Orbit webserver side. Failed queries are excluded because they end early or at a timeout. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -124,7 +124,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gkg_query_pipeline_duration_seconds_bucket%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gkg_query_pipeline_duration_seconds_bucket%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status%3D\\%22ok\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -146,7 +146,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))) or vector(0)",
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])))) or vector(0)",
           "legendFormat": "Pipeline: p95 (5m)",
           "refId": "A"
         }
@@ -842,7 +842,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Orbit-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
+      "description": "Orbit-side query pipeline duration percentiles for successful queries. Failed queries are excluded because they end early or at a timeout. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -880,7 +880,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -889,7 +889,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -898,7 +898,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -1303,8 +1303,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "server pipeline p95",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])))",
+          "legendFormat": "server pipeline p95 (ok)",
           "refId": "B"
         }
       ],

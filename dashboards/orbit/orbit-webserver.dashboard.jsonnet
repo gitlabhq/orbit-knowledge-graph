@@ -74,8 +74,8 @@ local health = [
   ),
   o.gaugeStat(
     'Pipeline: p95 (5m)',
-    'p95 of overall pipeline duration on the Orbit webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
-    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [pipelineDuration.prom_name, SEL],
+    'p95 of pipeline duration for successful queries on the Orbit webserver side. Failed queries are excluded because they end early or at a timeout. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
+    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, status="ok"}[5m])))' % [pipelineDuration.prom_name, SEL],
     DS, 's', 6,
   ),
   o.gaugeStat(
@@ -151,8 +151,8 @@ local latency = [
   o.histogramPercentiles(
     pipelineDuration,
     'Server: pipeline duration (p50/p95/p99)',
-    'Orbit-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.',
-    DS, SEL, w=12,
+    'Orbit-side query pipeline duration percentiles for successful queries. Failed queries are excluded because they end early or at a timeout. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.',
+    DS, SEL, filter='status="ok"', w=12,
   ),
   // Per-stage stacked p95: tells the budget at a glance.
   o.timeseries(
@@ -209,8 +209,8 @@ local latency = [
         'rails total p95', RDS, 'A',
       ),
       o.target(
-        'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [pipelineDuration.prom_name, SEL],
-        'server pipeline p95', DS, 'B',
+        'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, status="ok"}[5m])))' % [pipelineDuration.prom_name, SEL],
+        'server pipeline p95 (ok)', DS, 'B',
       ),
     ],
     's', 12, 8,
