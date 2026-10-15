@@ -321,6 +321,60 @@ or `"-node.property"` (leading `-`) for descending, where `node` is the node `id
 }
 ```
 
+## Merge requests created by agent sessions
+
+`AgentSession` is an AI agent session, taken from the AI governance sessions
+table. It records that a session ran, where it was recorded (`source`), and
+its flow type. It never records the goal, title, summary, status, or invoker. `AgentSession --CREATED_MR--> MergeRequest` links a session to the
+merge requests it created. It does not include the MR a flow was started
+against.
+
+Only GitLab Duo sessions (`source` is `gitlab_duo`) are indexed today, and only
+Duo sessions have merge request links. Historical sessions appear once the
+governance backfill has finished on the instance. Sessions from external agents
+are not indexed yet.
+
+`flow_type` is the workflow definition with its version dropped, so
+`developer/v1` is `developer`. A definition Orbit does not recognize is
+`other`. Only project sessions are indexed, and you see a session only with
+Reporter access or higher on its project.
+
+Merge requests created by the `developer` flow:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "s", "entity": "AgentSession", "filters": {"flow_type": {"eq": "developer"}}},
+      {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]}
+    ],
+    "relationships": [{"type": "CREATED_MR", "from": "s", "to": "mr"}],
+    "limit": 25
+  }
+}
+```
+
+Count session-created merge requests per flow type. Aggregations need a filter
+on at least one node, so bound the sessions by date:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "s", "entity": "AgentSession", "filters": {"session_started_at": {"gte": "2026-01-01"}}},
+      {"id": "mr", "entity": "MergeRequest"}
+    ],
+    "relationships": [{"type": "CREATED_MR", "from": "s", "to": "mr"}],
+    "group_by": ["s.flow_type"],
+    "aggregations": [{"count": "mr", "as": "mrs"}],
+    "aggregation_sort": "-mrs",
+    "limit": 25
+  }
+}
+```
+
 ## Work items in a project
 
 GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity. There

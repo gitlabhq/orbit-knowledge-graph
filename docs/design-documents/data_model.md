@@ -59,6 +59,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `PackageFile` | Represents a file stored for a package in the package registry (the artifact itself, for example a .whl or .jar). | `id`, `file_name`, `size`, `file_sha256`, `status`, `project_id` |
 | `ContainerRepository` | Represents a container image repository in a project's container registry. | `id`, `name`, `status`, `project_id` |
 | `Dependency` | Represents a dependency declared by a package (npm, Maven, NuGet, Composer, and other formats). | `id`, `name`, `version_pattern`, `project_id` |
+| `AgentSession` | Represents an AI agent session in a project, from the AI governance sessions table. Only GitLab Duo sessions are indexed today. Existence, source, and normalized flow type only; goal, title, summary, status, and invoker are never indexed. Redacted through the project (`read_code`). | `id`, `source`, `flow_type`, `project_id`, `session_started_at` |
 | `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
 | `VulnerabilityIdentifier` | Represents a vulnerability identifier such as CVE or GHSA.                                         | `id`, `external_type`, `external_id`, `name`                                  |
 
@@ -103,6 +104,8 @@ graph TD
     PackageFile -- BUILT_BY --> Pipeline
     ContainerRepository -- IN_PROJECT --> Project
     Dependency -- IN_PROJECT --> Project
+    AgentSession -- IN_PROJECT --> Project
+    AgentSession -- CREATED_MR --> MergeRequest
 ```
 
 ### Implemented Relationship Types
@@ -110,13 +113,14 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
-| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `PackageFile`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `PackageFile`, `ContainerRepository`, `Dependency`, `AgentSession` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `BUILT_BY`                          | `Package`, `PackageFile` | `Pipeline` | A package or package file was built by a CI/CD pipeline (sourced from the `packages_build_infos` and `packages_package_file_build_infos` join tables). |
 | `HAS_PACKAGE_FILE`                  | `Package`      | `PackageFile`  | A package contains a package file (FK on the package file).                                             |
 | `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
 | `HAS_VULNERABILITY`                 | `Package`      | `Vulnerability`| A registry package is affected by a vulnerability, matched to its SBOM component occurrence by name/version (sourced from the `sbom_occurrences_vulnerabilities` join and `sbom_occurrences`/`sbom_component_versions`). |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
+| `CREATED_MR`                        | `AgentSession` | `MergeRequest` | An agent session created a merge request (sourced from `duo_workflows_workflow_merge_requests`, `link_type = 1`, joined to the governance session on `workflow_id`). |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `MergeRequest` | `Pipeline`     | A merge request triggered a pipeline.                                                                   |
 | `TRIGGERED`                         | `User`         | `Pipeline`, `Job` | A user triggered a pipeline or job directly.                                                       |

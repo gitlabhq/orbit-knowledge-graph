@@ -1,4 +1,24 @@
+## [0.144.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.143.0...v0.144.0) (2026-10-15)
+
+### Features
+
+* **cli:** install one orbit skill as a wrapper or the full tree ([e4552d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e4552d9cc6ad8e8d888b84e037743b7c4fc19059)) by Dmitry Gruzd
+* **named-queries:** add expand_merge_request and expand_work_item ([f255a71](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f255a71c33c0e6730bf89c77fa0481160f5e632b)) by Dmitry Gruzd
+
+### Fixes
+
+* **indexer:** retry 429/502/503/504 archive errors instead of marking repos empty ([345c97c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/345c97cdb9bfb13574c98aa5ec67e24144139ad9)) by Dmitry Gruzd
+
+### Other
+
+* **billing:** add ADR 020 for SOX scoping of billing emission ([24fa08c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24fa08cfda6c96f7182a0126506463e854f07d72)) by Sharmad Nachnolkar
+* **indexer:** deny clippy panic lints on the data path ([54da1a9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/54da1a9856b6545461d46f825a4552c607fa60a3)) by Dmitry Gruzd
+
 ## [0.143.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.142.0...v0.143.0) (2026-10-15)
+
+### ⚠ BREAKING CHANGES
+
+* **probes:** Orbit no longer serves the legacy `/live` and `/ready` probe endpoints. Deployments with the Orbit Helm chart need chart 3.0.0 or later.
 
 ### Features
 

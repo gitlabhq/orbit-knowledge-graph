@@ -227,6 +227,46 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
     assert!(!authorized_ids.contains(&5));
 }
 
+async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, flow_type, project_id, traversal_path) VALUES
+         (1, 'developer', 1000, '1/100/1000/'),
+         (2, 'chat', 1001, '1/101/1001/')",
+        t("gl_agent_session")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    let ontology = load_ontology();
+    let query = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "w", "entity": "AgentSession", "id_range": {"start": 1, "end": 10000}}],
+            "limit": 10
+        }"#,
+        query_engine::compiler::Frontend::JsonDsl,
+        &ontology,
+        &test_security_context(),
+    )
+    .unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let w = result.ctx().get("w").unwrap().clone();
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1001]);
+    run_redaction(&mut result, &mock_service);
+
+    // The redaction id of an AgentSession row is its project, not the session.
+    let visible_projects: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&w))
+        .collect();
+    assert_eq!(result.authorized_count(), 1);
+    assert_eq!(visible_projects, HashSet::from([1000]));
+}
+
 async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -4406,6 +4446,7 @@ async fn redaction_integration() {
         three_hop_denying_one_project_removes_only_those_paths,
         group_project_two_hop_verifies_exact_pairs,
         single_node_project_query_verifies_all_projects,
+        agent_session_hidden_when_project_read_code_is_denied,
         all_nodes_have_required_type_columns,
         empty_query_result_stays_empty,
         all_authorized_preserves_all_data,

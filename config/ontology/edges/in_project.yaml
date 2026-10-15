@@ -154,3 +154,9 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "Dependency belongs to project."
+
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "Agent session belongs to project."

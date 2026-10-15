@@ -1,0 +1,26 @@
+# Pins the known limit: once ClickHouse has merged the source parts only the
+# tombstone is left, so the edge it should remove cannot be identified and stays.
+# The edge is seeded directly because the live row is gone from the source table.
+description: A tombstone with no live source version leaves an existing CREATED_MR edge in place
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+      gl_edge:
+        - { traversal_path: "1/100/1000/", source_id: 11, source_kind: AgentSession, relationship_kind: CREATED_MR, target_id: 10, target_kind: MergeRequest }
+    expect:
+      edges:
+        - { kind: CREATED_MR, from: AgentSession, to: MergeRequest, count: 1 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.CREATED_MR_siphon_duo_workflows_workflow_merge_requests, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_duo_workflows_workflow_merge_requests:
+        - { id: 1, workflow_id: 1, merge_request_id: 0, link_type: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      edges:
+        - { kind: CREATED_MR, from: AgentSession, to: MergeRequest, count: 1 }
