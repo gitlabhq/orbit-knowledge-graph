@@ -270,18 +270,18 @@ impl CodeIndexingTaskHandler {
             .await;
 
         let outcome = match &result {
-            Ok(Some(label)) => label,
-            Ok(None) => "skipped_lock",
+            Ok(label) => label,
+            Err(HandlerError::Deferred { .. }) => "skipped_lock",
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        if matches!(&result, Ok(Some(_))) {
+        if result.is_ok() {
             self.metrics.record_repository_indexed(outcome);
         }
         self.metrics.record_handler_duration(started_at);
 
         match &result {
-            Ok(_) => observer.finish(),
+            Ok(_) | Err(HandlerError::Deferred { .. }) => observer.finish(),
             Err(e) => {
                 observer.record_error(&e.to_string());
                 observer.finish();
@@ -307,13 +307,12 @@ impl CodeIndexingTaskHandler {
         &self,
         context: &HandlerContext,
         key: &str,
-        attempt: u32,
-    ) -> Result<Option<LockGuard>, HandlerError> {
-        let held = LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
+    ) -> Result<LockGuard, HandlerError> {
+        if let Some(guard) = LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
             .await
-            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
-        if held.is_some() || attempt == 1 {
-            return Ok(held);
+            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
+        {
+            return Ok(guard);
         }
         let time_left = match context.lock_service.time_left(key).await {
             Ok(time_left) => time_left.unwrap_or_default(),
@@ -322,9 +321,11 @@ impl CodeIndexingTaskHandler {
                 self.lock_ttl
             }
         };
+        let delay = time_left + self.renew_interval();
+        warn!(lock_key = %key, ?delay, "code indexing deferred: lock held by another indexer");
         Err(HandlerError::Deferred {
-            reason: format!("lock {key} held on redelivery {attempt}"),
-            delay: time_left + self.renew_interval(),
+            reason: format!("lock {key} held by another indexer"),
+            delay,
         })
     }
 
@@ -354,7 +355,7 @@ impl CodeIndexingTaskHandler {
         mut checkpoint: CodeCheckpoint,
         attempt: u32,
         observer: &mut dyn IndexingObserver,
-    ) -> Result<Option<&'static str>, HandlerError> {
+    ) -> Result<&'static str, HandlerError> {
         let Some(namespace_id) = request.traversal_path.top_level_namespace_id() else {
             return Err(HandlerError::Processing(format!(
                 "traversal_path {:?} has no namespace_id",
@@ -366,16 +367,7 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let Some(guard) = self.acquire_lock(context, &key, attempt).await? else {
-            warn!(
-                task_id = request.task_id,
-                project_id,
-                branch = %branch,
-                lock_key = %key,
-                "code indexing skipped: lock held by another indexer"
-            );
-            return Ok(None);
-        };
+        let guard = self.acquire_lock(context, &key).await?;
 
         checkpoint.start_attempt();
         self.checkpoint_store
@@ -473,7 +465,7 @@ impl CodeIndexingTaskHandler {
             }
         }
 
-        result.map(Some)
+        result
     }
 }
 
@@ -614,11 +606,6 @@ mod tests {
             self.mock_checkpoints.save(&checkpoint).await.unwrap();
         }
 
-        fn set_lock(&self, project_id: i64, branch: &str) {
-            let key = project_lock_key(project_id, branch);
-            self.mock_locks.set_lock(&key);
-        }
-
         fn lock_exists(&self, project_id: i64, branch: &str) -> bool {
             let key = project_lock_key(project_id, branch);
             self.mock_locks.is_held(&key)
@@ -654,17 +641,6 @@ mod tests {
             .await
             .unwrap();
         assert!(saved.is_none(), "no attempt row may replace the stored one");
-    }
-
-    #[tokio::test]
-    async fn skips_when_lock_already_held() {
-        let ctx = TestContext::new();
-        ctx.set_lock(123, "main");
-
-        let envelope = TestContext::make_request(100, 123, "main");
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        assert!(result.is_ok());
     }
 
     #[tokio::test]

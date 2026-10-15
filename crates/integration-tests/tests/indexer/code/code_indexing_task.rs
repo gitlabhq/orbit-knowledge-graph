@@ -1387,10 +1387,8 @@ async fn a_lost_lock_does_not_refund_over_the_new_holders_attempt() {
     );
 }
 
-#[tokio::test]
-async fn a_redelivery_defers_for_the_rest_of_a_held_lock() {
-    let project_id: i64 = 68;
-    let traversal_path = "1/68/";
+async fn a_held_lock_defers_the_delivery(project_id: i64, attempt: u32) {
+    let traversal_path = format!("1/{project_id}/");
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -1412,30 +1410,40 @@ async fn a_redelivery_defers_for_the_rest_of_a_held_lock() {
     let locks = Arc::new(MockLockService::new());
     locks.set_lock_for(&project_lock_key(project_id, "main"), held_for);
 
-    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    envelope.attempt = 2;
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, &traversal_path);
+    envelope.attempt = attempt;
     let error = handler
         .handle(handler_context_with_lock_service(locks), envelope)
         .await
-        .expect_err("a held lock defers the redelivery");
+        .expect_err("a held lock defers the delivery");
 
     let indexer::handler::HandlerError::Deferred { delay, .. } = error else {
-        panic!("a held lock must defer the redelivery, got {error}");
+        panic!("a held lock must defer delivery {attempt}, got {error}");
     };
     assert!(
         delay > held_for && delay <= held_for + renew_interval,
-        "the redelivery waits out the rest of the lease plus one renew interval, got {delay:?}"
+        "delivery {attempt} waits out the rest of the lease plus one renew interval, got {delay:?}"
     );
     assert!(
-        attempts(&clickhouse, traversal_path, project_id)
+        attempts(&clickhouse, &traversal_path, project_id)
             .await
             .is_empty(),
-        "a deferred redelivery starts no attempt"
+        "a deferred delivery starts no attempt"
     );
 }
 
 #[tokio::test]
-async fn a_deferred_redelivery_runs_once_the_lock_expires() {
+async fn a_held_lock_defers_a_first_delivery() {
+    a_held_lock_defers_the_delivery(68, 1).await;
+}
+
+#[tokio::test]
+async fn a_held_lock_defers_a_redelivery() {
+    a_held_lock_defers_the_delivery(71, 2).await;
+}
+
+#[tokio::test]
+async fn a_deferred_delivery_runs_once_the_lock_frees() {
     let project_id: i64 = 69;
     let traversal_path = "1/69/";
 
@@ -1460,22 +1468,21 @@ async fn a_deferred_redelivery_runs_once_the_lock_expires() {
         std::time::Duration::from_millis(300),
     );
 
-    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    envelope.attempt = 2;
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     let error = handler
         .handle(
             handler_context_with_lock_service(Arc::clone(&locks)),
             envelope,
         )
         .await
-        .expect_err("a held lock defers the redelivery");
+        .expect_err("a held lock defers the delivery");
     let indexer::handler::HandlerError::Deferred { delay, .. } = error else {
-        panic!("a held lock must defer the redelivery, got {error}");
+        panic!("a held lock must defer the delivery, got {error}");
     };
 
     tokio::time::sleep(delay).await;
     let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    envelope.attempt = 3;
+    envelope.attempt = 2;
     handler
         .handle(handler_context_with_lock_service(locks), envelope)
         .await
