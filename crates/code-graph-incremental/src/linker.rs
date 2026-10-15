@@ -127,6 +127,9 @@ impl<'t> Fold<'t> {
                 self.killed = Some(k);
                 return;
             }
+            if !matches!(item, WorkItem::Visit(_)) {
+                self.chain_memo.clear();
+            }
             match item {
                 WorkItem::ExitScope { wildcards, block } => {
                     self.scopes.pop();
@@ -193,8 +196,10 @@ impl<'t> Fold<'t> {
     }
 
     fn dispatch(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
-        self.chain_memo.clear();
         let k = c.kind();
+        if Self::rebinds(c) {
+            self.chain_memo.clear();
+        }
         if k == C::Import || k == C::ImportType {
             self.handle_import(c);
         } else if c.is(C::Def) {
@@ -252,6 +257,21 @@ impl<'t> Fold<'t> {
                 .filter(|child| !((k == C::Call || k == C::SuperType) && child.is(C::Import)))
                 .map(|child| WorkItem::Visit(child.index())),
         );
+    }
+
+    fn rebinds(c: Cursor<'t>) -> bool {
+        let kinds = [
+            C::Import,
+            C::ImportType,
+            C::Binding,
+            C::Scope,
+            C::Destructure,
+            C::SsaBranch,
+            C::SsaLoop,
+        ];
+        c.is(C::Def)
+            || kinds.iter().any(|&kind| c.is(kind))
+            || c.is(C::Call) && c.children().any(|child| child.is(C::Import))
     }
 
     fn handle_branch(branch: Cursor<'t>, lhs: Option<u32>, stack: &mut Vec<WorkItem>) {
