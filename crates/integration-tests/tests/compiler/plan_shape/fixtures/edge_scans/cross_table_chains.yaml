@@ -1,0 +1,121 @@
+cases:
+  - name: Merge request pipeline branch chain composes default CI and code tables
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
+    logical:
+      expect:
+        - (EdgeScan AUTHORED user->mr AS e0)
+        - (EdgeScan HAS_HEAD_PIPELINE mr->pipeline AS e1)
+        - (EdgeScan IN_PROJECT pipeline->project AS e2)
+        - (EdgeScan CONTAINS project->branch AS e3)
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_edge) AS _orbit_edge_0)
+            - (Scan Table(gl_ci_edge) AS _orbit_edge_1)
+            - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+            - (Scan Table(gl_code_edge) AS _orbit_edge_3)
+
+  - name: Merge request diff branch chain composes default diff and code tables
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_DIFF","from":"mr","to":"diff"},{"type":"IN_PROJECT","from":"diff","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
+    logical:
+      expect:
+        - (EdgeScan AUTHORED user->mr AS e0)
+        - (EdgeScan HAS_DIFF mr->diff AS e1)
+        - (EdgeScan IN_PROJECT diff->project AS e2)
+        - (EdgeScan CONTAINS project->branch AS e3)
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_edge) AS _orbit_edge_0)
+            - (Scan Table(gl_diff_edge) AS _orbit_edge_1)
+            - (Scan Table(gl_diff_edge) AS _orbit_edge_2)
+            - (Scan Table(gl_code_edge) AS _orbit_edge_3)
+
+  - name: Security scan project branch chain composes security and code tables
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"},{"type":"CONTAINS","from":"branch","to":"directory"}]}
+      gql: |
+        MATCH (scan:SecurityScan {id: 1})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
+    logical:
+      expect:
+        - (EdgeScan IN_PROJECT scan->project AS e0)
+        - (EdgeScan CONTAINS project->branch AS e1)
+        - (EdgeScan CONTAINS branch->directory AS e2)
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_sec_edge) AS _orbit_edge_0)
+            - (Scan Table(gl_code_edge) AS _orbit_edge_1)
+            - (Scan Table(gl_code_edge) AS _orbit_edge_2)
+
+  - name: Untyped merge request alternatives union default CI and diff tables
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE","HAS_DIFF"]}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) RETURN mr, target
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=mr direction=outgoing directional ... (_))"]
+        emitted:
+          expect:
+            - (Union ALL AS e (_) (_) (_))
+            - (Scan Table(gl_edge) AS _e)
+            - (Scan Table(gl_ci_edge) AS _e)
+            - (Scan Table(gl_diff_edge) AS _e)
+
+  - name: Split AUTHORED neighbors retain default and security routes
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"user","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED"]}}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED]->(neighbor) RETURN user, neighbor
+    logical:
+      expect: ["(Input neighbors (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Neighbors center=user direction=outgoing directional outgoing=[gl_edge, gl_sec_edge] ... (_))"]
+        emitted:
+          expect:
+            - (Union ALL AS e (_) (_))
+            - (Scan Table(gl_edge) AS _e)
+            - (Scan Table(gl_sec_edge) AS _e)
+
+  - name: Cross-table shortest path keeps scoped CI and code frontiers
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1]},{"id":"branch","entity":"Branch","node_ids":[2]}],"path":{"type":"shortest","from":"pipeline","to":"branch","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]}}
+      gql: |
+        MATCH path = ANY SHORTEST (pipeline:Pipeline {id: 1})-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch {id: 2}) RETURN path
+    logical:
+      expect: ["(Input path_finding (...))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (PathFinding pipeline->branch depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] relationships=[IN_PROJECT, CONTAINS] ... (_) (_))
+        emitted:
+          expect:
+            - (CTE _path_scope_traversal_paths (Union ALL (_) (_)))
+            - (Filter e1.traversal_path IN _path_scope_traversal_paths.traversal_path, ... (_))
+            - (Scan Table(gl_ci_edge) AS _e1)
+            - (Scan Table(gl_code_edge) AS _e1)
+            - (Scan Table(gl_diff_edge) AS _e1)
+            - (Scan Table(gl_edge) AS _e1)
+            - (Scan Table(gl_sec_edge) AS _e1)
