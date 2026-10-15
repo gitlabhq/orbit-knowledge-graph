@@ -27,7 +27,10 @@ pub(in crate::modules::code) fn run(
     let dropped = repository.usage().dropped_listed;
     if dropped > 0 {
         tracing::warn!(
+            project_id = envelope.project_id,
+            branch = %envelope.branch,
             dropped,
+            reason = "file_limit",
             "listed-only files past the repository file limit have no File row"
         );
     }

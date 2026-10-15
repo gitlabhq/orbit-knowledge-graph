@@ -377,6 +377,7 @@ impl CodeIndexingTaskHandler {
             cancel.clone(),
             &guard,
         );
+        let mut overloaded = false;
         let result = match run_with_heartbeat(
             indexing,
             &context.progress,
@@ -403,18 +404,12 @@ impl CodeIndexingTaskHandler {
                     ),
                 ))
             }
-            Err(IndexError::NoLane { waited }) => {
-                self.refund_attempt(&mut checkpoint).await;
-                Err(HandlerError::Backpressure(format!(
-                    "no indexing lane within {}s",
-                    waited.as_secs()
-                )))
-            }
+            Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
+                "no indexing lane within {}s",
+                waited.as_secs()
+            ))),
             Err(IndexError::Overloaded(cause)) => {
-                // Redeliveries share one dispatch; counting each would exhaust MAX_CODE_ATTEMPTS.
-                if attempt > 1 {
-                    self.refund_attempt(&mut checkpoint).await;
-                }
+                overloaded = true;
                 Err(HandlerError::Processing(format!(
                     "archive endpoint overloaded ({cause}); retrying"
                 )))
@@ -426,6 +421,24 @@ impl CodeIndexingTaskHandler {
 
         if let Err(e) = &result {
             warn!(project_id, branch = %branch, error = %e, "failed to index code");
+        }
+        let redelivered = match &result {
+            Err(HandlerError::Backpressure(_)) => true,
+            // Redeliveries share one dispatch; counting each would exhaust MAX_CODE_ATTEMPTS.
+            Err(HandlerError::Processing(_)) if overloaded => attempt > 1,
+            Err(HandlerError::Processing(_)) => context.redelivered_on_failure,
+            _ => false,
+        };
+        if redelivered {
+            match guard.renew(self.lock_ttl).await {
+                Ok(()) => self.refund_attempt(&mut checkpoint).await,
+                Err(error) => warn!(
+                    project_id,
+                    branch = %branch,
+                    %error,
+                    "lock not held at the end of the run; the attempt stays counted"
+                ),
+            }
         }
 
         result.map(Some)
@@ -755,7 +768,10 @@ mod tests {
         );
 
         let envelope = TestContext::make_request(42, 123, "main");
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+        let result = ctx
+            .handler
+            .handle(ctx.handler_context().with_redelivery(false), envelope)
+            .await;
 
         assert!(
             result.is_err(),
@@ -818,8 +834,11 @@ mod tests {
             .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
             .await
             .unwrap()
-            .expect("the refunded attempt is saved");
-        assert_eq!(checkpoint.attempts, 0);
+            .expect("the started attempt is saved");
+        assert_eq!(
+            checkpoint.attempts, 1,
+            "a run that lost its lock must not write a refund over a new holder"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -917,6 +936,45 @@ mod tests {
                 assert_eq!(checkpoint.attempts, 1, "delivery {attempt}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn archive_overload_on_the_last_delivery_still_nacks_and_never_checkpoints_empty() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+                project_id: 123,
+                status: 503,
+            }),
+        );
+        let mut first_delivery =
+            CodeCheckpoint::new(TraversalPath::new_unchecked("1/123/"), 123, "main");
+        first_delivery.start_attempt();
+        ctx.mock_checkpoints.save(&first_delivery).await.unwrap();
+
+        let mut envelope = TestContext::make_request_with_sha(7, 123, "main", None);
+        envelope.attempt = 5;
+        let result = ctx
+            .handler
+            .handle(ctx.handler_context().with_redelivery(false), envelope)
+            .await;
+
+        assert!(
+            matches!(&result, Err(HandlerError::Processing(msg)) if msg.contains("overloaded")),
+            "the last delivery of an overload must still nack, got {result:?}"
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("start-of-attempt checkpoint is saved");
+        assert!(checkpoint.indexed_at.is_none(), "must not be indexed-empty");
+        assert_eq!(checkpoint.attempts, 1);
     }
 
     #[tokio::test]
