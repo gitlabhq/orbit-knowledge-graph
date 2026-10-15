@@ -1,0 +1,36 @@
+name: "C#: a call inside a complex receiver keeps its own edge"
+
+fixtures:
+  - path: Builder.cs
+    content: |
+      public class Builder
+      {
+          public static Builder Make()
+          {
+              return new Builder();
+          }
+
+          public void Run() {}
+
+          public void Forgiving()
+          {
+              Make()!.Run();
+          }
+
+          public void Parenthesized()
+          {
+              (Make()).Run();
+          }
+      }
+
+tests:
+  - name: "the receiver call of each method links to Make"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'Make'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: Forgiving } }
+      - { row: { caller: Parenthesized } }
