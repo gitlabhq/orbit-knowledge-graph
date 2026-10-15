@@ -25,6 +25,34 @@ fixtures:
           }
       }
 
+      fn other() {}
+
+      mod clock {
+          pub fn tick() {}
+      }
+
+      fn start() {}
+
+      pub fn shadows_a_module_def(xs: &[i32]) {
+          let tick = start;
+          for x in xs {
+              use Kind::*;
+              let _ = Wrap(*x);
+              tick();
+          }
+      }
+
+      pub fn keeps_outer_names(xs: &[i32]) {
+          fn local() {}
+          let helper = other;
+          for x in xs {
+              use Kind::*;
+              let _ = Wrap(*x);
+              local();
+              helper();
+          }
+      }
+
       pub fn helps(mut n: i32) {
           while n > 0 {
               use crate::helpers::*;
@@ -44,3 +72,26 @@ tests:
       - { row_count: 2 }
       - { row: { caller: helps, callee: help } }
       - { row: { caller: wraps, callee: Wrap } }
+
+  - name: "a wildcard use in a loop does not hide names that it cannot bind"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'keeps_outer_names'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Wrap } }
+      - { row: { callee: local } }
+      - { row: { callee: other } }
+
+  - name: "a local named like a def in another module keeps its value in the loop"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadows_a_module_def'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Wrap } }
+      - { row: { callee: start } }

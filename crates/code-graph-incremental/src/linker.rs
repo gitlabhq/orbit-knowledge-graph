@@ -102,7 +102,6 @@ struct Fold<'t> {
     member_busy: FxHashSet<(u32, u32)>,
     member_memo_at: (BlockId, usize, usize, usize),
     loops: Vec<(BlockId, FxHashSet<u32>)>,
-    def_names: Option<FxHashSet<u32>>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
@@ -1009,14 +1008,16 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn assigned_names(&mut self, c: Cursor) -> FxHashSet<u32> {
+    fn assigned_names(&mut self, c: Cursor<'t>) -> FxHashSet<u32> {
         let mut names = FxHashSet::default();
-        let mut wildcard = false;
+        let mut wildcards = Vec::new();
         let mut walk = c.walk();
         while let Some(node) = walk.next() {
             if node.is(C::Import) || node.is(C::ImportType) {
                 for name in std::iter::once(node).chain(node.descendants()) {
-                    wildcard |= self.config.inline_modules && name.sym() == self.wildcard;
+                    if name.sym() == self.wildcard {
+                        wildcards.push(node);
+                    }
                     names.insert(name.sym());
                 }
                 walk.skip_subtree();
@@ -1028,15 +1029,15 @@ impl<'t> Fold<'t> {
                 names.insert(node.sym());
             }
         }
-        if wildcard {
-            let root = self.tree.root();
-            let defs = self.def_names.get_or_insert_with(|| {
-                root.descendants()
-                    .filter(|d| d.is(C::Def))
-                    .filter_map(|d| d.child_sym(C::DefName))
-                    .collect()
-            });
-            names.extend(defs.iter().copied());
+        for import in wildcards {
+            if let Some(module) = self.inline_module(import) {
+                names.extend(
+                    module
+                        .children()
+                        .filter(|d| d.is(C::Def))
+                        .filter_map(|d| d.child_sym(C::DefName)),
+                );
+            }
         }
         names
     }
@@ -1412,7 +1413,6 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         member_busy: FxHashSet::default(),
         member_memo_at: (entry, 0, 0, 0),
         loops: Vec::new(),
-        def_names: None,
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
