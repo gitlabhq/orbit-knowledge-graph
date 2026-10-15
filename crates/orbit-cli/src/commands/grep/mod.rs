@@ -64,9 +64,11 @@ pub(crate) fn run(
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     paths: Vec<String>,
-    filter: RecallFilter,
+    mut filter: RecallFilter,
     mut options: Options,
 ) -> Result<()> {
+    let languages = kind::languages(&mut filter.kinds);
+    options.types.extend(languages.iter().cloned());
     let launcher = crate::commands::setup::spec::launcher();
     let alternatives = match &query {
         Some(query) => query_alternatives(query).map_err(|_| {
@@ -156,6 +158,9 @@ pub(crate) fn run(
     }
     if !shown.is_empty() {
         header.push_str(&format!(" --kind {}", shown.join(",")));
+    }
+    for language in &languages {
+        header.push_str(&format!(" -t {language}"));
     }
     header.push_str(&format!(" @ {}", backend.header()));
     let rendered = render::render(
