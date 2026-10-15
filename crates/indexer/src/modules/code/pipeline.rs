@@ -798,12 +798,16 @@ impl CodeIndexer {
         observer.record_duration(indexing_start.elapsed().as_millis() as u64);
 
         for skipped in &result.skipped {
-            self.metrics
-                .record_file_skipped(skipped.kind.as_metric_label(), &skipped.path);
+            self.metrics.record_file_skipped(
+                skipped.kind.as_metric_label(),
+                &skipped.path,
+                skipped.family.as_deref(),
+            );
             if skipped.path.is_empty() {
                 warn!(
                     project_id = request.project_id,
                     branch = %request.branch,
+                    family = skipped.family.as_deref().unwrap_or_default(),
                     reason = skipped.kind.as_metric_label(),
                     detail = %skipped.detail,
                     "cross-file resolution stopped early during code indexing"
@@ -820,8 +824,11 @@ impl CodeIndexer {
         }
 
         for limited in &result.limited {
-            self.metrics
-                .record_file_skipped(limited.kind.as_metric_label(), &limited.path);
+            self.metrics.record_file_skipped(
+                limited.kind.as_metric_label(),
+                &limited.path,
+                limited.family.as_deref(),
+            );
             warn!(
                 project_id = request.project_id,
                 branch = %request.branch,

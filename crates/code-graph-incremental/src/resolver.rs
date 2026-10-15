@@ -540,7 +540,8 @@ impl Resolver {
             }
         }
 
-        if let Some(overrun) = overrun {
+        if let Some(mut overrun) = overrun {
+            overrun.family = Some(support_lang);
             killed.retain(|k| (&k.label, &k.path) != (&overrun.label, &overrun.path));
             killed.push(overrun);
             *self = Self::new(lang);

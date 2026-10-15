@@ -118,12 +118,18 @@ impl CodeMetrics {
             .add(count, &[KeyValue::new(code::labels::KIND, kind.to_owned())]);
     }
 
-    pub(in crate::modules::code) fn record_file_skipped(&self, reason: &'static str, path: &str) {
+    pub(in crate::modules::code) fn record_file_skipped(
+        &self,
+        reason: &'static str,
+        path: &str,
+        family: Option<&str>,
+    ) {
+        let language = family.map_or_else(|| file_language(path), str::to_string);
         self.files_skipped.add(
             1,
             &[
                 KeyValue::new(code::labels::REASON, reason),
-                KeyValue::new(code::labels::LANGUAGE, file_language(path)),
+                KeyValue::new(code::labels::LANGUAGE, language),
             ],
         );
     }

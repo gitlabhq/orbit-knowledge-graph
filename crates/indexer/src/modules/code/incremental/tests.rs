@@ -104,6 +104,7 @@ struct Timings {
     errors: usize,
     skipped_paths: Vec<String>,
     skipped_reasons: Vec<&'static str>,
+    skipped_families: Vec<Option<String>>,
     limited_reasons: Vec<&'static str>,
 }
 
@@ -150,6 +151,11 @@ async fn timings_for(files: &[(&str, &[u8])], limits: code_graph_incremental::Li
         errors: report.errors.len(),
         skipped_paths,
         skipped_reasons,
+        skipped_families: report
+            .skipped
+            .iter()
+            .map(|file| file.family.clone())
+            .collect(),
         limited_reasons,
     }
 }
@@ -275,6 +281,7 @@ async fn the_cross_file_budget_stops_package_reexports() {
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
     assert_eq!(timings.skipped_reasons, ["timeout_cross_file"]);
+    assert_eq!(timings.skipped_families, [Some("csharp".to_owned())]);
     assert_eq!(timings.languages, [("csharp".to_owned(), 600)]);
 }
 
@@ -293,6 +300,7 @@ async fn cross_file_resolution_stops_at_the_name_limit() {
     let timings = timings_for(&as_files(&files), limits).await;
     assert_eq!(timings.skipped_paths, [""]);
     assert_eq!(timings.skipped_reasons, ["too_many_names"]);
+    assert_eq!(timings.skipped_families, [Some("csharp".to_owned())]);
     assert_eq!(timings.languages, [("csharp".to_owned(), 200)]);
 }
 

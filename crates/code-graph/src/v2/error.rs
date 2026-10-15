@@ -248,6 +248,7 @@ pub struct SkippedFile {
     pub path: String,
     pub kind: FileSkip,
     pub detail: String,
+    pub family: Option<String>,
 }
 
 #[derive(Debug, Clone)]

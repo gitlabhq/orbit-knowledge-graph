@@ -187,6 +187,7 @@ fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error
     };
     code_graph::v2::error::SkippedFile {
         detail: killed.to_string(),
+        family: killed.family.map(|lang| lang.family().to_string()),
         path: killed.path,
         kind,
     }
