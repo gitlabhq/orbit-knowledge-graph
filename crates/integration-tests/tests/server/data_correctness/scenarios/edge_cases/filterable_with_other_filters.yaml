@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/filterable.rs::filterable_other_filters_still_work_alongside_traversal_path_column
 description: Other filters still work when traversal_path is a return column
 
 query:

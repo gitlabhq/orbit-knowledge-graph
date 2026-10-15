@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_ends_with_returns_matching_rows
 description: ends_with filter returns the matching username regardless of case and prunes granules with the ngram skip index
 
 config:

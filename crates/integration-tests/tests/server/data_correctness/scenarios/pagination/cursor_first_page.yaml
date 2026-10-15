@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_first_page
 description: First page with cursor returns correct count and has_more
 
 query:

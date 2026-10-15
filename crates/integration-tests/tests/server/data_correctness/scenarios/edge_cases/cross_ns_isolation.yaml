@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_isolation_no_leakage
 description: Namespace 1/101/ sees only its own MRs, no leakage from 1/100/
 
 config:

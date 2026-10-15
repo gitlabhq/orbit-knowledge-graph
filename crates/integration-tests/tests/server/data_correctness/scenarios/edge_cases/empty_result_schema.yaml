@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::empty_result_has_valid_schema
 description: Non-existent node_id returns empty result with valid schema
 
 query:

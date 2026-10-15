@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::traversal_dedup_returns_single_edge
 description: Traversal returns single edge for duplicated source node
 
 config:
@@ -36,6 +35,6 @@ expect:
       ids: [9003]
   edge_exists:
     AUTHORED:
-      - [9003, 9101]
+      - { from: User, from_id: 9003, to: MergeRequest, to_id: 9101 }
   edge_count:
     AUTHORED: 1

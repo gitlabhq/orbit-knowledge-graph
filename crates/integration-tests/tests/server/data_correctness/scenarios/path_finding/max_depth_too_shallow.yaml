@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_max_depth_too_shallow_returns_empty
 description: max_depth=1 cannot reach a 2-hop path, returns no paths
 
 query:

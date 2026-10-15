@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_project_id_filter_on_target_scopes_edges
 description: Filtering callee by project_id scopes CALLS edges to that project and drops the cross-project call
 
 query:

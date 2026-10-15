@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_contains_matches_multiple
 description: LIKE contains filter on "arl" matches charlie
 
 query:

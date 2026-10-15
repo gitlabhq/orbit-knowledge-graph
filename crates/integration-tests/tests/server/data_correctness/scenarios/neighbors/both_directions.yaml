@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_both_direction_returns_all_connected
 description: Bidirectional neighbors of Group 100
 
 query:
@@ -24,6 +23,10 @@ expect:
     WorkItem:
       ids: [4000, 4001]
   edge_exists:
-    MEMBER_OF: [[1, 100]]
-    CONTAINS: [[100, 200]]
-    IN_GROUP: [[4000, 100], [4001, 100]]
+    MEMBER_OF:
+      - { from: User, from_id: 1, to: Group, to_id: 100 }
+    CONTAINS:
+      - { from: Group, from_id: 100, to: Group, to_id: 200 }
+    IN_GROUP:
+      - { from: WorkItem, from_id: 4000, to: Group, to_id: 100 }
+      - { from: WorkItem, from_id: 4001, to: Group, to_id: 100 }

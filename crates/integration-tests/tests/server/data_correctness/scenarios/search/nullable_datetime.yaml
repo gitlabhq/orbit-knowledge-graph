@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_nullable_datetime_returns_null_when_unset
 description: Nullable DateTime column returns null when the value is unset
 
 query:

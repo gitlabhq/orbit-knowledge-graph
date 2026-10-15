@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::sip_prefilter_multi_hop_returns_correct_results
 description: Multi-hop CONTAINS [1,2] from Group 100 returns transitive children
 
 query:
@@ -22,6 +21,6 @@ expect:
       ids: [100, 200, 300]
   edge_exists:
     CONTAINS:
-      - [100, 200]
-      - [100, 300]
+      - { from: Group, from_id: 100, to: Group, to_id: 200 }
+      - { from: Group, from_id: 100, to: Group, to_id: 300 }
   referential_integrity: true

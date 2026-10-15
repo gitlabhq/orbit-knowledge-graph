@@ -1,12 +1,14 @@
-description: contains treats %, _, and backslash as plain characters; the ngram skip index prunes the base part and the decoy part
+description: contains treats %, _, and backslash as plain characters with independent decoys and ngram index pruning
 
 config:
-  redaction: { allow: { merge_request: [2101, 2102] } }
+  redaction: { allow: { merge_request: [2101, 2102, 2103, 2104] } }
   unmerged_seed: true
   extra_seed:
     gl_merge_request:
       - { id: 2101, iid: 7, title: "Rate 100% done_now C:\\temp fix", state: opened, source_branch: rate-a, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
-      - { id: 2102, iid: 8, title: "Rate 1000 doneXnow C:temp fix", state: opened, source_branch: rate-b, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2102, iid: 8, title: "Rate 1000 done_now C:\\temp fix", state: opened, source_branch: rate-b, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2103, iid: 9, title: "Rate 100% doneXnow C:\\temp fix", state: opened, source_branch: rate-c, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2104, iid: 10, title: "Rate 100% done_now C:temp fix", state: opened, source_branch: rate-d, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
 
 query:
   json: |
@@ -28,4 +30,6 @@ expect:
   nodes:
     MergeRequest:
       ids: [2101]
-      absent: [2102]
+      absent: [2102, 2103, 2104]
+      rows:
+        - { id: 2101, title: "Rate 100% done_now C:\\temp fix" }

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_multi_path_returns_union_of_scopes
 description: Multi-path aggregation returns union of scopes across both authorized paths
 
 config:

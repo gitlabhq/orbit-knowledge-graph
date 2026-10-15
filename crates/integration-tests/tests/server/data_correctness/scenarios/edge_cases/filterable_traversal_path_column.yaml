@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/filterable.rs::filterable_traversal_path_readable_as_column
 description: traversal_path (filterable=false) is readable as a return column on Group
 
 query:

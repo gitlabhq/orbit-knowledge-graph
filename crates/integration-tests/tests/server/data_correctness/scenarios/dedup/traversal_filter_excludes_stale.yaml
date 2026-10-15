@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::traversal_filter_excludes_stale_version
 description: Traversal filter excludes stale version of MR
 
 config:
