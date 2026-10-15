@@ -79,6 +79,28 @@
         "link": {
           "$ref": "#/definitions/scopedPath",
           "description": "Second skills directory that receives a symlink to the written skill, for assistants that do not scan `dir`."
+        },
+        "requires_full": {
+          "type": "boolean",
+          "description": "Install the full skill tree instead of the thin wrapper, for assistants that cannot run commands when they load a skill. Applies to every assistant sharing `dir`."
+        },
+        "permissions": {
+          "type": "object",
+          "required": ["file", "rules"],
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "$ref": "#/definitions/scopedPath",
+              "description": "Settings file whose `permissions.allow` array receives the rules."
+            },
+            "rules": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Allow rules for the commands the installed skill runs. `{{orbit}}` expands to the launcher."
+            }
+          },
+          "description": "Allow rules that stop the assistant from asking before it runs the skill's commands."
         }
       },
       "description": "Where the embedded skill is installed on disk."

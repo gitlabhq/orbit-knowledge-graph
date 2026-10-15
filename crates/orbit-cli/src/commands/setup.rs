@@ -256,6 +256,75 @@ impl Component {
     }
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SkillKind {
+    /// A thin skill that loads the real one when the agent reads it.
+    #[default]
+    Wrapper,
+    /// The skill tree itself, for agents that cannot run commands when they load a skill.
+    Full,
+}
+
+/// What `--skill` asked for, and the instance's full tree when one may be needed. Which kind
+/// each skills directory gets is decided at install time from the agents that share it.
+#[derive(Clone, Default)]
+pub(crate) struct SkillRequest {
+    pub(crate) kind: Option<SkillKind>,
+    pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
+}
+
+/// Fetches the full tree only when an agent that will be configured can load nothing else, or
+/// the directory already holds a full install;
+/// anything chosen later in the picker falls back to the embedded skill.
+pub(crate) async fn skill_request(
+    kind: Option<SkillKind>,
+    agents: &[String],
+    all: bool,
+    components: &BTreeSet<Component>,
+    dry_run: bool,
+    machine: &Machine,
+    target: &Target,
+) -> Result<SkillRequest> {
+    let needed = match kind {
+        Some(kind) => kind == SkillKind::Full,
+        None => requires_full_skill(agents, all, machine, target),
+    };
+    let wanted = !dry_run && components.contains(&Component::Skill) && needed;
+    let full_tree = match wanted {
+        true => Some(crate::skill::full_tree().await?),
+        false => None,
+    };
+    Ok(SkillRequest { kind, full_tree })
+}
+
+fn requires_full_skill(agents: &[String], all: bool, machine: &Machine, target: &Target) -> bool {
+    let selected: Vec<_> = match (all, agents.is_empty()) {
+        (true, _) => spec::agents().collect(),
+        (false, false) => plan::agents_named(agents).unwrap_or_default(),
+        (false, true) => machine
+            .installed_agents()
+            .into_iter()
+            .map(|(agent, _)| agent)
+            .collect(),
+    };
+    let needs_full = selected
+        .iter()
+        .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full));
+    // A rerun keeps `full`, so it needs the instance's tree again, not the embedded one.
+    needs_full || components::records_full_skill(&selected, target)
+}
+
 pub(crate) struct Options {
     pub(crate) agents: Vec<String>,
     pub(crate) all: bool,
@@ -264,6 +333,7 @@ pub(crate) struct Options {
     pub(crate) verbose: bool,
     pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
+    pub(crate) skill: SkillRequest,
 }
 
 pub(crate) enum Target {
@@ -339,6 +409,7 @@ mod tests {
             verbose: false,
             index: false,
             components: Component::from_flags(false, &[]),
+            skill: SkillRequest::default(),
         }
     }
 
@@ -493,11 +564,7 @@ mod tests {
         assert!(codex.contains("[mcp_servers.orbit]"), "{codex}");
         assert!(codex.contains(r#"args = ["mcp", "serve"]"#), "{codex}");
         assert!(codex.contains(r#"env = { AI_AGENT = "codex" }"#), "{codex}");
-        assert!(
-            dir.path()
-                .join(".agents/skills/orbit-cli/SKILL.md")
-                .is_file()
-        );
+        assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
 
         let removed = uninstall_named(&["codex", "opencode"], dir.path());
 
@@ -666,29 +733,525 @@ mod tests {
         assert!(!dir.path().join("opencode.json").exists());
     }
 
+    fn write_legacy_skill(legacy: &Path) {
+        for (relative, contents) in crate::skill::embedded_files() {
+            let file = legacy.join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, contents).unwrap();
+        }
+    }
+
+    fn skill_manifest_name(skill_dir: &Path) -> String {
+        let manifest = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+        manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("name: "))
+            .unwrap()
+            .to_string()
+    }
+
     #[cfg(unix)]
     #[test]
     fn skill_is_written_once_and_linked_into_claude() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["claude", "codex"], dir.path());
 
-        let canonical = dir.path().join(".agents/skills/orbit-cli");
-        let link = dir.path().join(".claude/skills/orbit-cli");
-        assert!(canonical.join("SKILL.md").is_file());
+        let canonical = dir.path().join(".agents/skills/orbit");
+        let link = dir.path().join(".claude/skills/orbit");
         assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
         assert_eq!(
             std::fs::read_link(&link).unwrap(),
-            Path::new("../../.agents/skills/orbit-cli")
+            Path::new("../../.agents/skills/orbit")
         );
-        assert!(link.join("SKILL.md").is_file());
+        assert_eq!(skill_manifest_name(&link), "orbit");
+        assert!(dir.path().join(".agents/skills/.orbit-managed").is_file());
+        assert!(!dir.path().join(".agents/skills/orbit-cli").exists());
 
-        let edited = canonical.join("references/local/sql.md");
-        std::fs::write(&edited, "my notes\n").unwrap();
         uninstall_named(&["claude", "codex"], dir.path());
 
         assert!(!link.exists());
-        assert!(!canonical.join("SKILL.md").exists());
-        assert_eq!(std::fs::read_to_string(&edited).unwrap(), "my notes\n");
+        assert!(!canonical.exists());
+        assert!(!dir.path().join(".agents").exists());
+    }
+
+    #[test]
+    fn the_default_skill_is_the_wrapper_named_orbit() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["codex"], dir.path());
+
+        let installed = dir.path().join(".agents/skills/orbit");
+        assert_eq!(skill_manifest_name(&installed), "orbit");
+        let manifest = std::fs::read_to_string(installed.join("SKILL.md")).unwrap();
+        assert!(manifest.contains("!`orbit skills get orbit`"), "{manifest}");
+        let files: Vec<_> = std::fs::read_dir(&installed)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(files, ["SKILL.md"]);
+    }
+
+    #[test]
+    fn a_full_skill_replaces_the_wrapper_and_keeps_the_name() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["codex"], dir.path());
+        let installed = dir.path().join(".agents/skills/orbit");
+
+        let options = Options {
+            skill: SkillRequest {
+                kind: Some(SkillKind::Full),
+                full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+            },
+            ..options_for(&["codex"])
+        };
+        install(options, project(dir.path()), &bare_machine()).unwrap();
+
+        assert_eq!(skill_manifest_name(&installed), "orbit");
+        assert!(installed.join("references/local/cli.md").is_file());
+
+        uninstall_named(&["codex"], dir.path());
+        assert!(!installed.exists());
+    }
+
+    #[test]
+    fn setup_moves_an_unmarked_skill_aside_and_uninstall_keeps_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        let installed = skills.join("orbit");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(
+            installed.join("SKILL.md"),
+            "---\nname: orbit\n---\nfrom me\n",
+        )
+        .unwrap();
+        std::fs::write(installed.join("extra.md"), "mine\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(skills.join(".orbit-managed").is_file());
+        assert!(!installed.join("extra.md").exists());
+        let backup = skills.join("orbit.orbit-backup");
+        assert_eq!(
+            std::fs::read_to_string(backup.join("extra.md")).unwrap(),
+            "mine\n"
+        );
+        assert!(!backup.join("SKILL.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(backup.join("SKILL.md.orbit-backup")).unwrap(),
+            "---\nname: orbit\n---\nfrom me\n"
+        );
+
+        std::fs::remove_file(skills.join(".orbit-managed")).unwrap();
+        uninstall_named(&["codex"], dir.path());
+        assert!(installed.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn a_second_foreign_skill_gets_its_own_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        std::fs::create_dir_all(skills.join("orbit.orbit-backup")).unwrap();
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/extra.md"), "newer\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup.1/extra.md")).unwrap(),
+            "newer\n"
+        );
+    }
+
+    #[test]
+    fn uninstalling_one_agent_keeps_the_skill_the_others_share() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["claude", "codex", "duo"], dir.path());
+        let shared = dir.path().join(".agents/skills/orbit");
+
+        uninstall_named(&["codex"], dir.path());
+
+        assert!(shared.join("SKILL.md").is_file());
+        #[cfg(unix)]
+        assert!(dir.path().join(".claude/skills/orbit/SKILL.md").is_file());
+
+        uninstall_named(&["claude"], dir.path());
+        assert!(shared.join("SKILL.md").is_file());
+        #[cfg(unix)]
+        assert!(!dir.path().join(".claude/skills/orbit").exists());
+
+        uninstall_named(&["duo"], dir.path());
+        assert!(!shared.exists());
+        assert!(!dir.path().join(".agents/skills/.orbit-managed").exists());
+    }
+
+    #[test]
+    fn duo_gets_the_full_skill_and_a_later_setup_for_another_agent_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join(".agents/skills/orbit");
+
+        install_with_mcp(&["duo"], dir.path());
+        assert!(installed.join("references/local/cli.md").is_file());
+
+        install_with_mcp(&["claude"], dir.path());
+        assert!(installed.join("references/local/cli.md").is_file());
+
+        let wrapper = Options {
+            skill: SkillRequest {
+                kind: Some(SkillKind::Wrapper),
+                full_tree: None,
+            },
+            ..options_with_mcp(&["claude"])
+        };
+        install(wrapper, project(dir.path()), &bare_machine()).unwrap();
+        assert!(!installed.join("references").exists());
+    }
+
+    #[test]
+    fn a_marker_left_behind_does_not_hide_a_recreated_skill_from_the_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::remove_dir_all(skills.join("orbit")).unwrap();
+
+        uninstall_named(&["codex"], dir.path());
+        assert!(!skills.join(".orbit-managed").exists());
+
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
+        install_with_mcp(&["codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup/notes.md")).unwrap(),
+            "mine\n"
+        );
+    }
+
+    #[test]
+    fn a_skill_recreated_by_hand_is_backed_up_even_when_the_record_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::remove_dir_all(skills.join("orbit")).unwrap();
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
+
+        uninstall_named(&["codex"], dir.path());
+        assert!(skills.join("orbit/notes.md").is_file());
+
+        install_with_mcp(&["codex"], dir.path());
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup/notes.md")).unwrap(),
+            "mine\n"
+        );
+        assert!(skills.join("orbit/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn a_skill_edited_after_setup_is_backed_up_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::write(skills.join("orbit/notes.md"), "mine\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(skills.join("orbit.orbit-backup/notes.md").is_file());
+        assert!(!skills.join("orbit/notes.md").exists());
+    }
+
+    #[test]
+    fn uninstalling_an_edited_shared_skill_still_releases_the_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["claude", "codex"], dir.path());
+        let notes = skills.join("orbit/notes.md");
+        std::fs::write(&notes, "mine\n").unwrap();
+
+        uninstall_named(&["codex"], dir.path());
+        uninstall_named(&["claude"], dir.path());
+        assert!(notes.is_file());
+        assert!(!skills.join(".orbit-managed").exists());
+
+        install_with_mcp(&["codex"], dir.path());
+        assert!(skills.join("orbit.orbit-backup").is_dir());
+        uninstall_named(&["codex"], dir.path());
+        assert!(!skills.join("orbit").exists());
+    }
+
+    #[test]
+    fn a_wrapper_from_another_release_is_replaced_not_backed_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        let manifest = skills.join("orbit/SKILL.md");
+        let current = std::fs::read_to_string(&manifest).unwrap();
+        let version_line = current
+            .lines()
+            .find(|line| line.starts_with("version:"))
+            .unwrap();
+        let other_release = current.replace(version_line, "version: 9.9.9");
+        assert_ne!(other_release, current);
+        std::fs::write(&manifest, other_release).unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!skills.join("orbit.orbit-backup").exists());
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), current);
+
+        std::fs::write(&manifest, "---\nname: orbit\n---\nmine\n").unwrap();
+        install_with_mcp(&["codex"], dir.path());
+        assert!(skills.join("orbit.orbit-backup").is_dir());
+    }
+
+    fn install_then_edit_wrapper(dir: &Path) -> (PathBuf, String) {
+        let manifest = dir.join(".agents/skills/orbit/SKILL.md");
+        install_with_mcp(&["codex"], dir);
+        let edited = format!(
+            "{}Always use project X.\n",
+            std::fs::read_to_string(&manifest).unwrap()
+        );
+        std::fs::write(&manifest, &edited).unwrap();
+        (manifest, edited)
+    }
+
+    #[test]
+    fn an_edited_wrapper_is_backed_up_on_setup() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, edited) = install_then_edit_wrapper(dir.path());
+
+        install_with_mcp(&["codex"], dir.path());
+
+        let backup = dir
+            .path()
+            .join(".agents/skills/orbit.orbit-backup/SKILL.md.orbit-backup");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), edited);
+    }
+
+    #[test]
+    fn an_edited_wrapper_is_kept_on_uninstall() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, edited) = install_then_edit_wrapper(dir.path());
+
+        uninstall_named(&["codex"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(manifest).unwrap(), edited);
+    }
+
+    #[test]
+    fn a_finder_file_does_not_count_as_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        install_with_mcp(&["codex"], dir.path());
+        std::fs::write(skills.join("orbit/.DS_Store"), "x").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!skills.join("orbit.orbit-backup").exists());
+    }
+
+    #[test]
+    fn the_wrapper_stays_when_no_agent_needs_the_full_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["claude", "codex"], dir.path());
+        install_with_mcp(&["codex"], dir.path());
+        assert!(!dir.path().join(".agents/skills/orbit/references").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_orbit_cli_skill_and_its_link_are_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        write_legacy_skill(&legacy);
+        let mine = dir.path().join(".agents/skills/mine");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude/skills")).unwrap();
+        let legacy_link = dir.path().join(".claude/skills/orbit-cli");
+        std::os::unix::fs::symlink("../../.agents/skills/orbit-cli", &legacy_link).unwrap();
+
+        install_with_mcp(&["claude"], dir.path());
+
+        assert!(!legacy.exists());
+        assert!(std::fs::symlink_metadata(&legacy_link).is_err());
+        assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+        assert!(mine.is_dir());
+    }
+
+    #[test]
+    fn a_legacy_orbit_cli_copy_in_the_claude_dir_is_migrated_and_uninstalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_copy = dir.path().join(".claude/skills/orbit-cli");
+        write_legacy_skill(&legacy_copy);
+
+        install_with_mcp(&["claude"], dir.path());
+
+        assert!(!legacy_copy.exists());
+        assert!(dir.path().join(".claude/skills/orbit/SKILL.md").is_file());
+
+        write_legacy_skill(&legacy_copy);
+        uninstall_named(&["claude"], dir.path());
+        assert!(!legacy_copy.exists());
+    }
+
+    #[test]
+    fn uninstall_removes_a_legacy_skill_and_keeps_one_the_user_owns() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        write_legacy_skill(&legacy);
+        uninstall_named(&["codex"], dir.path());
+        assert!(!legacy.exists());
+
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("SKILL.md"), "---\nname: something-else\n---\n").unwrap();
+        uninstall_named(&["codex"], dir.path());
+        assert!(legacy.join("SKILL.md").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_replaces_a_foreign_claude_skill_with_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let foreign = dir.path().join(".claude/skills/orbit");
+        std::fs::create_dir_all(&foreign).unwrap();
+        std::fs::write(foreign.join("SKILL.md"), "---\nname: orbit\n---\nforeign\n").unwrap();
+        let elsewhere = dir.path().join(".claude/skills/other");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        install_with_mcp(&["claude"], dir.path());
+
+        let expected = Path::new("../../.agents/skills/orbit");
+        assert_eq!(std::fs::read_link(&foreign).unwrap(), expected);
+        assert!(
+            std::fs::read_to_string(foreign.join("SKILL.md"))
+                .unwrap()
+                .contains("skills get orbit")
+        );
+
+        std::fs::remove_file(&foreign).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &foreign).unwrap();
+        install_with_mcp(&["claude"], dir.path());
+        assert_eq!(std::fs::read_link(&foreign).unwrap(), expected);
+        assert!(elsewhere.is_dir());
+    }
+
+    #[test]
+    fn migration_keeps_files_the_user_added_or_edited_in_an_unmarked_legacy_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        write_legacy_skill(&legacy);
+        std::fs::write(legacy.join("my-notes.md"), "mine\n").unwrap();
+        std::fs::write(legacy.join("references/local/sql.md"), "my edit\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("my-notes.md")).unwrap(),
+            "mine\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("references/local/sql.md")).unwrap(),
+            "my edit\n"
+        );
+        assert!(!legacy.join("SKILL.md").exists());
+        assert!(!legacy.join("references/local/cli.md").exists());
+        assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn an_edited_legacy_manifest_is_backed_up_so_only_one_skill_remains() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        write_legacy_skill(&legacy);
+        std::fs::write(
+            legacy.join("SKILL.md"),
+            "---\nname: orbit-cli\n---\nold release\n",
+        )
+        .unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!legacy.join("SKILL.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("SKILL.md.orbit-backup")).unwrap(),
+            "---\nname: orbit-cli\n---\nold release\n"
+        );
+        assert_eq!(
+            skill_manifest_name(&dir.path().join(".agents/skills/orbit")),
+            "orbit"
+        );
+    }
+
+    #[test]
+    fn a_retired_legacy_manifest_never_overwrites_an_earlier_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".agents/skills/orbit-cli");
+        write_legacy_skill(&legacy);
+        std::fs::write(
+            legacy.join("SKILL.md"),
+            "---\nname: orbit-cli\n---\nsecond\n",
+        )
+        .unwrap();
+        std::fs::write(legacy.join("SKILL.md.orbit-backup"), "first\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert!(!legacy.join("SKILL.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("SKILL.md.orbit-backup")).unwrap(),
+            "first\n"
+        );
+        assert!(
+            std::fs::read_to_string(legacy.join("SKILL.md.orbit-backup.1"))
+                .unwrap()
+                .contains("second")
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_allow_rules_written_under_either_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            r#"{"permissions":{"allow":["Bash(glab orbit skills get orbit)","Bash(glab orbit skills get orbit *)","Bash(ls)"]}}"#,
+        )
+        .unwrap();
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(
+            read_json(&settings)["permissions"]["allow"],
+            json!(["Bash(ls)"])
+        );
+    }
+
+    #[test]
+    fn claude_may_run_the_wrapper_command_without_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, r#"{"permissions":{"allow":["Bash(ls)"]}}"#).unwrap();
+
+        install_with_mcp(&["claude"], dir.path());
+
+        let allow = read_json(&settings)["permissions"]["allow"].clone();
+        assert_eq!(
+            allow,
+            json!([
+                "Bash(ls)",
+                "Bash(orbit skills get orbit)",
+                "Bash(orbit skills get orbit *)"
+            ])
+        );
+
+        install_with_mcp(&["claude"], dir.path());
+        assert_eq!(read_json(&settings)["permissions"]["allow"], allow);
+
+        uninstall_named(&["claude"], dir.path());
+        assert_eq!(
+            read_json(&settings)["permissions"]["allow"],
+            json!(["Bash(ls)"])
+        );
     }
 
     #[test]
