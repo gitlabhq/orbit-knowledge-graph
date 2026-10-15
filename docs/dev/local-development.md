@@ -30,7 +30,8 @@ below arrange for that traffic to land on the webserver you run.
 1. **A `gitlab-caproni` checkout with the Orbit fragment running.** Follow the
    [Orbit guide in `gitlab-caproni`](https://gitlab.com/gitlab-org/gitlab-caproni/-/blob/main/docs/fragments/orbit.md):
    uncomment `fragments/caproni.orbit.yaml` in `caproni.local.yaml`, then run
-   `scripts/setup-orbit.sh`. The first run takes 10 to 20 minutes. Three things to know
+   `scripts/setup-orbit.sh`. The first run takes 10 to 20 minutes. The fragment's VM size,
+   20 GiB and 6 cores, is the floor; keep that much free on the host. Three things to know
    on top of that guide:
 
    - The installer activates an Ultimate licence through 1Password, so run `op signin`
@@ -48,19 +49,20 @@ below arrange for that traffic to land on the webserver you run.
 |---|---|---|
 | Config | The pod's own config and secrets, through mirrord | Derived from the cluster by the dev script |
 | Rails reaches your webserver | mirrord steals the pod's gRPC traffic | The Service is routed to your host |
-| In-cluster Orbit while you run | Keeps running: the pods still consume NATS | Scaled to zero, restored on exit |
+| In-cluster Orbit while you run | Each enabled reloader's deployment is scaled to zero; the others keep running | All five scaled to zero, restored on exit |
 | Personal overrides | None, the pod config is the config | `config/dev.local.yaml` |
-| Rebuild on save | Yes, `cargo watch` | No, restart the process |
+| Rebuild on save | Yes: one host build, then each process restarts | No, restart the process |
+| Needs | mirrord, Rosetta on macOS, one agent pod per reloader | Nothing beyond `kubectl` access |
 
-Pick **native mode** for indexing work where every task must hit your code, and for anything
-that needs `config/dev.local.yaml`. Pick **edit mode** for webserver and query work, where
-stolen traffic and rebuild-on-save make the loop shortest.
+Pick **edit mode** when you want rebuild-on-save and the pod's exact configuration. Pick
+**native mode** when you need `config/dev.local.yaml` or want to start the processes
+yourself, under a debugger for instance. Native mode also puts nothing extra on the VM.
 
-Why the difference: for each reloader Caproni creates a `<deployment>-caproni` copy and
-scales the original to zero. mirrord targets the copy, whose container keeps running. Inbound
-traffic is stolen, so Rails hits your webserver, but a NATS pull consumer in the copy keeps
-pulling. Native mode scales the deployments to zero with no copy, which is why only it
-guarantees that your indexer did the work.
+Either way your code does the work. For each reloader Caproni scales the original deployment
+to zero and creates a `<deployment>-caproni` copy whose container runs `sleep infinity` with
+no probes. mirrord targets that copy. Nothing in the cluster consumes that deployment's work
+while the reloader is on. Deployments whose reloader you left off keep running, so enable
+the indexer reloaders when your indexing code must see every task.
 
 Both paths run the binary from your checkout, so they share one versioned JetStream stream
 and, through `config/dev.yaml`, the chart's consumer name `gkg-indexer`. That is what lets
@@ -79,32 +81,48 @@ repositories:
     directory: /path/to/your/knowledge-graph
 ```
 
-List only the reloaders you want. Each one mirrors one Orbit deployment, because a mirrord
-session targets one pod and each deployment has its own rendered config. Then, from the
-`gitlab-caproni` checkout:
+Set `directory` when you already have a checkout. A clone under `repos/knowledge-graph`
+means a second `target/`, and a debug build of the workspace is 11 to 13 GB. List only the
+reloaders you want. Each one mirrors one Orbit deployment, because a mirrord session targets
+one pod and each deployment has its own rendered config. Then, from the `gitlab-caproni`
+checkout:
 
 ```shell
 caproni up     # applies the repository change
 caproni run    # builds once, then starts the reloaders
 ```
 
-The first `caproni run` runs `mise install` and `cargo build` in your checkout before
-anything starts. Expect a further partial rebuild of a few minutes on that first start. The
-pod's environment variables reach cargo's build scripts through mirrord, so the TLS and HTTP
-crates compile again under a new fingerprint. Later starts and rebuilds take seconds. Each
-reloader runs `scripts/dev/caproni-edit-mode.sh`, which starts `cargo watch` on the matching
-`gkg-server` mode. mirrord serves `/app/config` and
-`/etc/secrets` from the pod, so the local binary runs with the pod's configuration. The
-wrapper changes one value: the probe server port, since all four pods bind the chart's
-single port and four host processes cannot share it. The webserver keeps 9394, the
-indexers take 9395 and 9396, the dispatcher 9397.
+`caproni up` runs `mise install` and one `cargo build` in your checkout (the repository's
+`edit_mode_prepare` hook). Cold, that build takes 4 to 5 minutes; afterwards it is a no-op.
+If the binary is stale when `caproni run` starts, the build watcher below builds first and
+the four modes wait for it.
+
+Each reloader then starts two processes from `scripts/dev/caproni-edit-mode.sh`:
+
+- **`gkg-build`** runs on the host, outside mirrord. It is `watchexec` over `crates/` and
+  `config/`, running `cargo build --bin gkg-server` on every save. Every reloader declares
+  it so that any subset rebuilds on save; the first one to start takes a lock in
+  `.dev/gkg-build.pid` and the others idle. After each build it rewrites a stamp file only
+  when the binary changed, so a no-op build restarts nothing.
+- **The mode process** runs under mirrord. It copies the pod's `/app/config/config.yaml`
+  into `.dev/`, then starts `gkg-server` and restarts it whenever the stamp changes.
+
+cargo never runs under mirrord on purpose. mirrord gives every wrapped process the pod's
+environment, and cargo's build scripts fingerprint that environment. A build under mirrord
+therefore recompiles the TLS and HTTP crates whenever that environment differs from the host's.
+
+mirrord serves `/app/config` and `/etc/secrets` from the pod, so the local binary runs with
+the pod's configuration. The wrapper changes one value: the probe server port, since all four
+pods bind the chart's single port and four host processes cannot share it. The webserver
+keeps the chart's 9394, the indexers take 9395 and 9396, the dispatcher 9397.
 
 To see that the UI is served by your build, open `http://gitlab.caproni.test/dashboard/orbit`
 and watch the `[gkg-webserver]` lines in the `caproni run` terminal. Attach a debugger to
 the `gkg-server` process by name; it is a normal host process.
 
-Edit a Rust file and `cargo watch` rebuilds and restarts that mode inside the same mirrord
-session. Ctrl+C in `caproni run` stops everything and restores the replica counts.
+Edit a Rust file and the build watcher rebuilds; each mode restarts inside its mirrord
+session once the new binary is on disk. Ctrl+C in `caproni run` stops everything, deletes
+the copies, and restores the replica counts.
 
 ## Native mode
 
@@ -233,6 +251,38 @@ caproni kubectl -n gitlab-dev-stack exec deploy/gitlab-dev-stack-nats-box -- nat
 ```
 
 Idle consumers also expire on their own after an hour.
+
+**`cannot start gkg-webserver: port 50054 already in use` from `caproni run`:**
+
+Caproni checks the port on the host before it starts a process. A native `mise run dev` or
+a `gkg-server` left over from an earlier session holds it; stop that first.
+
+**Rails gets 502 `InvalidSignature` from Orbit, or the code indexer gets 401, after `caproni up`:**
+
+The dev stack can rewrite `gitlab-dev-stack-gkg-secrets` on `caproni up`, and Rails keeps
+the old key until its pods restart. Both paths read the new secret, so only Rails is stale:
+
+```shell
+caproni kubectl -n gitlab rollout restart deploy/gitlab-webservice-default deploy/gitlab-sidekiq-all-in-1-v2 deploy/gitlab-toolbox
+```
+
+**`caproni run` fails its precondition after a killed terminal:**
+
+A closed terminal skips Caproni's cleanup and leaves the `<name>-caproni` copies, the originals
+at zero, and host processes behind (`caproni-edit-mode.sh`, `watchexec`, `mirrord intproxy`,
+`gkg-server`). Delete the copies, scale the originals back, and kill the leftovers:
+
+```shell
+caproni kubectl -n gitlab delete deploy gkg-webserver-caproni gkg-indexer-sdlc-caproni gkg-indexer-code-caproni gkg-dispatcher-caproni --ignore-not-found
+caproni kubectl -n gitlab scale deploy -l app.kubernetes.io/name=gkg --replicas=1
+pkill -f caproni-edit-mode.sh; pkill -f 'mirrord intproxy'; pkill -x gkg-server
+```
+
+**Saves do not rebuild in edit mode:**
+
+Every `gkg-build` line in the `caproni run` output says another watcher owns the lock, so no
+watcher is building. The pid in `.dev/gkg-build.pid` belongs to something else. Delete the
+file and restart `caproni run`.
 
 **403 Forbidden on `/dashboard/orbit` but JWT auth works:**
 
