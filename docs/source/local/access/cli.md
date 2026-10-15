@@ -192,8 +192,29 @@ For every agent it configures, `orbit setup`:
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- Installs the `orbit-cli` skill into `.agents/skills/`. Claude Code does not
-  scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
+- Installs one skill named `orbit` into `.agents/skills/`. Claude Code does not
+  scan that directory, so it also gets a `.claude/skills/orbit` link. By default
+  this is a thin wrapper that runs `orbit skills get orbit` when the agent loads
+  it, so installing needs no network. `--skill full` writes the skill files
+  themselves, for agents that cannot run a command when they load a skill.
+  GitLab Duo CLI is one, so setup installs `full` whenever Duo is among the
+  agents, and every agent that shares `.agents/skills` gets it. Without
+  `--skill`, a later setup keeps the kind already installed and, for `full`, fetches the instance's skill again. `full` uses the
+  skill your instance serves when credentials resolve and the instance answers,
+  and the skill embedded in the binary otherwise. The directory name stays
+  `orbit` in both cases. Setup records which agents use the directory in a
+  `.orbit-managed` file beside it, not inside it, so under `glab orbit` the
+  directory matches what `glab skills install` writes. A different `orbit` skill already there, or one whose files changed since
+  setup wrote them, is renamed to `orbit.orbit-backup`, with its `SKILL.md` renamed to
+  `SKILL.md.orbit-backup` so it stops loading. Setup also removes the
+  `orbit-cli` skill and link that earlier releases installed, including the real
+  copy they wrote where symlinks fail. `glab skills update orbit` replaces the
+  directory, so run `orbit setup` again afterward.
+- For Claude Code, adds `Bash(orbit skills get orbit)` and
+  `Bash(orbit skills get orbit *)` to `permissions.allow` in `settings.json`, so
+  the wrapper skill loads without a permission prompt. Under `glab orbit` the
+  rules read `Bash(glab orbit skills get orbit)` and
+  `Bash(glab orbit skills get orbit *)`.
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
 - Adds entries to that agent's JSON configuration, where the agent
@@ -225,8 +246,14 @@ orbit uninstall
 
 It lists the detected agents that have GitLab Orbit installed in that scope.
 Name agents to target only those. It removes what `orbit setup` wrote and leaves
-the rest of each file untouched. Files you edited after setup are kept, and so
-are their backups. A backup goes away once its file is back to the original.
+the rest of each file untouched. Setup records the skill directory it writes in a `.orbit-managed` file beside
+it, and uninstall removes only directories listed there that still hold what setup wrote. A directory holding only a wrapper `SKILL.md` that differs from this release's only in its `version:` line, as `glab skills update` can leave it, counts as unchanged, and `.DS_Store` files are ignored. Any other edit makes it a changed directory. Agents share that
+directory, so uninstalling one agent keeps it, and reports which agents still
+use it, until the last of them is removed. It also removes the `orbit-cli`
+skill that earlier releases installed, but only the files that match this release when
+that directory has no marker. A `SKILL.md` there that differs from this release, edited or from an older
+one, is renamed to `SKILL.md.orbit-backup`, so the old skill stops loading. Other files you edited after setup are kept, and
+so are their backups. A backup goes away once its file is back to the original.
 `--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
@@ -239,7 +266,7 @@ Graph files use `revisions/<project-id>/<commit-sha>.duckdb`.
 The `manifest.duckdb` file records their paths and status.
 The canonical checkout path determines the project ID.
 Reindexing replaces that commit's graph and preserves other revisions.
-Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root.
+Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads and writes `$ORBIT_DATA_DIR/settings.json` too.
 
 Queries wait up to five seconds for busy revisions before returning an error.
 Workspace queries skip missing or incomplete revisions with a diagnostic.
