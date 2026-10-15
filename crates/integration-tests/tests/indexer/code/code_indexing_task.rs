@@ -1112,73 +1112,6 @@ async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
     );
 }
 
-async fn seed_unended_attempts(
-    deps: &CodeIndexingDeps,
-    traversal_path: &str,
-    project_id: i64,
-    attempts: i64,
-) {
-    let mut checkpoint = indexer::modules::code::CodeCheckpoint::new(
-        TraversalPath::new_unchecked(traversal_path),
-        project_id,
-        "main",
-    );
-    checkpoint.attempts = attempts;
-    deps.checkpoint_store
-        .save(&checkpoint)
-        .await
-        .expect("seed checkpoint");
-}
-
-#[tokio::test]
-async fn the_last_redelivery_after_unended_attempts_is_dead_lettered_not_run() {
-    let project_id: i64 = 62;
-    let traversal_path = "1/62/";
-
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-
-    let mock = MockGitlabServer::start().await;
-    mock.add_project(
-        project_id,
-        "main",
-        &[("src/Main.java", "public class Main {}")],
-    );
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler();
-    seed_unended_attempts(&deps, traversal_path, project_id, 4).await;
-
-    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    envelope.attempt = 5;
-    let error = handler
-        .handle(handler_context_redelivered(false), envelope)
-        .await
-        .expect_err("four attempts that never returned mean the repository crashes the indexer");
-    assert!(
-        matches!(
-            error,
-            indexer::handler::HandlerError::Permanent {
-                action: indexer::handler::PermanentAction::DeadLetter,
-                ..
-            }
-        ),
-        "unexpected error: {error}"
-    );
-    assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
-        None
-    );
-    assert_eq!(
-        attempts(&clickhouse, traversal_path, project_id).await,
-        [5],
-        "the checkpoint must reach the sweep's quarantine threshold"
-    );
-}
-
 #[tokio::test]
 async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold() {
     let project_id: i64 = 64;
@@ -1213,7 +1146,7 @@ async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold()
             .expect_err("the archive endpoint keeps failing")
     };
 
-    for cycle in 1..=4i64 {
+    for cycle in 1..=5i64 {
         for attempt in 1..=5 {
             let error = fail_once(attempt).await;
             assert!(
@@ -1227,28 +1160,9 @@ async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold()
             "each exhausted cycle keeps one attempt; the redelivered ones give theirs back"
         );
     }
-
-    for attempt in 1..=4 {
-        let error = fail_once(attempt).await;
-        assert!(
-            matches!(error, indexer::handler::HandlerError::Processing(_)),
-            "last cycle, attempt {attempt}: {error}"
-        );
-    }
-    let error = fail_once(5).await;
-    assert!(
-        matches!(
-            error,
-            indexer::handler::HandlerError::Permanent {
-                action: indexer::handler::PermanentAction::DeadLetter,
-                ..
-            }
-        ),
-        "last cycle, attempt 5: {error}"
-    );
     assert_eq!(
         attempts(&clickhouse, traversal_path, project_id).await,
-        [5],
+        [indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS],
         "the project is parked at the sweep's threshold"
     );
 }
@@ -1309,37 +1223,6 @@ async fn a_lost_lock_does_not_refund_over_the_new_holders_attempt() {
         [7],
         "a run that lost its lock must not refund over the new holder's checkpoint"
     );
-}
-
-#[tokio::test]
-async fn a_redelivery_after_one_unended_attempt_still_runs() {
-    let project_id: i64 = 63;
-    let traversal_path = "1/63/";
-
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-
-    let mock = MockGitlabServer::start().await;
-    mock.add_project(
-        project_id,
-        "main",
-        &[("src/Main.java", "public class Main {}")],
-    );
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    let handler = deps.code_indexing_task_handler();
-    seed_unended_attempts(&deps, traversal_path, project_id, 1).await;
-
-    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
-    envelope.attempt = 2;
-    handler
-        .handle(handler_context_redelivered(true), envelope)
-        .await
-        .expect("one unended attempt may be a hard kill; the redelivery runs");
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
 }
 
 #[tokio::test]
@@ -1469,7 +1352,7 @@ async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
     let spent = attempts(&clickhouse, traversal_path, project_id).await;
     assert_eq!(spent, [1], "a whole dispatch of overload costs one attempt");
     assert!(
-        spent[0] < indexer::modules::code::MAX_CODE_ATTEMPTS,
+        spent[0] < indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS,
         "the dispatcher must still re-send the project after CODE_RETRY_AFTER"
     );
     assert_eq!(

@@ -26,9 +26,7 @@ use metrics::CodeMetrics;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
-pub use checkpoint::{
-    ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore, MAX_CODE_ATTEMPTS,
-};
+pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
 pub use handler::CodeIndexingTaskHandler;
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{

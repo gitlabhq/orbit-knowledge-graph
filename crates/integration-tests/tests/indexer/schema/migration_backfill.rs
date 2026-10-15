@@ -13,9 +13,9 @@ use bytes::Bytes;
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::campaign::{CampaignState, campaign_id_for_version};
 use indexer::config::{DispatcherConfig, DispatcherError};
-use indexer::modules::code::MAX_CODE_ATTEMPTS;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::CodeBackfill;
+use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use indexer::orchestrator::scheduled::{
     MigrationCompletionChecker, ScheduledTask, ScheduledTaskMetrics, SchedulerServices,
 };

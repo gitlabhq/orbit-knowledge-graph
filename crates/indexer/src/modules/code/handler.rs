@@ -7,7 +7,7 @@ use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
-use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore, MAX_CODE_ATTEMPTS};
+use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
@@ -353,27 +353,6 @@ impl CodeIndexingTaskHandler {
                 return Ok(None);
             }
         };
-
-        if attempt > 1 && checkpoint.attempts >= i64::from(attempt - 1) {
-            let unended = checkpoint.attempts;
-            warn!(
-                task_id = request.task_id,
-                project_id,
-                branch = %branch,
-                attempt,
-                unended_attempts = unended,
-                "redelivered after earlier attempts of this task that never returned or ended in exhaustion"
-            );
-            if !context.redelivered_on_failure {
-                checkpoint.attempts = MAX_CODE_ATTEMPTS;
-                if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
-                    warn!(project_id, branch = %branch, error = %e, "failed to quarantine the project");
-                }
-                return Err(HandlerError::dead_letter(format!(
-                    "project {project_id} quarantined: {unended} earlier attempts never returned or ended in exhaustion; the last delivery is not run"
-                )));
-            }
-        }
 
         checkpoint.start_attempt();
         self.checkpoint_store

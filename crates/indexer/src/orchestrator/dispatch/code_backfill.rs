@@ -16,7 +16,6 @@ use super::DispatchOutcome;
 use super::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::modules::code::MAX_CODE_ATTEMPTS;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::Envelope;
@@ -28,6 +27,7 @@ pub const METRIC_NAME: &str = "dispatch.code_backfill";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
+pub const MAX_CODE_ATTEMPTS: i64 = 5;
 pub const CODE_RETRY_AFTER: Duration = Duration::from_secs(3600);
 
 const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"

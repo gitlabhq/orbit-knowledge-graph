@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
-use indexer::modules::code::MAX_CODE_ATTEMPTS;
+use indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS;
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;

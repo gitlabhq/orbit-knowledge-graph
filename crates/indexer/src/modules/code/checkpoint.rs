@@ -13,8 +13,6 @@ use thiserror::Error;
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
-pub const MAX_CODE_ATTEMPTS: i64 = 5;
-
 #[derive(Debug, Error)]
 pub enum CheckpointError {
     #[error("query failed: {0}")]
