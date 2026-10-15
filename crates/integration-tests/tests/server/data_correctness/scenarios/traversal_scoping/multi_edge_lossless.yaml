@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::project_scoped_multi_edge_traversal_is_lossless
 description: Project-scoped MR-MRDiff-MRDiffFile chain returns all diff files without loss
 
 config:

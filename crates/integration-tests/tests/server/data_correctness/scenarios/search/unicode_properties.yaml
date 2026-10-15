@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_unicode_properties_survive_pipeline
 description: Unicode and emoji values survive the query pipeline round-trip
 
 query:

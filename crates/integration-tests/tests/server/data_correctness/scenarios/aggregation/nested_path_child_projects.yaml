@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_nested_path_includes_child_projects
 description: Nested path 1/100/ includes child projects under Group 100
 
 config:

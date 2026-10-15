@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_is_null_matches_unset_columns
 description: is_null filter matches rows where the nullable column is unset
 
 query:
@@ -17,5 +16,12 @@ expect:
   node_count: 7
   nodes:
     User:
-      prop_present: [username]
+      rows:
+        - { id: 1, username: alice }
+        - { id: 2, username: bob }
+        - { id: 3, username: charlie }
+        - { id: 4, username: diana }
+        - { id: 5, username: eve }
+        - { id: 6, username: "用户_émoji_🎉" }
+        - { id: 7, username: frank }
       prop_absent: [avatar_url]

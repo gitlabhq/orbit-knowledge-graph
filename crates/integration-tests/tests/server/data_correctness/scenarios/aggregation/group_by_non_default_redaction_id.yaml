@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_group_by_non_default_redaction_id_column
 description: Group by entity with non-default redaction.id_column (MergeRequestDiff)
 
 config:

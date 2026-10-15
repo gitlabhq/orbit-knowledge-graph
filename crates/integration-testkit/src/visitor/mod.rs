@@ -100,17 +100,11 @@ pub struct ResponseView {
 }
 
 fn row_value_i64(row: &Map<String, Value>, key: &str) -> Option<i64> {
-    row.get(key).and_then(|v| {
-        v.as_i64()
-            .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
-    })
+    row.get(key).and_then(Value::as_i64)
 }
 
 fn row_value_f64(row: &Map<String, Value>, key: &str) -> Option<f64> {
-    row.get(key).and_then(|v| {
-        v.as_f64()
-            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-    })
+    row.get(key).and_then(Value::as_f64)
 }
 
 fn group_node_object<'a>(

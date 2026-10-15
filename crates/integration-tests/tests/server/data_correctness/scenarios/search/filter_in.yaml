@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_in_returns_matching_rows
 description: IN filter returns rows matching any of the specified values
 
 query:

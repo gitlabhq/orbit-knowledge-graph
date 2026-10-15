@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::non_default_redaction_id_with_multiple_mrs
 description: Multiple MRs with allow-all redaction return all associated diffs
 
 query:

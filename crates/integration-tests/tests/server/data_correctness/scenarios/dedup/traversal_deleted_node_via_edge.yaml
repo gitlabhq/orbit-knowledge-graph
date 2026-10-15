@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::traversal_deleted_node_visible_via_edge
 description: >
   Deleted node excluded from traversal; edge-only queries cannot filter
   deleted nodes at query layer (indexer soft-deletes edges alongside nodes)

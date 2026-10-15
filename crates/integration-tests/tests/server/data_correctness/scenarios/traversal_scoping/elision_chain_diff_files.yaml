@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::scope_implied_container_elision_chain_counts_diff_files
 description: Container-elision 4-hop FK chain counts diff files per project
 
 config:

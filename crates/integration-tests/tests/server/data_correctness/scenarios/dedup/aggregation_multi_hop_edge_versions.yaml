@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::aggregation_multi_hop_self_join_dedups_edge_versions
 description: Multi-hop aggregation deduplicates versioned edge rows
 
 config:
