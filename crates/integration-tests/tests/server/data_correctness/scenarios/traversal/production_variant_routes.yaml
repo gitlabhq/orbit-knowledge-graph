@@ -385,13 +385,19 @@ cases:
       sql_contains: [gl_sec_edge, gl_code_edge]
 
   - name: Merge request alternatives union default CI and diff tables
-    description: Relationship alternatives from one endpoint return rows from all three physical tables
+    description: Relationship alternatives return every authorized row across three physical tables and exclude another namespace
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
     query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2500,3500]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE","HAS_DIFF"]}}
       gql: |
-        MATCH (mr:MergeRequest {id: 2500})-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) RETURN mr, target
+        MATCH (mr:MergeRequest)-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) WHERE mr.id IN [2500, 3500] RETURN mr, target
     expect:
       node_count: 4
       skip_requirements: [node_ids]
+      nodes:
+        MergeRequest: { ids: [2500], absent: [3500] }
       edges:
         IN_PROJECT: [[2500, 1000]]
         HAS_HEAD_PIPELINE: [[2500, 1101]]
