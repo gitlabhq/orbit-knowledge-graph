@@ -10,7 +10,7 @@ into the billing path, read this first.
 
 ## Why this boundary exists
 
-The `orbit-billing` crate emits the Snowplow billing events that GitLab's
+The `orbit-billing` crate emits the Snowplow billing events that GitLab
 fulfillment systems use to bill customers for Orbit usage. Changes to the
 billing-emission code path are in scope for SOX (Sarbanes-Oxley) controls.
 The events the system emits must accurately reflect billable activity. The
@@ -23,22 +23,27 @@ for the formal scope definition and audit context.
 
 `orbit-billing` is the only crate that builds and emits billing events.
 Inside `orbit-server`, the file `crates/orbit-server/src/billing_adapter.rs`
-is the sole `Claims → BillingInputs` conversion point. Every field that
-ends up in a billing event flows through this file. A small number of
+is the sole conversion point from `Claims` into `BillingInputs` and
+`QuotaCheckInputs`. Billing identity and attribution claims flow through
+this adapter; configuration, delivery credentials, and observer callbacks
+are separate inputs. A small number of
 other files in `orbit-server` invoke those conversions at the call site
 (e.g. `billing_adapter::billing_inputs(&claims, …)`). They hold references to
 `BillingTracker` / `QuotaService` constructed at startup. They do not
-define what data crosses into a billing event. That logic lives only
-in `billing_adapter.rs`.
+map claims into billing input structs themselves. Event construction and
+execution metadata assembly live in `orbit-billing`.
 
-The existing hard gate around this boundary is **CODEOWNERS**
-(`.gitlab/CODEOWNERS`). It routes `/crates/orbit-billing/`,
-`/crates/orbit-server/src/billing_adapter.rs`, and a small set of related
-paths to the SOX-billing approver group. Changes to those paths require
-explicit SOX approval to merge.
+Two hard gates protect this boundary:
 
-This document defines the additional content-level rules that the
-path-based CODEOWNERS gate cannot see. AI agents should respect them at
+- **CODEOWNERS** (`.gitlab/CODEOWNERS`). The `[SOX Billing]` section routes
+  the billing crate, adapter, and related paths to `@gitlab-org/orbit/team`.
+  Changes to those paths require code-owner approval on protected `main`.
+- **The `billing-boundary-check` CI job.** It fails when a workspace crate
+  other than `orbit-server` declares a direct dependency on `orbit-billing`.
+  It does not detect new imports within `orbit-server` or re-exports.
+
+This document defines the additional content-level rules that these
+gates cannot see. AI agents should respect them at
 authoring time.
 
 ## Rules
@@ -58,15 +63,14 @@ in `orbit-server`. A re-export silently widens the SOX scope through the
 public API of `orbit-server`. Every crate that depends on `orbit-server`
 would gain access without being on the explicit allowlist.
 
-### R3. Billing-relevant data only flows through `billing_adapter.rs`
+### R3. Claims conversion stays in `billing_adapter.rs`
 
-Do not wire a new call site that hands billing-relevant data to anything
-outside `billing_adapter.rs`. Billing-relevant data is any field this
-change would add to the data populating `BillingInputs`. The current set
-of fields is defined in `crates/orbit-billing/src/inputs.rs`; treat that
-struct as the authoritative list and let it evolve there. If you are
-unsure whether a value is billing-relevant, treat it as one and route
-the change accordingly.
+Map claims into `BillingInputs` and `QuotaCheckInputs` only in
+`billing_adapter.rs`. Call sites use the adapter's conversions instead of
+constructing these input structs or duplicating claim mappings themselves.
+Configuration, delivery credentials, and observer callbacks are separate
+inputs and do not pass through this conversion seam. New hook points for
+those inputs still require SOX review and CODEOWNERS coverage.
 
 ### R4. Billing emission goes through `BillingTracker` / `BillingObserver`
 
