@@ -2587,6 +2587,68 @@ mod tests {
     }
 
     #[test]
+    fn agent_session_is_project_delegated_and_exposes_only_allowlisted_properties() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        assert_redaction(
+            &ontology,
+            "AgentSession",
+            "project",
+            "project_id",
+            "read_code",
+        );
+
+        let node = ontology
+            .get_node("AgentSession")
+            .expect("AgentSession node");
+        let mut properties: Vec<&str> = node.fields.iter().map(|f| f.name.as_str()).collect();
+        properties.sort_unstable();
+        assert_eq!(
+            properties,
+            [
+                "flow_type",
+                "id",
+                "project_id",
+                "session_started_at",
+                "source",
+                "traversal_path",
+            ],
+            "session detail columns must never become properties"
+        );
+    }
+
+    #[test]
+    fn agent_session_flow_type_sql_list_matches_declared_values() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let declared: BTreeSet<String> = ontology
+            .get_node("AgentSession")
+            .and_then(|node| node.fields.iter().find(|f| f.name == "flow_type"))
+            .and_then(|field| field.enum_values.as_ref())
+            .expect("flow_type should be an enum")
+            .values()
+            .cloned()
+            .collect();
+
+        let sql = std::fs::read_to_string(fixtures_dir().join("nodes/agents/agent_session.sql.j2"))
+            .expect("agent_session.sql.j2 should exist");
+        let list_start = sql.find(" IN (").expect("SQL should list known flow types");
+        let list = &sql[list_start
+            ..sql[list_start..]
+                .find("),")
+                .map(|i| list_start + i)
+                .unwrap()];
+        let mut in_sql: BTreeSet<String> = list
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(String::from)
+            .collect();
+        in_sql.insert("other".to_string());
+
+        assert_eq!(in_sql, declared);
+    }
+
+    #[test]
     fn sort_key_settings_are_non_empty() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 

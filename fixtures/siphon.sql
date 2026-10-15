@@ -1543,6 +1543,54 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
 
+-- Siphon source table for AI governance sessions (detail columns omitted: the ontology never reads them)
+CREATE TABLE IF NOT EXISTS siphon_ai_governance_sessions
+(
+    `id` Int64,
+    `namespace_id` Int64,
+    `project_id` Nullable(Int64),
+    `user_id` Int64 DEFAULT 0,
+    `workflow_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `session_started_at` DateTime64(6, 'UTC'),
+    `session_finished_at` Nullable(DateTime64(6, 'UTC')),
+    `source` Int16 DEFAULT 0,
+    `status` Int16 DEFAULT 0,
+    `external_xid` Nullable(String),
+    `agent_type` Nullable(String),
+    `flow_type` Nullable(String),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, session_started_at, id)
+ORDER BY (traversal_path, session_started_at, id);
+
+-- Siphon source table for session -> merge request links (link_type 0 = source, 1 = created)
+CREATE TABLE IF NOT EXISTS siphon_duo_workflows_workflow_merge_requests
+(
+    `id` Int64,
+    `workflow_id` Int64,
+    `merge_request_id` Int64,
+    `project_id` Nullable(Int64),
+    `namespace_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `link_type` Int16,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, workflow_id, id)
+ORDER BY (traversal_path, workflow_id, id);
+
 -- Siphon source table for package file build infos (join table: package file -> pipeline)
 CREATE TABLE IF NOT EXISTS siphon_packages_package_file_build_infos
 (

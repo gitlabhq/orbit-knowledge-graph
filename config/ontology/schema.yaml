@@ -411,6 +411,10 @@ domains:
     description: "Entities related to container image repositories in the container registry."
     nodes:
       ContainerRepository: nodes/container_registry/container_repository.yaml
+  agents:
+    description: "Entities related to AI agent sessions."
+    nodes:
+      AgentSession: nodes/agents/agent_session.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -455,6 +459,7 @@ edges:
   DEPLOYED_TO: edges/deployed_to.yaml
   IN_ENVIRONMENT: edges/in_environment.yaml
   CREATED_FOR_MR: edges/created_for_mr.yaml
+  CREATED_MR: edges/created_mr.yaml
   SOURCE_PROJECT: edges/source_project.yaml
   HAS_HEAD_PIPELINE: edges/has_head_pipeline.yaml
   HAS_LATEST_DIFF: edges/has_latest_diff.yaml
