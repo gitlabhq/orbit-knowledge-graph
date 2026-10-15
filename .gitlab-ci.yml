@@ -698,7 +698,6 @@ docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
   needs: []
-  allow_failure: true
   extends:
     - .mr-only-rules
   variables:
