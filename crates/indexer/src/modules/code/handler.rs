@@ -438,12 +438,21 @@ impl CodeIndexingTaskHandler {
         if redelivered {
             match guard.renew(self.lock_ttl).await {
                 Ok(()) => self.refund_attempt(&mut checkpoint).await,
-                Err(error) => warn!(
+                Err(error @ LockError::Lost) => warn!(
                     project_id,
                     branch = %branch,
                     %error,
                     "lock not held at the end of the run; the attempt stays counted"
                 ),
+                Err(error) => {
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        %error,
+                        "lock renew failed transiently at the end of the run; refunding the attempt"
+                    );
+                    self.refund_attempt(&mut checkpoint).await;
+                }
             }
         }
 
@@ -660,6 +669,40 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "no attempt is started while the lock is held elsewhere"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_transient_renew_error_still_refunds_a_redelivered_attempt() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+                project_id: 123,
+                status: 500,
+            }),
+        );
+        ctx.mock_locks.fail_renews_transiently();
+
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Processing(_))),
+            "got {result:?}"
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("start-of-attempt checkpoint is saved");
+        assert_eq!(
+            checkpoint.attempts, 0,
+            "only a lost lock keeps the attempt; a backend error on renew does not prove another holder"
         );
     }
 
