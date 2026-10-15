@@ -150,6 +150,64 @@ async fn incremental_flag_records_language_timing_metrics() {
 }
 
 #[tokio::test]
+async fn incremental_flag_counts_listed_entries_dropped_past_the_file_limit() {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+    let exporter = InMemoryMetricExporter::default();
+    let provider = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(exporter.clone()).build())
+        .build();
+    opentelemetry::global::set_meter_provider(provider.clone());
+    enable_incremental("1/2803/");
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    let icons: Vec<String> = (0..10).map(|i| format!("assets/icon{i}.png")).collect();
+    let mut files = vec![
+        ("src/a.js", "export function a() {}\n"),
+        ("src/b.js", "import { a } from './a';\na();\n"),
+    ];
+    files.extend(icons.iter().map(|path| (path.as_str(), "png")));
+    mock.add_project(2803, "main", &files);
+    let mut config = indexer::testkit::test_pipeline_configuration();
+    config.max_repository_files = 3;
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
+    let handler = deps.code_indexing_task_handler();
+    index_code(&handler, &clickhouse, 2803, "first", 1, "1/2803/").await;
+    provider.force_flush().unwrap();
+
+    let metrics = exporter.get_finished_metrics().unwrap();
+    let skipped_by_reason: BTreeMap<String, u64> = metrics
+        .iter()
+        .flat_map(|resource| resource.scope_metrics())
+        .flat_map(|scope| scope.metrics())
+        .filter(|metric| metric.name() == "gkg.indexer.code.archive.entries.skipped")
+        .flat_map(|metric| match metric.data() {
+            AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                .data_points()
+                .map(|point| {
+                    let reason = point
+                        .attributes()
+                        .find(|kv| kv.key.as_str() == "reason")
+                        .map(|kv| kv.value.to_string())
+                        .unwrap();
+                    (reason, point.value())
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(
+        skipped_by_reason.get("file_limit"),
+        Some(&7),
+        "listed-only entries past the file limit need a skip reason, got {skipped_by_reason:?}"
+    );
+}
+
+#[tokio::test]
 async fn incremental_flag_dead_letters_an_export_the_ontology_cannot_map() {
     enable_incremental("1/2802/");
     let clickhouse = integration_testkit::TestContext::new(&[

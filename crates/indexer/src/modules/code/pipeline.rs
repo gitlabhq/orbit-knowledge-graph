@@ -428,6 +428,11 @@ impl CodeIndexer {
                                 .record_archive_entry_skipped(reason, 1, file.size);
                         }
                     }
+                    let dropped = files.usage().dropped_listed;
+                    if dropped > 0 {
+                        self.metrics
+                            .record_archive_entry_skipped("file_limit", dropped as u64, 0);
+                    }
                 }
                 repository
             }
