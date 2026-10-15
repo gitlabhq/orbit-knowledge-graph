@@ -97,6 +97,9 @@ struct Fold<'t> {
     chain_seen: FxHashSet<u32>,
     obj_seen: FxHashSet<u32>,
     chain_memo: FxHashMap<u32, Vec<Value>>,
+    member_memo: FxHashMap<(u32, u32), Vec<Value>>,
+    member_busy: FxHashSet<(u32, u32)>,
+    member_memo_at: (BlockId, usize, usize, usize),
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
@@ -1210,6 +1213,30 @@ impl<'t> Fold<'t> {
         let Some(obj) = m.child(C::Object) else {
             return vec![];
         };
+        let name = obj.reference();
+        let bare = obj.child(C::Call).is_none()
+            && !name.has(C::Object)
+            && name.child(C::Member).is_none()
+            && name.child(C::Ivar).is_none();
+        let key = bare.then(|| (name.sym(), m.sym()));
+        let at = (
+            self.cur,
+            self.ssa.writes(),
+            self.scopes.len(),
+            self.def_stack.len(),
+        );
+        if self.member_memo_at != at {
+            self.member_memo.clear();
+            self.member_memo_at = at;
+        }
+        if let Some(found) = key.and_then(|key| self.member_memo.get(&key)) {
+            return found.clone();
+        }
+        if let Some(key) = key
+            && !self.member_busy.insert(key)
+        {
+            return vec![];
+        }
         let mut targets = Vec::new();
         for r in self.lookup_chain(obj) {
             match r {
@@ -1221,7 +1248,7 @@ impl<'t> Fold<'t> {
                 _ => targets.push(r),
             }
         }
-        targets
+        let found: Vec<Value> = targets
             .into_iter()
             .flat_map(|r| match r {
                 Value::LocalDef(d) => self
@@ -1232,7 +1259,12 @@ impl<'t> Fold<'t> {
                 Value::ImportRef(_) => vec![r],
                 _ => vec![],
             })
-            .collect()
+            .collect();
+        if let Some(key) = key {
+            self.member_busy.remove(&key);
+            self.member_memo.insert(key, found.clone());
+        }
+        found
     }
 
     fn push_calls(&mut self, from: u32, targets: Vec<u32>) {
@@ -1295,6 +1327,9 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         chain_seen: FxHashSet::default(),
         obj_seen: FxHashSet::default(),
         chain_memo: FxHashMap::default(),
+        member_memo: FxHashMap::default(),
+        member_busy: FxHashSet::default(),
+        member_memo_at: (entry, 0, 0, 0),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),

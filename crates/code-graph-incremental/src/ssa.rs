@@ -66,6 +66,7 @@ pub struct SsaEngine {
     frames: Vec<Frame>,
     written: FxHashSet<u32>,
     unsealed: usize,
+    writes: usize,
 }
 
 impl SsaEngine {
@@ -80,6 +81,7 @@ impl SsaEngine {
             frames: Vec::new(),
             written: FxHashSet::default(),
             unsealed: 0,
+            writes: 0,
         }
     }
 
@@ -146,6 +148,10 @@ impl SsaEngine {
         self.add_sealed_successor(header)
     }
 
+    pub fn writes(&self) -> usize {
+        self.writes
+    }
+
     pub fn has_variable_in_block(&self, variable: u32, block: BlockId) -> bool {
         self.current_def
             .get(&variable)
@@ -170,6 +176,7 @@ impl SsaEngine {
     }
 
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
+        self.writes += 1;
         self.written.insert(variable);
         self.current_def
             .entry(variable)
