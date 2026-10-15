@@ -1,0 +1,56 @@
+cases:
+  - name: CI variants scan the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"pipeline","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (pipeline:Pipeline {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN pipeline, project
+    logical:
+      expect: ["(EdgeScan IN_PROJECT pipeline->project AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"]
+          reject: ["(Scan Table(gl_edge) ...)"]
+
+  - name: Security variants scan the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"vulnerability","entity":"Vulnerability","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"vulnerability","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (vulnerability:Vulnerability {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN vulnerability, project
+    logical:
+      expect: ["(EdgeScan IN_PROJECT vulnerability->project AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"]
+          reject: ["(Scan Table(gl_edge) ...)"]
+
+  - name: Diff variants scan the diff edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"diff","entity":"MergeRequestDiff","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"diff","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (diff:MergeRequestDiff {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN diff, project
+    logical:
+      expect: ["(EdgeScan IN_PROJECT diff->project AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Scan Table(gl_diff_edge) AS _orbit_edge_0)"]
+          reject: ["(Scan Table(gl_edge) ...)"]
+
+  - name: Code bridge variants scan the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"project","entity":"Project","node_ids":[1]},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (project:Project {id: 1})-[:CONTAINS]->(branch:Branch) RETURN project, branch
+    logical:
+      expect: ["(EdgeScan CONTAINS project->branch AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"]
+          reject: ["(Scan Table(gl_edge) ...)"]

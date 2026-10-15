@@ -1,4 +1,4 @@
-name: Traversal relationship alternatives scan every declared route
+name: Typed CI relationship alternatives share the CI edge table
 
 query:
   json: |
@@ -15,5 +15,6 @@ physical:
   clickhouse:
     planned:
       expect:
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+      reject:
         - (Scan Table(gl_edge) ...)
-        - (Scan Table(gl_ci_edge) ...)

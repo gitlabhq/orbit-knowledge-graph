@@ -6,8 +6,8 @@ config:
       - { id: 7000, name: p700, full_path: "g700/p700", visibility_level: public, traversal_path: "1/700/7000/" }
     gl_branch:
       - { id: 7700, project_id: 7000, name: main, traversal_path: "1/700/7000/" }
-    gl_edge:
-      - { source_id: 7000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7700, target_kind: Branch, traversal_path: "1/700/7000/" }
+    gl_code_edge:
+      - { source_id: 7000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7700, target_kind: Branch, project_id: 7000, branch: main, traversal_path: "1/700/7000/" }
   redaction:
     allow:
       project: [7000]
@@ -26,7 +26,7 @@ query:
     }
 
 expect:
-  sql_contains: ["gl_edge"]
+  sql_contains: ["gl_code_edge"]
   skip_requirements: ["node_ids"]
   row_count: 1
   row_values:

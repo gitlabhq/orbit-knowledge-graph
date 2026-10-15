@@ -96,13 +96,22 @@ mod tests {
         let model = ClickHouseDataModel::derive(ontology).unwrap();
 
         let code_writers = model.layout().schema().writers("gl_code_edge").unwrap();
-        assert!(code_writers.contains("CONTAINS"));
+        assert!(code_writers.contains("Branch"));
+        assert!(code_writers.contains("Directory"));
         assert!(!code_writers.contains("Group"));
         assert!(!code_writers.contains("Project"));
 
         let default_writers = model.layout().schema().writers("gl_edge").unwrap();
         assert!(default_writers.contains("Group"));
         assert!(default_writers.contains("Project"));
+
+        let ci_writers = model.layout().schema().writers("gl_ci_edge").unwrap();
+        assert!(ci_writers.contains("Pipeline"));
+        assert!(!ci_writers.contains("Vulnerability"));
+
+        let security_writers = model.layout().schema().writers("gl_sec_edge").unwrap();
+        assert!(security_writers.contains("Vulnerability"));
+        assert!(!security_writers.contains("Pipeline"));
     }
 
     #[test]

@@ -551,14 +551,14 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]},
-                {"id": "f", "entity": "File"}
+                {"id": "parent", "entity": "Pipeline", "node_ids": [1]},
+                {"id": "child", "entity": "Pipeline"}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
-            "group_by": ["p"],
+            "relationships": [{"type": "CHILD_OF", "from": "parent", "to": "child"}],
+            "group_by": ["parent"],
             "aggregations": [{
-                "count": "f",
-                "as": "files"
+                "count": "child",
+                "as": "children"
             }],
             "limit": 10
         }"#;

@@ -10,10 +10,9 @@ config:
       - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000 }
       - { id: 99001, traversal_path: "1/100/1000/", project_id: 1000, auto_canceled_by_id: 99002 }
       - { id: 99002, traversal_path: "1/100/1000/", project_id: 1000 }
-    gl_edge:
+    gl_ci_edge:
       - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 99001, target_kind: Pipeline, _version: "2026-01-01 00:00:00", _deleted: false }
       - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 99001, target_kind: Pipeline, _version: "2026-01-02 00:00:00", _deleted: true }
-    gl_ci_edge:
       - { traversal_path: "1/100/1000/", source_id: 99001, source_kind: Pipeline, relationship_kind: AUTO_CANCELED_BY, target_id: 99002, target_kind: Pipeline }
 
 query:

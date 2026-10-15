@@ -2024,27 +2024,6 @@ mod tests {
     }
 
     #[test]
-    fn edge_routes_use_domain_defaults_before_global_default() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
-
-        for (source, target, table) in [
-            ("Group", "Project", "gl_edge"),
-            ("Project", "Branch", "gl_edge"),
-            ("Branch", "Directory", "gl_code_edge"),
-            ("Branch", "File", "gl_code_edge"),
-            ("Directory", "Directory", "gl_code_edge"),
-            ("Directory", "File", "gl_code_edge"),
-        ] {
-            assert_eq!(
-                ontology
-                    .edge_table_for_variant("CONTAINS", source, target)
-                    .unwrap(),
-                table
-            );
-        }
-    }
-
-    #[test]
     fn variant_table_overrides_domain_route() {
         let ontology = Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),

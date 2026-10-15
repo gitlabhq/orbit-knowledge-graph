@@ -270,6 +270,7 @@ impl crate::Relational<ClickHouse> {
             })
             .collect();
         let mut writers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut mapped_variants = BTreeSet::new();
         for node in ontology.nodes() {
             writers
                 .entry(node.destination_table.clone())
@@ -281,10 +282,30 @@ impl crate::Relational<ClickHouse> {
                 .flat_map(|pipeline| pipeline.transform.edges())
             {
                 for route in ontology.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert((
+                        route.relationship_kind.clone(),
+                        route.source_kind.clone(),
+                        route.target_kind.clone(),
+                    ));
                     writers
                         .entry(route.destination_table.clone())
                         .or_default()
                         .insert(node.name.clone());
+                }
+            }
+        }
+        for (kind, pipeline) in ontology.edge_etl_configs() {
+            for mapping in pipeline.transform.edges() {
+                for route in ontology.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert((
+                        route.relationship_kind.clone(),
+                        route.source_kind.clone(),
+                        route.target_kind.clone(),
+                    ));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(kind.to_string());
                 }
             }
         }
@@ -296,14 +317,37 @@ impl crate::Relational<ClickHouse> {
                         .or_default()
                         .insert(derived.name.clone());
                 }
+                if let Some(variants) = ontology.get_edge(kind) {
+                    mapped_variants.extend(variants.iter().map(|route| {
+                        (
+                            route.relationship_kind.clone(),
+                            route.source_kind.clone(),
+                            route.target_kind.clone(),
+                        )
+                    }));
+                }
             }
         }
-        for kind in ontology.edge_names() {
-            for table in relationship_tables.get(kind).into_iter().flatten() {
+        for route in ontology.edges() {
+            let variant = (
+                route.relationship_kind.clone(),
+                route.source_kind.clone(),
+                route.target_kind.clone(),
+            );
+            if !mapped_variants.contains(&variant) {
+                let writer = ontology
+                    .get_node(&route.source_kind)
+                    .filter(|node| node.pipelines.is_empty())
+                    .or_else(|| {
+                        ontology
+                            .get_node(&route.target_kind)
+                            .filter(|node| node.pipelines.is_empty())
+                    })
+                    .map_or(&route.relationship_kind, |node| &node.name);
                 writers
-                    .entry(table.clone())
+                    .entry(route.destination_table.clone())
                     .or_default()
-                    .insert(kind.to_string());
+                    .insert(writer.clone());
             }
         }
         Ok(Self {

@@ -19,6 +19,7 @@ variants:
 
   - from_node: { type: Project, id: id }
     to_node: { type: Branch, id: id }
+    table: gl_code_edge
     scope: same_namespace
     description: "Project contains branch."
 

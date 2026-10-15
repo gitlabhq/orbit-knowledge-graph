@@ -408,7 +408,7 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 ##### Storage in ClickHouse
 
-The graph is converted to Apache Arrow record batches and written to ClickHouse. Node batches use the branch, directory, file, definition, and imported symbol tables. Edge batches route by relationship kind and both endpoint kinds. The resolved ontology variant selects `gl_code_edge` for source-code-to-source-code relationships. Cross-domain relationships such as `Branch -> Project IN_PROJECT` stay in `gl_edge`. Every row carries base columns for the namespace hierarchy path, project ID, branch, and a version timestamp used for stale data cleanup.
+The graph is converted to Apache Arrow record batches and written to ClickHouse. Node batches use the branch, directory, file, definition, and imported symbol tables. Edge batches route by relationship kind and both endpoint kinds. The resolved ontology variant selects `gl_code_edge` for source-code relationships, including the Project and Branch bridge. Every row carries base columns for the namespace hierarchy path, project ID, branch, and a version timestamp used for stale data cleanup.
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 

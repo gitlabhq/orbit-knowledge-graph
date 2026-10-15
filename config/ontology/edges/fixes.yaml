@@ -1,6 +1,7 @@
 # config/ontology/edges/fixes.yaml
 
 description: Merge request fixes a vulnerability
+table: gl_sec_edge
 
 variants:
   - from_node: { type: MergeRequest, id: id }

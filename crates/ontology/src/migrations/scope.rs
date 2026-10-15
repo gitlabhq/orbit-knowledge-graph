@@ -195,11 +195,8 @@ pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         }
     }
     for kind in ontology.edge_names() {
-        if ontology
-            .edge_tables_for_relationship(kind)
-            .iter()
-            .any(|table| is_code_table(ontology, table))
-        {
+        let tables = ontology.edge_tables_for_relationship(kind);
+        if !tables.is_empty() && tables.iter().all(|table| is_code_table(ontology, table)) {
             names.insert(kind.to_string());
         }
     }

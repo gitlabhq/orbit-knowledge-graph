@@ -17,6 +17,7 @@ variants:
 
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
+    table: gl_sec_edge
     fk_column: author_id
     scope: prune_to_target
     description: "User reported vulnerability."
@@ -26,4 +27,3 @@ variants:
     fk_column: author_id
     scope: prune_to_target
     description: "User authored work item."
-
