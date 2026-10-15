@@ -1,0 +1,29 @@
+name: "Python: calls inside a lambda bound to a local reach the callee"
+
+fixtures:
+  - path: main.py
+    content: |
+      def helper(x):
+          return x
+
+
+      def run():
+          f = lambda x: helper(x)
+          return f(1)
+
+
+      def reassigned():
+          g = None
+          g = lambda x: helper(x)
+          return g(2)
+
+tests:
+  - name: helper is reached from both lambdas
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { empty: false }
+      - { column_values: { field: caller, values: ["f", "g"] } }
