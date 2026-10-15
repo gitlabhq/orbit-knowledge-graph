@@ -633,3 +633,61 @@ fn origin_relative_references_refuse_another_instance() {
         "{stderr}"
     );
 }
+
+fn setup_claude_md(dir: &Path, home: &Path, base_url: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .current_dir(dir)
+        .args(["setup", "claude", "--project", "--yes", "--no-index"])
+        .args(["--skip", "hooks"])
+        .env("HOME", home)
+        .env("ORBIT_DATA_DIR", home)
+        .env("ORBIT_API_BASE_URL", base_url)
+        .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+        .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+        .env_remove("GITLAB_TOKEN")
+        .output()
+        .expect("run orbit setup");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::read_to_string(dir.join("CLAUDE.md")).expect("CLAUDE.md")
+}
+
+#[test]
+fn setup_mentions_gitlab_when_orbit_answers_for_origin() {
+    let (base_url, handle) = serve_once(r#"{"projects":[]}"#, "application/json");
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let home = tempfile::tempdir().expect("tempdir");
+
+    let instructions = setup_claude_md(clone.path(), home.path(), &base_url);
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        request
+            .request_line
+            .starts_with("GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project "),
+        "{}",
+        request.request_line
+    );
+    assert!(
+        instructions.contains("GitLab issues, MRs"),
+        "{instructions}"
+    );
+}
+
+#[test]
+fn setup_leaves_gitlab_out_when_orbit_does_not_answer() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+    drop(listener);
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let home = tempfile::tempdir().expect("tempdir");
+
+    let instructions = setup_claude_md(clone.path(), home.path(), &base_url);
+
+    assert!(instructions.contains("grep"), "{instructions}");
+    assert!(!instructions.contains("GitLab"), "{instructions}");
+}

@@ -23,6 +23,7 @@ const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) struct SkillHttpResponse {
     pub(crate) status: u16,
@@ -345,12 +346,35 @@ impl std::fmt::Display for MissingCredential {
 
 impl std::error::Error for MissingCredential {}
 
-pub(crate) fn credentials_available() -> bool {
-    resolve_endpoint(
-        |key| std::env::var(key).ok(),
-        || resolve_via_credential_helper(Path::new(".")),
-    )
-    .is_ok()
+pub(crate) fn gitlab_usable(dir: &Path) -> bool {
+    let Ok(client) = OrbitClient::from_env_in(dir) else {
+        return false;
+    };
+    let Ok(host) = client.get_host() else {
+        return false;
+    };
+    let origin = super::origin::project(dir)
+        .filter(|(origin_host, _)| *origin_host == host)
+        .map(|(_, path)| path);
+    std::thread::spawn(move || {
+        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else {
+            return false;
+        };
+        runtime.block_on(async {
+            let probe = async {
+                match origin {
+                    Some(path) => client.get_graph_status(&[("full_path", path)]).await,
+                    None => client.get_status().await,
+                }
+            };
+            matches!(tokio::time::timeout(PROBE_TIMEOUT, probe).await, Ok(Ok(_)))
+        })
+    })
+    .join()
+    .unwrap_or(false)
 }
 
 fn resolve_via_credential_helper(dir: &Path) -> Option<ResolvedEndpoint> {
