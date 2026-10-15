@@ -3,8 +3,16 @@ name: "JavaScript: a parameter named like a function does not type its call resu
 fixtures:
   - path: main.js
     content: |
+      class Baz {
+        baz() {}
+      }
+
       class Foo {
         bar() {}
+
+        next() {
+          return new Baz();
+        }
       }
 
       function make() {
@@ -21,6 +29,16 @@ fixtures:
         x.bar();
       }
 
+      function chained(make) {
+        const y = make().next();
+        y.baz();
+      }
+
+      function chained_top() {
+        const y = make().next();
+        y.baz();
+      }
+
 tests:
   - name: "only the call to the top-level make types x"
     query: |
@@ -30,3 +48,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: g } }
+
+  - name: "a call chained on a shadowed call is not typed either"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'baz'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: chained_top } }
