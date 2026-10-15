@@ -105,6 +105,7 @@ impl fmt::Display for OntologyError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTableConfig {
+    pub domains: BTreeSet<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
     pub storage: EdgeTableStorage,
@@ -183,6 +184,7 @@ impl Ontology {
             .map(|s| (*s).to_string())
             .collect();
         let default_config = EdgeTableConfig {
+            domains: BTreeSet::new(),
             sort_key: default_sort_key,
             columns: Vec::new(),
             storage: EdgeTableStorage::default(),
@@ -333,6 +335,7 @@ impl Ontology {
         self.edge_table_configs.insert(
             name,
             EdgeTableConfig {
+                domains: BTreeSet::new(),
                 sort_key,
                 columns: Vec::new(),
                 storage: EdgeTableStorage::default(),
@@ -914,6 +917,102 @@ impl Ontology {
             .get(relationship_kind)?
             .iter()
             .find(|edge| edge.source_kind == source_kind && edge.target_kind == target_kind)
+    }
+
+    pub fn edge_table_for_variant(
+        &self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Result<&str, OntologyError> {
+        self.edge_route(relationship_kind, source_kind, target_kind)
+            .map(|edge| edge.destination_table.as_str())
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "relationship '{relationship_kind}' has no {source_kind} -> {target_kind} variant"
+                ))
+            })
+    }
+
+    pub fn edge_routes_for_mapping(&self, mapping: &EdgeMapping) -> Vec<&EdgeEntity> {
+        self.edges
+            .get(&mapping.label)
+            .into_iter()
+            .flatten()
+            .filter(|edge| {
+                node_ref_matches(&mapping.source, &edge.source_kind)
+                    && node_ref_matches(&mapping.target, &edge.target_kind)
+            })
+            .collect()
+    }
+
+    pub fn table_writers(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut writers = BTreeMap::<String, BTreeSet<String>>::new();
+        let mut mapped_variants = BTreeSet::new();
+
+        for node in self.nodes() {
+            writers
+                .entry(node.destination_table.clone())
+                .or_default()
+                .insert(node.name.clone());
+            for mapping in node
+                .pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+            {
+                for route in self.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(node.name.clone());
+                }
+            }
+        }
+
+        for (kind, pipeline) in self.edge_etl_configs() {
+            for mapping in pipeline.transform.edges() {
+                for route in self.edge_routes_for_mapping(mapping) {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(kind.to_string());
+                }
+            }
+        }
+
+        for derived in self.derived_entities() {
+            for kind in &derived.emits {
+                for route in self.get_edge(kind).into_iter().flatten() {
+                    mapped_variants.insert(edge_variant_key(route));
+                    writers
+                        .entry(route.destination_table.clone())
+                        .or_default()
+                        .insert(derived.name.clone());
+                }
+            }
+        }
+
+        for route in self.edges() {
+            if mapped_variants.contains(&edge_variant_key(route)) {
+                continue;
+            }
+            let writer = self
+                .get_node(&route.source_kind)
+                .filter(|node| node.pipelines.is_empty())
+                .or_else(|| {
+                    self.get_node(&route.target_kind)
+                        .filter(|node| node.pipelines.is_empty())
+                })
+                .map_or(&route.relationship_kind, |node| &node.name);
+            writers
+                .entry(route.destination_table.clone())
+                .or_default()
+                .insert(writer.clone());
+        }
+
+        writers
     }
 
     pub fn edge_tables_for_relationship(&self, relationship_kind: &str) -> BTreeSet<&str> {
@@ -1726,6 +1825,21 @@ impl Ontology {
     }
 }
 
+fn node_ref_matches(node_ref: &NodeRef, node_kind: &str) -> bool {
+    match &node_ref.kind {
+        NodeRefKind::Literal(literal) => literal == node_kind,
+        NodeRefKind::Derived { .. } => true,
+    }
+}
+
+fn edge_variant_key(edge: &EdgeEntity) -> (String, String, String) {
+    (
+        edge.relationship_kind.clone(),
+        edge.source_kind.clone(),
+        edge.target_kind.clone(),
+    )
+}
+
 impl fmt::Display for Ontology {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -1984,6 +2098,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn variant_table_overrides_domain_route() {
+        let ontology = Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/variant_routes"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            ontology
+                .edge_table_for_variant("CALLS", "Definition", "Definition")
+                .unwrap(),
+            "gl_code_edge"
+        );
+        assert_eq!(
+            ontology
+                .edge_table_for_variant("CALLS", "File", "Definition")
+                .unwrap(),
+            "gl_edge"
+        );
     }
 
     #[test]

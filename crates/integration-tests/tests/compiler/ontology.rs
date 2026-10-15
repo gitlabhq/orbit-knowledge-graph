@@ -305,7 +305,7 @@ fn package_built_by_pipeline_traversal() {
     let rendered = result.base.render();
 
     assert!(rendered.contains("gl_package"));
-    assert!(rendered.contains("gl_edge"));
+    assert!(rendered.contains("gl_ci_edge"));
     assert!(rendered.contains("'BUILT_BY'"));
     assert!(rendered.contains("(_orbit_edge_0.source_kind = 'Package')"));
     assert!(rendered.contains("(_orbit_edge_0.target_kind = 'Pipeline')"));

@@ -1,6 +1,7 @@
 # config/ontology/edges/dismissed_by.yaml
 
 description: User who dismissed a vulnerability
+table: gl_sec_edge
 
 variants:
   - from_node: { type: User, id: id }

@@ -183,10 +183,9 @@ promotion cannot switch tables under a running query.
 Loading an archive does not prove the binary can serve it; that depends on the archive loader,
 parser, and compiler. Validate a cross-version rollout before relying on it.
 
-Deploy variant-table parsing and routing support to every query server before publishing split-route archives.
-Older binaries can ignore a variant's `table` field and read the wrong table.
-The dispatcher rejects split routes until producers support writes to variant-specific tables.
-Query servers support split routes once variant-aware query planning is deployed.
+Deploy variant-table parsing and routing support to every query server and indexer before publishing split-route archives.
+Older binaries can ignore a variant's route and read or write the wrong table.
+Query servers and indexers resolve each relationship variant by its relationship kind and endpoint kinds.
 Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
 If a server rejects the active archive, it clears its last installed snapshot. All query servers
 return `503` until an operator repairs the archive or rolls back the active version.

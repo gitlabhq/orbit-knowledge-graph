@@ -39,6 +39,7 @@ settings:
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
     gl_code_edge:
+      domains: [source_code]
       sort_key: [traversal_path, relationship_kind, project_id, branch, source_id, target_id, source_kind, target_kind]
       columns:
         - {name: traversal_path, type: string}

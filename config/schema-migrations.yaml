@@ -16,6 +16,8 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 106
+  scope: "*"
 - version: 105
   scope: "*"
   note: >-
