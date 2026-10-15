@@ -27,7 +27,7 @@ impl Tree {
         let field = self.node(target).field;
         if target == self.root && replacements.len() != 1 {
             for node in replacements {
-                node.remove_subtree(&mut self.storage.0);
+                self.remove_subtree(node);
             }
             return;
         }
@@ -41,7 +41,14 @@ impl Tree {
                 target.insert_before(node, &mut self.storage.0);
             }
         }
-        target.remove_subtree(&mut self.storage.0);
+        self.remove_subtree(target);
+    }
+
+    fn remove_subtree(&mut self, id: NodeId) {
+        for node in id.descendants(&self.storage.0) {
+            self.tags.remove(&Self::to_raw(node));
+        }
+        id.remove_subtree(&mut self.storage.0);
     }
 
     pub fn compact(&mut self) {
