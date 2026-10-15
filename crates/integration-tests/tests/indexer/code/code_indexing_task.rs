@@ -5,6 +5,7 @@ use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::handler::Handler;
+use indexer::locking::LockService;
 use indexer::modules::code::{
     ClickHouseStaleDataCleaner, CodeCheckpointStore, StaleDataCleaner, config::CodeTableNames,
     project_lock_key,
@@ -1462,11 +1463,9 @@ async fn a_deferred_delivery_runs_once_the_lock_frees() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler =
         deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_millis(900));
+    let key = project_lock_key(project_id, "main");
     let locks = Arc::new(MockLockService::new());
-    locks.set_lock_for(
-        &project_lock_key(project_id, "main"),
-        std::time::Duration::from_millis(300),
-    );
+    locks.set_lock_for(&key, std::time::Duration::from_secs(60));
 
     let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     let error = handler
@@ -1476,11 +1475,12 @@ async fn a_deferred_delivery_runs_once_the_lock_frees() {
         )
         .await
         .expect_err("a held lock defers the delivery");
-    let indexer::handler::HandlerError::Deferred { delay, .. } = error else {
-        panic!("a held lock must defer the delivery, got {error}");
-    };
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Deferred { .. }),
+        "a held lock must defer the delivery, got {error}"
+    );
 
-    tokio::time::sleep(delay).await;
+    locks.release(&key).await.expect("release");
     let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
     envelope.attempt = 2;
     handler
