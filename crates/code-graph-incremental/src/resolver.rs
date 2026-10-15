@@ -2207,6 +2207,34 @@ mod resolving_tests {
     use super::*;
 
     #[test]
+    fn files_of_one_namespace_import_it_as_one_shared_package() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join("Big")).unwrap();
+        for f in 0..4 {
+            let source = format!("namespace Big;\npublic class C{f} {{}}\n");
+            std::fs::write(repo.path().join(format!("Big/F{f}.cs")), source).unwrap();
+        }
+        let env = Env::with_limits(SupportLang::CSharp, crate::Limits::UNLIMITED).unwrap();
+        let repository = std::sync::Arc::new(
+            orbit_utils::vfs::Vfs::load(
+                orbit_utils::vfs::sources::Directory(repo.path()),
+                orbit_utils::vfs_policies::CodePolicy,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let graph = crate::templates::index(crate::pipeline::Context::new(&env, repository));
+        let (_, resolved) = graph.unwrap().finish();
+        let state = &resolved.state;
+        let resolver = &state.resolver;
+        let (via, packages) = package_imports(&state.trees, &resolver.reqs, resolver.wildcard_sym);
+        assert_eq!(packages, [vec![0, 1, 2, 3]]);
+        let shared = via.iter().filter(|v| matches!(v, Via::Package(0))).count();
+        assert_eq!(shared, 4);
+    }
+
+    #[test]
     fn a_panic_while_resolving_releases_the_name() {
         let key = (0, 7);
         let panicked = std::panic::catch_unwind(|| {
