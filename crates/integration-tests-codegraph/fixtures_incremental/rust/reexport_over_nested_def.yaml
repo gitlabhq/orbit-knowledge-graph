@@ -1,0 +1,54 @@
+name: "Rust: a named re-export at the crate root wins over a same-named def in an inline module"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "reexport_over_nested_def"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod query_builder;
+      pub mod user;
+
+      pub mod helper_types {
+          pub type insert_into<T> = T;
+      }
+
+      pub use crate::query_builder::functions::{delete, insert_into};
+
+  - path: src/query_builder/mod.rs
+    content: |
+      pub mod functions;
+
+  - path: src/query_builder/functions.rs
+    content: |
+      pub fn insert_into() {}
+
+      pub fn delete() {}
+
+  - path: src/user.rs
+    content: |
+      use crate::insert_into;
+
+      pub fn inline() {
+          crate::insert_into();
+      }
+
+      pub fn imported() {
+          insert_into();
+      }
+
+tests:
+  - name: "both callers reach the re-exported function, not the type alias"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['inline', 'imported']
+      RETURN caller.name AS caller, callee.file_path AS file
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: imported, file: src/query_builder/functions.rs } }
+      - { row: { caller: inline, file: src/query_builder/functions.rs } }

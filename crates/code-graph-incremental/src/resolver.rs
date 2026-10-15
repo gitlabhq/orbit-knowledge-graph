@@ -1024,9 +1024,16 @@ fn propagate_reexports(
         let mut new_exports: indexmap::IndexMap<(usize, u32), Loc, rustc_hash::FxBuildHasher> =
             Default::default();
         let added = std::cell::Cell::new(0);
-        let mut export = |fi: usize, name, loc: Loc| {
-            if visible[fi].contains_key(&name) {
-                return;
+        let mut export = |fi: usize, name, loc: Loc, named: bool| {
+            if let Some(old) = visible[fi].get(&name) {
+                let nested_own = old.fi as usize == fi
+                    && trees[fi]
+                        .cursor(old.node)
+                        .enclosing(|p| p.is(C::Def))
+                        .is_some();
+                if !(named && nested_own && *old != loc) {
+                    return;
+                }
             }
             match new_exports.entry((fi, name)) {
                 indexmap::map::Entry::Vacant(entry) => {
@@ -1057,7 +1064,7 @@ fn propagate_reexports(
                         .get_or_insert_with(|| package_exports(&packages[package], visible));
                     for (&name, locs) in union.iter() {
                         for &loc in locs {
-                            export(req.fi as usize, name, loc);
+                            export(req.fi as usize, name, loc, false);
                         }
                     }
                     continue;
@@ -1075,14 +1082,20 @@ fn propagate_reexports(
                             req.fi as usize,
                             alias,
                             Loc::new(req.target_fi as usize, req.anchor),
+                            false,
                         );
                         continue;
                     }
                     for (&ds, &loc) in exports.iter() {
-                        export(req.fi as usize, ds, loc);
+                        export(req.fi as usize, ds, loc, false);
                     }
                 } else if let Some(&loc) = exports.get(&ns) {
-                    export(req.fi as usize, c.child_sym(C::Alias).unwrap_or(ns), loc);
+                    export(
+                        req.fi as usize,
+                        c.child_sym(C::Alias).unwrap_or(ns),
+                        loc,
+                        true,
+                    );
                 }
             }
         }
@@ -1096,7 +1109,7 @@ fn propagate_reexports(
             {
                 let source_fi = loc.fi as usize;
                 for (&ds, &dloc) in &visible[source_fi] {
-                    export(fi, ds, dloc);
+                    export(fi, ds, dloc, false);
                 }
             }
         }
@@ -1105,7 +1118,7 @@ fn propagate_reexports(
             for &n in &declared[req.target_fi as usize] {
                 let own = visible[req.fi as usize].get(&n).filter(|l| l.fi == req.fi);
                 if let Some(&loc) = own {
-                    export(req.target_fi as usize, n, loc);
+                    export(req.target_fi as usize, n, loc, false);
                 }
             }
         }
