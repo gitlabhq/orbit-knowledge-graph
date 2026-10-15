@@ -1,0 +1,80 @@
+name: "Rust: receivers typed through a two-step alias chain across files"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "alias_chain_receivers"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod sound;
+      pub mod alias1;
+      pub mod alias2;
+      pub mod user;
+
+  - path: src/sound.rs
+    content: |
+      pub struct Sound;
+
+      impl Sound {
+          pub fn m(&self) {}
+
+          pub fn again(&self) -> Sound {
+              Sound
+          }
+      }
+
+  - path: src/alias1.rs
+    content: |
+      use crate::sound::Sound;
+      pub type S1 = Sound;
+
+  - path: src/alias2.rs
+    content: |
+      use crate::alias1::S1;
+      pub type S2 = S1;
+
+  - path: src/user.rs
+    content: |
+      use crate::alias2::S2;
+
+      pub struct Kennel {
+          pub sound: S2,
+      }
+
+      pub fn ret_sound() -> S2 {
+          todo!()
+      }
+
+      pub fn by_param(s: S2) {
+          s.m();
+      }
+
+      pub fn by_field(k: Kennel) {
+          k.sound.m();
+      }
+
+      pub fn by_return() {
+          ret_sound().m();
+      }
+
+      pub fn by_chain(s: S2) {
+          s.again().again().m();
+      }
+
+tests:
+  - name: "every receiver shape reaches Sound::m"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'm'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: by_chain } }
+      - { row: { caller: by_field } }
+      - { row: { caller: by_param } }
+      - { row: { caller: by_return } }
