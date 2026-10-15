@@ -1,0 +1,27 @@
+name: "Java: a super call through a qualified supertype keeps its edge"
+
+fixtures:
+  - path: ImmutableCollection.java
+    content: |
+      public abstract class ImmutableCollection<E> extends AbstractCollection<E> implements Serializable {
+        ImmutableCollection() {}
+        public abstract static class Builder<E> {
+          @CanIgnoreReturnValue
+          public Builder<E> addAll(Iterator<? extends E> elements) {
+          }
+        }
+        abstract static class ArrayBasedBuilder<E> extends ImmutableCollection.Builder<E> {
+          public Builder<E> addAll(Iterable<? extends E> elements) {
+            super.addAll(elements);
+          }
+        }
+      }
+
+tests:
+  - name: "the override in ArrayBasedBuilder calls the addAll of Builder through super"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'addAll' AND callee.name = 'addAll'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

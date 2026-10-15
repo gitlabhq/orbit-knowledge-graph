@@ -648,9 +648,9 @@ fn expand(
         .filter(|(producer, uses)| {
             (producer.is(C::Binding)
                 || (producer.is(C::Call)
-                    && uses
+                    && !uses
                         .iter()
-                        .any(|e| e.call_resolution == CallResolution::Callable)
+                        .any(|e| e.call_resolution == CallResolution::NonCallable)
                     && !ctx
                         .call_at_site
                         .contains_key(&(producer.fi(), producer.index())))
