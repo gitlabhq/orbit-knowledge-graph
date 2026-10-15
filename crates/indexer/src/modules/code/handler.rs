@@ -303,6 +303,37 @@ impl CodeIndexingTaskHandler {
         }
     }
 
+    async fn acquire_lock(
+        &self,
+        context: &HandlerContext,
+        key: &str,
+        attempt: u32,
+    ) -> Result<Option<LockGuard>, HandlerError> {
+        let acquire = || async {
+            LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
+                .await
+                .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))
+        };
+        let mut held = acquire().await?;
+        if held.is_some() || attempt == 1 {
+            return Ok(held);
+        }
+        let deadline = tokio::time::Instant::now() + self.lock_ttl;
+        let poll = self.lock_ttl / 30;
+        while held.is_none() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(poll).await;
+            context.progress.notify_in_progress().await;
+            held = acquire().await?;
+        }
+        if held.is_none() {
+            return Err(HandlerError::Backpressure(format!(
+                "lock {key} still held after {}s on redelivery {attempt}",
+                self.lock_ttl.as_secs()
+            )));
+        }
+        Ok(held)
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
@@ -337,27 +368,15 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
-        {
-            Some(guard) => guard,
-            None => {
-                warn!(
-                    task_id = request.task_id,
-                    project_id,
-                    branch = %branch,
-                    lock_key = %key,
-                    attempt,
-                    "code indexing skipped: lock held by another indexer"
-                );
-                if attempt > 1 {
-                    return Err(HandlerError::Backpressure(format!(
-                        "lock {key} still held on redelivery {attempt}; waiting for it to expire"
-                    )));
-                }
-                return Ok(None);
-            }
+        let Some(guard) = self.acquire_lock(context, &key, attempt).await? else {
+            warn!(
+                task_id = request.task_id,
+                project_id,
+                branch = %branch,
+                lock_key = %key,
+                "code indexing skipped: lock held by another indexer"
+            );
+            return Ok(None);
         };
 
         checkpoint.start_attempt();
@@ -649,18 +668,53 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn a_redelivery_waits_for_a_held_lock_instead_of_acking() {
+    struct CountingAcker(Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait]
+    impl crate::nats::MessageAcker for CountingAcker {
+        async fn ack(&self) -> Result<(), crate::nats::NatsError> {
+            Ok(())
+        }
+        async fn ack_term(&self) -> Result<(), crate::nats::NatsError> {
+            Ok(())
+        }
+        async fn ack_progress(&self) -> Result<(), crate::nats::NatsError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        async fn nack(&self, _delay: Option<Duration>) -> Result<(), crate::nats::NatsError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_redelivery_waits_out_a_held_lock_before_backing_off() {
         let ctx = TestContext::new();
         ctx.set_lock(123, "main");
+        let progress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let message = crate::nats::NatsMessage::new(
+            TestContext::make_request(100, 123, "main"),
+            CountingAcker(progress.clone()),
+        );
+        let context = HandlerContext::new(
+            ctx.mock_nats.clone(),
+            ctx.mock_locks.clone(),
+            message.progress_notifier(),
+        );
 
         let mut envelope = TestContext::make_request(100, 123, "main");
         envelope.attempt = 2;
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+        let started = tokio::time::Instant::now();
+        let result = ctx.handler.handle(context, envelope).await;
 
         assert!(
             matches!(result, Err(HandlerError::Backpressure(_))),
-            "a stale lock from a crashed run must not ack the redelivery, got {result:?}"
+            "a lock still held after a full TTL backs off without an ack, got {result:?}"
+        );
+        assert!(started.elapsed() >= ctx.handler.lock_ttl);
+        assert!(
+            progress.load(std::sync::atomic::Ordering::SeqCst) >= 10,
+            "the delivery must be kept alive while the handler waits for the lock"
         );
         assert!(
             ctx.mock_checkpoints
@@ -670,6 +724,44 @@ mod tests {
                 .is_none(),
             "no attempt is started while the lock is held elsewhere"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_redelivery_runs_once_the_stale_lock_expires() {
+        use crate::locking::LockService;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        ctx.set_lock(123, "main");
+        let locks = ctx.mock_locks.clone();
+        let release_after = ctx.handler.lock_ttl / 2;
+        tokio::spawn(async move {
+            tokio::time::sleep(release_after).await;
+            locks
+                .release(&project_lock_key(123, "main"))
+                .await
+                .expect("release");
+        });
+
+        let mut envelope = TestContext::make_request(100, 123, "main");
+        envelope.attempt = 2;
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            result.is_ok(),
+            "the same delivery must run once the stale lock is gone, got {result:?}"
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("the run checkpoints");
+        assert!(checkpoint.indexed_at.is_some());
+        assert_eq!(checkpoint.attempts, 0);
     }
 
     #[tokio::test]
