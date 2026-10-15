@@ -13,11 +13,8 @@ pub(crate) mod test_helpers;
 
 use std::sync::Arc;
 
-use crate::IndexerConfig;
-use crate::analytics::IndexingAnalytics;
-use crate::clickhouse::ClickHouseClients;
-
-use crate::handler::{HandlerInitError, HandlerRegistry};
+use super::ModuleDeps;
+use crate::handler::HandlerInitError;
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
 use config::CodeTableNames;
@@ -47,17 +44,15 @@ pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "handler wiring takes each collaborator explicitly"
-)]
 pub async fn register_handlers(
-    registry: &HandlerRegistry,
-    config: &IndexerConfig,
-    clients: &ClickHouseClients,
-    ontology: &ontology::Ontology,
-    writer: Arc<crate::clickhouse::ClickHouseWriter>,
-    analytics: IndexingAnalytics,
+    ModuleDeps {
+        registry,
+        config,
+        clients,
+        ontology,
+        writer,
+        analytics,
+    }: ModuleDeps<'_>,
     resources: &orbit_server_config::ContainerResources,
     shutdown: tokio_util::sync::CancellationToken,
 ) -> Result<(), HandlerInitError> {
