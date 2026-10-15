@@ -970,6 +970,7 @@ impl<'t> Fold<'t> {
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
         let mut copied = FxHashMap::default();
+        let mut reset = FxHashSet::default();
         let mut aliases = smallvec::SmallVec::<[_; 4]>::new();
         while let Some((target, sources)) = copies.pop() {
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
@@ -992,7 +993,11 @@ impl<'t> Fold<'t> {
                 }
                 let value = self.read_value(source);
                 value_updates.push((target, value));
-                if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
+                if source == 0 {
+                    if self.fields.contains_key(&target) && reset.insert(target) {
+                        copies.push((target, FxHashMap::default()));
+                    }
+                } else if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
                     match copied.entry(source) {
                         Entry::Occupied(first) => aliases.push((target, *first.get())),
                         Entry::Vacant(slot) => {
