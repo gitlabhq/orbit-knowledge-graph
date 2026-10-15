@@ -13,10 +13,8 @@ style:
 
 # Project-delegated on purpose: the session's existence is visible to anyone with
 # read_code (Reporter+) on the project, like the source-code nodes. read_duo_workflow
-# is invoker-only for non-pipeline sessions and would hide that. The pipeline only
-# extracts source = gitlab_duo for now; the other source values are declared so
-# external sessions can be enabled later without a schema rename, once the privacy
-# owners rule on them.
+# is invoker-only for non-pipeline sessions and would hide that. Only
+# source = gitlab_duo is extracted today; the other values are declared for later.
 redaction:
   resource_type: project
   id_column: project_id

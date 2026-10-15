@@ -29,8 +29,10 @@ WITH
   WHERE (traversal_path, workflow_id, id) IN (SELECT traversal_path, workflow_id, id FROM _batch WHERE _deleted)
     AND {{deleted_column}} = false
   GROUP BY id),
-  -- The edge source is the governance session id, not the workflow id. Both tables
-  -- carry the workflow's traversal_path, so the join is bounded to the same prefix.
+  -- A link whose session has not replicated yet gets no edge, and the extract does
+  -- not revisit it until the link row changes or the next full rebuild, so sessions
+  -- the governance backfill writes after the link pass wait for a rebuild.
+  -- Both tables carry the workflow's traversal_path, so the join is bounded to it.
   _sessions AS (SELECT
     workflow_id,
     argMax(id, {{version_column}}) AS session_id

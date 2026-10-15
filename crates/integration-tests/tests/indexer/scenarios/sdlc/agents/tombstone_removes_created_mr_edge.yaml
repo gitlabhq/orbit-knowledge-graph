@@ -1,5 +1,3 @@
-# A production tombstone keeps the sort key (traversal_path, workflow_id, id) and
-# zeroes merge_request_id and link_type; the edge is found through the last live version.
 description: A key-only tombstone for a link row removes the CREATED_MR edge while the live version is unmerged, and does nothing once only the tombstone is left
 scope: { namespace: 100 }
 

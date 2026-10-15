@@ -1,9 +1,7 @@
 SELECT
   id,
-  -- flow_type is the workflow definition, free-form user input on the create
-  -- API: only the family (the part before the version) of a known flow type is ingested,
-  -- everything else is bucketed as 'other'. Keep in sync with the flow_type
-  -- values in agent_session.yaml.
+  -- flow_type is free-form user input: keep only known families, else 'other'.
+  -- Keep in sync with agent_session.yaml.
   if(
     splitByChar('/', coalesce(flow_type, ''))[1] IN (
       'software_development', 'external_agent', 'ai_catalog_agent',
@@ -21,7 +19,6 @@ SELECT
     splitByChar('/', coalesce(flow_type, ''))[1],
     'other'
   ) AS flow_type,
-  -- Stored as an Int16; the ontology enum maps it to the source name.
   source,
   session_started_at,
   project_id,
