@@ -438,7 +438,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .report
             .skipped
             .iter()
-            .map(|file| (file.path.as_str(), file.label))
+            .map(|file| (file.path.as_str(), file.label.as_ref()))
             .collect();
         let unread: FxHashSet<_> = context
             .report
@@ -583,22 +583,16 @@ impl Phase<Resolved> for Display {
                     tree_index: fi as u32,
                     edges: &edges,
                 };
-                crate::dsl::rewrite::take_fqn_cut();
-                let tree = pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)?;
-                if crate::dsl::rewrite::take_fqn_cut() {
-                    cut.push(tree.label.clone());
+                let (tree, kept) =
+                    pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)?;
+                if let Some((key, segments)) = kept {
+                    let label = env.lang.syms.resolve(key).to_string();
+                    cut.push(Killed::limit(label, &tree.label, segments + 1, segments));
                 }
                 Ok(tree)
             })
             .collect::<Result<_, Killed>>()?;
-        context.report.limited.extend(cut.iter().map(|path| {
-            Killed::limit(
-                "fqn",
-                path,
-                crate::dsl::rewrite::MAX_FQN_SEGMENTS + 1,
-                crate::dsl::rewrite::MAX_FQN_SEGMENTS,
-            )
-        }));
+        context.report.limited.extend(cut);
         Ok(Displayed { state })
     }
 }

@@ -109,7 +109,7 @@ fn cross_file_timeout_keeps_resolved_edges_and_recovers_on_noop_reindex() {
     let family_skip = |skipped: &[Killed]| {
         let skipped: Vec<_> = skipped
             .iter()
-            .map(|k| (k.label, k.path.as_str(), k.cancelled))
+            .map(|k| (k.label.as_ref(), k.path.as_str(), k.cancelled))
             .collect();
         assert_eq!(skipped, [("resolve", "", false)]);
     };
@@ -364,7 +364,10 @@ fn a_file_over_the_resolve_budget_keeps_imports_and_loses_inheritance() {
 
     let (resolved, skipped) = resolve_repo(&env, repo.path());
 
-    let mut paths: Vec<_> = skipped.iter().map(|k| (k.label, k.path.as_str())).collect();
+    let mut paths: Vec<_> = skipped
+        .iter()
+        .map(|k| (k.label.as_ref(), k.path.as_str()))
+        .collect();
     paths.sort();
     assert_eq!(paths, [("resolve", "main.py"), ("resolve", "utils.py")]);
     assert_eq!(

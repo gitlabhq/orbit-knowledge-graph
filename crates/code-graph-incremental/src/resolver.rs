@@ -541,7 +541,7 @@ impl Resolver {
         }
 
         if let Some(overrun) = overrun {
-            killed.retain(|k| (k.label, &k.path) != (overrun.label, &overrun.path));
+            killed.retain(|k| (&k.label, &k.path) != (&overrun.label, &overrun.path));
             killed.push(overrun);
             *self = Self::new(lang);
         }

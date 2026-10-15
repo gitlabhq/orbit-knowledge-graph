@@ -6,7 +6,7 @@ use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Node, Storage, Tree};
 
 use super::matching::matches;
-use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text, Tf};
+use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, TagEntry, Text, Tf};
 
 /// How captured subtrees enter a template. The target is about to be removed,
 /// so its descendants can be moved in place of copied, except when the built
@@ -224,7 +224,7 @@ pub fn apply_rewrites(
     rules: &[Rewrite],
     sentinels: &[&Sentinel],
 ) -> Result<(), Killed> {
-    apply_rewrites_inner(t, lang, rules, false, None, sentinels, apply_structure)
+    apply_rewrites_inner(t, lang, rules, false, None, sentinels, apply_structure).map(drop)
 }
 
 pub fn apply_rewrites_with_edges(
@@ -234,7 +234,7 @@ pub fn apply_rewrites_with_edges(
     preorder: bool,
     edge_ctx: &EdgeCtx,
     sentinels: &[&Sentinel],
-) -> Result<(), Killed> {
+) -> Result<Cut, Killed> {
     apply_rewrites_inner(
         t,
         lang,
@@ -246,36 +246,21 @@ pub fn apply_rewrites_with_edges(
     )
 }
 
-pub(crate) const MAX_FQN_SEGMENTS: usize = 64;
-const MAX_FQN_BYTES: usize = 4096;
+pub type Cut = Option<(u32, usize)>;
 
-thread_local! {
-    static FQN_CUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-pub(crate) fn take_fqn_cut() -> bool {
-    FQN_CUT.replace(false)
-}
-
-fn cap_fqn(lang: &Lang, sym: u32, sep: &str) -> u32 {
-    let s = lang.syms.resolve(sym);
-    let mut start = s
-        .rmatch_indices(sep)
-        .nth(MAX_FQN_SEGMENTS - 1)
-        .map_or(0, |(i, _)| i + sep.len());
-    if s.len() - start > MAX_FQN_BYTES {
-        let min = s.ceil_char_boundary(s.len() - MAX_FQN_BYTES);
-        start = s[min..]
-            .find(sep)
-            .map(|i| min + i + sep.len())
-            .filter(|&i| i < s.len())
-            .unwrap_or(min);
+fn bounded(lang: &Lang, entry: &TagEntry, val: u32) -> (u32, Option<usize>) {
+    let Some(step) = &entry.keep_last else {
+        return (val, None);
+    };
+    let &Tf::KeepLast(_, segments, _) = step else {
+        return (val, None);
+    };
+    let full = lang.syms.resolve(val);
+    let kept = step.apply_to_str(full);
+    if kept.len() == full.len() {
+        return (val, None);
     }
-    if start == 0 || sep.is_empty() {
-        return sym;
-    }
-    FQN_CUT.set(true);
-    lang.syms.intern(&s[start..])
+    (lang.syms.intern(&kept), Some(segments))
 }
 
 pub fn apply_display(
@@ -284,10 +269,10 @@ pub fn apply_display(
     rules: &[Rewrite],
     edge_ctx: &EdgeCtx,
     run: &Sentinel,
-) -> Result<Tree<Compact>, Killed> {
+) -> Result<(Tree<Compact>, Cut), Killed> {
     if rules.iter().all(|rule| matches!(rule.out, Out::Tag(..))) {
         let mut tree = t;
-        apply_rewrites_inner(
+        let cut = apply_rewrites_inner(
             &mut tree,
             lang,
             rules,
@@ -296,11 +281,11 @@ pub fn apply_display(
             &[run],
             |_, _, _, _, _, _| false,
         )?;
-        Ok(tree)
+        Ok((tree, cut))
     } else {
         let mut tree: Tree = t.into();
-        apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[run])?;
-        Ok(tree.into())
+        let cut = apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[run])?;
+        Ok((tree.into(), cut))
     }
 }
 
@@ -313,9 +298,9 @@ fn apply_rewrites_inner<S: Storage<Node = Node>>(
     edge_ctx: Option<&EdgeCtx>,
     sentinels: &[&Sentinel],
     structure: impl Fn(&mut Tree<S>, &Lang, S::Id, &Rewrite, &[Cap<S::Id>], Option<&EdgeCtx>) -> bool,
-) -> Result<(), Killed> {
+) -> Result<Cut, Killed> {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
-    let fqn_key = lang.syms.lookup("fqn");
+    let mut cut = None;
     let mut caps: Vec<Cap<S::Id>> = (0..max_slots).map(|_| SmallVec::new()).collect();
 
     let mut by_kind = rustc_hash::FxHashMap::<u16, Vec<usize>>::default();
@@ -386,12 +371,10 @@ fn apply_rewrites_inner<S: Storage<Node = Node>>(
                                 lang.syms.intern(&entry.val.apply_to_str(s))
                             }
                         };
-                        let val = match &entry.val {
-                            Tf::Concat(sep, ..) if fqn_key != 0 && entry.key == fqn_key => {
-                                cap_fqn(lang, val, sep)
-                            }
-                            _ => val,
-                        };
+                        let (val, kept) = bounded(lang, entry, val);
+                        if let Some(segments) = kept {
+                            cut.get_or_insert((entry.key, segments));
+                        }
                         t.set_tag(raw, entry.key, val);
                     }
                 }
@@ -403,7 +386,7 @@ fn apply_rewrites_inner<S: Storage<Node = Node>>(
             }
         }
     }
-    Ok(())
+    Ok(cut)
 }
 
 fn apply_structure(
@@ -462,7 +445,7 @@ fn apply_structure(
                             lang.syms.intern(&entry.val.apply_to_str(s))
                         }
                     };
-                    (entry.key, val)
+                    (entry.key, bounded(lang, entry, val).0)
                 })
                 .collect();
             t.replace(target, built);

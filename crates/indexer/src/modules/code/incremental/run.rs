@@ -171,7 +171,7 @@ pub(in crate::modules::code) fn run(
 
 fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error::SkippedFile {
     use code_graph::v2::error::{AbortPhase, FileSkip};
-    let kind = match killed.label {
+    let kind = match killed.label.as_ref() {
         "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
         "resolve" => FileSkip::ResolveTimeout,
         "names" => FileSkip::TooManyNames,

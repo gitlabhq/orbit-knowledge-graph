@@ -170,7 +170,7 @@ fn a_file_over_the_rewrite_budget_is_skipped_and_reported() {
     assert!(items.is_empty());
     assert_eq!(skipped.len(), 1);
     assert_eq!(
-        (skipped[0].label, skipped[0].path.as_str()),
+        (skipped[0].label.as_ref(), skipped[0].path.as_str()),
         ("rewrite", "main.py")
     );
 }
