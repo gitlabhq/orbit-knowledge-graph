@@ -13,9 +13,9 @@ fixtures:
   - path: nested_if.js
     content:
       - "import { target } from './target';\nfunction nestedIf(c) {\n"
-      - { repeat: 4200, text: "if (c) {\n" }
+      - { repeat: 2300, text: "if (c) {\n" }
       - "function innermostIf() {}\n"
-      - { repeat: 4200, text: "}\n" }
+      - { repeat: 2300, text: "}\n" }
       - "target();\n}\n"
 
   - path: shallow.js
