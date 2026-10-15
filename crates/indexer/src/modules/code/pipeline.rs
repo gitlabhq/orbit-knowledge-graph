@@ -57,8 +57,9 @@ impl ProgressObserver for NatsHeartbeat {
 }
 
 pub enum IndexOutcome {
-    /// Every row landed in ClickHouse and the project is checkpointed.
-    Indexed { rows_written: u64 },
+    Indexed {
+        rows_written: u64,
+    },
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
@@ -389,7 +390,7 @@ impl CodeIndexer {
 
         context.work.release();
         self.writer
-            .start_flush()
+            .start_flush(run.commit.clone())
             .await
             .map_err(|e| IndexError::Failed(HandlerError::Processing(e.to_string())))?;
         run.commit.durable().await.map_err(IndexError::Failed)?;

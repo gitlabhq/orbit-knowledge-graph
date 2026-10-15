@@ -169,7 +169,8 @@ type Token = Arc<dyn FlushToken>;
 
 enum Msg {
     Submit(String, RecordBatch, Token),
-    Flush(Option<tokio::sync::oneshot::Sender<()>>),
+    Flush(tokio::sync::oneshot::Sender<()>),
+    FlushFor(Token),
 }
 
 /// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
@@ -227,16 +228,16 @@ impl BufferedWriter {
     pub async fn flush(&self) -> Result<(), WriteError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx
-            .send(Msg::Flush(Some(tx)))
+            .send(Msg::Flush(tx))
             .await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))?;
         rx.await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
 
-    pub async fn start_flush(&self) -> Result<(), WriteError> {
+    pub async fn start_flush(&self, token: Token) -> Result<(), WriteError> {
         self.tx
-            .send(Msg::Flush(None))
+            .send(Msg::FlushFor(token))
             .await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
@@ -282,9 +283,18 @@ async fn drain(
                     for (table, buf) in std::mem::take(&mut pending) {
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
-                    if let Some(ack) = ack {
-                        while writes.join_next().await.is_some() {}
-                        let _ = ack.send(());
+                    while writes.join_next().await.is_some() {}
+                    let _ = ack.send(());
+                }
+                Some(Msg::FlushFor(token)) => {
+                    let holding: Vec<String> = pending
+                        .iter()
+                        .filter(|(_, buf)| buf.tokens.iter().any(|t| Arc::ptr_eq(t, &token)))
+                        .map(|(table, _)| table.clone())
+                        .collect();
+                    for table in holding {
+                        let buf = pending.remove(&table).unwrap();
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
                 }
                 Some(Msg::Submit(table, batch, token)) => {
@@ -578,6 +588,37 @@ mod tests {
             1,
             "reaching max_rows flushes immediately, independent of floor or cap"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn start_flush_writes_only_the_tables_holding_the_tokens_rows() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 1_000_000,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1_000_000,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
+        );
+        let first: Arc<CountToken> = Arc::new(CountToken::default());
+        let second: Arc<CountToken> = Arc::new(CountToken::default());
+
+        submit(&w, "gl_edge", batch(10), first.clone()).await;
+        submit(&w, "gl_definition", batch(10), second.clone()).await;
+        w.start_flush(first.clone()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(first.flushed.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            second.flushed.load(Ordering::SeqCst),
+            0,
+            "another producer's table must keep pooling"
+        );
+
+        w.flush().await.unwrap();
+        assert_eq!(second.flushed.load(Ordering::SeqCst), 1);
     }
 
     #[test]
