@@ -8,12 +8,14 @@ use bytes::Bytes;
 use chrono::Utc;
 use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockRevision, LockService};
 use crate::nats::{
-    KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
+    KvEntry, KvPutOptions, KvPutResult, MessageAcker, NatsError, NatsMessage, NatsServices,
+    NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
 
@@ -339,6 +341,47 @@ impl LockService for MockLockService {
 
     async fn release(&self, key: &str) -> Result<(), LockError> {
         self.held.lock().remove(key);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct CountingAcker {
+    progress_acks: Arc<AtomicUsize>,
+    progressed: Arc<Notify>,
+}
+
+impl CountingAcker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn progress_count(&self) -> usize {
+        self.progress_acks.load(Ordering::SeqCst)
+    }
+
+    pub async fn progressed(&self) {
+        self.progressed.notified().await;
+    }
+}
+
+#[async_trait]
+impl MessageAcker for CountingAcker {
+    async fn ack(&self) -> Result<(), NatsError> {
+        Ok(())
+    }
+
+    async fn ack_term(&self) -> Result<(), NatsError> {
+        Ok(())
+    }
+
+    async fn ack_progress(&self) -> Result<(), NatsError> {
+        self.progress_acks.fetch_add(1, Ordering::SeqCst);
+        self.progressed.notify_one();
+        Ok(())
+    }
+
+    async fn nack(&self, _delay: Option<Duration>) -> Result<(), NatsError> {
         Ok(())
     }
 }

@@ -24,7 +24,7 @@ use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
 pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
-pub use handler::CodeIndexingTaskHandler;
+pub use handler::{CodeIndexingTaskHandler, project_lock_key};
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,

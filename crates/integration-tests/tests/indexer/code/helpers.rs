@@ -20,8 +20,8 @@ use indexer::modules::code::{
     config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
-use indexer::nats::ProgressNotifier;
-use indexer::testkit::{MockLockService, MockNatsServices};
+use indexer::nats::{NatsMessage, ProgressNotifier};
+use indexer::testkit::{CountingAcker, MockLockService, MockNatsServices, TestEnvelopeFactory};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Event;
 use integration_testkit::{TestContext, t};
@@ -469,6 +469,14 @@ pub fn handler_context_with_lock_service(lock_service: Arc<MockLockService>) -> 
 
 pub fn handler_context_redelivered(redelivered_on_failure: bool) -> HandlerContext {
     handler_context().with_redelivery(redelivered_on_failure)
+}
+
+pub fn handler_context_with_acker(
+    lock_service: Arc<MockLockService>,
+    acker: CountingAcker,
+) -> HandlerContext {
+    let progress = NatsMessage::new(TestEnvelopeFactory::simple("{}"), acker).progress_notifier();
+    HandlerContext::new(Arc::new(MockNatsServices::new()), lock_service, progress)
 }
 
 pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
