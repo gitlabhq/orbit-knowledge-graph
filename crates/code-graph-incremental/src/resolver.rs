@@ -901,7 +901,17 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
+                    let target_path = match mapped {
+                        Some(path) => path,
+                        None if raw_path == "." => tree
+                            .root()
+                            .tag(root_relative)
+                            .and_then(|rel| tree.label.strip_suffix(lang.syms.resolve(rel)))
+                            .map_or_else(String::new, |root| {
+                                root.trim_end_matches(PATH_SEP).to_owned()
+                            }),
+                        None => raw_path.to_owned(),
+                    };
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {

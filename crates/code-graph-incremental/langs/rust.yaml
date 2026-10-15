@@ -115,7 +115,7 @@ stages:
         replace: '(__call (__callee @$N) $A)'
       # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
-        replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
+        replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$N)) (__callee @$N) $A)'
       - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
@@ -152,32 +152,32 @@ stages:
 
       # use a::b::*;  and  pub use a::b::*;
       - match: '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
+        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name "*"))'
         tag: { import_type: ReExportGlob }
       - match: '(use_declaration argument: (use_wildcard $P))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
+        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name "*"))'
         tag: { import_type: GlobUse }
 
       # use a::b as c;  pub(crate) stays private
       - match: '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))'
-        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$P|or("field:name","id") (__alias @$A)))'
         tag: { import_type: ReExportAliased }
       - match: '(use_declaration argument: (use_as_clause path: $P alias: $A))'
-        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$P|or("field:name","id") (__alias @$A)))'
         tag: { import_type: AliasedUse }
 
       # use a::{b, c as d, self};  one import per entry, built in the next stage
       - match: '(use_declaration (__visibility !(crate)) argument: (scoped_use_list path: $P list: (use_list $$$E)))'
-        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->pub_use_entry)'
+        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) $$$E:_*_named->pub_use_entry)'
       - match: '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$E)))'
-        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->use_entry)'
+        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) $$$E:_*_named->use_entry)'
 
       # use crate::foo::Bar;
       - match: '(use_declaration (__visibility !(crate)) argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
+        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$A|field("name")))'
         tag: { import_type: PubUse }
       - match: '(use_declaration argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
+        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$A|field("name")))'
         tag: { import_type: Use }
 
       # use foo;
@@ -372,7 +372,7 @@ stages:
       # `impl zoo::traits::Audible for X` / `trait Bark: crate::traits::Audible`:
       # a path in supertype position is a scoped import of its last segment
       - match: '(__supertype "/::/")'
-        replace: '(__supertype @$ROOT|split_last("::") (__import (__source @$ROOT|regex_replace("::[^:]*$","")) (__source_path @$ROOT|regex_replace("::[^:]*$","")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$ROOT|split_last("::"))))'
+        replace: '(__supertype @$ROOT|split_last("::") (__import (__source @$ROOT|regex_replace("::[^:]*$","")) (__source_path @$ROOT|regex_replace("::[^:]*$","")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$ROOT|split_last("::"))))'
 
   - name: tuple-fields
     rules:

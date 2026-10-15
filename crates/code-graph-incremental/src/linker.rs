@@ -443,7 +443,7 @@ impl<'t> Fold<'t> {
             return None;
         }
         let path = self.syms.resolve(import.child_sym(C::SourcePath)?);
-        let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
+        let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty() && *s != ".");
         let Some(first) = segments.next() else {
             return Some(self.tree.root());
         };
