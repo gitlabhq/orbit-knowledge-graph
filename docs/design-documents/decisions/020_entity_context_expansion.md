@@ -73,18 +73,21 @@ error.
 summaries and no graph query. With `expand`, it runs at most one named query:
 exactly one for a found, readable token whose type has an expansion query.
 One `context` request is therefore at most one billed query. It counts once
-against the `orbit_query` rate limit (60 per minute per user). Summaries-only
-calls, failed or denied expansions, and 403 responses use rate-limit budget but
-are not billed.
+against the `orbit_query` rate limit (60 per minute per user). GKG bills a
+query that finishes without a GKG error, for any row count. That includes a
+fully redacted result and a result that Rails drops afterwards. Errors inside
+GKG are not billed. Summaries-only calls, expansions that fail before a query
+runs (including the scope pre-check below), and 403 responses use rate-limit
+budget but are not billed.
 
 **Response.** The response is version 1.1.0. `entities` is an array, with one
 entry for the one token. Each entry carries the PostgreSQL summary and an
 `expansion` field. Because the expansion lives on the entity, several tokens
 later add entries and need no new field. `expansion` is `null` when expansion
 was not requested or the token was not found. Those two cases take precedence
-over every error. For a found token whose type has no shipped expansion query,
-`expansion` is `{"error": {"code": "expansion_unavailable"}}`. Otherwise it is `{"result": ...}` with the deduplicated graph, or
-`{"error": {"code": ...}}`. An expansion failure never fails the summaries.
+over every error. For a found token whose type has no expansion query,
+`expansion` is `{"error": {"code": "expansion_not_supported"}}`. Otherwise it
+is `{"result": ...}` with the deduplicated graph, or `{"error": {"code": ...}}`. An expansion failure never fails the summaries.
 
 **Transport.** The expansion is an ordinary named query, so the contract does
 not depend on the transport. Rails resolves and authorizes the token, builds
@@ -92,9 +95,10 @@ the summary, and adds the graph result to the body. We do not add Workhorse
 merge logic, so `expand` runs only on the Rails path, behind
 `orbit_query_in_rails` (checked per user). While the flag is off for a user,
 `expand: true` still returns the summaries, with
-`expansion: {"error": {"code": "expansion_unavailable"}}`. The client can then
-fall back to calling the named query itself through `/api/v4/orbit/query/:name`,
-which runs on Workhorse. The trade-off is that `expand` rollout follows #1381.
+`expansion: {"error": {"code": "expansion_unavailable"}}`, which also covers
+Orbit not being enabled for the user. The error carries a `fallback` naming the
+query and its parameters, so the client can call it itself through
+`/api/v4/orbit/query/:name`, which runs on Workhorse. The trade-off is that `expand` rollout follows #1381.
 In return, the merge and the error mapping stay in Ruby, and no Go change is
 needed. If #1381 slips, the fallback is Workhorse merge logic for a single
 stream. The contract stays the same.
@@ -114,10 +118,19 @@ directly through `/api/v4/orbit/query/:name`.
 after a lookup starts returns the same `not_found`. Only a found, readable
 record is expanded. The details block below lists every rule.
 
+**Graph scope.** GKG answers only inside the user's graph scope: Reporter+
+traversal paths with Orbit enabled. Rails can still read a record outside that
+scope. Examples are a Guest, a project-only member, a non-member on a public
+project, and a root group with Orbit off. Before it runs the expansion query, `context` checks the
+record's path against the scope. Outside scope, `expansion` is
+`{"error": {"code": "outside_graph_scope"}}`, no query runs, and nothing is
+billed.
+
 **Truncation.** The `limit` constant applies to the whole graph, and redacted rows take up
-window slots. A center missing from the graph means "no readable neighbors"
-only when `pagination.truncated` is `false`. Otherwise the client must treat it
-as unknown.
+window slots. Inside graph scope, a center missing from the graph means "no
+readable neighbors" only when `pagination.truncated` is `false`. Otherwise the
+client must treat it as unknown. A record that is not indexed yet can still
+return an empty graph, so an empty result is not proof that no neighbors exist.
 
 **Later: several tokens.** We want N sub-queries of one `context` request to
 bill as one query. A candidate mechanism is a shared `billable_request_id`.
@@ -140,7 +153,11 @@ explicit MCP tool and agent command are deferred.
   `unsupported_type`.
 - Resolution applies both the per-resource ability (for example
   `read_work_item`) and the fine-grained token boundary. Group-level work items
-  pass their group as the boundary.
+  pass their group as the boundary. A fine-grained token therefore needs
+  `read_merge_request` or `read_work_item` (and `read_pipeline` for pipeline
+  status) in addition to `read_orbit`. This is stricter than the
+  [security design](../security.md) rule that token scopes gate endpoints and do not
+  filter results. Reconciling the two is a follow-up.
 - Each `entities[]` entry has `token` (as sent), `resolved_token` (only when
   found), `type`, `id`, `found`, `summary` (when found), `error` (when not
   found) and `expansion`. `summary` holds `namespace_path`, and `project_path`,
@@ -149,12 +166,21 @@ explicit MCP tool and agent command are deferred.
   proposal lists them: for a merge request, title, state, author, branches,
   latest pipeline status, reviewers and linked issues. For a work item, title,
   state, labels, assignees, milestone and linked merge requests.
-  `linked_issues[]` and `linked_merge_requests[]` entries carry `token`.
+  `summary.truncated` lists the summary fields cut at their cap, for example
+  `["linked_issues"]`; the lists stay arrays. `linked_issues[]` and
+  `linked_merge_requests[]` entries carry `type`, `id`, `token` and `relation`
+  (`CLOSES`), so a later `related[]` list reuses the shape.
+- `id` on an entity is a string, like `nodes[].id` in the graph.
 - Edges in an expansion identify their endpoints by the pair (`from`,
   `from_id`) or (`to`, `to_id`), because IDs are per type.
-- `expansion.error.code` is `expansion_unavailable`, or a code that the
-  Rails handler maps from the query path: `billing_namespace_required`,
-  `quota_exhausted`, `timeout` or `execution_error`.
+- `expansion.error.code` is one of these:
+  - `expansion_unavailable`: rollout, or Orbit not enabled for the user.
+  - `expansion_not_supported`: the type has no expand query.
+  - `outside_graph_scope`: the record is outside the user's graph scope.
+  - A code that the Rails handler maps from the query path:
+    `billing_namespace_required`, `quota_exhausted`, `timeout` or
+    `execution_error`. `billing_namespace_required` carries the candidate groups
+  and the preferences link, like `/orbit/query/:name`.
 - Version 1.1.0 is a deliberate choice. The closed prototype described 1.0.0
   with `ref` and `invalid_ref`, which this contract renames to `token` and
   `invalid_token`. The prototype never merged, so 1.1.0 lets clients built
@@ -167,8 +193,11 @@ A found token:
  "entities": [
    {"token": "gitlab-org/gitlab#609451",
     "resolved_token": "WorkItem[196910643]",
-    "type": "WorkItem", "id": 196910643, "found": true,
-    "summary": {"...": "..."},
+    "type": "WorkItem", "id": "196910643", "found": true,
+    "summary": {"linked_merge_requests": [
+                  {"type": "MergeRequest", "id": "42", "token": "MergeRequest[42]",
+                   "relation": "CLOSES", "...": "..."}],
+                "truncated": [], "...": "..."},
     "expansion": {"result": {"nodes": ["..."], "edges": ["..."]}}}]}
 ```
 
@@ -215,7 +244,8 @@ Raw results carry `format_version`. TOON output carries its own version
 
 - A `context` request bills at most one query and uses one rate-limit unit.
   The billing owner should confirm that one `context` with `expand` is at most
-  one billed query. A failed query is not billed.
+  one billed query. Errors inside GKG are not billed. Out-of-scope records
+  run no query.
 - An agent that holds several tokens makes several `context` calls, each rate
   limited and billed on its own.
 - Both the `context` route and the named-query route check the rate limit
@@ -241,6 +271,14 @@ Raw results carry `format_version`. TOON output carries its own version
   !2523 used `GET` with `refs[]`) must use `POST` with `tokens` and the 1.1.0
   envelope.
   Whether `Type:ID` is an accepted token form is open.
+- Future work, not decided here:
+  - Epic tokens, an `expansion.query` echo, and more types (Note, Milestone,
+    User, Project, Group) through the generic `expand_neighbors` query.
+  - File and Definition tokens resolved from the graph, never Gitaly, from a
+    blob URL (project, path, commit SHA, line range) with `expand_file` and
+    `expand_definition` queries. The code token forms are reserved: the blob
+    URL, `File[id]` and `Definition[id]`.
+  - `as_of`, `limit`, `cursor` and `include` request fields.
 
 ## Alternatives considered
 
