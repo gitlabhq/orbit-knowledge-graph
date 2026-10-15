@@ -95,6 +95,16 @@ impl FileInventory {
         Ok(Self(out))
     }
 
+    /// Mutate entries in place without the hook pipeline. Drops entries
+    /// reclassified as `Drop`.
+    pub fn reclassify(mut self, mut f: impl FnMut(&mut FileInventoryEntry)) -> Self {
+        for entry in &mut self.0 {
+            f(entry);
+        }
+        self.0.retain(|e| e.decision != Decision::Drop);
+        Self(self.0)
+    }
+
     pub fn into_inner(self) -> Vec<FileInventoryEntry> {
         self.0
     }
@@ -142,6 +152,26 @@ mod tests {
         assert_eq!(inv.find("a/b.rs").unwrap().decision, Decision::Load);
         assert!(inv.find("src/main.rs").is_some());
         assert!(!inv.contains("missing.rs"));
+    }
+
+    #[test]
+    fn reclassify_upgrades_and_drops() {
+        let inv = FileInventory::new(vec![
+            entry("Cargo.toml", 50, Decision::Load),
+            entry("logo.png", 5000, Decision::ListOnly),
+            entry("src/main.rs", 100, Decision::Parse),
+        ]);
+        let inv = inv.reclassify(|e| {
+            if e.path == "Cargo.toml" {
+                e.decision = Decision::Parse;
+            }
+            if e.path == "logo.png" {
+                e.decision = Decision::Drop;
+            }
+        });
+        assert_eq!(inv.find("Cargo.toml").unwrap().decision, Decision::Parse);
+        assert!(!inv.contains("logo.png"));
+        assert_eq!(inv.len(), 2);
     }
 
     struct UpgradeTextToParseHooks;
