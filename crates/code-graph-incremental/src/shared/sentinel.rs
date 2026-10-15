@@ -18,6 +18,7 @@ pub struct Limits {
     pub max_tree_depth: usize,
     pub max_cross_file_names: usize,
     pub max_manifest_bytes: u64,
+    pub max_file_edges: usize,
 }
 
 impl Limits {
@@ -32,6 +33,7 @@ impl Limits {
         max_tree_depth: 0,
         max_cross_file_names: 0,
         max_manifest_bytes: 0,
+        max_file_edges: 0,
     };
 }
 

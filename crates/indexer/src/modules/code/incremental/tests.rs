@@ -335,20 +335,24 @@ async fn a_value_copied_into_its_own_fields_links_without_a_copy_limit() {
 
 #[tokio::test]
 async fn a_file_with_more_edges_than_the_limit_is_skipped() {
-    let functions: String = (0..2_000)
-        .map(|i| format!("function a{i}() {{}}\n"))
-        .collect();
-    let assigns: String = (0..2_000)
+    let functions: String = (0..50).map(|i| format!("function a{i}() {{}}\n")).collect();
+    let assigns: String = (0..50)
         .map(|i| format!("if (c) {{ f = a{i}; }}\n"))
         .collect();
-    let calls = "f();\n".repeat(2_000);
+    let calls = "f();\n".repeat(50);
     let wide = format!("{functions}function m(c) {{\nlet f = a0;\n{assigns}{calls}}}\n");
     let files: &[(&str, &[u8])] = &[
         ("root/wide.js", wide.as_bytes()),
         ("root/flat.js", b"function flat() {}\n"),
     ];
-    let timings = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
-    assert_eq!(timings.skipped_paths, ["wide.js"]);
+    let limits = code_graph_incremental::Limits {
+        max_file_edges: 1_000,
+        ..code_graph_incremental::Limits::UNLIMITED
+    };
+    assert_eq!(timings_for(files, limits).await.skipped_paths, ["wide.js"]);
+    let unlimited = timings_for(files, code_graph_incremental::Limits::UNLIMITED).await;
+    assert!(unlimited.skipped_paths.is_empty());
+    let timings = timings_for(files, limits).await;
     assert_eq!(timings.skipped_reasons, ["too_many_edges"]);
 }
 
@@ -720,6 +724,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
     assert_eq!(mapped.max_tree_depth, configured.max_tree_depth);
     assert_eq!(mapped.max_cross_file_names, configured.max_cross_file_names);
     assert_eq!(mapped.max_manifest_bytes, configured.max_manifest_bytes);
+    assert_eq!(mapped.max_file_edges, configured.max_file_edges);
 
     let unlimited = limits(&CodeIndexingPipelineConfig {
         max_files: 0,
@@ -731,6 +736,7 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         max_tree_depth: 0,
         max_cross_file_names: 0,
         max_manifest_bytes: 0,
+        max_file_edges: 0,
         ..configured
     });
     assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);

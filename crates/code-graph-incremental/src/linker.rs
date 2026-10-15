@@ -18,13 +18,11 @@ type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 type WildcardImports = Rc<Vec<u32>>;
 
-const MAX_FILE_EDGES: usize = 2_000_000;
-
-fn edge_limit(edges: &[Edge], path: &str) -> Result<(), Killed> {
-    if edges.len() <= MAX_FILE_EDGES {
+fn edge_limit(edges: &[Edge], cap: usize, path: &str) -> Result<(), Killed> {
+    if cap == 0 || edges.len() <= cap {
         return Ok(());
     }
-    Err(Killed::limit("edges", path, edges.len(), MAX_FILE_EDGES))
+    Err(Killed::limit("edges", path, edges.len(), cap))
 }
 
 enum WorkItem {
@@ -77,6 +75,7 @@ enum Wildcards {
 
 struct Fold<'t> {
     tree: &'t Tree,
+    max_edges: usize,
     ssa: SsaEngine,
     cur: BlockId,
     registered: FxHashSet<u32>,
@@ -123,7 +122,7 @@ impl<'t> Fold<'t> {
                 .run
                 .check()
                 .and_then(|()| self.file.check())
-                .and_then(|()| edge_limit(&self.edges, &self.tree.label))
+                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))
             {
                 self.killed = Some(k);
                 return;
@@ -1255,6 +1254,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
 
     let mut f = Fold {
         tree,
+        max_edges: env.limits.max_file_edges,
         ssa,
         cur: entry,
         registered: FxHashSet::default(),
@@ -1298,7 +1298,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         f.run
             .check()
             .and_then(|()| f.file.check())
-            .and_then(|()| edge_limit(&f.edges, &tree.label))?;
+            .and_then(|()| edge_limit(&f.edges, f.max_edges, &tree.label))?;
         let first = f.edges.len();
         let mut targets = f.ssa.resolve_value(&value);
         if targets.is_empty() {

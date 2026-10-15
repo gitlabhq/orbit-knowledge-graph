@@ -42,6 +42,7 @@ pub(super) fn limits(config: &CodeIndexingPipelineConfig) -> code_graph_incremen
         max_tree_depth: config.max_tree_depth,
         max_cross_file_names: config.max_cross_file_names,
         max_manifest_bytes: config.max_manifest_bytes,
+        max_file_edges: config.max_file_edges,
         ..code_graph_incremental::Limits::UNLIMITED
     }
 }

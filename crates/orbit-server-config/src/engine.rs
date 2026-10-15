@@ -270,6 +270,9 @@ pub struct CodeIndexingPipelineConfig {
     /// family reads for resolution. A manifest past the limit is not read, keeps
     /// its File row, and is counted as too_many_manifest_bytes. 0 = no limit.
     pub max_manifest_bytes: u64,
+    /// Edges that the incremental engine's linker may emit for one file. A file
+    /// past the limit is skipped as too_many_edges. 0 = no limit.
+    pub max_file_edges: usize,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
