@@ -338,13 +338,17 @@ impl Resolver {
         let (new_reqs, mut cross_edges) =
             gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
         self.reqs.extend(new_reqs);
+        let packages: Vec<_> = match config.merge_same_named_types {
+            true => trees.iter().map(package_owners).collect(),
+            false => Vec::new(),
+        };
         let (ambiguous, too_many_names) = propagate_reexports(
             trees,
             &self.reqs,
             &mut self.visible,
             self.wildcard_sym,
             self.tags,
-            config.merge_same_named_types,
+            &packages,
             run,
             env.limits.max_cross_file_names,
         );
@@ -390,7 +394,7 @@ impl Resolver {
             }
         }
 
-        let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
+        let (partials, extensions) = gather_members(trees, &packages);
         let declared_members: Vec<MemberCache> = trees.iter().map(|_| Default::default()).collect();
         let exporters: Vec<FxHashSet<u32>> = self
             .visible
@@ -448,7 +452,7 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             tags: self.tags,
-            merge_types: config.merge_same_named_types,
+            packages: &packages,
             partials: &partials,
             extensions: &extensions,
             declared_members: &declared_members,
@@ -697,7 +701,7 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     tags: ReservedTags,
-    merge_types: bool,
+    packages: &'a [FxHashMap<u32, u32>],
     partials: &'a FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     declared_members: &'a [MemberCache],
@@ -960,14 +964,14 @@ fn propagate_reexports(
     visible: &mut VisibleMap,
     wildcard_sym: u32,
     tags: ReservedTags,
-    merge_types: bool,
+    owners: &[FxHashMap<u32, u32>],
     run: &Sentinel,
     max_names: usize,
 ) -> (FxHashSet<(u32, u32)>, Option<Killed>) {
     let mut ambiguous: FxHashSet<(u32, u32)> = FxHashSet::default();
     let mut names: usize = visible.iter().map(FxHashMap::len).sum();
     let mut too_many_names = None;
-    let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), merge_types);
+    let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), owners);
 
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
@@ -1634,13 +1638,24 @@ fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
     }
 }
 
-fn partial_key(d: Cursor, merge_types: bool) -> Option<(u32, u32, u32)> {
-    if !merge_types || !d.is_class() {
+fn package_owners(tree: &Tree) -> FxHashMap<u32, u32> {
+    let mut owners = FxHashMap::default();
+    for c in tree.root().descendants() {
+        if let Some(package) = c.child_sym(C::Package)
+            && let Some(owner) = c.parent()
+        {
+            owners.entry(owner.index()).or_insert(package);
+        }
+    }
+    owners
+}
+
+fn partial_key(d: Cursor, packages: &[FxHashMap<u32, u32>]) -> Option<(u32, u32, u32)> {
+    let owners = packages.get(d.fi() as usize)?;
+    if !d.is_class() {
         return None;
     }
-    let pkg = d
-        .ancestors()
-        .find_map(|a| a.children().find_map(|c| c.child_sym(C::Package)));
+    let pkg = d.ancestors().find_map(|a| owners.get(&a.index()).copied());
     let arity = d
         .children()
         .filter(|c| c.is(C::Binding) && c.sym_opt().is_some() && c.children().next().is_none())
@@ -1657,7 +1672,7 @@ type Members = (
     FxHashMap<u32, Vec<Loc>>,
 );
 
-fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
+fn gather_members(trees: &[Tree], packages: &[FxHashMap<u32, u32>]) -> Members {
     let (mut parts, mut extensions) = Members::default();
     for (fi, tree) in trees.iter().enumerate() {
         let defs = tree
@@ -1669,7 +1684,7 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
                 continue;
             };
             let loc = Loc::new(fi, d.index());
-            if let Some(key) = partial_key(d, merge_types) {
+            if let Some(key) = partial_key(d, packages) {
                 parts.entry(key).or_default().push(loc);
             }
             if d.parent().is_some_and(|p| p.is(C::Def)) {
@@ -1838,7 +1853,7 @@ fn extension_members<'a>(
 }
 
 fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
-    let parts = partial_key(cls, ctx.merge_types).and_then(|k| ctx.partials.get(&k));
+    let parts = partial_key(cls, ctx.packages).and_then(|k| ctx.partials.get(&k));
     let parts = parts.into_iter().flatten().map(|l| cls.jump(l.fi, l.node));
     std::iter::once(cls)
         .chain(impl_blocks_of(ctx, cls))

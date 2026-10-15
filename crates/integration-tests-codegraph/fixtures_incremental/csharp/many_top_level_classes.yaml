@@ -1,0 +1,16 @@
+name: "C#: many top-level classes without a namespace link in linear work"
+
+fixtures:
+  - path: A.cs
+    content:
+      - "class Target {\n    public static void Run() {}\n}\n"
+      - { repeat: 10000, text: "class C{i} {\n    void M() {\n        Target.Run();\n    }\n}\n" }
+
+tests:
+  - name: "every class method calls Target.Run"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'Run'
+      RETURN count(caller) AS n
+    assert:
+      - { count_equals: { field: n, value: 10000 } }
