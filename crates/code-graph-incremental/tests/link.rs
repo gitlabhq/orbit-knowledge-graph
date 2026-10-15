@@ -204,3 +204,16 @@ fn linking_deeply_nested_blocks_stays_within_the_link_budget() {
     source += "return y;\n}\n";
     assert_eq!(link_nested(source, 3_000), Ok(()));
 }
+
+#[test]
+fn linking_deeply_nested_loops_stays_within_the_link_budget() {
+    let levels = 3_000;
+    let mut source = String::from("function a() {}\nfunction f(c) {\n");
+    for i in 0..levels {
+        source += &format!("while (c) {{\nlet x{i} = c;\n");
+    }
+    source += "a();\n";
+    source += &"}\n".repeat(levels);
+    source += "}\n";
+    assert_eq!(link_nested(source, 1_000), Ok(()));
+}
