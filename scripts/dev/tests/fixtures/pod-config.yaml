@@ -13,4 +13,6 @@ metrics:
   log_level: "info"
   prometheus:
     enabled: true
+    # The chart renders `enabled` only. The port is kept here to exercise the wrapper's
+    # guard, which exists for hand-edited configs that still carry the deprecated key.
     port: 9394

@@ -531,6 +531,15 @@ newline-check:
   script:
     - mise run lint:newlines
 
+script-tests:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-only-rules
+    - .no-cargo-home-cache
+  script:
+    - mise run test:scripts
+
 lint-check:
   stage: lint
   extends:

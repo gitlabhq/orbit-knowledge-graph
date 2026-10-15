@@ -1,24 +1,44 @@
 #!/usr/bin/env bash
-# Runs one Orbit mode on the host inside a Caproni edit-mode (mirrord) session.
+# Runs Orbit from this checkout inside a Caproni edit-mode session.
 #
-# Usage: scripts/dev/caproni-edit-mode.sh {webserver|indexer-sdlc|indexer-code|dispatcher}
+# Usage:
+#   caproni-edit-mode.sh build        build gkg-server once; refresh the stamp if the binary changed
+#   caproni-edit-mode.sh watch        rebuild on save (a `context: local` process, outside mirrord)
+#   caproni-edit-mode.sh {webserver|indexer-sdlc|indexer-code|dispatcher}
+#                                     run that mode under mirrord; restart it on every new build
+#   caproni-edit-mode.sh launch MODE CONFIG
+#                                     internal: exec gkg-server (what the mirrord-side watcher runs)
 #
-# The reloaders in caproni-project.yaml start this script under `mirrord exec`
-# targeting the matching Orbit pod. The reloader marks /app/config and
-# /etc/secrets read-only, so mirrord serves both from the pod and gkg-server
-# runs with the pod's own configuration. The one change is the probe server
-# port: every pod binds the chart's single probeServer.port (9394) and four
-# host processes cannot share it. The webserver keeps 9394 because mirrord
-# steals the pod's readiness probes to the local listener; the others move.
+# cargo never runs inside mirrord. mirrord puts the pod's environment into every process it
+# wraps, and cargo's build scripts fingerprint that environment, so a build under mirrord
+# recompiles the TLS and HTTP crates every time the environment differs from the host's.
+# Instead one host-side watcher builds, and each mirrord-side process only restarts the
+# binary when the stamp file it watches changes. The stamp moves only when the binary on disk
+# changed, so a no-op build restarts nothing.
+#
+# The reloaders mark /app/config, /etc/secrets, and /etc/tls read-only, so mirrord serves
+# them from the pod and gkg-server runs with the pod's own configuration. The one change is
+# the probe server port: every pod binds the chart's single probeServer.port (9394) and four
+# host processes cannot share it. The webserver keeps the chart's port; the others move.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 POD_CONFIG="${ORBIT_POD_CONFIG:-/app/config/config.yaml}"
 GENERATED_DIR="${GENERATED_DIR_OVERRIDE:-$REPO_ROOT/.dev}"
+BINARY="${ORBIT_BINARY_OVERRIDE:-$REPO_ROOT/target/debug/gkg-server}"
+STAMP="$GENERATED_DIR/gkg-server.built"
+WATCH_LOCK="$GENERATED_DIR/gkg-build.pid"
+
+# What the host-side watcher watches and how. --ignore-nothing matters: watchexec otherwise
+# honours every .gitignore up the tree, and a checkout under an ignored parent directory
+# (a worktree under .claude/, for instance) would never trigger a build and never say why.
+# queue lets a running cargo finish and runs once more, instead of killing it mid-build.
+WATCH_ARGS=(--ignore-nothing --on-busy-update=queue -d 500ms -w crates -w config -W "$REPO_ROOT")
 
 usage() {
-  printf 'Usage: %s {webserver|indexer-sdlc|indexer-code|dispatcher}\n' "$(basename "$0")" >&2
+  printf 'Usage: %s {build|watch|webserver|indexer-sdlc|indexer-code|dispatcher}\n' "$(basename "$0")" >&2
 }
 
 # Reloader key -> gkg-server --mode.
@@ -64,9 +84,86 @@ write_overlay() {
   echo "$target"
 }
 
-main() {
-  local key="${1:-}" mode overlay
-  mode="$(edit_mode_for "$key")" || { usage; exit 1; }
+# One cargo build, with cargo's JSON message stream on stdout so the caller can see
+# whether gkg-server was relinked. Diagnostics still render on stderr.
+cargo_build() {
+  (cd "$REPO_ROOT" && mise exec -- cargo build --bin gkg-server --message-format=json-render-diagnostics)
+}
+
+# True when the message stream in the given file says cargo relinked gkg-server. The
+# binary's inode, size, and mtime are no use here: cargo copies the artifact into
+# target/debug on every build, no-op or not, so the file looks new each time.
+relinked_in() { # path to the message stream
+  yq -p json -o json 'select(.reason == "compiler-artifact" and .target.name == "gkg-server") | .fresh' "$1" 2>/dev/null | grep -qx false
+}
+
+# One build. Rewrites the stamp only when cargo relinked the binary, so the mirrord-side
+# watchers restart on real builds and ignore the no-op ones. A failed build leaves the
+# stamp and the running servers alone.
+build() {
+  local msgs
+  mkdir -p "$GENERATED_DIR"
+  msgs="$(mktemp "$GENERATED_DIR/cargo-messages.XXXXXX")"
+  if ! cargo_build >"$msgs"; then
+    rm -f "$msgs"
+    return 1
+  fi
+  if relinked_in "$msgs" || [[ ! -s "$STAMP" ]]; then
+    date +%s >"$STAMP"
+  fi
+  rm -f "$msgs"
+}
+
+# Every reloader declares the build watcher so that any subset of reloaders rebuilds on
+# save. Only one watcher per checkout may run cargo; the lock holds its pid. Caproni starts
+# all four at the same instant, so the create must be atomic: noclobber opens with O_EXCL.
+# A lock whose pid is gone (a killed terminal) is taken over.
+acquire_watch_lock() {
+  local holder attempt
+  mkdir -p "$GENERATED_DIR"
+  for attempt in 1 2; do
+    if (set -o noclobber; echo "$$" >"$WATCH_LOCK") 2>/dev/null; then
+      return 0
+    fi
+    holder="$(cat "$WATCH_LOCK" 2>/dev/null || true)"
+    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+      return 1
+    fi
+    [[ "$attempt" -eq 1 ]] && rm -f "$WATCH_LOCK"
+  done
+  return 1
+}
+
+watch() {
+  if ! acquire_watch_lock; then
+    echo "another gkg-build watcher owns $WATCH_LOCK; this one idles"
+    exec sleep 2147483647
+  fi
+  cd "$REPO_ROOT"
+  # mise resolves cargo and watchexec from this repo's mise.toml regardless of the PATH
+  # caproni inherited from the gitlab-caproni checkout.
+  exec mise exec -- watchexec --shell=none "${WATCH_ARGS[@]}" -- "$SELF" build
+}
+
+# Directories holding the aws-lc-fips-sys shared library. `cargo run` would put them on the
+# loader path from the build script's rustc-link-search; a binary started by hand needs it
+# set explicitly. Newest build first.
+library_path() {
+  # shellcheck disable=SC2012 # ls -t is the point; the paths carry no odd characters
+  ls -td "$(dirname "$BINARY")"/build/aws-lc-fips-sys-*/out/build/artifacts 2>/dev/null | paste -sd: -
+}
+
+launch() { # mode, config
+  local libs
+  libs="$(library_path)"
+  export DYLD_FALLBACK_LIBRARY_PATH="${libs}${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH="${libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  exec "$BINARY" --mode="$1" --config="$2"
+}
+
+run_mode() { # reloader key
+  local key="$1" mode overlay
+  mode="$(edit_mode_for "$key")"
   if [[ ! -r "$POD_CONFIG" ]]; then
     cat >&2 <<EOF
 ERROR: $POD_CONFIG is not readable.
@@ -78,10 +175,24 @@ EOF
     exit 1
   fi
   overlay="$(write_overlay "$key")"
+  if [[ ! -s "$STAMP" ]]; then
+    echo "waiting for the first build; gkg-build writes $STAMP when gkg-server is ready"
+    while [[ ! -s "$STAMP" ]]; do sleep 2; done
+  fi
   cd "$REPO_ROOT"
-  # mise resolves cargo and cargo-watch from this repo's mise.toml regardless of
-  # the PATH caproni inherited from the gitlab-caproni checkout.
-  exec mise exec -- cargo watch --why -x "run --bin gkg-server -- --mode=$mode --config=$overlay"
+  # Restart the binary whenever the build watcher rewrites the stamp. SIGTERM goes to
+  # gkg-server itself because the launcher execs it.
+  exec mise exec -- watchexec --shell=none --ignore-nothing -r -d 1s -w "$STAMP" -- "$SELF" launch "$mode" "$overlay"
+}
+
+main() {
+  case "${1:-}" in
+    build) build ;;
+    watch) watch ;;
+    launch) [[ $# -eq 3 ]] || { usage; exit 1; }; launch "$2" "$3" ;;
+    webserver | indexer-sdlc | indexer-code | dispatcher) run_mode "$1" ;;
+    *) usage; exit 1 ;;
+  esac
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
