@@ -16,6 +16,14 @@ pub(crate) fn edge_table(relationship_kind: &str, source_kind: &str, target_kind
         .unwrap())
 }
 
+pub(crate) fn edge_tables(relationship_kind: &str) -> Vec<String> {
+    ONTOLOGY
+        .edge_tables_for_relationship(relationship_kind)
+        .into_iter()
+        .map(t)
+        .collect()
+}
+
 pub async fn assert_node_count(ctx: &TestContext, table: &str, expected: usize) {
     let table = t(table);
     let result = ctx.query(&format!("SELECT 1 FROM {table} FINAL")).await;

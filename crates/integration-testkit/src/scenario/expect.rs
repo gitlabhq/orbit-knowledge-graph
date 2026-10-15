@@ -6,7 +6,9 @@ use orbit_arrow::{ArrowUtils, ColumnValue};
 use super::DispatchedMessage;
 use super::format::{DispatchExpect, EdgeExpect, Expect, Matcher, NodeExpect, RowMatcher};
 use super::seed::prefix_graph_table;
-use crate::assertions::{assert_edge_tags_by_source, assert_edge_tags_by_target, edge_table};
+use crate::assertions::{
+    assert_edge_tags_by_source, assert_edge_tags_by_target, edge_table, edge_tables,
+};
 use crate::context::TestContext;
 use crate::t;
 
@@ -52,17 +54,27 @@ async fn check_nodes(ctx: &TestContext, table: &str, expect: &NodeExpect, locati
 
 async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
     let kind = &expect.kind;
-    let (from, to) = expect_endpoint_kinds(expect, &format!("{location}: {kind} edges"));
-    let table = edge_table(kind, from, to);
     let mut conditions = vec![format!("relationship_kind = '{kind}'")];
-    conditions.push(format!("source_kind = '{from}'"));
-    conditions.push(format!("target_kind = '{to}'"));
-    let batches = ctx
-        .query(&format!(
-            "SELECT * FROM {table} FINAL WHERE {}",
-            conditions.join(" AND ")
-        ))
-        .await;
+    let tables = match (&expect.from, &expect.to) {
+        (Some(from), Some(to)) => {
+            conditions.push(format!("source_kind = '{from}'"));
+            conditions.push(format!("target_kind = '{to}'"));
+            vec![edge_table(kind, from, to)]
+        }
+        (None, None) => edge_tables(kind),
+        _ => panic!("{location}: {kind} edges require both from: and to:, or neither"),
+    };
+    let selects = tables
+        .iter()
+        .map(|table| {
+            format!(
+                "SELECT * FROM {table} FINAL WHERE {}",
+                conditions.join(" AND ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    let batches = ctx.query(&selects).await;
     let rows = extract_rows(&batches);
     let edge_location = format!("{location}: {kind} edges");
 
@@ -91,11 +103,13 @@ async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
     }
 
     if !expect.source_tags.is_empty() {
+        let (from, to) = expect_endpoint_kinds(expect, &edge_location);
         let expected = tag_pairs(&expect.source_tags);
         let expected_refs = tag_pair_refs(&expected);
         assert_edge_tags_by_source(ctx, kind, from, to, "source_tags", &expected_refs).await;
     }
     if !expect.target_tags.is_empty() {
+        let (from, to) = expect_endpoint_kinds(expect, &edge_location);
         let expected = tag_pairs(&expect.target_tags);
         let expected_refs = tag_pair_refs(&expected);
         assert_edge_tags_by_target(ctx, kind, from, to, "target_tags", &expected_refs).await;
