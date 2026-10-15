@@ -208,6 +208,10 @@ impl Handler for MockHandler {
         self.requires_worker_pool
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "the mock panics on purpose to exercise handler panic isolation"
+    )]
     async fn handle(
         &self,
         _context: HandlerContext,

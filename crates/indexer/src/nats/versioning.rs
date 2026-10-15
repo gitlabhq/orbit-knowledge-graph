@@ -23,6 +23,10 @@ pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, RETIRED_INDEXING_P
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(release_segment(), *SCHEMA_VERSION));
 
+#[expect(
+    clippy::expect_used,
+    reason = "static regex literal is verified by tests and cannot fail at runtime"
+)]
 static SANITIZE_RELEASE_PATTERN: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new("[^a-zA-Z0-9]+").expect("valid literal regex"));
 

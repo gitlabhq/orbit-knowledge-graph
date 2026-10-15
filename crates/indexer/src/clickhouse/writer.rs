@@ -300,6 +300,7 @@ async fn drain(
                     buf.batches.push(batch);
                     buf.tokens.push(token);
                     if buf.rows >= limits.max_rows {
+                        #[expect(clippy::unwrap_used, reason = "key was just inserted by `entry().or_default()` above")]
                         let buf = pending.remove(&table).unwrap();
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
@@ -318,6 +319,7 @@ async fn drain(
                     .map(|(table, _)| table.clone())
                     .collect();
                 for table in ripe {
+                    #[expect(clippy::unwrap_used, reason = "keys come from `pending` itself and are removed once each")]
                     let buf = pending.remove(&table).unwrap();
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
@@ -334,6 +336,7 @@ async fn drain(
 }
 
 /// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
+#[expect(clippy::expect_used, reason = "the write semaphore is never closed")]
 fn spawn_write(
     writes: &mut JoinSet<()>,
     sem: &Arc<tokio::sync::Semaphore>,

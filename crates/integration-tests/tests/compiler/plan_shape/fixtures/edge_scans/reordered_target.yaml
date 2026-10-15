@@ -1,4 +1,4 @@
-name: A reordered-table declaration keeps the source edge scan
+name: A pinned target keeps the source edge scan while reordered tables are metadata only
 ontology_overlay: reordered_edges
 
 query:
@@ -17,4 +17,4 @@ physical:
       reject: ["(Scan Table(gl_code_edge_by_target) ...)"]
   duckdb:
     planned:
-      expect: ["(Scan Table(gl_edge) AS _orbit_edge_0)"]
+      expect: ["(Scan Table(gl_edge) AS e0)"]

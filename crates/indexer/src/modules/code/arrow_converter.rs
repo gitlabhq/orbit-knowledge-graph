@@ -131,6 +131,10 @@ fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashS
         .collect()
 }
 
+#[expect(
+    clippy::panic,
+    reason = "callers pass either a built-in code-graph entity name or a name taken from this same ontology, so the lookup cannot miss"
+)]
 pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
@@ -579,6 +583,10 @@ fn repository_on_branch_rows<'a>(
     rows
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "edge indices come from iterating this same graph, so endpoints exist"
+)]
 fn graph_edge_row<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
@@ -793,6 +801,7 @@ impl<'a> EdgeRouting<'a> {
     }
 
     /// `Some` when every row routes to the same table.
+    #[expect(clippy::expect_used, reason = "length is checked to be 1 just before")]
     fn single_table(&self) -> Option<&'a str> {
         let mut tables = match self {
             Self::Dictionary { keys, by_key } => {
@@ -830,6 +839,10 @@ impl<'a> EdgeRouting<'a> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "indices are derived from the batch's own schema, so projection is in bounds"
+)]
 fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     let schema = batch.schema();
     let mut indices: Vec<usize> = Vec::new();

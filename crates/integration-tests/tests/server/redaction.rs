@@ -36,6 +36,7 @@ fn edge_table_for(relationship: &str) -> String {
     // load_ontology() already applies the schema version prefix.
     ontology
         .edge_table_for_relationship(relationship)
+        .unwrap()
         .to_string()
 }
 

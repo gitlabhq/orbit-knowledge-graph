@@ -202,7 +202,7 @@ struct ProjectData {
     /// projects that lack repository content. `u32::MAX` means always.
     empty_archive_responses: u32,
     slow_archive: bool,
-    archive_error: bool,
+    archive_status: Option<StatusCode>,
 }
 
 pub struct MockGitlabServer {
@@ -262,7 +262,7 @@ impl MockGitlabServer {
                 archive_files,
                 empty_archive_responses: 0,
                 slow_archive: false,
-                archive_error: false,
+                archive_status: None,
             },
         );
     }
@@ -279,7 +279,7 @@ impl MockGitlabServer {
                 )],
                 empty_archive_responses: 0,
                 slow_archive: true,
-                archive_error: false,
+                archive_status: None,
             },
         );
     }
@@ -295,7 +295,7 @@ impl MockGitlabServer {
                 archive_files: Vec::new(),
                 empty_archive_responses: u32::MAX,
                 slow_archive: false,
-                archive_error: false,
+                archive_status: None,
             },
         );
     }
@@ -313,17 +313,10 @@ impl MockGitlabServer {
         }
     }
 
-    pub fn add_project_with_archive_error(&self, project_id: i64, default_branch: &str) {
-        self.state.projects.lock().insert(
-            project_id,
-            ProjectData {
-                default_branch: default_branch.to_string(),
-                archive_files: Vec::new(),
-                empty_archive_responses: 0,
-                slow_archive: false,
-                archive_error: true,
-            },
-        );
+    pub fn set_archive_status(&self, project_id: i64, status: Option<StatusCode>) {
+        if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
+            project.archive_status = status;
+        }
     }
 
     pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
@@ -376,7 +369,10 @@ async fn handle_download_archive(
     }
     let mut projects = state.projects.lock();
     match projects.get_mut(&project_id) {
-        Some(p) if p.archive_error => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Some(ProjectData {
+            archive_status: Some(status),
+            ..
+        }) => (*status).into_response(),
         Some(p) if p.empty_archive_responses > 0 => {
             if p.empty_archive_responses != u32::MAX {
                 p.empty_archive_responses -= 1;
@@ -511,7 +507,7 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
             "SELECT source_id FROM {} \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'DEFINES'",
-            ontology.edge_table_for_relationship("DEFINES")
+            ontology.edge_table_for_relationship("DEFINES").unwrap()
         ))
         .await;
     assert!(

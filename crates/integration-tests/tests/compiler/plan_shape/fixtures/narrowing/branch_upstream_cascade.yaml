@@ -54,10 +54,6 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON _orbit_edge_1.target_id = _orbit_edge_3.source_id (_) (_))
-        - |
-          (SemiJoin _orbit_edge_3.source_id IN subquery (_)
-            (Project e1p.target_id AS target_id
-              (SemiJoin e1p.source_id IN subquery (_)
-                (Project e0p.target_id AS target_id
-                  (Filter e0p.source_id = 1, ... (_))))))
+        - (Join ON e1.target_id = e3.source_id (_) (_))
+        - (Join ON e0.target_id = e2.source_id (_) (_))
+        - (Filter a.id = 1, ... (Scan Table(gl_definition) AS a))

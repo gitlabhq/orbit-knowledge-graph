@@ -25,6 +25,9 @@ pub enum ResolveError {
         detail: String,
     },
 
+    #[error("archive endpoint overloaded: {0}")]
+    Overloaded(GitlabClientError),
+
     #[error(transparent)]
     Other(#[from] HandlerError),
 }
@@ -39,6 +42,7 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
+    /// Rails raises 500 for a repository that does not exist.
     ServerError,
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
@@ -75,24 +79,40 @@ impl std::fmt::Display for EmptyRepositoryReason {
     }
 }
 
+/// Backfill resolves the branch through `project_info` first, so the project exists
+/// and a 404 means it has no repository or no refs.
 fn classify_download_error(
-    err: &RepositoryServiceError,
-) -> Option<(EmptyRepositoryReason, String)> {
-    match err {
-        RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(id)) => Some((
-            EmptyRepositoryReason::NotFound,
-            format!("project {id} not found (404)"),
-        )),
-        RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
-            project_id,
-            status,
-        }) => Some((
-            EmptyRepositoryReason::ServerError,
-            format!(
-                "archive endpoint returned {status} for project {project_id} (repository likely missing)"
-            ),
-        )),
-        _ => None,
+    err: RepositoryServiceError,
+) -> Result<ResolveError, RepositoryServiceError> {
+    let api_error = match err {
+        RepositoryServiceError::GitlabApi(api_error) => api_error,
+        RepositoryServiceError::Archive(_) => return Err(err),
+    };
+    match &api_error {
+        GitlabClientError::NotFound(id) => Ok(ResolveError::EmptyRepository {
+            reason: EmptyRepositoryReason::NotFound,
+            detail: format!("project {id} not found (404)"),
+        }),
+        GitlabClientError::ServerError {
+            status: 502..=504, ..
+        }
+        | GitlabClientError::RateLimited { .. } => Ok(ResolveError::Overloaded(api_error)),
+        GitlabClientError::ServerError { project_id, status } => {
+            Ok(ResolveError::EmptyRepository {
+                reason: EmptyRepositoryReason::ServerError,
+                detail: format!(
+                    "archive endpoint returned {status} for project {project_id} (repository likely missing)"
+                ),
+            })
+        }
+        GitlabClientError::Request(_)
+        | GitlabClientError::Unauthorized
+        | GitlabClientError::ForcePush(_)
+        | GitlabClientError::JwtSigning(_)
+        | GitlabClientError::JwtDecoding(_)
+        | GitlabClientError::InvalidSecret(_)
+        | GitlabClientError::Unexpected(_)
+        | GitlabClientError::CircuitOpen { .. } => Err(api_error.into()),
     }
 }
 
@@ -182,9 +202,10 @@ impl RepositoryResolver {
             {
                 Ok(stream) => stream,
                 Err(err) => {
-                    if let Some((reason, detail)) = classify_download_error(&err) {
-                        return Step::GiveUp(ResolveError::EmptyRepository { reason, detail });
-                    }
+                    let err = match classify_download_error(err) {
+                        Ok(resolved) => return Step::GiveUp(resolved),
+                        Err(err) => err,
+                    };
                     warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
                     let e = HandlerError::Processing(format!("failed to download archive: {err}"));
                     return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
@@ -567,7 +588,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_maps_archive_5xx_to_empty_repository() {
+    async fn resolve_maps_archive_500_to_empty_repository() {
         let service = ScriptedRepositoryService::with_download_error(|| {
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::ServerError {
                 project_id: 42,
@@ -584,6 +605,39 @@ mod tests {
                 assert!(detail.contains("500"), "detail was {detail}");
             }
             other => panic!("expected EmptyRepository, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_maps_archive_overload_statuses_to_overloaded_without_retrying() {
+        use gitlab_client::GitlabClientError;
+
+        let overloads: [fn() -> GitlabClientError; 4] = [
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 502,
+            },
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 503,
+            },
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 504,
+            },
+            || GitlabClientError::RateLimited { project_id: 42 },
+        ];
+        for overload in overloads {
+            let service = ScriptedRepositoryService::with_download_error(move || {
+                RepositoryServiceError::GitlabApi(overload())
+            });
+            let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+            for commit_sha in [None, Some("abc123")] {
+                let err = resolver.resolve(42, "main", commit_sha).await.unwrap_err();
+                assert!(matches!(err, ResolveError::Overloaded(_)), "got {err:?}");
+            }
+            assert_eq!(service.download_count(), 2, "no local retries");
         }
     }
 

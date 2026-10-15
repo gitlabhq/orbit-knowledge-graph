@@ -72,6 +72,10 @@ impl LockGuard {
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+    )]
     pub fn time_left(&self) -> Duration {
         self.lease
             .lock()
@@ -84,9 +88,17 @@ impl LockGuard {
         let Some(service) = &self.service else {
             return Ok(());
         };
+        #[expect(
+            clippy::unwrap_used,
+            reason = "mutex poisoning means another thread already panicked; propagating is intended"
+        )]
         let revision = self.lease.lock().unwrap().revision;
         match service.renew(&self.key, ttl, revision).await? {
             Some(new_revision) => {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
                 let mut lease = self.lease.lock().unwrap();
                 lease.revision = new_revision;
                 lease.expires_at = tokio::time::Instant::now() + ttl;

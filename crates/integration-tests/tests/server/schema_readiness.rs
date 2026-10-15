@@ -3,8 +3,6 @@ use std::time::Duration;
 
 use crate::common::DummyClaims;
 use crate::indexer::common::dispatch::start_nats;
-use axum::body::Body;
-use axum::http::StatusCode;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -16,18 +14,19 @@ use orbit_migrations::version::{
     ensure_version_table, mark_version_migrating, mark_version_retired, promote_version,
     table_prefix,
 };
-use orbit_server::active_schema::{ActiveSchema, validate_servable_archive};
+use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::InMemoryAnalyticsTracker;
 use orbit_server::auth::{Claims, JwtValidator};
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::OrbitServiceImpl;
+use orbit_server::probes;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::orbit_service_server::OrbitServiceServer;
 use orbit_server::proto::*;
-use orbit_server::webserver::create_router;
 use orbit_server_config::AppConfig;
 use orbit_utils::yaml;
+use reqwest::StatusCode;
 use serde_json::{Value, json};
 use testcontainers_modules::nats::Nats;
 use tokio::sync::mpsc;
@@ -36,7 +35,6 @@ use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tonic::transport::Channel;
 use tonic::{Request, Status, Streaming};
-use tower::ServiceExt;
 
 const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const WAIT_LIMIT: Duration = Duration::from_secs(30);
@@ -49,7 +47,7 @@ const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
 ];
 
 #[tokio::test]
-async fn split_route_archive_is_not_served() {
+async fn split_route_archive_is_served_by_variant_aware_queries() {
     let mut cluster = Cluster::start(1).await;
     cluster.create_tables(&[1, 2]).await;
     cluster.promote(1).await;
@@ -59,14 +57,8 @@ async fn split_route_archive_is_not_served() {
     calls["variants"][0]["table"] = json!("gl_edge");
     sources.insert("edges/calls.yaml".into(), yaml::to_string(&calls).unwrap());
     let archive = OntologyArchive::from_sources(2, &sources).unwrap();
-    assert_eq!(
-        validate_servable_archive(&archive).unwrap_err().to_string(),
-        "validation error: relationship 'CALLS' has split table routes; this consumer requires one table per relationship kind"
-    );
     cluster.catalog.publish(&archive).await.unwrap();
     cluster.promote(2).await;
-    cluster.await_serving(None).await;
-    cluster.restore_archive(2).await;
     cluster.await_serving(Some(2)).await;
 }
 
@@ -222,7 +214,7 @@ struct Cluster {
     catalog: OntologyCatalog,
     nats_client: Arc<NatsClient>,
     client: OrbitServiceClient<Channel>,
-    router: axum::Router,
+    probe_url: String,
     analytics: Arc<InMemoryAnalyticsTracker>,
     _shutdown: DropGuard,
     _nats: testcontainers::ContainerAsync<Nats>,
@@ -265,7 +257,7 @@ impl Cluster {
             catalog,
             nats_client,
             client,
-            router: create_router(active_schema),
+            probe_url: spawn_probe_server(active_schema),
             analytics,
             _shutdown: shutdown.drop_guard(),
             _nats: nats,
@@ -403,7 +395,7 @@ impl Cluster {
             shutdown.clone(),
         );
         Reader {
-            router: create_router(active_schema),
+            probe_url: spawn_probe_server(active_schema),
             client,
             _shutdown: shutdown.drop_guard(),
         }
@@ -495,7 +487,7 @@ impl Cluster {
     }
 
     async fn ready_status(&self) -> StatusCode {
-        probe(&self.router, "/ready").await
+        probe(&self.probe_url, "/-/readiness").await
     }
 
     async fn list_tools(&mut self) -> Result<ListToolsResponse, Status> {
@@ -538,18 +530,18 @@ impl Cluster {
 }
 
 struct Reader {
-    router: axum::Router,
+    probe_url: String,
     client: Arc<ArrowClickHouseClient>,
     _shutdown: DropGuard,
 }
 
 impl Reader {
     async fn ready_status(&self) -> StatusCode {
-        probe(&self.router, "/ready").await
+        probe(&self.probe_url, "/-/readiness").await
     }
 
     async fn live_status(&self) -> StatusCode {
-        probe(&self.router, "/live").await
+        probe(&self.probe_url, "/-/liveness").await
     }
 
     async fn await_ready(&self) {
@@ -784,10 +776,21 @@ fn authenticated<T>(message: T) -> Request<T> {
     request
 }
 
-async fn probe(router: &axum::Router, path: &str) -> StatusCode {
-    router
-        .clone()
-        .oneshot(axum::http::Request::get(path).body(Body::empty()).unwrap())
+fn spawn_probe_server(active_schema: Arc<ActiveSchema>) -> String {
+    let address = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let schema = labkit::health::ReadinessCheck::new("schema", move || {
+        probes::schema_installed(&active_schema)
+    });
+    labkit::health::spawn_server(address, vec![schema], None, None).unwrap();
+    format!("http://{address}")
+}
+
+async fn probe(base_url: &str, path: &str) -> StatusCode {
+    super::tls_fixtures::init_crypto_provider();
+    reqwest::get(format!("{base_url}{path}"))
         .await
         .unwrap()
         .status()
