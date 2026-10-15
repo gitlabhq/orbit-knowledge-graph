@@ -23,6 +23,8 @@ pub(super) struct EdgeColumnYaml {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct EdgeTableYaml {
+    #[serde(default)]
+    pub domains: Vec<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumnYaml>,
     #[serde(default)]

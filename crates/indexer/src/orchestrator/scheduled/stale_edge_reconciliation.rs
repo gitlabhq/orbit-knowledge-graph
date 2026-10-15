@@ -198,7 +198,11 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
                     node.name.clone(),
                     prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
                 );
-                for edge_table in ontology.edge_tables_for_relationship(&mapping.label) {
+                for edge_table in ontology
+                    .edge_routes_for_mapping(mapping)
+                    .into_iter()
+                    .map(|edge| edge.destination_table.as_str())
+                {
                     kinds_by_group
                         .entry((
                             node.name.clone(),

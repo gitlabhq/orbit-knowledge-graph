@@ -17,7 +17,7 @@ rectangle "**GitLab Cloud Infrastructure**\n//Shared multi-tenant//" as cloud #E
     component "**SDLC Indexer**\nRust ETL engine\nSiphon CDC consumer" as sdlc_idx_h #CCE5CC
     component "**Code Indexer**\nparser-core + OXC\n+ tree-sitter" as code_idx_h #CCE5CC
     component "**Graph Query Engine**\nJSON DSL -> ClickHouse SQL" as query_eng_h #CCE5CC
-    component "**gRPC**\nTonic, JWT auth" as http_srv_h #CCE5CC    
+    component "**gRPC**\nTonic, JWT auth" as http_srv_h #CCE5CC
     component "Embedded GATE" as gate
 
     note as gate_note 

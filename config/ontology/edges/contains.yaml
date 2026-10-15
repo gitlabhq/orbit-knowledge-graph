@@ -19,6 +19,7 @@ variants:
 
   - from_node: { type: Project, id: id }
     to_node: { type: Branch, id: id }
+    table: gl_code_edge
     scope: same_namespace
     description: "Project contains branch."
 
@@ -30,6 +31,11 @@ variants:
     to_node: { type: Directory, id: id }
     scope: same_namespace
     description: "Branch contains root directory."
+
+  - from_node: { type: Branch, id: id }
+    to_node: { type: File, id: id }
+    scope: same_namespace
+    description: "Branch contains root file."
 
   - from_node: { type: Directory, id: id }
     to_node: { type: Directory, id: id }
