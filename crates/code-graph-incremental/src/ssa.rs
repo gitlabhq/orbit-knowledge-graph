@@ -517,7 +517,6 @@ impl SsaEngine {
                     .into_iter()
                     .next()
                     .expect("a trivial phi has exactly one outer value");
-                let phi_vals: Vec<Value> = scc.iter().map(|&p| Value::Phi(p)).collect();
                 for &pid in &scc {
                     let variable = self.phis[pid.0 as usize].variable;
                     let block = self.phis[pid.0 as usize].block;
@@ -527,20 +526,25 @@ impl SsaEngine {
                         block_defs.insert(block, replacement.clone());
                     }
                 }
-                for (i, phi) in self.phis.iter_mut().enumerate() {
+                let in_scc = |value: &Value| matches!(value, Value::Phi(p) if scc_set.contains(p));
+                let mut users: Vec<PhiId> = scc
+                    .iter()
+                    .flat_map(|p| self.users[p.0 as usize].iter().copied())
+                    .collect();
+                users.sort_unstable_by_key(|user| user.0);
+                users.dedup();
+                for user in users {
+                    let phi = &mut self.phis[user.0 as usize];
                     for op in &mut phi.operands {
-                        if phi_vals.contains(op) {
+                        if in_scc(op) {
                             *op = replacement.clone();
                             if let Value::Phi(used) = replacement {
-                                self.users[used.0 as usize]
-                                    .push(PhiId(u32::try_from(i).expect("phi index exceeds u32")));
+                                self.users[used.0 as usize].push(user);
                             }
                         }
                     }
                     for w in &mut phi.witnesses {
-                        if let Some(wv) = w
-                            && phi_vals.contains(wv)
-                        {
+                        if w.as_ref().is_some_and(in_scc) {
                             *w = None;
                         }
                     }
@@ -1039,6 +1043,26 @@ mod tests {
                 .iter()
                 .all(|phi| !phi.operands.contains(&Value::Marker))
         );
+    }
+
+    #[test]
+    fn many_redundant_phi_cycles_collapse_through_their_users() {
+        let mut ssa = SsaEngine::new();
+        let block = ssa.add_block();
+        let cycles: Vec<_> = (0..10_000)
+            .map(|k| {
+                let (a, b) = (ssa.new_phi(block, 1), ssa.new_phi(block, 1));
+                ssa.add_operand(a, Value::LocalDef(k));
+                ssa.add_operand(a, Value::Phi(b));
+                ssa.add_operand(b, Value::Phi(a));
+                ssa.add_operand(b, Value::Phi(a));
+                (k, a)
+            })
+            .collect();
+        ssa.remove_redundant_phi_sccs();
+        for (k, a) in cycles {
+            assert_eq!(ssa.resolve_value(&Value::Phi(a)), vec![Value::LocalDef(k)]);
+        }
     }
 
     #[test]
