@@ -452,6 +452,7 @@ impl Resolver {
             partials: &partials,
             extensions: &extensions,
             declared_members: &declared_members,
+            chains: trees.iter().map(|_| Default::default()).collect(),
             exporters: &exporters,
             imports: &imports,
         };
@@ -583,6 +584,9 @@ fn expand(
     for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
+    ctx.chains
+        .iter_mut()
+        .for_each(|memo| memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear());
     cross_edges.extend(&wave1);
     ctx.run.check()?;
 
@@ -696,6 +700,7 @@ struct ResolveCtx<'a> {
     partials: &'a FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     declared_members: &'a [MemberCache],
+    chains: Vec<ChainMemo>,
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -1517,15 +1522,18 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
 
 thread_local! {
     static RESOLVING: std::cell::RefCell<FxHashSet<(u32, u32)>> = Default::default();
+    static CUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+
+type ChainMemo = std::sync::Mutex<FxHashMap<u32, Option<(u32, u32)>>>;
 
 struct Resolving((u32, u32));
 
 impl Resolving {
     fn enter(key: (u32, u32)) -> Option<Self> {
-        RESOLVING
-            .with_borrow_mut(|resolving| resolving.insert(key))
-            .then_some(Self(key))
+        let entered = RESOLVING.with_borrow_mut(|resolving| resolving.insert(key));
+        CUT.set(CUT.get() || !entered);
+        entered.then_some(Self(key))
     }
 }
 
@@ -1536,14 +1544,32 @@ impl Drop for Resolving {
 }
 
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
+    let memo = || {
+        ctx.chains[c.fi() as usize]
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    };
+    if let Some(&found) = memo().get(&c.index()) {
+        return found.map(|(fi, node)| ctx.corpus.jump(fi, node));
+    }
     let _resolving = Resolving::enter((c.fi(), c.index()))?;
-    stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
+    if ctx.run.check().is_err() {
+        CUT.set(true);
+        return None;
+    }
+    let outer = CUT.replace(false);
+    let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
         chain(ctx, c, &|r| {
             resolve_reference(ctx, r)
                 .or_else(|| enclosing_alias(ctx, r))
                 .or_else(|| visible_type(ctx, r.fi(), r.sym()))
         })
-    })
+    });
+    if !CUT.get() {
+        memo().insert(c.index(), found.map(|f| (f.fi(), f.index())));
+    }
+    CUT.set(outer || CUT.get());
+    found
 }
 
 fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<Cursor<'a>> {

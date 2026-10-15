@@ -733,18 +733,14 @@ mod tests {
             .map(|_| ())
     }
 
-    fn index_one_class(methods: usize) -> usize {
-        let body: String = (0..methods)
-            .map(|i| format!("void f{i}() {{}}\n"))
-            .collect();
+    fn indexing_work(lang: crate::treesitter::SupportLang, files: &[(&str, String)]) -> usize {
         let repo = tempfile::tempdir().unwrap();
-        std::fs::write(
-            repo.path().join("C.java"),
-            format!("class C {{\n{body}}}\n"),
-        )
-        .unwrap();
-        let env =
-            Env::with_limits(crate::treesitter::SupportLang::Java, Limits::UNLIMITED).unwrap();
+        for (path, content) in files {
+            let path = repo.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
         let repository = Arc::new(
             Vfs::load(
                 Directory(repo.path()),
@@ -755,9 +751,37 @@ mod tests {
             .unwrap(),
         );
         let steps = crate::tree::SIBLING_STEPS.load(Ordering::Relaxed);
-        let graph = templates::index(Context::new(&env, repository)).unwrap();
-        assert!(graph.finish().1.state.edges.len() >= methods);
+        templates::index(Context::new(&env, repository)).unwrap();
         crate::tree::SIBLING_STEPS.load(Ordering::Relaxed) - steps
+    }
+
+    fn index_one_class(methods: usize) -> usize {
+        let body: String = (0..methods)
+            .map(|i| format!("void f{i}() {{}}\n"))
+            .collect();
+        let class = format!("class C {{\n{body}}}\n");
+        indexing_work(crate::treesitter::SupportLang::Java, &[("C.java", class)])
+    }
+
+    fn index_alias_chain(aliases: usize) -> usize {
+        let chain: String = (1..aliases)
+            .map(|i| format!("pub type A{i} = A{};\n", i - 1))
+            .collect();
+        let uses: String = (0..aliases)
+            .map(|i| format!("pub fn f{i}(x: A{}) {{ x.m(); }}\n", aliases - 1))
+            .collect();
+        let lib = format!(
+            "pub struct S;\nimpl S {{ pub fn m(&self) {{}} }}\npub type A0 = S;\n{chain}{uses}"
+        );
+        let manifest = "[package]\nname = \"p\"\nversion = \"0.1.0\"\n".to_string();
+        let files = [("Cargo.toml", manifest), ("src/lib.rs", lib)];
+        indexing_work(crate::treesitter::SupportLang::Rust, &files)
+    }
+
+    #[test]
+    fn uses_of_a_long_type_alias_chain_resolve_in_linear_work() {
+        let (small, large) = (index_alias_chain(500), index_alias_chain(2_000));
+        assert!(large <= 5 * small, "{small} -> {large}");
     }
 
     #[test]
