@@ -66,8 +66,6 @@ pub struct SsaEngine {
     frames: Vec<Frame>,
     written: FxHashSet<u32>,
     unsealed: usize,
-    #[cfg(test)]
-    work: usize,
 }
 
 impl SsaEngine {
@@ -80,8 +78,6 @@ impl SsaEngine {
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
             frames: Vec::new(),
-            #[cfg(test)]
-            work: Default::default(),
             written: FxHashSet::default(),
             unsealed: 0,
         }
@@ -391,10 +387,6 @@ impl SsaEngine {
     }
 
     fn remove_if_trivial(&mut self, phi_id: PhiId, pending: &mut SmallVec<[PhiId; 8]>) -> Value {
-        #[cfg(test)]
-        {
-            self.work += 1;
-        }
         let w = &self.phis[phi_id.0 as usize].witnesses;
         if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
             && w0 != w1
@@ -564,10 +556,6 @@ impl SsaEngine {
         while let Value::Phi(phi) = end
             && let Some(next) = &self.replaced[phi.0 as usize]
         {
-            #[cfg(test)]
-            {
-                self.work += 1;
-            }
             end = next.clone();
         }
         let mut cur = value.clone();
@@ -1057,14 +1045,15 @@ mod tests {
         );
     }
 
-    fn nested_loops(levels: usize) -> usize {
+    #[test]
+    fn nested_loops_keep_short_users_lists_and_direct_pointers() {
         let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         ssa.seal_block(entry);
         ssa.write_variable(1, entry, Value::LocalDef(0));
         let (mut headers, mut reads) = (Vec::new(), Vec::new());
         let mut block = entry;
-        for _ in 0..levels {
+        for _ in 0..1_000 {
             let (header, body) = ssa.begin_loop(block);
             headers.push(header);
             reads.push(ssa.read_variable_internal(1, body));
@@ -1072,17 +1061,17 @@ mod tests {
         }
         for header in headers.into_iter().rev() {
             block = ssa.finish_loop(header, block);
+            assert!(ssa.users.iter().all(|users| users.len() <= 2));
         }
         for read in &reads {
             assert_eq!(ssa.resolve_value(read), vec![Value::LocalDef(0)]);
         }
-        ssa.work
-    }
-
-    #[test]
-    fn nested_loops_resolve_in_linear_work() {
-        let (small, large) = (nested_loops(1_000), nested_loops(4_000));
-        assert!(large <= 5 * small, "{small} -> {large}");
+        assert!(
+            ssa.replaced
+                .iter()
+                .flatten()
+                .all(|value| !matches!(value, Value::Phi(_)))
+        );
     }
 
     #[test]

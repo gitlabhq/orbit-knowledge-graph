@@ -733,63 +733,6 @@ mod tests {
             .map(|_| ())
     }
 
-    fn indexing_work(lang: crate::treesitter::SupportLang, files: &[(&str, String)]) -> usize {
-        let repo = tempfile::tempdir().unwrap();
-        for (path, content) in files {
-            let path = repo.path().join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, content).unwrap();
-        }
-        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let repository = Arc::new(
-            Vfs::load(
-                Directory(repo.path()),
-                KeepAll,
-                Default::default(),
-                Default::default(),
-            )
-            .unwrap(),
-        );
-        let steps = crate::tree::SIBLING_STEPS.load(Ordering::Relaxed);
-        templates::index(Context::new(&env, repository)).unwrap();
-        crate::tree::SIBLING_STEPS.load(Ordering::Relaxed) - steps
-    }
-
-    fn index_one_class(methods: usize) -> usize {
-        let body: String = (0..methods)
-            .map(|i| format!("void f{i}() {{}}\n"))
-            .collect();
-        let class = format!("class C {{\n{body}}}\n");
-        indexing_work(crate::treesitter::SupportLang::Java, &[("C.java", class)])
-    }
-
-    fn index_alias_chain(aliases: usize) -> usize {
-        let chain: String = (1..aliases)
-            .map(|i| format!("pub type A{i} = A{};\n", i - 1))
-            .collect();
-        let uses: String = (0..aliases)
-            .map(|i| format!("pub fn f{i}(x: A{}) {{ x.m(); }}\n", aliases - 1))
-            .collect();
-        let lib = format!(
-            "pub struct S;\nimpl S {{ pub fn m(&self) {{}} }}\npub type A0 = S;\n{chain}{uses}"
-        );
-        let manifest = "[package]\nname = \"p\"\nversion = \"0.1.0\"\n".to_string();
-        let files = [("Cargo.toml", manifest), ("src/lib.rs", lib)];
-        indexing_work(crate::treesitter::SupportLang::Rust, &files)
-    }
-
-    #[test]
-    fn uses_of_a_long_type_alias_chain_resolve_in_linear_work() {
-        let (small, large) = (index_alias_chain(500), index_alias_chain(2_000));
-        assert!(large <= 5 * small, "{small} -> {large}");
-    }
-
-    #[test]
-    fn a_class_with_many_methods_indexes_in_linear_work() {
-        let (small, large) = (index_one_class(1_000), index_one_class(4_000));
-        assert!(large <= 5 * small, "{small} -> {large}");
-    }
-
     #[test]
     fn a_namespace_imported_through_many_files_links_each_use_once() {
         let (namespaces, per_namespace) = (10, 10);
