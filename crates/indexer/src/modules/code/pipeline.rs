@@ -391,7 +391,14 @@ impl CodeIndexer {
 
         drop(repository);
         context.work.release();
-        run.commit.durable().await.map_err(IndexError::Failed)?;
+        match clock.run(run.commit.durable()).await {
+            Some(durable) => durable.map_err(IndexError::Failed)?,
+            None => {
+                return Err(IndexError::BudgetExceeded {
+                    budget: budget.unwrap_or_default(),
+                });
+            }
+        }
         Ok(IndexOutcome::Indexed {
             rows_written: run.rows_written,
         })

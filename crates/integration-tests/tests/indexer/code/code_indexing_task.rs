@@ -1227,6 +1227,49 @@ async fn the_extraction_tree_is_deleted_before_the_job_waits_for_durability() {
 }
 
 #[tokio::test]
+async fn a_hung_flush_ends_with_the_job_budget() {
+    let project_id: i64 = 65;
+    let traversal_path = "1/65/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let mut config = never_flushing();
+    config.job_timeout_secs = 2;
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
+    let handler = deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL);
+
+    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        handler.handle(handler_context(), envelope),
+    )
+    .await
+    .expect("the durability wait must end with the job budget");
+    assert!(
+        matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
+        "a job whose rows never land must fail within its budget so NATS redelivers it, got {result:?}"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+}
+
+#[tokio::test]
 async fn a_shutdown_flushes_a_waiting_job_without_the_age_cap() {
     let project_id: i64 = 64;
     let traversal_path = "1/64/";
