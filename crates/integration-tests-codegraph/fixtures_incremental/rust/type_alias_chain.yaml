@@ -1,0 +1,24 @@
+name: "Rust: uses of a long type alias chain resolve in linear work"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "type_alias_chain"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content:
+      - "pub struct S;\n\nimpl S {\n    pub fn m(&self) {}\n}\n\npub type A0 = S;\n"
+      - { repeat: 4000, text: "pub type A{i+1} = A{i};\n" }
+      - { repeat: 4000, text: "pub fn f{i}(x: A4000) {\n    x.m();\n}\n" }
+
+tests:
+  - name: "each use of the last alias calls the method of the aliased struct"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'm'
+      RETURN count(caller) AS n
+    assert:
+      - { count_equals: { field: n, value: 4000 } }

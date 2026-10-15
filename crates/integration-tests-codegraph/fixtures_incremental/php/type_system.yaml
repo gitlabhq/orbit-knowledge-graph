@@ -354,6 +354,6 @@ tests:
   - name: "Every Definition has a non-null FQN"
     query: |
       MATCH (d:Definition)
-      RETURN d.fqn AS fqn
+      RETURN count(d) AS total, count(d.fqn) AS with_fqn
     assert:
-      - { no_nulls: fqn }
+      - { row: { total: 51, with_fqn: 51 } }

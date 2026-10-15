@@ -1,6 +1,7 @@
 //! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
-//! The byte limit counts offered files before policy runs. The file limit counts kept files;
-//! a listed entry past the same count is dropped and counted. Rejected content is not materialized.
+//! The byte limit counts offered files before policy runs. The file limit counts kept files
+//! once per path; a listed entry past the same count is dropped and counted. Rejected content
+//! is not materialized.
 //! Files are read, classified, and stored during loading unless metadata explicitly requests KeepLazy.
 //! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
 
@@ -11,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use sha2::{Digest, Sha256};
 
 use super::limits::{LimitKind, add_capped};
@@ -47,6 +48,7 @@ pub struct Loading<T> {
     limits: Limits,
     cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     entries: Vec<Mutex<Vec<VfsEntry<T>>>>,
+    paths: Vec<Mutex<FxHashSet<u64>>>,
     blobs: Vec<Mutex<FxHashMap<[u8; 32], Content>>>,
     scratch: Scratch,
     files: AtomicU64,
@@ -85,6 +87,7 @@ impl<T: Tag> Loading<T> {
             limits,
             cancelled: options.cancelled,
             entries: (0..ENTRY_SHARDS).map(|_| Mutex::default()).collect(),
+            paths: (0..ENTRY_SHARDS).map(|_| Mutex::default()).collect(),
             blobs: (0..BLOB_SHARDS).map(|_| Mutex::default()).collect(),
             files: AtomicU64::new(0),
             listed: AtomicU64::new(0),
@@ -176,22 +179,21 @@ impl<T: Tag> Loading<T> {
     }
 
     fn record(&self, file: File<'static, T>, content: Content) -> Result<(), SourceError> {
-        let cap = self.limits.files.map(|n| n as u64);
-        if file.keeps() && !matches!(content, Content::Failed(_)) {
-            add_capped(&self.files, LimitKind::Files, 1, cap)?;
-        } else if add_capped(&self.listed, LimitKind::Files, 1, cap).is_err() {
-            self.dropped.fetch_add(1, Relaxed);
-            return Ok(());
-        }
-        self.add_entry(file, content);
-        Ok(())
-    }
-
-    fn add_entry(&self, file: File<'static, T>, content: Content) {
         let mut hasher = FxHasher::default();
         file.path.hash(&mut hasher);
-        let shard = &self.entries[hasher.finish() as usize % ENTRY_SHARDS];
-        lock(shard).push(VfsEntry { file, content });
+        let hash = hasher.finish();
+        let shard = hash as usize % ENTRY_SHARDS;
+        if lock(&self.paths[shard]).insert(hash) {
+            let cap = self.limits.files.map(|n| n as u64);
+            if file.keeps() && !matches!(content, Content::Failed(_)) {
+                add_capped(&self.files, LimitKind::Files, 1, cap)?;
+            } else if add_capped(&self.listed, LimitKind::Files, 1, cap).is_err() {
+                self.dropped.fetch_add(1, Relaxed);
+                return Ok(());
+            }
+        }
+        lock(&self.entries[shard]).push(VfsEntry { file, content });
+        Ok(())
     }
 
     fn store(&self, bytes: Vec<u8>) -> Result<Content, SourceError> {

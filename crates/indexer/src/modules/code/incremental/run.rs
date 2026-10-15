@@ -182,7 +182,7 @@ pub(in crate::modules::code) fn run(
 
 fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error::SkippedFile {
     use code_graph::v2::error::{AbortPhase, FileSkip};
-    let kind = match killed.label {
+    let kind = match killed.label.as_ref() {
         "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
         "resolve" => FileSkip::ResolveTimeout,
         "names" => FileSkip::TooManyNames,
@@ -192,13 +192,13 @@ fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error
         "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
         "link" => FileSkip::Timeout(AbortPhase::Ssa),
         "edges" => FileSkip::TooManyEdges,
-        "fields" => FileSkip::TooManyFieldCopies,
         "manifests" => FileSkip::TooManyManifestBytes,
-        "members" => FileSkip::TooManyMembers,
+        "fqn" => FileSkip::FqnTruncated,
         _ => FileSkip::Timeout(AbortPhase::Sentinel),
     };
     code_graph::v2::error::SkippedFile {
         detail: killed.to_string(),
+        family: killed.family.map(|lang| lang.family().to_string()),
         path: killed.path,
         kind,
     }
