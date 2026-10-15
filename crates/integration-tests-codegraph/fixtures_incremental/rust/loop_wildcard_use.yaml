@@ -1,0 +1,46 @@
+name: "Rust: a wildcard use inside a loop binds its names for reads in the loop"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "loop_wildcard_use"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub enum Kind {
+          Wrap(i32),
+      }
+
+      mod helpers {
+          pub fn help() {}
+      }
+
+      pub fn wraps(xs: &[i32]) {
+          for x in xs {
+              use Kind::*;
+              let _ = Wrap(*x);
+          }
+      }
+
+      pub fn helps(mut n: i32) {
+          while n > 0 {
+              use crate::helpers::*;
+              help();
+              n -= 1;
+          }
+      }
+
+tests:
+  - name: "calls through a wildcard use in a loop body link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['wraps', 'helps']
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: helps, callee: help } }
+      - { row: { caller: wraps, callee: Wrap } }
