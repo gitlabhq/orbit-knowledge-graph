@@ -142,6 +142,10 @@ fn project_path_re() -> String {
     format!(r"(?:{PATH_SEGMENT})(?:/{PATH_SEGMENT}){{0,19}}")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "static regex literal is verified by tests and cannot fail at runtime"
+)]
 static ISSUE_REF: LazyLock<Regex> = LazyLock::new(|| {
     let project = project_path_re();
     Regex::new(&format!(
@@ -150,6 +154,10 @@ static ISSUE_REF: LazyLock<Regex> = LazyLock::new(|| {
     .expect("issue regex compiles")
 });
 
+#[expect(
+    clippy::expect_used,
+    reason = "static regex literal is verified by tests and cannot fail at runtime"
+)]
 static MR_REF: LazyLock<Regex> = LazyLock::new(|| {
     let project = project_path_re();
     Regex::new(&format!(
@@ -161,6 +169,10 @@ static MR_REF: LazyLock<Regex> = LazyLock::new(|| {
 // Commit SHA refs always include a project prefix when cross-project, but the
 // project-less form is just a hex run. We require a word boundary on both sides
 // so we don't grab the middle of an HTTP URL fragment.
+#[expect(
+    clippy::expect_used,
+    reason = "static regex literal is verified by tests and cannot fail at runtime"
+)]
 static COMMIT_REF: LazyLock<Regex> = LazyLock::new(|| {
     let project = project_path_re();
     Regex::new(&format!(
@@ -288,6 +300,10 @@ fn extract_commit_shas_from_list(body: &str) -> Vec<Reference> {
     // serialization to the note body, each entry begins with the short SHA
     // followed by ` - `. We anchor on that delimiter so commit-message-style
     // hex words inside titles don't trigger false positives.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "static regex literal is verified by tests and cannot fail at runtime"
+    )]
     static LINE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?m)^[^\w]*\b(?P<sha>[0-9a-f]{7,40})\b\s*-\s").unwrap());
 
@@ -306,6 +322,10 @@ fn extract_commit_shas_from_list(body: &str) -> Vec<Reference> {
 fn extract_merge_ref(body: &str) -> Vec<Reference> {
     // "enabled an automatic merge when all merge checks for <SHA> pass"
     // SHA appears after "for " and before " pass".
+    #[expect(
+        clippy::expect_used,
+        reason = "static regex literal is verified by tests and cannot fail at runtime"
+    )]
     static SHA_AFTER_FOR: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"\bfor\s+(?P<sha>[0-9a-f]{7,40})\b").expect("sha-after-for regex compiles")
     });
