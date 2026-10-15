@@ -58,7 +58,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |
-| Local development (`mise run dev`) | `scripts/dev/orbit-native-dev.sh`, `docs/dev/local-development.md` |
+| Local development (`mise run dev`, `caproni run`) | `scripts/dev/orbit-native-dev.sh`, `scripts/dev/caproni-edit-mode.sh`, `caproni-project.yaml`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | **All project links** (repos, epics, infra, people, Helm charts) | `README.md` (single source of truth) |

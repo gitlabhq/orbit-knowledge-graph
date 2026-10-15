@@ -14,10 +14,10 @@
 
 Two repositories are involved. Know which one you're in at every step.
 
-| Repo | Path (typical GDK) | Role |
-|------|--------------------|------|
-| **GitLab monolith** | `…/gitlab-development-kit/gitlab` | Owns the Postgres source tables, the **Siphon CDC** config that replicates them to ClickHouse, and the **redaction** authorization layer. |
-| **knowledge-graph** (`gitlab-org/orbit/knowledge-graph`) | `…/gitlab-development-kit/knowledge-graph` | The `gkg` engine: the **ontology** (YAML) that tells `gkg-indexer` how to turn `siphon_*` ClickHouse tables into graph nodes/edges, plus the indexer, query compiler, and gRPC server. |
+| Repo | Path (Caproni edit mode) | Role |
+|------|--------------------------|------|
+| **GitLab monolith** | `…/gitlab-caproni/repos/gitlab` | Owns the Postgres source tables, the **Siphon CDC** config that replicates them to ClickHouse, and the **redaction** authorization layer. |
+| **knowledge-graph** (`gitlab-org/orbit/knowledge-graph`) | `…/gitlab-caproni/repos/knowledge-graph` (or your own checkout) | The `gkg` engine: the **ontology** (YAML) that tells `gkg-indexer` how to turn `siphon_*` ClickHouse tables into graph nodes/edges, plus the indexer, query compiler, and gRPC server. |
 
 **Data flow (one direction):**
 
@@ -91,8 +91,7 @@ This emits three files:
 - `db/click_house/migrate/main/<TS>_create_siphon_<table>_pg_pkey_ordered.rb`: companion ID-ordered table + materialized view (for reconciliation).
 - `db/siphon/tables/<table>.yml`: CDC config (`dedup_by`, `dedup_by_columns_lookup_table`, `reconcile`).
 
-> If `bundle exec rails …` fails with a missing gem (e.g. a `gdk-toogle` version
-> mismatch. Yes, that gem is intentionally spelled "toogle"), your local bundle is
+> If `bundle exec rails …` fails with a missing gem, your local bundle is
 > behind `master`. Run `bundle install` and retry.
 
 ### 3.2 Post-generation edits (the review-tested conventions)
@@ -107,11 +106,12 @@ This emits three files:
 ### 3.3 Regenerate `main.sql` (NEVER hand-edit)
 
 `db/click_house/main.sql` must be regenerated against the **CI-pinned** ClickHouse
-version, in Docker. The local GDK ClickHouse is a newer version that emits
+version, in Docker. The Caproni dev-stack ClickHouse is a newer version that emits
 a slightly different dump (e.g. single-column-key parens) that fails `clickhouse:check-schema`.
+Run this from `repos/gitlab` with the monolith in edit mode. Port 8123 must be free on the
+host, so stop `mise run dev` (its ClickHouse port-forward uses it) first.
 
 ```bash
-gdk stop clickhouse                       # free port 8123
 docker rm -f gl-ch-dump 2>/dev/null
 docker run -d --name gl-ch-dump -e CLICKHOUSE_SKIP_USER_SETUP=1 \
   -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:25.12.3-alpine
@@ -120,7 +120,7 @@ curl -s http://localhost:8123/ --data "CREATE DATABASE IF NOT EXISTS gitlab_clic
 bundle exec rake gitlab:clickhouse:migrate:main
 bundle exec rake gitlab:clickhouse:schema:dump:main   # writes main.sql + schema_cache/*.yml
 git diff db/click_house/main.sql          # MUST be only your new table's blocks
-docker rm -f gl-ch-dump && gdk start clickhouse
+docker rm -f gl-ch-dump
 ```
 
 > Pin version note: CI uses `clickhouse/clickhouse-server:25.12.3-alpine`. There is
