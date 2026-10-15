@@ -19,7 +19,6 @@ anyhow = { workspace = true }
 arrow = { workspace = true }
 base64 = { workspace = true }
 async-trait = { workspace = true }
-axum = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 orbit-analytics = { path = "../orbit-analytics" }
@@ -50,7 +49,7 @@ query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
-labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
+labkit = { workspace = true, features = ["grpc", "health", "otel", "prometheus"] }
 labkit-events = { workspace = true }
 serde = { workspace = true }
 secrecy = { workspace = true }
@@ -75,6 +74,7 @@ orbit-versions = { path = "../orbit-versions" }
 tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
+axum = { workspace = true }
 compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 orbit-billing = { path = "../orbit-billing", features = ["testkit"] }

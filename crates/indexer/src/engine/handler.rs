@@ -76,10 +76,6 @@ impl HandlerError {
         }
     }
 
-    pub fn is_permanent(&self) -> bool {
-        matches!(self, Self::Permanent { .. } | Self::Deserialization(_))
-    }
-
     /// A deterministic failure that will never succeed on retry; dead-letter it for inspection.
     pub fn dead_letter(message: impl Into<String>) -> Self {
         HandlerError::Permanent {

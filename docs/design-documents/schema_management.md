@@ -202,18 +202,18 @@ At boot, a missing key falls back to one read of `gkg_schema_version`. That read
 Each version the watch delivers is an install attempt: load the archive, check that every expected
 table exists in `system.tables`, swap the snapshot. Readiness means "a snapshot is installed":
 
-| Install attempt | Snapshot | `/ready` |
+| Install attempt | Snapshot | `/-/readiness` |
 |---|---|---|
-| no active version | cleared | `503` with `schema_pending` |
+| no active version | cleared | `503`, `schema` check fails |
 | usable archive and all expected tables, whatever the version relative to the binary | installed | `200` |
-| a table of the active version is missing | cleared | `503` with `schema_pending` |
-| the active archive is missing, corrupt, or fails to load | cleared | `503` with `schema_pending` |
+| a table of the active version is missing | cleared | `503`, `schema` check fails |
+| the active archive is missing, corrupt, or fails to load | cleared | `503`, `schema` check fails |
 | the watch is lost (bucket dropped, NATS outage) | unchanged | last state |
 
 Failed installs retry every `schema.version_poll_interval_secs` seconds; a lost watch is reopened
 at the same cadence while the installed snapshot keeps serving. Tables are checked at install time
 only. A dispatcher from a release before this key existed never writes it. So on a rollback to
-such a release, these webservers keep serving their last version until they are replaced. `/live` never depends on the active schema, and there is no outdated-version shutdown: a newer
+such a release, these webservers keep serving their last version until they are replaced. `/-/liveness` never depends on the active schema, and there is no outdated-version shutdown: a newer
 active version is served, not refused.
 
 While no snapshot is installed, schema-dependent RPCs (introspection, named queries, query
@@ -227,7 +227,7 @@ missing tables only; it does not validate columns or freshness.
 Webservers built before this gate exit when the active version exceeds their binary. So the first
 rollout of the new binary must replace them before a schema promotion.
 
-`/ready` checks only this local state. The HealthCheck service's `/health` aggregates ClickHouse
+`/-/readiness` checks only this local state. The HealthCheck service's `/health` aggregates ClickHouse
 and Kubernetes health separately. `ClusterHealthChecker` may label an unhealthy Kubernetes
 aggregate `Migrating` while a `migrating` row exists. See
 [`health_check.md`](health_check.md#migration-awareness).
@@ -376,8 +376,8 @@ exits non-zero and Kubernetes restarts it (`CrashLoopBackoff`), which self-heals
 dispatcher catches up. Transient ClickHouse read errors are retried within the budget. The wait
 gate lives in `crates/indexer/src/schema/version.rs`.
 
-The indexer health server exposes this gate through `/ready`: it returns `503` until message
-processing starts and `200` afterward. It does not recheck NATS, ClickHouse, or GitLab because the
+The probe server exposes this gate through the `schema_gate` check on `/-/readiness`: it returns
+`503` until message processing starts and `200` afterward. It does not recheck NATS, ClickHouse, or GitLab because the
 HealthCheck service's `/health` endpoint owns aggregate dependency health.
 
 ### Write path prefix enforcement

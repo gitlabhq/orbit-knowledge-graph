@@ -169,12 +169,15 @@ impl Pipeline {
             stats.scanned_rows += page.scan_stats.scanned_rows;
             stats.scanned_bytes += page.scan_stats.scanned_bytes;
 
-            cursor = cursor.advance(
-                page.batches
-                    .last()
-                    .expect("non-empty page has a last block"),
-                &plan.sort_key,
-            )?;
+            #[expect(
+                clippy::expect_used,
+                reason = "a page that reached this point is non-empty, so it has a last block"
+            )]
+            let last_block = page
+                .batches
+                .last()
+                .expect("non-empty page has a last block");
+            cursor = cursor.advance(last_block, &plan.sort_key)?;
             let has_more = rows_in_page >= base_query.batch_size() || page.truncated;
             base_query.set_batch_size(next_page_limit(
                 base_query.batch_size(),
@@ -214,6 +217,10 @@ impl Pipeline {
             }
 
             {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
                 let mut observer = context.observer.lock().unwrap();
                 observer.extracted(rows_in_page, bytes_in_page);
             }
@@ -222,6 +229,10 @@ impl Pipeline {
             let drain_writes = async {
                 while let Some(report) = write_futures.next().await {
                     let report = report?;
+                    #[expect(
+                        clippy::unwrap_used,
+                        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                    )]
                     let mut observer = context.observer.lock().unwrap();
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
@@ -295,6 +306,10 @@ impl Pipeline {
             .record_watermark_lag(&plan.name, &window.target);
 
         {
+            #[expect(
+                clippy::unwrap_used,
+                reason = "mutex poisoning means another thread already panicked; propagating is intended"
+            )]
             let mut observer = context.observer.lock().unwrap();
             observer.record_datalake_read(stats.read_rows, stats.read_bytes);
             observer.record_datalake_scan(stats.scanned_rows, stats.scanned_bytes);

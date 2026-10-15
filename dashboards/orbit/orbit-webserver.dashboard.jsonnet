@@ -486,8 +486,7 @@ local resources = [
 
 // 9. Reference (collapsed by default) ------------------------------------
 local reference =
-  o.externalSection('HTTP transport', ext.GKG_HTTP, DS, SEL)
-  + o.externalSection('gRPC transport', ext.GKG_GRPC, DS, SEL)
+  o.externalSection('gRPC transport', ext.GKG_GRPC, DS, SEL)
   + o.sectionCollapsed('Query pipeline (reference)', o.metricsInDomain('query.pipeline'), DS, SEL)
   + o.sectionCollapsed('Query engine — threats (reference)', o.metricsInDomain('query.engine'), DS, SEL)
   + o.sectionCollapsed('Content resolution (reference)', o.metricsInDomain('server.content'), DS, SEL)

@@ -5,3 +5,8 @@ detect: ["~/.gitlab/duo"]
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"
+skills:
+  dir:
+    project: .agents/skills
+    global: "~/.agents/skills"
+  requires_full: true

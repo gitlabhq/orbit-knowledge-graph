@@ -108,7 +108,7 @@ The prefix layout is already a blue-green split. The active version keeps servin
 queries and streaming updates from its `v<N>_` tables while the migrating version
 fills its own set. Promotion flips reads over in one step. The two run side by
 side down to their NATS streams and locks, which are version-segmented.
-`/ready` holds the new pods out of rotation until their version is active (see
+`/-/readiness` holds the new pods out of rotation until their version is active (see
 [`schema_management.md`](../schema_management.md) and
 [`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)).
 

@@ -20,7 +20,7 @@ rectangle "**Orbit Module**\n//Deploys as a single Rust binary//" as module #E8F
 
   component "**Graph Query Engine**\nJSON DSL -> ClickHouse SQL\n13-phase compiler, 4 query types" as query_eng #CCE5CC
 
-  component "**gRPC Server**\nTonic (+ Axum), JWT auth" as http_srv #CCE5CC
+  component "**gRPC Server**\nTonic, JWT auth" as http_srv #CCE5CC
 
  
 }

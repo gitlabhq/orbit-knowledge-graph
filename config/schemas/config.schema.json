@@ -3,9 +3,6 @@
   "title": "AppConfig",
   "type": "object",
   "properties": {
-    "bind_address": {
-      "type": "string"
-    },
     "grpc_bind_address": {
       "type": "string"
     },
@@ -44,12 +41,6 @@
     "health_check": {
       "$ref": "#/$defs/HealthCheckConfig"
     },
-    "indexer_health_bind_address": {
-      "type": "string"
-    },
-    "dispatcher_health_bind_address": {
-      "type": "string"
-    },
     "metrics": {
       "$ref": "#/$defs/MetricsConfig"
     },
@@ -83,7 +74,6 @@
   },
   "additionalProperties": false,
   "required": [
-    "bind_address",
     "grpc_bind_address",
     "jwt_clock_skew_secs",
     "nats",
@@ -94,8 +84,6 @@
     "gitlab",
     "schedule",
     "health_check",
-    "indexer_health_bind_address",
-    "dispatcher_health_bind_address",
     "metrics",
     "probe_server",
     "tls",

@@ -1094,6 +1094,70 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
+async fn archive_overload_on_backfill_is_retried_not_checkpointed_as_empty() {
+    let project_id: i64 = 7;
+    let traversal_path = "1/7/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    let max_attempts = indexer::modules::code::code_indexing_task_topic_policy()
+        .max_attempts
+        .expect("the code topic sets max_attempts");
+    for delivery in 1..=max_attempts {
+        let status = if delivery % 2 == 1 {
+            axum::http::StatusCode::BAD_GATEWAY
+        } else {
+            axum::http::StatusCode::TOO_MANY_REQUESTS
+        };
+        mock.set_archive_status(project_id, Some(status));
+        let mut envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+        envelope.attempt = delivery;
+        let result = handler.handle(handler_context(), envelope).await;
+        assert!(
+            matches!(&result, Err(indexer::handler::HandlerError::Processing(msg)) if msg.contains("overloaded")),
+            "{status} on a backfill task must nack as overload, got {result:?}"
+        );
+    }
+
+    let spent = attempts(&clickhouse, traversal_path, project_id).await;
+    assert_eq!(spent, [1], "a whole dispatch of overload costs one attempt");
+    assert!(
+        spent[0] < indexer::orchestrator::dispatch::code_backfill::MAX_CODE_ATTEMPTS,
+        "the dispatcher must still re-send the project after CODE_RETRY_AFTER"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None,
+        "overload must not write an indexed-empty checkpoint"
+    );
+
+    mock.set_archive_status(project_id, None);
+    let envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the redelivered task indexes once the endpoint recovers");
+    deps.pipeline.flush().await.expect("flush");
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
+}
+
+#[tokio::test]
 async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";

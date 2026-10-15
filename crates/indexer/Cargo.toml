@@ -53,7 +53,6 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
@@ -62,7 +61,6 @@ jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
-tower = { workspace = true }
 
 # This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
 # attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the
@@ -77,3 +75,7 @@ unsafe_code = "forbid"
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 allow_attributes_without_reason = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"

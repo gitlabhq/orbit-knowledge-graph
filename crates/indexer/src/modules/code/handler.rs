@@ -291,6 +291,18 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
+    async fn refund_attempt(&self, checkpoint: &mut CodeCheckpoint) {
+        checkpoint.refund_attempt();
+        if let Err(e) = self.checkpoint_store.save(checkpoint).await {
+            warn!(
+                project_id = checkpoint.project_id,
+                branch = %checkpoint.branch,
+                error = %e,
+                "failed to refund the attempt"
+            );
+        }
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
@@ -392,13 +404,19 @@ impl CodeIndexingTaskHandler {
                 ))
             }
             Err(IndexError::NoLane { waited }) => {
-                checkpoint.refund_attempt();
-                if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
-                    warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
-                }
+                self.refund_attempt(&mut checkpoint).await;
                 Err(HandlerError::Backpressure(format!(
                     "no indexing lane within {}s",
                     waited.as_secs()
+                )))
+            }
+            Err(IndexError::Overloaded(cause)) => {
+                // Redeliveries share one dispatch; counting each would exhaust MAX_CODE_ATTEMPTS.
+                if attempt > 1 {
+                    self.refund_attempt(&mut checkpoint).await;
+                }
+                Err(HandlerError::Processing(format!(
+                    "archive endpoint overloaded ({cause}); retrying"
                 )))
             }
             Err(IndexError::Failed(e)) => Err(e),
@@ -854,6 +872,51 @@ mod tests {
             .unwrap()
             .expect("checkpoint should be set for missing repository");
         assert_eq!(checkpoint.last_task_id, 7);
+    }
+
+    #[tokio::test]
+    async fn archive_overload_nacks_and_never_checkpoints_empty() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let overloads: [fn() -> GitlabClientError; 2] = [
+            || GitlabClientError::ServerError {
+                project_id: 123,
+                status: 502,
+            },
+            || GitlabClientError::RateLimited { project_id: 123 },
+        ];
+        for overload in overloads {
+            for attempt in [1, 2, 9] {
+                let ctx = TestContext::new();
+                ctx.mock_repo
+                    .set_download_error(123, RepositoryServiceError::GitlabApi(overload()));
+                if attempt > 1 {
+                    let mut first_delivery =
+                        CodeCheckpoint::new(TraversalPath::new_unchecked("1/123/"), 123, "main");
+                    first_delivery.start_attempt();
+                    ctx.mock_checkpoints.save(&first_delivery).await.unwrap();
+                }
+
+                let mut envelope = TestContext::make_request_with_sha(7, 123, "main", None);
+                envelope.attempt = attempt;
+                let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+                assert!(
+                    matches!(&result, Err(HandlerError::Processing(msg)) if msg.contains("overloaded")),
+                    "overload must be retried, got {result:?}"
+                );
+                let checkpoint = ctx
+                    .mock_checkpoints
+                    .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+                    .await
+                    .unwrap()
+                    .expect("start-of-attempt checkpoint is saved");
+                assert!(checkpoint.indexed_at.is_none(), "must not be indexed-empty");
+                assert_eq!(checkpoint.last_task_id, 0);
+                assert_eq!(checkpoint.attempts, 1, "delivery {attempt}");
+            }
+        }
     }
 
     #[tokio::test]
