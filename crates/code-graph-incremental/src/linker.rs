@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -883,7 +884,8 @@ impl<'t> Fold<'t> {
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
-        let mut copied = FxHashSet::default();
+        let mut copied = FxHashMap::default();
+        let mut aliases = smallvec::SmallVec::<[_; 4]>::new();
         while let Some((target, sources)) = copies.pop() {
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
@@ -905,16 +907,27 @@ impl<'t> Fold<'t> {
                 }
                 let value = self.read_value(source);
                 value_updates.push((target, value));
-                if (self.fields.contains_key(&source) || self.fields.contains_key(&target))
-                    && copied.insert(source)
-                {
-                    let sources = self.fields.get(&source).cloned().unwrap_or_default();
-                    copies.push((target, sources));
+                if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
+                    match copied.entry(source) {
+                        Entry::Occupied(first) => aliases.push((target, *first.get())),
+                        Entry::Vacant(slot) => {
+                            slot.insert(target);
+                            let sources = self.fields.get(&source).cloned().unwrap_or_default();
+                            copies.push((target, sources));
+                        }
+                    }
                 }
             }
             field_updates.push((target, fields));
         }
         self.fields.extend(field_updates);
+        for (target, first) in aliases {
+            if target != first
+                && let Some(shared) = self.fields.get(&first).cloned()
+            {
+                self.fields.insert(target, shared);
+            }
+        }
         for (target, value) in value_updates {
             self.ssa.write_variable(target, self.cur, value);
         }
