@@ -66,6 +66,7 @@ impl TestContext {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
+            insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
@@ -232,6 +233,7 @@ impl TestContext {
                 session_settings: std::collections::HashMap::new(),
                 replicated: false,
                 insert_settings: std::collections::HashMap::new(),
+                insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
                 profiling: AppConfig::embedded_defaults().graph.profiling,
             },
             url: self.url.clone(),

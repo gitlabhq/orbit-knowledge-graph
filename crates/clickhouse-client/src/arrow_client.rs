@@ -9,10 +9,12 @@ use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
 use circuit_breaker::{CircuitBreaker, CircuitConfig};
+use clickhouse::insert_formatted::InsertFormatted;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use orbit_observability::resilience::MetricsObserver;
+use orbit_server_config::clickhouse::DEFAULT_INSERT_TIMEOUT_SECS;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
@@ -86,6 +88,7 @@ pub struct ArrowClickHouseClient {
     base_url: String,
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
+    insert_timeout: Duration,
     quorum_writes: bool,
     replicated: bool,
     circuit_breaker: CircuitBreaker,
@@ -125,6 +128,7 @@ impl ArrowClickHouseClient {
             base_url: url.to_string(),
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
+            insert_timeout: Duration::from_secs(DEFAULT_INSERT_TIMEOUT_SECS),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
             circuit_breaker: CircuitBreaker::new(
@@ -144,6 +148,17 @@ impl ArrowClickHouseClient {
     pub fn with_replicated(mut self, replicated: bool) -> Self {
         self.replicated = replicated;
         self
+    }
+
+    pub fn with_insert_timeout(mut self, timeout: Duration) -> Self {
+        self.insert_timeout = timeout;
+        self
+    }
+
+    fn bounded_insert(&self, sql: &str) -> InsertFormatted {
+        self.client
+            .insert_formatted_with(sql)
+            .with_timeouts(Some(self.insert_timeout), Some(self.insert_timeout))
     }
 
     pub fn database(&self) -> &str {
@@ -257,7 +272,7 @@ impl ArrowClickHouseClient {
         let sql = format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream");
         self.circuit_breaker
             .call_transient(|| async {
-                let mut insert = self.client.insert_formatted_with(&sql);
+                let mut insert = self.bounded_insert(&sql);
                 insert
                     .send(Bytes::from(buffer))
                     .await
@@ -314,7 +329,7 @@ impl ArrowClickHouseClient {
         let mut writer = StreamWriter::try_new_with_options(drain.clone(), &schema, options)
             .map_err(ClickHouseError::ArrowEncode)?;
 
-        let mut insert = self.client.insert_formatted_with(sql);
+        let mut insert = self.bounded_insert(sql);
 
         flush_drain(&mut insert, &drain).await?;
 
@@ -695,6 +710,50 @@ mod tests {
     use circuit_breaker::CircuitBreakableError;
     use futures::future::BoxFuture;
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn an_insert_the_server_never_answers_fails_on_the_insert_timeout() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut sink = [0u8; 4096];
+                    while socket.read(&mut sink).await.is_ok_and(|n| n > 0) {}
+                });
+            }
+        });
+        let client = ArrowClickHouseClient::new(
+            &url,
+            "db",
+            "default",
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            "test",
+        )
+        .with_insert_timeout(Duration::from_millis(200));
+        let schema = Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2]))]).unwrap();
+
+        let insert = client.insert_arrow_streaming("t", vec![batch]);
+        let outcome = tokio::time::timeout(Duration::from_secs(10), insert).await;
+
+        let error = outcome
+            .expect("the insert must end on its own timeout, not on the test bound")
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ClickHouseError::Insert(clickhouse::error::Error::TimedOut)
+            ),
+            "{error}"
+        );
+    }
 
     fn client_with_insert_settings(
         insert_settings: HashMap<String, String>,

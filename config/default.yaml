@@ -51,6 +51,7 @@ datalake:
   replicated: false
   session_settings: {}
   insert_settings: {}
+  insert_timeout_secs: 600
   profiling:
     enabled: false
     explain: false
@@ -69,6 +70,7 @@ graph:
     max_query_size: "10485760"
   insert_settings:
     optimize_on_insert: "0"
+  insert_timeout_secs: 600
   profiling:
     enabled: false
     explain: false

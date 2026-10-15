@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use orbit_server_config::ClickHouseConfiguration;
 
@@ -28,6 +29,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             service,
         )
         .with_replicated(self.replicated)
+        .with_insert_timeout(Duration::from_secs(self.insert_timeout_secs))
     }
 }
 
@@ -102,6 +104,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
+            insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
@@ -118,6 +121,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
+            insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
@@ -135,6 +139,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
+            insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
@@ -152,6 +157,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
+            insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
@@ -289,6 +295,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
+            insert_timeout_secs: AppConfig::embedded_defaults().graph.insert_timeout_secs,
             profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 

@@ -290,6 +290,13 @@
           },
           "default": {}
         },
+        "insert_timeout_secs": {
+          "description": "Bound on one INSERT request: sending a chunk, and waiting for the\nserver's answer after the last one. A hung connection fails the write\ninstead of holding its commit open.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 600
+        },
         "profiling": {
           "$ref": "#/$defs/ProfilingConfig"
         }
