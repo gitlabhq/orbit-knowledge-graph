@@ -78,7 +78,7 @@ pub(super) fn install(selection: &Selection, target: &Target, report: &mut Repor
         report.start_group(component.label());
         let installer: &dyn Installer = match component {
             Component::Skill => &skill::Skill {
-                tree: &selection.skill_tree,
+                request: &selection.skill,
             },
             other => installer_for(*other),
         };

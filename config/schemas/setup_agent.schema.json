@@ -80,6 +80,10 @@
           "$ref": "#/definitions/scopedPath",
           "description": "Second skills directory that receives a symlink to the written skill, for assistants that do not scan `dir`."
         },
+        "requires_full": {
+          "type": "boolean",
+          "description": "Install the full skill tree instead of the thin wrapper, for assistants that cannot run commands when they load a skill. Applies to every assistant sharing `dir`."
+        },
         "permissions": {
           "type": "object",
           "required": ["file", "rules"],

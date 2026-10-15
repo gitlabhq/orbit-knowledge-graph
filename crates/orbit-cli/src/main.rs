@@ -518,7 +518,7 @@ impl SetupFlags {
         all: bool,
         index: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
-        skill_tree: std::collections::BTreeMap<String, Vec<u8>>,
+        skill: commands::setup::SkillRequest,
     ) -> commands::setup::Options {
         commands::setup::Options {
             agents,
@@ -528,7 +528,7 @@ impl SetupFlags {
             verbose: self.verbose,
             index,
             components,
-            skill_tree,
+            skill,
         }
     }
 
@@ -583,9 +583,11 @@ enum Commands {
         /// skill when the agent reads it. `full` writes the skill tree now,
         /// for agents that cannot run commands at that point; it needs the
         /// instance for the current content and falls back to the embedded
-        /// skill when the instance does not answer.
-        #[arg(long, value_enum, default_value_t)]
-        skill: commands::setup::SkillKind,
+        /// skill when the instance does not answer. Without this flag, an
+        /// agent that cannot run commands (Duo) gets `full`, and a directory
+        /// keeps the kind it already has.
+        #[arg(long, value_enum)]
+        skill: Option<commands::setup::SkillKind>,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -900,9 +902,17 @@ async fn dispatch(
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let skill_tree = commands::setup::skill_tree(skill, &components, flags.dry_run).await?;
-            let options = flags.to_options(agents, all, !no_index, components, skill_tree);
             let machine = commands::setup::detect::Machine::current()?;
+            let skill = commands::setup::skill_request(
+                skill,
+                &agents,
+                all,
+                &components,
+                flags.dry_run,
+                &machine,
+            )
+            .await?;
+            let options = flags.to_options(agents, all, !no_index, components, skill);
             let run = commands::setup::install(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {
                 telemetry::emit_setup_event(

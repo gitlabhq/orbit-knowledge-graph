@@ -773,7 +773,7 @@ fn setup_skill(
 }
 
 fn installed_manifest(skills: &std::path::Path) -> String {
-    assert!(skills.join("orbit/.orbit-managed").is_file());
+    assert!(skills.join(".orbit-managed").is_file());
     assert!(!skills.join("orbit-cli").exists());
     let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
     assert!(manifest.contains("\nname: orbit\n"), "{manifest}");

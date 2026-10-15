@@ -2,26 +2,55 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use super::json;
 use super::{
     Installer, Report, backup_once, backup_path, file_mentions, remove_empty_parents, write_file,
 };
-use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
+use crate::commands::setup::{SkillKind, SkillRequest, Target};
 use crate::skill::{INSTALL_DIR_NAME, LEGACY_INSTALL_DIR_NAME, embedded_files};
 
 const MANIFEST: &str = "SKILL.md";
+/// Ownership record next to the skill directory, so the directory itself stays what the
+/// agents (or `glab skills`) expect.
 const MARKER_FILE: &str = ".orbit-managed";
-const MARKER_CONTENTS: &str =
-    "Installed by `orbit setup`; `orbit uninstall` removes this directory.\n";
 
-static NO_FILES: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+static NO_REQUEST: SkillRequest = SkillRequest {
+    kind: None,
+    full_tree: None,
+};
 
-pub(super) static WITHOUT_FILES: Skill<'static> = Skill { tree: &NO_FILES };
+pub(super) static WITHOUT_FILES: Skill<'static> = Skill {
+    request: &NO_REQUEST,
+};
 
 pub(super) struct Skill<'a> {
-    pub(super) tree: &'a BTreeMap<String, Vec<u8>>,
+    pub(super) request: &'a SkillRequest,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Marker {
+    kind: SkillKind,
+    agents: BTreeSet<String>,
+}
+
+fn marker_path(skill_root: &Path) -> PathBuf {
+    skill_root.parent().unwrap_or(skill_root).join(MARKER_FILE)
+}
+
+fn read_marker(skill_root: &Path) -> Option<Marker> {
+    let contents = std::fs::read_to_string(marker_path(skill_root)).ok()?;
+    Some(serde_json::from_str(&contents).unwrap_or(Marker {
+        kind: SkillKind::Wrapper,
+        agents: BTreeSet::new(),
+    }))
+}
+
+fn write_marker(skill_root: &Path, marker: &Marker) -> Result<()> {
+    let contents = serde_json::to_string(marker).context("failed to encode the skill marker")?;
+    write_file(&marker_path(skill_root), format!("{contents}\n"))
 }
 
 impl Installer for Skill<'_> {
@@ -55,16 +84,18 @@ impl Installer for Skill<'_> {
                 remove_legacy(legacy_link, &skill.legacy_link_label, target, report)?;
             }
             remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
-            write_skill_files(&skill.root, &skill.label, self.tree, report)?;
+            let kind = self.kind_for(&skill);
+            let tree = self.tree_for(kind)?;
+            write_skill_files(
+                &skill.root,
+                &skill.label,
+                kind,
+                &skill.agents,
+                &tree,
+                report,
+            )?;
             if let Some(link) = &skill.link {
-                link_skill_dir(
-                    &link.path,
-                    &skill.root,
-                    &skill.label,
-                    &link.label,
-                    self.tree,
-                    report,
-                )?;
+                link_skill_dir(link, &skill, kind, &tree, report)?;
             }
         }
         for agent in agents {
@@ -88,9 +119,9 @@ impl Installer for Skill<'_> {
             }
             remove_legacy(&skill.legacy_root, &skill.legacy_label, target, report)?;
             if let Some(link) = &skill.link {
-                unlink_skill_dir(&link.path, &link.label, target, report)?;
+                unlink_skill_dir(link, &skill.link_agents, target, report)?;
             }
-            remove_skill_files(&skill.root, &skill.label, target, report)?;
+            release_skill_files(&skill.root, &skill.label, &skill.agents, target, report)?;
         }
         for agent in agents {
             remove_permissions(*agent, target, report)?;
@@ -107,9 +138,34 @@ impl Installer for Skill<'_> {
     }
 }
 
+impl Skill<'_> {
+    /// An explicit choice wins. Otherwise a sharing agent that needs the full tree decides, and
+    /// the last install keeps its kind so a rerun for another agent does not swap it.
+    fn kind_for(&self, skill: &SkillTarget) -> SkillKind {
+        if let Some(requested) = self.request.kind {
+            return requested;
+        }
+        if skill.requires_full {
+            return SkillKind::Full;
+        }
+        read_marker(&skill.root).map_or(SkillKind::Wrapper, |marker| marker.kind)
+    }
+
+    fn tree_for(&self, kind: SkillKind) -> Result<BTreeMap<String, Vec<u8>>> {
+        match (kind, &self.request.full_tree) {
+            (SkillKind::Wrapper, _) => crate::skill::wrapper_tree(),
+            (SkillKind::Full, Some(tree)) => Ok(tree.clone()),
+            (SkillKind::Full, None) => crate::skill::embedded_full_tree(),
+        }
+    }
+}
+
 struct SkillTarget {
     root: PathBuf,
     label: String,
+    agents: BTreeSet<String>,
+    requires_full: bool,
+    link_agents: BTreeSet<String>,
     link: Option<SkillLink>,
     legacy_root: PathBuf,
     legacy_label: String,
@@ -124,7 +180,10 @@ struct SkillLink {
 
 fn skill_targets(agents: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> {
     let mut targets: Vec<SkillTarget> = Vec::new();
-    for dirs in agents.iter().filter_map(|agent| agent.skills.as_ref()) {
+    for (agent_name, dirs) in agents
+        .iter()
+        .filter_map(|agent| Some((agent.name.clone(), agent.skills.as_ref()?)))
+    {
         let (dir, dir_label) = target.resolve(&dirs.dir)?;
         let root = dir.join(INSTALL_DIR_NAME);
         let (link, legacy_link, legacy_link_label) = match &dirs.link {
@@ -142,8 +201,12 @@ fn skill_targets(agents: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> 
             None => (None, None, String::new()),
         };
 
+        let link_agents: BTreeSet<String> = link.iter().map(|_| agent_name.clone()).collect();
         match targets.iter_mut().find(|existing| existing.root == root) {
             Some(existing) => {
+                existing.agents.insert(agent_name);
+                existing.requires_full |= dirs.requires_full;
+                existing.link_agents.extend(link_agents);
                 if existing.link.is_none() {
                     existing.link = link;
                     existing.legacy_link = legacy_link;
@@ -153,6 +216,9 @@ fn skill_targets(agents: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> 
             None => targets.push(SkillTarget {
                 root,
                 label: format!("{dir_label}/{INSTALL_DIR_NAME}"),
+                agents: BTreeSet::from([agent_name]),
+                requires_full: dirs.requires_full,
+                link_agents,
                 link,
                 legacy_root: dir.join(LEGACY_INSTALL_DIR_NAME),
                 legacy_label: format!("{dir_label}/{LEGACY_INSTALL_DIR_NAME}"),
@@ -227,21 +293,63 @@ const ALLOW_PATH: [&str; 2] = ["permissions", "allow"];
 fn write_skill_files(
     skill_root: &Path,
     label: &str,
+    kind: SkillKind,
+    agents: &BTreeSet<String>,
     tree: &BTreeMap<String, Vec<u8>>,
     report: &mut Report,
 ) -> Result<()> {
-    let mut files = tree.clone();
-    files.insert(MARKER_FILE.to_string(), MARKER_CONTENTS.as_bytes().to_vec());
-    if read_tree(skill_root).is_some_and(|current| current == files) {
+    let mut owners = read_marker(skill_root)
+        .map(|marker| marker.agents)
+        .unwrap_or_default();
+    owners.extend(agents.iter().cloned());
+    let marker = Marker {
+        kind,
+        agents: owners,
+    };
+    // A tree identical to ours (for example one `glab skills install` wrote) is adopted as is.
+    if read_tree(skill_root).is_some_and(|current| current == *tree) {
+        write_marker(skill_root, &marker)?;
         report.note(label, "unchanged");
         return Ok(());
     }
-    // Replace the directory so files of a previous install (another skill kind or source) go away.
-    remove_path(skill_root)?;
-    for (relative, contents) in files {
+    make_room(skill_root, label, report)?;
+    for (relative, contents) in tree {
         write_file(&skill_root.join(relative), contents)?;
     }
+    write_marker(skill_root, &marker)?;
     report.note(label, "skill installed");
+    Ok(())
+}
+
+/// Clears `path` for a new install. What `orbit setup` wrote is replaced; anything else is
+/// renamed to a sibling whose `SKILL.md` no longer loads, so the user's files survive.
+fn make_room(path: &Path, label: &str, report: &mut Report) -> Result<()> {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if !metadata.is_dir() || marker_path(path).exists() {
+        remove_path(path)?;
+        let _ = std::fs::remove_file(marker_path(path));
+        return Ok(());
+    }
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let first_backup = path.with_file_name(format!("{name}.orbit-backup"));
+    let mut backup = first_backup.clone();
+    for attempt in 1.. {
+        if !backup.exists() {
+            break;
+        }
+        backup = path.with_file_name(format!("{name}.orbit-backup.{attempt}"));
+    }
+    std::fs::rename(path, &backup)
+        .with_context(|| format!("failed to move {} aside", path.display()))?;
+    let manifest = backup.join(MANIFEST);
+    if manifest.exists() {
+        std::fs::rename(&manifest, backup.join(format!("{MANIFEST}.orbit-backup")))
+            .with_context(|| format!("failed to rename {}", manifest.display()))?;
+    }
+    let kept = backup.file_name().unwrap_or_default().to_string_lossy();
+    report.note(label, format!("existing skill kept as {kept}"));
     Ok(())
 }
 
@@ -278,51 +386,67 @@ fn remove_path(path: &Path) -> Result<()> {
 }
 
 fn link_skill_dir(
-    link_path: &Path,
-    skill_root: &Path,
-    skill_label: &str,
-    label: &str,
+    link: &SkillLink,
+    skill: &SkillTarget,
+    kind: SkillKind,
     tree: &BTreeMap<String, Vec<u8>>,
     report: &mut Report,
 ) -> Result<()> {
-    let link_target = relative_path_from_link(link_path, skill_root);
-    if std::fs::read_link(link_path).is_ok_and(|current| current == link_target) {
-        report.note(label, "already linked");
+    let link_target = relative_path_from_link(&link.path, &skill.root);
+    if std::fs::read_link(&link.path).is_ok_and(|current| current == link_target) {
+        report.note(&link.label, "already linked");
         return Ok(());
     }
-    // Anything else here (a foreign skill, a stale copy, another link) would shadow the install.
-    remove_path(link_path)?;
-    if let Some(parent) = link_path.parent() {
+    make_room(&link.path, &link.label, report)?;
+    if let Some(parent) = link.path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    match symlink_dir(&link_target, link_path) {
+    match symlink_dir(&link_target, &link.path) {
         Ok(()) => {
-            report.note(label, format!("linked to {skill_label}"));
+            report.note(&link.label, format!("linked to {}", skill.label));
             Ok(())
         }
-        Err(_) => write_skill_files(link_path, label, tree, report),
+        Err(_) => write_skill_files(
+            &link.path,
+            &link.label,
+            kind,
+            &skill.link_agents,
+            tree,
+            report,
+        ),
     }
 }
 
-fn remove_skill_files(
+/// Drops `agents` from the owners of the skill and deletes it once nobody is left, so removing
+/// one agent keeps the skill the others still load.
+fn release_skill_files(
     skill_root: &Path,
     label: &str,
+    agents: &BTreeSet<String>,
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    if !skill_root.exists() {
+    if std::fs::symlink_metadata(skill_root).is_err() {
         return Ok(());
     }
-    if !skill_root.join(MARKER_FILE).exists() {
+    let Some(mut marker) = read_marker(skill_root) else {
         report.note(
             label,
             "kept (not installed by orbit setup; delete it by hand)",
         );
         return Ok(());
+    };
+    marker.agents.retain(|owner| !agents.contains(owner));
+    if !marker.agents.is_empty() {
+        write_marker(skill_root, &marker)?;
+        let remaining: Vec<&str> = marker.agents.iter().map(String::as_str).collect();
+        report.note(label, format!("kept for {}", remaining.join(", ")));
+        return Ok(());
     }
     remove_path(skill_root)?;
+    let _ = std::fs::remove_file(marker_path(skill_root));
     remove_empty_parents(skill_root, &target.root()?);
     report.note(label, "skill removed");
     Ok(())
@@ -354,36 +478,33 @@ fn remove_legacy(path: &Path, label: &str, target: &Target, report: &mut Report)
     if metadata.is_symlink() || !path.is_dir() {
         return Ok(());
     }
-    if path.join(MARKER_FILE).exists() {
-        remove_path(path)?;
-    } else if has_legacy_manifest(path) {
-        retire_legacy_manifest(path, label, report)?;
-        let mut directories = BTreeSet::new();
-        for (relative, contents) in embedded_files() {
-            let file = path.join(&relative);
-            let unedited = std::fs::read(&file).is_ok_and(|current| current == contents);
-            if unedited && std::fs::remove_file(&file).is_ok() {
-                directories.extend(
-                    file.ancestors()
-                        .skip(1)
-                        .take_while(|directory| directory.starts_with(path))
-                        .map(Path::to_path_buf),
-                );
-            }
-        }
-        let mut deepest_first: Vec<PathBuf> = directories.into_iter().collect();
-        deepest_first.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
-        for directory in &deepest_first {
-            let _ = std::fs::remove_dir(directory);
-        }
-        if path.exists() {
-            report.note(
-                label,
-                "kept (has files that differ from this release, edited or from an older one; delete it by hand)",
+    if !has_legacy_manifest(path) {
+        return Ok(());
+    }
+    retire_legacy_manifest(path, label, report)?;
+    let mut directories = BTreeSet::new();
+    for (relative, contents) in embedded_files() {
+        let file = path.join(&relative);
+        let unedited = std::fs::read(&file).is_ok_and(|current| current == contents);
+        if unedited && std::fs::remove_file(&file).is_ok() {
+            directories.extend(
+                file.ancestors()
+                    .skip(1)
+                    .take_while(|directory| directory.starts_with(path))
+                    .map(Path::to_path_buf),
             );
-            return Ok(());
         }
-    } else {
+    }
+    let mut deepest_first: Vec<PathBuf> = directories.into_iter().collect();
+    deepest_first.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
+    for directory in &deepest_first {
+        let _ = std::fs::remove_dir(directory);
+    }
+    if path.exists() {
+        report.note(
+            label,
+            "kept (has files that differ from this release, edited or from an older one; delete it by hand)",
+        );
         return Ok(());
     }
     remove_empty_parents(path, &target.root()?);
@@ -439,21 +560,21 @@ fn has_legacy_manifest(dir: &Path) -> bool {
 }
 
 fn unlink_skill_dir(
-    link_path: &Path,
-    label: &str,
+    link: &SkillLink,
+    agents: &BTreeSet<String>,
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    let Ok(metadata) = std::fs::symlink_metadata(link_path) else {
+    let Ok(metadata) = std::fs::symlink_metadata(&link.path) else {
         return Ok(());
     };
     if !metadata.is_symlink() {
-        return remove_skill_files(link_path, label, target, report);
+        return release_skill_files(&link.path, &link.label, agents, target, report);
     }
-    remove_symlink(link_path)
-        .with_context(|| format!("failed to remove {}", link_path.display()))?;
-    remove_empty_parents(link_path, &target.root()?);
-    report.note(label, "link removed");
+    remove_symlink(&link.path)
+        .with_context(|| format!("failed to remove {}", link.path.display()))?;
+    remove_empty_parents(&link.path, &target.root()?);
+    report.note(&link.label, "link removed");
     Ok(())
 }
 

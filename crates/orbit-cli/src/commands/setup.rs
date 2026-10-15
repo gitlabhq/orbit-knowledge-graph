@@ -256,7 +256,18 @@ impl Component {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum SkillKind {
     /// A thin skill that loads the real one when the agent reads it.
     #[default]
@@ -265,18 +276,49 @@ pub(crate) enum SkillKind {
     Full,
 }
 
-pub(crate) async fn skill_tree(
-    kind: SkillKind,
+/// What `--skill` asked for, and the instance's full tree when one may be needed. Which kind
+/// each skills directory gets is decided at install time from the agents that share it.
+#[derive(Clone, Default)]
+pub(crate) struct SkillRequest {
+    pub(crate) kind: Option<SkillKind>,
+    pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
+}
+
+/// Fetches the full tree only when an agent that will be configured can load nothing else;
+/// anything chosen later in the picker falls back to the embedded skill.
+pub(crate) async fn skill_request(
+    kind: Option<SkillKind>,
+    agents: &[String],
+    all: bool,
     components: &BTreeSet<Component>,
     dry_run: bool,
-) -> Result<BTreeMap<String, Vec<u8>>> {
-    if dry_run || !components.contains(&Component::Skill) {
-        return Ok(BTreeMap::new());
-    }
-    match kind {
-        SkillKind::Wrapper => crate::skill::wrapper_tree(),
-        SkillKind::Full => crate::skill::full_tree().await,
-    }
+    machine: &Machine,
+) -> Result<SkillRequest> {
+    let needed = match kind {
+        Some(kind) => kind == SkillKind::Full,
+        None => requires_full_skill(agents, all, machine),
+    };
+    let wanted = !dry_run && components.contains(&Component::Skill) && needed;
+    let full_tree = match wanted {
+        true => Some(crate::skill::full_tree().await?),
+        false => None,
+    };
+    Ok(SkillRequest { kind, full_tree })
+}
+
+fn requires_full_skill(agents: &[String], all: bool, machine: &Machine) -> bool {
+    let selected: Vec<_> = match (all, agents.is_empty()) {
+        (true, _) => spec::agents().collect(),
+        (false, false) => plan::agents_named(agents).unwrap_or_default(),
+        (false, true) => machine
+            .installed_agents()
+            .into_iter()
+            .map(|(agent, _)| agent)
+            .collect(),
+    };
+    selected
+        .iter()
+        .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full))
 }
 
 pub(crate) struct Options {
@@ -287,8 +329,7 @@ pub(crate) struct Options {
     pub(crate) verbose: bool,
     pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
-    /// Resolved up front because `--skill full` can need the network.
-    pub(crate) skill_tree: BTreeMap<String, Vec<u8>>,
+    pub(crate) skill: SkillRequest,
 }
 
 pub(crate) enum Target {
@@ -364,7 +405,7 @@ mod tests {
             verbose: false,
             index: false,
             components: Component::from_flags(false, &[]),
-            skill_tree: crate::skill::wrapper_tree().unwrap(),
+            skill: SkillRequest::default(),
         }
     }
 
@@ -719,13 +760,14 @@ mod tests {
             Path::new("../../.agents/skills/orbit")
         );
         assert_eq!(skill_manifest_name(&link), "orbit");
-        assert!(canonical.join(".orbit-managed").is_file());
+        assert!(dir.path().join(".agents/skills/.orbit-managed").is_file());
         assert!(!dir.path().join(".agents/skills/orbit-cli").exists());
 
         uninstall_named(&["claude", "codex"], dir.path());
 
         assert!(!link.exists());
         assert!(!canonical.exists());
+        assert!(!dir.path().join(".agents").exists());
     }
 
     #[test]
@@ -737,12 +779,11 @@ mod tests {
         assert_eq!(skill_manifest_name(&installed), "orbit");
         let manifest = std::fs::read_to_string(installed.join("SKILL.md")).unwrap();
         assert!(manifest.contains("!`orbit skills get orbit`"), "{manifest}");
-        let mut files: Vec<_> = std::fs::read_dir(&installed)
+        let files: Vec<_> = std::fs::read_dir(&installed)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
-        files.sort();
-        assert_eq!(files, [".orbit-managed", "SKILL.md"]);
+        assert_eq!(files, ["SKILL.md"]);
     }
 
     #[test]
@@ -752,39 +793,120 @@ mod tests {
         let installed = dir.path().join(".agents/skills/orbit");
 
         let options = Options {
-            skill_tree: crate::skill::embedded_tree_named("orbit").unwrap(),
+            skill: SkillRequest {
+                kind: Some(SkillKind::Full),
+                full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+            },
             ..options_for(&["codex"])
         };
         install(options, project(dir.path()), &bare_machine()).unwrap();
 
         assert_eq!(skill_manifest_name(&installed), "orbit");
         assert!(installed.join("references/local/cli.md").is_file());
-        assert!(installed.join(".orbit-managed").is_file());
 
         uninstall_named(&["codex"], dir.path());
         assert!(!installed.exists());
     }
 
     #[test]
-    fn setup_overwrites_an_unmarked_skill_but_uninstall_keeps_one() {
+    fn setup_moves_an_unmarked_skill_aside_and_uninstall_keeps_one() {
         let dir = tempfile::tempdir().unwrap();
-        let installed = dir.path().join(".agents/skills/orbit");
+        let skills = dir.path().join(".agents/skills");
+        let installed = skills.join("orbit");
         std::fs::create_dir_all(&installed).unwrap();
         std::fs::write(
             installed.join("SKILL.md"),
-            "---\nname: orbit\n---\nfrom glab\n",
+            "---\nname: orbit\n---\nfrom me\n",
         )
         .unwrap();
-        std::fs::write(installed.join("extra.md"), "stale\n").unwrap();
+        std::fs::write(installed.join("extra.md"), "mine\n").unwrap();
 
         install_with_mcp(&["codex"], dir.path());
 
-        assert!(installed.join(".orbit-managed").is_file());
+        assert!(skills.join(".orbit-managed").is_file());
         assert!(!installed.join("extra.md").exists());
+        let backup = skills.join("orbit.orbit-backup");
+        assert_eq!(
+            std::fs::read_to_string(backup.join("extra.md")).unwrap(),
+            "mine\n"
+        );
+        assert!(!backup.join("SKILL.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(backup.join("SKILL.md.orbit-backup")).unwrap(),
+            "---\nname: orbit\n---\nfrom me\n"
+        );
 
-        std::fs::remove_file(installed.join(".orbit-managed")).unwrap();
+        std::fs::remove_file(skills.join(".orbit-managed")).unwrap();
         uninstall_named(&["codex"], dir.path());
         assert!(installed.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn a_second_foreign_skill_gets_its_own_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        std::fs::create_dir_all(skills.join("orbit.orbit-backup")).unwrap();
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/extra.md"), "newer\n").unwrap();
+
+        install_with_mcp(&["codex"], dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(skills.join("orbit.orbit-backup.1/extra.md")).unwrap(),
+            "newer\n"
+        );
+    }
+
+    #[test]
+    fn uninstalling_one_agent_keeps_the_skill_the_others_share() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["claude", "codex", "duo"], dir.path());
+        let shared = dir.path().join(".agents/skills/orbit");
+
+        uninstall_named(&["codex"], dir.path());
+
+        assert!(shared.join("SKILL.md").is_file());
+        #[cfg(unix)]
+        assert!(dir.path().join(".claude/skills/orbit/SKILL.md").is_file());
+
+        uninstall_named(&["claude"], dir.path());
+        assert!(shared.join("SKILL.md").is_file());
+        #[cfg(unix)]
+        assert!(!dir.path().join(".claude/skills/orbit").exists());
+
+        uninstall_named(&["duo"], dir.path());
+        assert!(!shared.exists());
+        assert!(!dir.path().join(".agents/skills/.orbit-managed").exists());
+    }
+
+    #[test]
+    fn duo_gets_the_full_skill_and_a_later_setup_for_another_agent_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join(".agents/skills/orbit");
+
+        install_with_mcp(&["duo"], dir.path());
+        assert!(installed.join("references/local/cli.md").is_file());
+
+        install_with_mcp(&["claude"], dir.path());
+        assert!(installed.join("references/local/cli.md").is_file());
+
+        let wrapper = Options {
+            skill: SkillRequest {
+                kind: Some(SkillKind::Wrapper),
+                full_tree: None,
+            },
+            ..options_with_mcp(&["claude"])
+        };
+        install(wrapper, project(dir.path()), &bare_machine()).unwrap();
+        assert!(!installed.join("references").exists());
+    }
+
+    #[test]
+    fn the_wrapper_stays_when_no_agent_needs_the_full_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["claude", "codex"], dir.path());
+        install_with_mcp(&["codex"], dir.path());
+        assert!(!dir.path().join(".agents/skills/orbit/references").exists());
     }
 
     #[cfg(unix)]

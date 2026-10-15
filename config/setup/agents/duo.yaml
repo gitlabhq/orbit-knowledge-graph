@@ -9,3 +9,4 @@ skills:
   dir:
     project: .agents/skills
     global: "~/.agents/skills"
+  requires_full: true

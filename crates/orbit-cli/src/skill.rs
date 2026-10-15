@@ -74,13 +74,12 @@ pub(crate) async fn full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
         .collect()
 }
 
-#[cfg(test)]
-pub(crate) fn embedded_tree_named(name: &str) -> Result<BTreeMap<String, Vec<u8>>> {
+pub(crate) fn embedded_full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
     local_tree()
         .into_iter()
         .map(|(path, contents)| {
             let contents = match path == MANIFEST {
-                true => rename_manifest(&contents, name)?,
+                true => rename_manifest(&contents, DEFAULT_SKILL)?,
                 false => contents,
             };
             Ok((path, contents.into_bytes()))

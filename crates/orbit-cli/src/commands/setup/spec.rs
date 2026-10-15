@@ -174,6 +174,9 @@ pub(super) struct SkillDirs {
     pub(super) dir: ScopedPath,
     pub(super) link: Option<ScopedPath>,
     pub(super) permissions: Option<SkillPermissions>,
+    /// The assistant cannot run commands when it loads a skill, so it needs the real tree.
+    #[serde(default)]
+    pub(super) requires_full: bool,
 }
 
 #[derive(Debug, Deserialize)]

@@ -9,8 +9,10 @@ description: >-
   instruction section, hooks, and skill. A picker lists the detected agents;
   `--yes` skips it. `--mcp` also registers the MCP server. The skill is always
   named `orbit`. By default it is a wrapper that loads the real skill when the
-  agent reads it. With `--skill full` it holds the skill files themselves. Inside a Git
+  agent reads it. With `--skill full` it holds the skill files themselves, and Duo always gets that
+  form. A later run keeps the installed form unless `--skill` says otherwise. Inside a Git
   repository it then indexes the repository; `--no-index` skips that.
   Writes user-global configuration unless `--project` or `--dir` is given.
-  Existing files get a one-time `.orbit-backup` sibling. Re-running updates
+  Existing files get a one-time `.orbit-backup` sibling, and an existing
+  `orbit` skill directory is moved to `orbit.orbit-backup`. Re-running updates
   in place. `orbit uninstall` reverts it.

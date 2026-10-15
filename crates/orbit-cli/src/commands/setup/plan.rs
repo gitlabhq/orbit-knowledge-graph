@@ -1,16 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
 use super::components;
 use super::spec::{self, Agent};
-use super::{Component, Options, Target};
+use super::{Component, Options, SkillRequest, Target};
 
 pub(super) struct Selection {
     pub(super) agents: Vec<Agent>,
     pub(super) components: BTreeSet<Component>,
-    pub(super) skill_tree: BTreeMap<String, Vec<u8>>,
+    pub(super) skill: SkillRequest,
 }
 
 impl Selection {
@@ -28,7 +28,7 @@ impl Selection {
         Ok(Selection {
             agents,
             components: options.components.clone(),
-            skill_tree: options.skill_tree.clone(),
+            skill: options.skill.clone(),
         })
     }
 
@@ -49,7 +49,7 @@ impl Selection {
         Ok(Selection {
             agents,
             components,
-            skill_tree: BTreeMap::new(),
+            skill: SkillRequest::default(),
         })
     }
 
@@ -63,7 +63,7 @@ impl Selection {
     }
 }
 
-fn agents_named(names: &[String]) -> Result<Vec<Agent>> {
+pub(super) fn agents_named(names: &[String]) -> Result<Vec<Agent>> {
     let unique: BTreeSet<&String> = names.iter().collect();
     unique
         .into_iter()
