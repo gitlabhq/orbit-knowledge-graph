@@ -64,18 +64,16 @@ async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
         (None, None) => edge_tables(kind),
         _ => panic!("{location}: {kind} edges require both from: and to:, or neither"),
     };
-    let selects = tables
-        .iter()
-        .map(|table| {
-            format!(
+    let mut rows = Vec::new();
+    for table in tables {
+        let batches = ctx
+            .query(&format!(
                 "SELECT * FROM {table} FINAL WHERE {}",
                 conditions.join(" AND ")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ");
-    let batches = ctx.query(&selects).await;
-    let rows = extract_rows(&batches);
+            ))
+            .await;
+        rows.extend(extract_rows(&batches));
+    }
     let edge_location = format!("{location}: {kind} edges");
 
     if let Some(expected) = expect.count {

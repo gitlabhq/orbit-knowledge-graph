@@ -5,6 +5,7 @@ use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
+use ontology::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN};
 use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
@@ -757,26 +758,31 @@ impl<'a> EdgeRouting<'a> {
         use arrow::array::{Array, AsArray};
         use arrow::datatypes::Int32Type;
 
-        let strings = ["relationship_kind", "source_kind", "target_kind"]
-            .map(|name| {
-                let column = edges
-                    .column_by_name(name)
-                    .ok_or_else(|| SinkError(format!("edges batch missing {name} column")))?;
-                if column.null_count() > 0 {
-                    return Err(SinkError(format!(
-                        "{name} contains nulls, which edge routing cannot resolve"
-                    )));
-                }
-                let dictionary = column
-                    .as_dictionary_opt::<Int32Type>()
-                    .ok_or_else(|| SinkError(format!("{name} is not dictionary encoded")))?;
-                let values = dictionary.values().as_string_opt::<i32>().ok_or_else(|| {
-                    SinkError(format!("{name} dictionary values are not strings"))
-                })?;
-                Ok((dictionary.keys().values().as_ref(), values))
-            })
-            .into_iter()
-            .collect::<Result<Vec<_>, SinkError>>()?;
+        let strings = [
+            RELATIONSHIP_KIND_COLUMN,
+            SOURCE_KIND_COLUMN,
+            TARGET_KIND_COLUMN,
+        ]
+        .map(|name| {
+            let column = edges
+                .column_by_name(name)
+                .ok_or_else(|| SinkError(format!("edges batch missing {name} column")))?;
+            if column.null_count() > 0 {
+                return Err(SinkError(format!(
+                    "{name} contains nulls, which edge routing cannot resolve"
+                )));
+            }
+            let dictionary = column
+                .as_dictionary_opt::<Int32Type>()
+                .ok_or_else(|| SinkError(format!("{name} is not dictionary encoded")))?;
+            let values = dictionary
+                .values()
+                .as_string_opt::<i32>()
+                .ok_or_else(|| SinkError(format!("{name} dictionary values are not strings")))?;
+            Ok((dictionary.keys().values().as_ref(), values))
+        })
+        .into_iter()
+        .collect::<Result<Vec<_>, SinkError>>()?;
 
         let [relationship, source, target] = strings.as_slice() else {
             return Err(SinkError("edge route columns did not resolve".into()));
