@@ -4,10 +4,15 @@ use std::sync::Arc;
 
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
-use query_engine::compiler::{Frontend, compile_local, generate_local_ddl};
+use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, generate_local_ddl};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::shared::PipelineOutput;
 
-use super::{assert_response, pipeline_output, read_scenarios, seed_preset};
+use super::pagination::{PageCollection, next_page, with_after, without_cursor};
+use super::{
+    assert_compilation, assert_cursor, assert_output, assert_repeated_response, pipeline_output,
+    read_scenarios, repeat_count, seed_preset, validate_response,
+};
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Seed, discover};
 
@@ -35,27 +40,83 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
                 .parse()
                 .unwrap_or_else(|_| panic!("{name}: unknown query language '{key}'"));
             let label = format!("{name} [{key} on duckdb]");
-            let compiled = Arc::new(
-                compile_local(query, frontend, &ontology)
-                    .unwrap_or_else(|e| panic!("{label}: compile failed: {e}")),
-            );
-            let sql = compiled.base.render();
-            let batches = database
-                .query_arrow(&sql)
-                .unwrap_or_else(|e| panic!("{label}: {e}\n{sql}"));
-            let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context);
-            let response = GraphFormatter.format(&pipeline_output(
-                &compiled,
-                query_result,
-                0,
-                compiled.base.result_context.clone(),
-                sql,
-            ));
-            assert_response(&compiled.input, response, &scenario.expect, &label);
+            let expect = &scenario.expect;
+            expect.validate_pages_exclusive(&label);
+            let compiled = compile_local(query, frontend, &ontology).map(Arc::new);
+            let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
+                continue;
+            };
+            if expect.compile_only {
+                continue;
+            }
+            if expect.pages.is_empty() {
+                let output = execute(&database, &compiled, &label);
+                let baseline = assert_output(&output, frontend, expect, &label);
+                for run in 2..=repeat_count(expect, &label) {
+                    let compiled = compile_local(query, frontend, &ontology).map(Arc::new);
+                    let compiled = assert_compilation(compiled, expect, key, &label)
+                        .expect("repeated query should compile");
+                    let output = execute(&database, &compiled, &label);
+                    let response = assert_output(&output, frontend, expect, &label);
+                    assert_repeated_response(&baseline, &response, run, &label);
+                }
+                continue;
+            }
+            let mut collected = PageCollection::default();
+            let mut page_query = query.clone();
+            for (index, page_expect) in expect.pages.iter().enumerate() {
+                let page_label = format!("{label} page {}", index + 1);
+                let compiled = Arc::new(
+                    compile_local(&page_query, frontend, &ontology)
+                        .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
+                );
+                let output = execute(&database, &compiled, &page_label);
+                let response = assert_output(&output, frontend, page_expect, &page_label);
+                let response =
+                    serde_json::from_value(response).expect("response should deserialize");
+                collected.push(&response);
+                if let Some(token) = next_page(&response, index, expect.pages.len(), &page_label) {
+                    page_query = with_after(frontend, query, &token);
+                }
+            }
+            if let Some(all_pages) = &expect.all_pages {
+                collected.assert_expect(all_pages, &label);
+                if all_pages.matches_unpaginated {
+                    let query = without_cursor(frontend, query);
+                    let compiled =
+                        Arc::new(compile_local(&query, frontend, &ontology).unwrap_or_else(
+                            |error| panic!("{label}: unpaginated compile failed: {error}"),
+                        ));
+                    let output = execute(&database, &compiled, &label);
+                    assert_cursor(&output, &label);
+                    let response =
+                        validate_response(&compiled.input, GraphFormatter.format(&output), &label);
+                    collected.assert_matches(&response, &label);
+                }
+            }
         }
         ran += 1;
     }
     assert!(ran > 0, "no duckdb scenarios under {}", root.display());
+}
+
+fn execute(
+    database: &DuckDbClient,
+    compiled: &Arc<CompiledQueryContext>,
+    label: &str,
+) -> PipelineOutput {
+    let sql = compiled.base.render();
+    let batches = database
+        .query_arrow(&sql)
+        .unwrap_or_else(|error| panic!("{label}: {error}\n{sql}"));
+    let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    pipeline_output(
+        compiled,
+        query_result,
+        0,
+        compiled.base.result_context.clone(),
+        sql,
+    )
 }
 
 fn seed_local<'a>(database: &DuckDbClient, seeds: impl IntoIterator<Item = &'a Seed>, name: &str) {

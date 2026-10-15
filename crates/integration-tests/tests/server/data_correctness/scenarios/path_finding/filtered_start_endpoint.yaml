@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_filtered_start_endpoint_reaches_project
 description: Filtered start endpoint (username=alice) finds path to Project 1004
 
 query:

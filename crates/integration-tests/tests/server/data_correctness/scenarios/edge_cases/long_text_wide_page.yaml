@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::long_node_text_is_excerpted_only_on_wide_pages
 # The wide-page limit triggers text truncation. The ClickHouse filter
 # matches the full value, but the response property is truncated.
 # The filter assertion checks the response (truncated) value.

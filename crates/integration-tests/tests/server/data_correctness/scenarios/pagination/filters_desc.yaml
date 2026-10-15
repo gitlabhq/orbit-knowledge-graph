@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_with_filters_desc_pages_return_exact_matches
 description: Filtered DESC pagination returns exact matches per page
 
 query:
@@ -19,34 +18,46 @@ query:
     MATCH (u:User)-[:AUTHORED]->(wi:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 AND wi.work_item_type IN ['issue', 'task', 'epic'] AND wi.weight >= 3 RETURN u, wi.work_item_type, wi.weight ORDER BY wi.id DESC PAGE 1
 
 expect:
+  all_pages:
+    node_order:
+      WorkItem: [4010, 4003, 4000]
+    no_duplicate_ids: true
+    no_duplicate_edges: true
+    matches_unpaginated: true
   pages:
     - node_count: 2
       nodes:
         WorkItem:
           order: [4010]
+          absent: [4001, 4002]
           filters:
             work_item_type: { in: [issue, task, epic] }
             weight: { gte: 3 }
       edge_exists:
-        AUTHORED: [[7, 4010]]
+        AUTHORED:
+          - { from: User, from_id: 7, to: WorkItem, to_id: 4010 }
       has_more: true
     - node_count: 2
       nodes:
         WorkItem:
           order: [4003]
+          absent: [4001, 4002]
           filters:
             work_item_type: { in: [issue, task, epic] }
             weight: { gte: 3 }
       edge_exists:
-        AUTHORED: [[3, 4003]]
+        AUTHORED:
+          - { from: User, from_id: 3, to: WorkItem, to_id: 4003 }
       has_more: true
     - node_count: 2
       nodes:
         WorkItem:
           order: [4000]
+          absent: [4001, 4002]
           filters:
             work_item_type: { in: [issue, task, epic] }
             weight: { gte: 3 }
       edge_exists:
-        AUTHORED: [[1, 4000]]
+        AUTHORED:
+          - { from: User, from_id: 1, to: WorkItem, to_id: 4000 }
       has_more: false

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::aggregation_dedup_counts_unique_entities
 description: Aggregation counts each entity once after dedup
 
 config:

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_project_id_filter_scopes_edges
 description: Filtering Definition by project_id scopes both node scan and CALLS edge scan
 
 query:

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_work_item_in_milestone_returns_correct_edges
 description: WorkItem-Milestone IN_MILESTONE traversal returns correct edges and milestone properties
 
 query:
@@ -20,8 +19,8 @@ expect:
   referential_integrity: true
   edge_exists:
     IN_MILESTONE:
-      - [4000, 6000]
-      - [4001, 6000]
+      - { from: WorkItem, from_id: 4000, to: Milestone, to_id: 6000 }
+      - { from: WorkItem, from_id: 4001, to: Milestone, to_id: 6000 }
   nodes:
     Milestone:
       rows:

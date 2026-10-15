@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_filter_returns_latest_matching_version
 description: Filter returns latest version when it matches
 
 config:

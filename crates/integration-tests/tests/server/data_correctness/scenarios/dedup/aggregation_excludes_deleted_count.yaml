@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::aggregation_excludes_deleted_from_count
 description: Aggregation excludes deleted entities from count
 
 config:

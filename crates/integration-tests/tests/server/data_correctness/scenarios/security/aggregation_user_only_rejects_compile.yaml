@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_only_rejects_at_compile
 description: Aggregation on User alone rejects at compile for non-admin because User has no traversal_path
 
 query:
@@ -13,4 +12,5 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN count(u) AS cnt LIMIT 10
 
 expect:
-  compile_error: "traversal_path"
+  compile_error: true
+  compile_error_contains: [traversal_path, aggregation]

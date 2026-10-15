@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_cross_namespace_pages_cover_scoped_edges
 description: Cross-namespace scoped traversal pages cover 3 in-scope edges
 
 config:
@@ -20,9 +19,38 @@ query:
 
 expect:
   all_pages:
+    node_ids:
+      Group: [100, 200]
+      Project: [1000, 1002, 1010]
     edge_count: 3
     page_count: 3
+    no_duplicate_edges: true
+    matches_unpaginated: true
   pages:
-    - skip_requirements: [node_count, cursor, "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:CONTAINS"]
+    - node_count: 2
+      nodes:
+        Group: { ids: [100], absent: [101, 102, 900] }
+        Project: { ids: [1000], absent: [1001, 1003, 1004, 9000] }
+      edge_exists:
+        CONTAINS:
+          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
+      edge_count: { CONTAINS: 1 }
+      has_more: true
+    - node_count: 2
+      nodes:
+        Group: { ids: [100], absent: [101, 102, 900] }
+        Project: { ids: [1002], absent: [1001, 1003, 1004, 9000] }
+      edge_exists:
+        CONTAINS:
+          - { from: Group, from_id: 100, to: Project, to_id: 1002 }
+      edge_count: { CONTAINS: 1 }
+      has_more: true
+    - node_count: 2
+      nodes:
+        Group: { ids: [200], absent: [101, 102, 900] }
+        Project: { ids: [1010], absent: [1001, 1003, 1004, 9000] }
+      edge_exists:
+        CONTAINS:
+          - { from: Group, from_id: 200, to: Project, to_id: 1010 }
+      edge_count: { CONTAINS: 1 }
+      has_more: false

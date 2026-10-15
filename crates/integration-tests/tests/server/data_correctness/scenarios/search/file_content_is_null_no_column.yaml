@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_is_null_filter_without_selecting_column
 description: File content is_null filter works without selecting content column
 
 query:
@@ -24,3 +23,5 @@ expect:
     File:
       ids: [13003]
       prop_absent: [content]
+      rows:
+        - { id: 13003, path: assets/logo.png }

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_step_indices_are_sequential
 description: Path edge step indices are sequential starting from 0
 
 query:
