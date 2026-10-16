@@ -12,7 +12,10 @@ fixtures:
               Other x = new Other();
 
               Box x() {
-                  return this;
+                  if (x != null) {
+                      x.b();
+                  }
+                  return new Box();
               }
 
               void b() {}
@@ -38,13 +41,14 @@ fixtures:
       }
 
 tests:
-  - name: the method x has no self edge
+  - name: the method x reads the field x and has no self edge
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
-      WHERE c.name = 'x' AND t.name = 'x'
-      RETURN t.fqn AS callee
+      WHERE c.name = 'x' AND t.name IN ['x', 'b']
+      RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { callee: "Main.Other.b", kind: "Method" } }
 
   - name: a read of x types the receiver by the field, not by the method of the same name
     query: |
@@ -55,7 +59,7 @@ tests:
       - { row_count: 1 }
       - { row: { callee: "Main.Other.b", kind: "Method" } }
 
-  - name: a call of x() targets the method and types the receiver by its return
+  - name: a call of x() targets the method and not the field's type
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'goCall'
@@ -63,6 +67,16 @@ tests:
     assert:
       - { not: true, row: { callee: "Main.Other.b" } }
       - { row: { callee: "Main.Box.x" } }
+
+  - name: a call of x() types the receiver by its return
+    # Known gap: a Java chained call on a method result is not typed, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Box.b", "Main.Box.x"] } }
 
   - name: an inherited read of x types the receiver by the field
     # Known gap: a bare read of an inherited field is not bound in the subclass scope, on main too.

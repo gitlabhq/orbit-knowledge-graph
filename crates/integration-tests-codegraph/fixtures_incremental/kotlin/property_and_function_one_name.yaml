@@ -10,7 +10,17 @@ fixtures:
       class Box {
           val x: Other = Other()
 
-          fun x(): Box = this
+          fun x(): Box {
+              x.b()
+              return Box()
+          }
+
+          val cb: Int = 1
+
+          fun local(): Int {
+              fun cb(): Int = 2
+              return cb()
+          }
 
           fun b() {}
 
@@ -22,13 +32,23 @@ fixtures:
       }
 
 tests:
-  - name: the function x has no self edge
+  - name: the function x reads the property x and has no self edge
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
-      WHERE c.name = 'x' AND t.name = 'x'
-      RETURN t.fqn AS callee
+      WHERE c.name = 'x' AND t.name IN ['x', 'b']
+      RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Function" } }
+
+  - name: a local function with a property's name stays the call target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'local' AND t.name = 'cb'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: "Function" } }
 
   - name: a read of x types the receiver by the property, not by the function of the same name
     query: |
