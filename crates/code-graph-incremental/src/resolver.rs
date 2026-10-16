@@ -992,7 +992,10 @@ fn gather_imports_for(
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
                             let hits = resolve_glob(&submod, file_index, &lookup.prefixes);
-                            let (submod, hits) = prefer_own(submod, hits);
+                            let (submod, hits) = match config.same_path_same_type {
+                                true => prefer_own(submod, hits),
+                                false => (submod, hits),
+                            };
                             hits.into_iter().map(move |loc| (loc, submod.clone(), true))
                         })),
                     };
