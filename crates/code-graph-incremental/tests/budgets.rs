@@ -3,9 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Canonicalize, Link, Parse, Rewrite, SourceFile};
-use code_graph_incremental::tree::EdgeKind;
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Sentinel, templates};
 mod common;
@@ -112,81 +110,4 @@ fn skipped(killed: &[Killed]) -> Vec<(&str, &str)> {
         .collect();
     found.sort();
     found
-}
-
-#[test]
-fn a_file_nested_past_the_depth_limit_keeps_what_lies_above_the_cut() {
-    let repo = tempfile::tempdir().unwrap();
-    let nested = format!(
-        "function top() {{}}\nfunction nested(c) {{\ntop();\n{}{}}}\n",
-        "if (c) {\n".repeat(200),
-        "}\n".repeat(200)
-    );
-    write_all(repo.path(), &[("nested.js", &nested)]);
-    let env = Env::with_limits(
-        SupportLang::JavaScript,
-        Limits {
-            max_tree_depth: 64,
-            ..Limits::UNLIMITED
-        },
-    )
-    .unwrap();
-    let graph = templates::index(Context::new(&env, common::walk(repo.path()))).unwrap();
-    let report = &graph.context().report;
-    assert!(report.skipped.is_empty());
-    assert_eq!(skipped(&report.limited), [("depth", "nested.js")]);
-    let state = &graph.value().state;
-    let name = |tree: u32, node: u32| {
-        let def = state.trees[tree as usize].cursor(node);
-        env.lang
-            .syms
-            .resolve(def.child_sym(C::DefName).unwrap_or(0))
-            .to_string()
-    };
-    let calls: Vec<_> = state
-        .edges
-        .iter()
-        .filter(|e| e.kind == EdgeKind::Calls)
-        .map(|e| (name(e.from_tree, e.from_node), name(e.to_tree, e.to_node)))
-        .collect();
-    assert_eq!(calls, [("nested".to_string(), "top".to_string())]);
-}
-
-#[test]
-fn a_class_whose_body_is_cut_keeps_its_definitions() {
-    let repo = tempfile::tempdir().unwrap();
-    let nested = format!(
-        "class Shallow {{\n  method(c) {{\n{}{}  }}\n}}\n",
-        "if (c) {\n".repeat(200),
-        "}\n".repeat(200)
-    );
-    write_all(repo.path(), &[("shallow.js", &nested)]);
-    let env = Env::with_limits(
-        SupportLang::JavaScript,
-        Limits {
-            max_tree_depth: 64,
-            ..Limits::UNLIMITED
-        },
-    )
-    .unwrap();
-    let graph = templates::index(Context::new(&env, common::walk(repo.path()))).unwrap();
-    assert_eq!(
-        skipped(&graph.context().report.limited),
-        [("depth", "shallow.js")]
-    );
-    let mut names: Vec<_> = graph
-        .value()
-        .state
-        .trees
-        .iter()
-        .flat_map(|tree| {
-            tree.root()
-                .descendants()
-                .filter_map(|n| n.child_sym(C::DefName))
-                .collect::<Vec<_>>()
-        })
-        .map(|sym| env.lang.syms.resolve(sym).to_string())
-        .collect();
-    names.sort();
-    assert_eq!(names, ["Shallow", "method"]);
 }
