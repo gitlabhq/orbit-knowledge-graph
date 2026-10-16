@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
+use clickhouse_client::FromArrowColumn;
 use integration_testkit::{load_ontology, t};
 use orbit_server::active_schema::{ActiveSchema, SchemaSnapshot};
+use orbit_server_config::AppConfig;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use crate::common::TestContext;
@@ -50,6 +52,24 @@ pub const STALE_FIRST_PASS: CheckpointRow = CheckpointRow {
     written_at: "now64(6) - INTERVAL 3 HOUR",
     ..PAGING_FIRST_PASS
 };
+
+pub fn use_production_query_settings() {
+    orbit_server_config::query::init(AppConfig::embedded_defaults().query);
+}
+
+pub async fn query_cache_usage(ctx: &TestContext) -> Vec<String> {
+    ctx.execute("SYSTEM FLUSH LOGS").await;
+    let batches = ctx
+        .query(&format!(
+            "SELECT toString(query_cache_usage) FROM system.query_log \
+             WHERE type = 'QueryFinish' AND current_database = '{}' \
+               AND Settings['use_query_cache'] = '1' \
+             ORDER BY event_time_microseconds",
+            ctx.config.database
+        ))
+        .await;
+    String::extract_column(&batches, 0).expect("query_cache_usage column")
+}
 
 pub fn admin_context() -> SecurityContext {
     SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])

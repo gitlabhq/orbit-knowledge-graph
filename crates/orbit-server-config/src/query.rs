@@ -18,6 +18,11 @@ fn escape_setting_str(s: &str) -> String {
     format!("'{escaped}'")
 }
 
+const QUERY_CACHE_UNCACHEABLE_HANDLING: [(&str, &str); 2] = [
+    ("query_cache_nondeterministic_function_handling", "'ignore'"),
+    ("query_cache_system_table_handling", "'ignore'"),
+];
+
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
@@ -67,7 +72,8 @@ pub struct QueryConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_ast_depth: Option<u64>,
 
-    /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
+    /// ClickHouse `use_query_cache`. Queries with non-deterministic functions
+    /// or system tables still run, but uncached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_query_cache: Option<bool>,
 
@@ -182,7 +188,8 @@ impl QueryConfig {
             Ok(Value::Object(m)) => m,
             _ => return Ok(Vec::new()),
         };
-        map.into_iter()
+        let mut settings = map
+            .into_iter()
             .filter(|(_, v)| !v.is_null())
             .map(|(k, v)| {
                 let formatted = match &v {
@@ -197,7 +204,13 @@ impl QueryConfig {
                 };
                 Ok((k, formatted))
             })
-            .collect()
+            .collect::<Result<Vec<_>, String>>()?;
+        if self.use_query_cache == Some(true) {
+            settings.extend(
+                QUERY_CACHE_UNCACHEABLE_HANDLING.map(|(k, v)| (k.to_string(), v.to_string())),
+            );
+        }
+        Ok(settings)
     }
 }
 
@@ -209,7 +222,7 @@ impl QueryConfig {
 /// query:
 ///   default:
 ///     max_execution_time: 30
-///     use_query_cache: false
+///     use_query_cache: true
 ///     query_cache_ttl: 60
 ///   aggregation:
 ///     max_execution_time: 60
@@ -313,6 +326,14 @@ mod tests {
             settings,
             vec![
                 ("max_execution_time".into(), "30".into()),
+                (
+                    "query_cache_nondeterministic_function_handling".into(),
+                    "'ignore'".into()
+                ),
+                (
+                    "query_cache_system_table_handling".into(),
+                    "'ignore'".into()
+                ),
                 ("use_query_cache".into(), "1".into()),
             ]
         );
@@ -333,7 +354,16 @@ mod tests {
                 ("max_ast_elements".into(), "1000000".into()),
                 ("max_execution_time".into(), "30".into()),
                 ("max_expanded_ast_elements".into(), "10000000".into()),
+                (
+                    "query_cache_nondeterministic_function_handling".into(),
+                    "'ignore'".into()
+                ),
+                (
+                    "query_cache_system_table_handling".into(),
+                    "'ignore'".into()
+                ),
                 ("query_cache_ttl".into(), "60".into()),
+                ("use_query_cache".into(), "1".into()),
             ]
         );
         Ok(())

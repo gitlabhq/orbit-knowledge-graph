@@ -147,6 +147,11 @@ impl ArrowClickHouseClient {
         self
     }
 
+    pub fn without_query_cache(mut self) -> Self {
+        self.client = self.client.with_setting("use_query_cache", "0");
+        self
+    }
+
     pub fn database(&self) -> &str {
         &self.database
     }

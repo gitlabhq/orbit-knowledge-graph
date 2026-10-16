@@ -56,24 +56,16 @@ impl PipelineStage for ClickHouseExecutor {
 
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
-
-            let mut http_settings: Vec<(String, String)> = compiled
-                .base
-                .query_config
-                .to_clickhouse_settings()
-                .map_err(PipelineError::Execution)
-                .inspect_err(|e| obs.record_error(e))?;
-
             let query_id = correlation::query_id("base");
-            http_settings.push(("query_id".to_string(), query_id.clone()));
-            http_settings.push(("log_comment".to_string(), log_comment));
-
             let prepared = PreparedQuery {
                 sql: compiled.base.sql.clone(),
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
+                http_settings: vec![
+                    ("query_id".to_string(), query_id.clone()),
+                    ("log_comment".to_string(), log_comment),
+                ],
                 query_id,
-                http_settings,
             };
             (prepared, compiled.base.result_context.clone())
         };
