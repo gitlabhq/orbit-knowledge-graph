@@ -53,7 +53,7 @@ pub async fn run_if_needed(
     match active {
         None => {
             info!(
-                version = *SCHEMA_VERSION,
+                schema_version = *SCHEMA_VERSION,
                 "fresh install — creating tables from ontology and recording initial schema version"
             );
             let prefix = table_prefix(*SCHEMA_VERSION);
@@ -64,7 +64,7 @@ pub async fn run_if_needed(
         }
         Some(version) if version == *SCHEMA_VERSION => {
             info!(
-                version = *SCHEMA_VERSION,
+                schema_version = *SCHEMA_VERSION,
                 "schema version matches — no migration needed"
             );
             metrics.record("complete", "skipped");
@@ -123,7 +123,7 @@ async fn run_forward_migration(
 ) -> Result<(), DispatcherMigrationError> {
     if read_active_version(graph).await? == Some(*SCHEMA_VERSION) {
         info!(
-            version = *SCHEMA_VERSION,
+            schema_version = *SCHEMA_VERSION,
             "migration already completed by another pod — releasing lock"
         );
         metrics.record("complete", "skipped");
@@ -133,7 +133,7 @@ async fn run_forward_migration(
 
     let ledger = MigrationLedger::load_embedded().map_err(MigrationError::Ledger)?;
     let requested_scope = ledger.resolve_scope_between(active_version, *SCHEMA_VERSION);
-    info!(version = *SCHEMA_VERSION, %requested_scope, "preparing tables for schema migration");
+    info!(schema_version = *SCHEMA_VERSION, %requested_scope, "preparing tables for schema migration");
     execute::create_tables_with_selective_cloning(
         graph,
         ontology,
@@ -147,7 +147,7 @@ async fn run_forward_migration(
     metrics.record("create_tables", "success");
 
     info!(
-        version = *SCHEMA_VERSION,
+        schema_version = *SCHEMA_VERSION,
         "marking schema version as migrating"
     );
     mark_version_migrating(graph, *SCHEMA_VERSION).await?;
@@ -177,7 +177,7 @@ async fn run_rollback(
 ) -> Result<(), DispatcherMigrationError> {
     if read_active_version(graph).await? == Some(*SCHEMA_VERSION) {
         info!(
-            version = *SCHEMA_VERSION,
+            schema_version = *SCHEMA_VERSION,
             "rollback already completed by another pod — releasing lock"
         );
         metrics.record("complete", "skipped");
@@ -195,7 +195,7 @@ async fn run_rollback(
         let retired_versions = promote_version(graph, *SCHEMA_VERSION).await?;
         metrics.record("complete", "rollback_reactivated");
         info!(
-            version = *SCHEMA_VERSION,
+            schema_version = *SCHEMA_VERSION,
             ?retired_versions,
             "rollback complete — resuming on existing tables"
         );

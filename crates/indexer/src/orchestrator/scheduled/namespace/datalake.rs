@@ -121,7 +121,7 @@ impl DatalakeChangeDetector {
                         .record_error(super::TASK_NAME, "detection_branch");
                     error!(
                         table = %branch.table,
-                        target = %branch.target,
+                        branch_target = %branch.target,
                         error = %err,
                         "change detection branch failed; skipping it until the next full sweep"
                     );
