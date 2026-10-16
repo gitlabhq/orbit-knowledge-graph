@@ -869,6 +869,29 @@
       "domain": "indexer.namespace_deletion"
     },
     {
+      "otel_name": "gkg.indexer.sdlc.change.delay",
+      "prom_name": "gkg_indexer_sdlc_change_delay_seconds",
+      "description": "Seconds from dispatch of an incremental run until it completes, outside migration campaigns.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
       "otel_name": "gkg.indexer.sdlc.datalake.query",
       "prom_name": "gkg_indexer_sdlc_datalake_query_bytes_total",
       "description": "Total bytes returned by ClickHouse datalake extraction queries.",

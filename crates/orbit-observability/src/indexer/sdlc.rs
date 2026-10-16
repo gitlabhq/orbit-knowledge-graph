@@ -1,5 +1,5 @@
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE, LATENCY_SLOW};
 
 pub mod labels {
     pub const ENTITY: &str = "entity";
@@ -79,6 +79,15 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
     DOMAIN,
 );
 
+pub const CHANGE_DELAY: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.sdlc.change.delay",
+    "Seconds from dispatch of an incremental run until it completes, outside migration campaigns.",
+    Some("s"),
+    &[],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &PIPELINE_DURATION,
     &PIPELINE_ROWS_PROCESSED,
@@ -88,4 +97,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &DATALAKE_QUERY_BYTES,
     &TRANSFORM_DURATION,
     &WATERMARK_LAG,
+    &CHANGE_DELAY,
 ];

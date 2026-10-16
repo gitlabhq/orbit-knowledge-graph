@@ -253,6 +253,10 @@ impl EntityHandler {
             }
         };
 
+        if result.is_ok() && mode == IndexingMode::Incremental && request.campaign_id.is_none() {
+            self.metrics.record_change_delay(&window.target);
+        }
+
         match &result {
             Ok(stats) => {
                 debug!(
@@ -450,12 +454,17 @@ impl Handler for EntityHandler {
 mod tests {
     use super::*;
 
+    use crate::checkpoint::CheckpointError;
+    use crate::durability::WriteDurability;
     use crate::modules::sdlc::plan::build_plans;
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
     use ontology::Ontology;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
     use orbit_server_config::AppConfig;
 
     fn handler_context() -> HandlerContext {
@@ -468,6 +477,20 @@ mod tests {
     }
 
     fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
+        build_handler_with(
+            entity_name,
+            scope,
+            Arc::new(MockCheckpointStore),
+            test_metrics(),
+        )
+    }
+
+    fn build_handler_with(
+        entity_name: &str,
+        scope: EtlScope,
+        checkpoint_store: Arc<dyn CheckpointStore>,
+        metrics: SdlcMetrics,
+    ) -> EntityHandler {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(
             &ontology,
@@ -488,7 +511,6 @@ mod tests {
             .unwrap_or_else(|| panic!("entity plan not found: {entity_name}"));
 
         let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
-        let checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(MockCheckpointStore);
         let pipeline = Arc::new(Pipeline::new(
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
@@ -509,7 +531,7 @@ mod tests {
             writer,
             datalake,
             checkpoint_store,
-            test_metrics(),
+            metrics,
             subscription,
             None,
             IndexingAnalytics::disabled(),
@@ -545,6 +567,112 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    struct CompletedCheckpointStore;
+
+    #[async_trait]
+    impl CheckpointStore for CompletedCheckpointStore {
+        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+            let mut checkpoint = Checkpoint::new(ts("2024-01-20T00:00:00Z"));
+            checkpoint.complete(ts("2024-01-20T00:00:00Z"));
+            Ok(Some(checkpoint))
+        }
+
+        async fn save(
+            &self,
+            _key: &str,
+            _checkpoint: &Checkpoint,
+            _durability: WriteDurability,
+        ) -> Result<(), CheckpointError> {
+            Ok(())
+        }
+
+        async fn load_by_prefix(
+            &self,
+            _prefix: &str,
+        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+            Ok(Vec::new())
+        }
+
+        async fn consolidate(
+            &self,
+            _parent_key: &str,
+            _watermark: &DateTime<Utc>,
+        ) -> Result<(), CheckpointError> {
+            Ok(())
+        }
+    }
+
+    async fn change_delay_observations(
+        checkpoint_store: Arc<dyn CheckpointStore>,
+        request: serde_json::Value,
+    ) -> u64 {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .build();
+        let metrics = SdlcMetrics::with_meter(&provider.meter("test"));
+        let handler = build_handler_with(
+            "MergeRequest",
+            EtlScope::Namespaced,
+            checkpoint_store,
+            metrics,
+        );
+
+        let envelope = TestEnvelopeFactory::simple(&request.to_string());
+        handler.handle(handler_context(), envelope).await.unwrap();
+        provider.force_flush().unwrap();
+
+        exporter
+            .get_finished_metrics()
+            .unwrap()
+            .iter()
+            .flat_map(|resource| resource.scope_metrics())
+            .flat_map(|scope| scope.metrics())
+            .filter(|metric| metric.name() == "gkg.indexer.sdlc.change.delay")
+            .map(|metric| match metric.data() {
+                AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
+                    .data_points()
+                    .map(|point| point.count())
+                    .sum::<u64>(),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    fn namespace_request(campaign_id: Option<&str>) -> serde_json::Value {
+        serde_json::json!({
+            "namespace": 100,
+            "traversal_path": "42/100/",
+            "watermark": "2024-01-21T00:00:00Z",
+            "campaign_id": campaign_id,
+        })
+    }
+
+    #[tokio::test]
+    async fn incremental_run_records_change_delay() {
+        let observations =
+            change_delay_observations(Arc::new(CompletedCheckpointStore), namespace_request(None))
+                .await;
+        assert_eq!(observations, 1);
+    }
+
+    #[tokio::test]
+    async fn full_load_does_not_record_change_delay() {
+        let observations =
+            change_delay_observations(Arc::new(MockCheckpointStore), namespace_request(None)).await;
+        assert_eq!(observations, 0);
+    }
+
+    #[tokio::test]
+    async fn campaign_run_does_not_record_change_delay() {
+        let observations = change_delay_observations(
+            Arc::new(CompletedCheckpointStore),
+            namespace_request(Some("campaign-1")),
+        )
+        .await;
+        assert_eq!(observations, 0);
     }
 
     #[test]
