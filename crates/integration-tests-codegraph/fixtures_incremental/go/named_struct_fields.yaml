@@ -10,6 +10,13 @@ fixtures:
       	Port int
       }
 
+      type Commented struct {
+      	// First is documented.
+      	First string
+      	// Second is documented.
+      	Second int
+      }
+
       type Base struct{}
 
       type Derived struct {
@@ -33,14 +40,14 @@ fixtures:
       }
 
 tests:
-  - name: the fields of named struct types are the only Field definitions
+  - name: the fields of named struct types are the only Field definitions, with comments between them
     query: |
       MATCH (d:Definition) WHERE d.definition_type = 'Field'
       RETURN d.name AS name
       ORDER BY name
     assert:
-      - { row_count: 3 }
-      - { column_values: { field: name, values: ["Level", "Name", "Port"] } }
+      - { row_count: 5 }
+      - { column_values: { field: name, values: ["First", "Level", "Name", "Port", "Second"] } }
 
   - name: an embedded field of a named struct is a supertype
     query: |
