@@ -597,17 +597,24 @@ impl<'t> Fold<'t> {
         self.def_stack.push(c.index());
         for decorator in c.children().filter(|node| node.is(C::Decorator)) {
             self.handle_inline_imports(decorator);
-            let before = self.edges.len();
-            if let Some(sym) = decorator.sym_opt() {
-                let targets = self.lookup(sym);
+            if decorator.sym_opt().is_some() || decorator.value_child(C::Member).is_some() {
+                let before = self.edges.len();
+                let targets = self.lookup_chain(decorator);
                 self.emit_targets(&targets, c.index());
-            }
-            self.walk_children(decorator);
-            for edge in &mut self.edges[before..] {
-                if edge.kind == EdgeKind::Imports && edge.site.is_none() {
-                    edge.site = Some(decorator.index());
+                for edge in &mut self.edges[before..] {
+                    if edge.kind == EdgeKind::Imports && edge.site.is_none() {
+                        edge.site = Some(decorator.index());
+                    }
                 }
             }
+            let mut stack = Vec::new();
+            stack.extend(
+                decorator
+                    .children_rev()
+                    .filter(|node| !node.is(C::Member))
+                    .map(|node| WorkItem::Visit(node.index())),
+            );
+            self.run(stack);
         }
         for binding in c.children().filter(|node| Self::is_header_binding(*node)) {
             if let Some(rhs) = binding.bare_rhs() {
