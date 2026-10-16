@@ -1,0 +1,21 @@
+name: "JavaScript: 5,000 nested loops that each assign a name number their nodes once"
+
+fixtures:
+  - path: m.js
+    content:
+      - "function a() {}\n"
+      - "function f(c) {\n"
+      - { repeat: 5000, text: "while (c) {\nlet x{i} = c;\n" }
+      - "a();\n"
+      - { repeat: 5000, text: "}\n" }
+      - "}\n"
+
+tests:
+  - name: "the call in the innermost loop reads a from before the outermost loop"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: a } }

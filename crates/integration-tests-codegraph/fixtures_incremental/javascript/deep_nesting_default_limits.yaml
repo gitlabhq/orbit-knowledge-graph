@@ -1,0 +1,44 @@
+name: "JavaScript: the default budgets skip a file nested past max_tree_depth and keep the rest"
+
+limits: default
+
+skipped:
+  - { path: nested_if.js, label: depth }
+
+fixtures:
+  - path: target.js
+    content: |
+      export function target() {}
+
+  - path: nested_if.js
+    content:
+      - "import { target } from './target';\nfunction nestedIf(c) {\n"
+      - { repeat: 2300, text: "if (c) {\n" }
+      - "function innermostIf() {}\n"
+      - { repeat: 2300, text: "}\n" }
+      - "target();\n}\n"
+
+  - path: shallow.js
+    content: |
+      import { target } from './target';
+      function shallow() {
+        target();
+      }
+
+tests:
+  - name: "the shallow file still links to the target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: shallow } }
+
+  - name: "the skipped file contributes no definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['nestedIf', 'innermostIf']
+      RETURN count(d) AS n
+    assert:
+      - { count_equals: { field: n, value: 0 } }

@@ -143,7 +143,15 @@ Four test targets run the suites and the pipeline checks:
 | `vanished_tree` | a repository tree that disappears does not fail the other files |
 
 A suite that mixes languages declares `pipeline:`. A known gap is a `skip: true`
-with a comment that gives the reason.
+with a comment that gives the reason. The incremental runner still executes the
+queries of a skipped test without its assertions, so a query that no longer runs,
+or needs a LIMIT, fails the suite while it stays skipped.
+
+`limits: default` indexes a suite with the production budgets of
+`config/default.yaml` (incremental runner only; unset or `unlimited` applies no
+budget). `skipped:` lists the files those budgets must skip, each as
+`{ path: deep.js, label: depth }`; the label names the guard that must fire and
+is optional. Without `skipped:` the runner fails when any file is skipped.
 
 ## Adding a test
 

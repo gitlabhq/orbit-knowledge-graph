@@ -569,3 +569,45 @@ fn concurrent_loading_and_first_reads_preserve_content_and_classify_once() {
         Some(Decision::List("binary"))
     );
 }
+
+#[test]
+fn the_file_limit_counts_a_kept_entry_after_a_listed_one_of_the_same_path() {
+    let listed = (
+        "a".to_string(),
+        Put::Listed {
+            size: 0,
+            reason: "excluded_extension",
+        },
+    );
+    let kept = |name: &str| (name.to_string(), Put::Bytes(vec![1]));
+    let limits = Limits {
+        files: Some(1),
+        ..Limits::default()
+    };
+    let entries = vec![listed, kept("b"), kept("a")];
+    let result = Vfs::load(entries, (), limits, Options::default());
+    assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
+}
+
+#[test]
+fn the_file_limit_counts_paths_that_share_a_hash() {
+    use std::hash::{Hash, Hasher};
+    let (a, b) = ("p/e6e786bcf6d1b1ad.cs", "p/741aba3948e9c9ca.cs");
+    let fx = |path: &str| {
+        let mut hasher = rustc_hash::FxHasher::default();
+        path.hash(&mut hasher);
+        hasher.finish()
+    };
+    assert_eq!(
+        fx(a),
+        fx(b),
+        "the pair no longer collides under FxHasher; find a new one"
+    );
+    let limits = Limits {
+        files: Some(1),
+        ..Limits::default()
+    };
+    let entries = vec![(a, Put::Bytes(vec![1])), (b, Put::Bytes(vec![1]))];
+    let result = Vfs::load(entries, (), limits, Options::default());
+    assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
+}
