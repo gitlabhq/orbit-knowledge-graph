@@ -1,0 +1,87 @@
+name: "Rust: a call targets the method in the impl, not the field of the same name"
+
+fixtures:
+  - path: src/lib.rs
+    content: |
+      pub mod buf;
+      pub mod user;
+
+  - path: src/buf.rs
+    content: |
+      pub struct Buf {
+          pub len: usize,
+      }
+
+      impl Buf {
+          pub fn new() -> Buf {
+              Buf { len: 0 }
+          }
+
+          pub fn len(&self) -> usize {
+              self.len
+          }
+      }
+
+      pub fn same_file(b: &Buf) -> usize {
+          b.len()
+      }
+
+      pub fn same_file_read(b: &Buf) -> usize {
+          b.len
+      }
+
+  - path: src/user.rs
+    content: |
+      use crate::buf::Buf;
+
+      pub fn cross_file(b: &Buf) -> usize {
+          b.len()
+      }
+
+      pub fn cross_file_read(b: &Buf) -> usize {
+          b.len
+      }
+
+tests:
+  - name: a same-file call targets the method in the impl, not the field
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'same_file'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["buf::Buf::len"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a same-file field read keeps the field as its target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'same_file_read'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["buf::Buf::len"] } }
+      - { column_values: { field: kind, values: ["Field"] } }
+
+  - name: a cross-file call targets the method in the impl, not the field
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'cross_file'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["buf::Buf::len"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a cross-file field read is not a call of the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'cross_file_read'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { not: true, row: { kind: "Method" } }
+
+  - name: the getter has no self edge
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'len'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }

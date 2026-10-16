@@ -670,12 +670,60 @@ impl<'t> Fold<'t> {
             let remap = callee.is_some()
                 && self.edges[i].kind == EdgeKind::Calls
                 && target.child_sym(C::DefName) == callee;
+            let to = match remap {
+                true => self.callable_in(target),
+                false => target.index(),
+            };
             let edge = &mut self.edges[i];
             edge.site = Some(site);
-            if remap {
-                edge.to_node = crate::tree::callable_target(target).index();
-            }
+            edge.to_node = to;
         }
+        self.dedupe_from(first);
+    }
+
+    fn callable_in(&self, target: Cursor<'t>) -> u32 {
+        let found = crate::tree::callable_target(target);
+        if !found.is_field() {
+            return found.index();
+        }
+        self.type_parts(found, true)
+            .find_map(|part| self.member_of(part, found.child_sym(C::DefName)?))
+            .filter(|&member| !self.tree.cursor(member).is_field())
+            .unwrap_or(found.index())
+    }
+
+    fn field_in(&self, target: Cursor<'t>) -> u32 {
+        let found = crate::tree::field_target(target);
+        if found.is_field() {
+            return found.index();
+        }
+        self.type_parts(found, false)
+            .find_map(|part| self.member_of(part, found.child_sym(C::DefName)?))
+            .filter(|&member| self.tree.cursor(member).is_field())
+            .unwrap_or(found.index())
+    }
+
+    fn type_parts(&self, member: Cursor<'t>, blocks: bool) -> impl Iterator<Item = u32> + '_ {
+        member
+            .ancestors()
+            .find(|node| node.is_class())
+            .and_then(|class| class.child_sym(C::DefName))
+            .into_iter()
+            .flat_map(|name| self.defs_named(name))
+            .filter(move |&part| self.tree.cursor(part).has(C::ImplBlock) == blocks)
+    }
+
+    fn dedupe_from(&mut self, first: usize) {
+        if self.edges.len() - first < 2 {
+            return;
+        }
+        let mut seen = FxHashSet::default();
+        let tail: Vec<Edge> = self
+            .edges
+            .drain(first..)
+            .filter(|e| seen.insert((e.kind, e.to_node)))
+            .collect();
+        self.edges.extend(tail);
     }
 
     fn handle_standalone_member(&mut self, c: Cursor<'t>) {
@@ -685,9 +733,17 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
-            for edge in &mut self.edges[first..] {
+            for i in first..self.edges.len() {
+                let target = self.tree.cursor(self.edges[i].to_node);
+                let to = match self.edges[i].kind == EdgeKind::Calls {
+                    true => self.field_in(target),
+                    false => target.index(),
+                };
+                let edge = &mut self.edges[i];
                 edge.call_resolution = crate::tree::CallResolution::Reference;
+                edge.to_node = to;
             }
+            self.dedupe_from(first);
         }
     }
 

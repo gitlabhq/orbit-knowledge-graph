@@ -1411,11 +1411,31 @@ fn call_edges<'a>(
     targets.into_iter().map(move |t| call_edge(from, t, site))
 }
 
-fn callee_targets<'a>(call: Cursor<'a>, targets: Vec<Cursor<'a>>) -> Vec<Cursor<'a>> {
-    match call.has(C::Property) {
-        true => targets,
-        false => targets.into_iter().map(callable_target).collect(),
+fn callee_targets<'a>(
+    ctx: &'a ResolveCtx,
+    call: Cursor<'a>,
+    targets: Vec<Cursor<'a>>,
+) -> Vec<Cursor<'a>> {
+    if call.has(C::Property) {
+        return targets;
     }
+    targets
+        .into_iter()
+        .map(|target| {
+            let found = callable_target(target);
+            if !found.is_field() {
+                return found;
+            }
+            found
+                .ancestors()
+                .find(|node| node.is_class())
+                .into_iter()
+                .flat_map(|class| impl_blocks_of(ctx, class))
+                .find_map(|block| find_method_in(block, found.child_sym(C::DefName)?))
+                .filter(|method| !method.is_field())
+                .unwrap_or(found)
+        })
+        .collect()
 }
 
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
@@ -1484,7 +1504,7 @@ fn dispatch(
             };
             Some(Either::Right(call_edges(
                 from,
-                callee_targets(call, targets),
+                callee_targets(ctx, call, targets),
                 usage.site,
             )))
         })
@@ -1986,13 +2006,13 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 {
                     out.extend(call_edges(
                         from,
-                        callee_targets(node, member_targets(ctx, m, target)),
+                        callee_targets(ctx, node, member_targets(ctx, m, target)),
                         Some(node.index()),
                     ));
                 }
                 Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
-                    let members = callee_targets(node, method_up(ctx, target, m.sym(), fi));
+                    let members = callee_targets(ctx, node, method_up(ctx, target, m.sym(), fi));
                     out.extend(call_edges(from, members, Some(node.index())));
                 }
                 None => {
@@ -2044,7 +2064,7 @@ fn inherited_calls<'a>(
         }
         for parent in parents {
             let site = Some(call.index());
-            let targets = callee_targets(call, method_up(ctx, *parent, name, fi));
+            let targets = callee_targets(ctx, call, method_up(ctx, *parent, name, fi));
             out.extend(call_edges(from, targets, site));
         }
     }
