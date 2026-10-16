@@ -149,6 +149,9 @@ pub struct Resolver {
     file_index: FileIndex,
     wildcard_sym: u32,
     tags: ReservedTags,
+    /// Per retained file, the names a removed file declared and this file
+    /// saw; set by `remap`, consumed by the next `invalidate`.
+    lost: FxHashMap<u32, FxHashSet<u32>>,
 }
 
 impl Resolver {
@@ -160,6 +163,7 @@ impl Resolver {
             file_index: FileIndex::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             tags: ReservedTags::new(lang),
+            lost: FxHashMap::default(),
         }
     }
 
@@ -193,24 +197,40 @@ impl Resolver {
     /// The files whose cross-file pass must run again: the dirty ones, every
     /// importer that lost a target, every importer that gained one declaring
     /// a name it mentions, importers of files that first resolve now, and
-    /// their dependents. A lost target that still exists keeps the names it
-    /// exported in the scopes of its other importers, so every importer
-    /// re-resolves; a removed target's names leave those scopes in `remap`,
-    /// so only the importers that mention one re-resolve.
+    /// their dependents. A change that is known by name (a removed file's
+    /// declared names, a gained file's) travels to dependents that mention
+    /// one of the names; any other change travels to every dependent. A
+    /// lost target that still exists keeps the names it exported in the
+    /// scopes of its other importers, so it counts as such a change.
     fn invalidate(
         &self,
         previous_index: &FileIndex,
         trees: &[Tree],
         dirty_fis: &FxHashSet<u32>,
         paths: &PathLookup,
+        lost: FxHashMap<u32, FxHashSet<u32>>,
     ) -> FxHashSet<u32> {
         if self.visible.is_empty() {
             return (0..trees.len() as u32).collect();
         }
         let mut invalidated: FxHashSet<u32> = dirty_fis.iter().copied().collect();
+        let mut pending: VecDeque<(u32, Option<std::rc::Rc<FxHashSet<u32>>>)> =
+            dirty_fis.iter().map(|&fi| (fi, None)).collect();
+        let claims = |fi: u32, name: u32| !matches!(self.visible[fi as usize].get(&name), Some(held) if held.fi == fi);
+        for (fi, names) in lost {
+            let names: FxHashSet<u32> = names.into_iter().filter(|&n| claims(fi, n)).collect();
+            if !invalidated.contains(&fi) && mentions(&trees[fi as usize], &names) {
+                invalidated.insert(fi);
+                pending.push_back((fi, Some(std::rc::Rc::new(names))));
+            }
+        }
         let lookup_changed = self.lookup != *paths.lookup;
         if lookup_changed {
-            invalidated.extend(self.reqs.iter().map(|req| req.fi));
+            for req in &self.reqs {
+                if invalidated.insert(req.fi) {
+                    pending.push_back((req.fi, None));
+                }
+            }
         } else {
             let mut known: FxHashMap<(u32, u32), SmallVec<[Loc; 1]>> = FxHashMap::default();
             for req in &self.reqs {
@@ -232,31 +252,27 @@ impl Resolver {
                     .collect();
                 if targets.iter().any(|target| !now.contains(target)) {
                     invalidated.insert(fi);
+                    pending.push_back((fi, None));
                     continue;
                 }
-                let gained = now.iter().filter(|loc| !targets.contains(loc));
-                let claims = |name: u32| !matches!(self.visible[fi as usize].get(&name), Some(held) if held.fi == fi);
-                let gained_names: FxHashSet<u32> = gained
+                let gained_names: FxHashSet<u32> = now
+                    .iter()
+                    .filter(|loc| !targets.contains(loc))
                     .flat_map(|loc| {
                         names_of
                             .entry(loc.fi)
                             .or_insert_with(|| {
-                                gather_visible_one(
-                                    &trees[loc.fi as usize],
-                                    loc.fi as usize,
-                                    self.tags.exports,
-                                )
-                                .into_keys()
-                                .collect()
+                                declared_names(&trees[loc.fi as usize], self.tags.exports)
                             })
                             .iter()
                             .copied()
-                            .filter(|&name| claims(name))
+                            .filter(|&name| claims(fi, name))
                             .collect::<Vec<_>>()
                     })
                     .collect();
                 if mentions(&trees[fi as usize], &gained_names) {
                     invalidated.insert(fi);
+                    pending.push_back((fi, Some(std::rc::Rc::new(gained_names))));
                 }
             }
         }
@@ -272,23 +288,35 @@ impl Resolver {
                 .filter(|fi| !dirty_fis.contains(fi))
                 .collect();
             let (discovered, _) = gather_imports_for(trees, paths, &discovery_files);
-            invalidated.extend(
-                discovered
-                    .iter()
-                    .filter(|req| !known_imports.contains(&(req.fi, req.node)))
-                    .map(|req| req.fi),
-            );
+            for req in &discovered {
+                if !known_imports.contains(&(req.fi, req.node)) && invalidated.insert(req.fi) {
+                    pending.push_back((req.fi, None));
+                }
+            }
         }
-        if !invalidated.is_empty() {
+        if !pending.is_empty() {
             let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
             for req in &self.reqs {
                 dependents.entry(req.target_fi).or_default().push(req.fi);
             }
-            let mut pending: VecDeque<_> = invalidated.iter().copied().collect();
-            while let Some(target) = pending.pop_front() {
+            let mut swept: FxHashSet<u32> = FxHashSet::default();
+            while let Some((target, names)) = pending.pop_front() {
                 for &dependent in dependents.get(&target).into_iter().flatten() {
-                    if invalidated.insert(dependent) {
-                        pending.push_back(dependent);
+                    match &names {
+                        None => {
+                            if swept.insert(dependent) {
+                                invalidated.insert(dependent);
+                                pending.push_back((dependent, None));
+                            }
+                        }
+                        Some(names) => {
+                            if !invalidated.contains(&dependent)
+                                && mentions(&trees[dependent as usize], names)
+                            {
+                                invalidated.insert(dependent);
+                                pending.push_back((dependent, Some(names.clone())));
+                            }
+                        }
                     }
                 }
             }
@@ -296,20 +324,19 @@ impl Resolver {
         invalidated
     }
 
-    /// Renumbers the resolver's memory after files left the graph. Returns,
-    /// per retained file, the visible names it lost, whatever brought them
-    /// in: an import or a `visible_from` directive. A file that mentions one
-    /// of them must resolve again.
+    /// Renumbers the resolver's memory after files left the graph. Keeps,
+    /// per retained file, the names a removed file declared and this file
+    /// saw, whatever brought them in: an import or a `visible_from`
+    /// directive. The next `invalidate` resolves a file again when it
+    /// mentions one of them.
     pub fn remap(
         &mut self,
         old_labels: &[String],
         label_to_fi: &FxHashMap<&str, u32>,
-    ) -> FxHashMap<u32, FxHashSet<u32>> {
+        declared_by_removed: &FxHashMap<u32, FxHashSet<u32>>,
+    ) {
         if self.visible.is_empty() {
-            return label_to_fi
-                .values()
-                .map(|&fi| (fi, FxHashSet::default()))
-                .collect();
+            return;
         }
         let n = label_to_fi.len();
         let mut remapped: VisibleMap = (0..n)
@@ -333,7 +360,12 @@ impl Resolver {
                             .insert(sym, Loc::new(target_new_fi as usize, loc.node));
                     }
                     None => {
-                        lost_a_name.entry(new_fi).or_default().insert(sym);
+                        if declared_by_removed
+                            .get(&loc.fi)
+                            .is_some_and(|names| names.contains(&sym))
+                        {
+                            lost_a_name.entry(new_fi).or_default().insert(sym);
+                        }
                     }
                 }
             }
@@ -359,7 +391,7 @@ impl Resolver {
                 })
             })
             .collect();
-        lost_a_name
+        self.lost = lost_a_name;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -378,9 +410,10 @@ impl Resolver {
     ) -> Result<ResolveResult, Killed> {
         let index_names = support_lang.index_names();
         let roots = Roots::build(trees, lang);
+        let lost = std::mem::take(&mut self.lost);
         let previous_index = self.rebuild_file_index(trees, env, entrypoints);
         let paths = PathLookup::new(trees, env, &self.file_index, lookup, &roots);
-        let dirty_fis = &self.invalidate(&previous_index, trees, dirty_fis, &paths);
+        let dirty_fis = &self.invalidate(&previous_index, trees, dirty_fis, &paths, lost);
         self.lookup = lookup.clone();
         edges.retain(|edge| edge.from_tree == edge.to_tree || !dirty_fis.contains(&edge.from_tree));
 
@@ -895,6 +928,20 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
         }
     }
     names
+}
+
+/// The names a file declares for its importers: its top-level defs, its
+/// default export, and every def an `exports` tag names.
+pub(crate) fn declared_names(tree: &Tree, exports_key: u32) -> FxHashSet<u32> {
+    let root = tree.root();
+    root.children()
+        .filter(|c| c.is(C::Def))
+        .filter_map(|d| {
+            d.child_sym(C::DefName)
+                .or_else(|| d.child_sym(C::DefaultExport))
+        })
+        .chain(root.descendants().filter_map(|c| c.tag(exports_key)))
+        .collect()
 }
 
 /// Whether any node of the file carries one of `names`. An empty set
@@ -1621,32 +1668,21 @@ fn package_imports(
             _ => groups.push(i..i + 1),
         }
     }
-    let mut members: FxHashMap<&str, Vec<u32>> = FxHashMap::default();
-    for group in &groups {
-        let path = reqs[group.start].target_path.as_str();
-        members
-            .entry(path)
-            .or_default()
-            .extend(reqs[group.clone()].iter().map(|r| r.target_fi));
-    }
-    for files in members.values_mut() {
-        files.sort_unstable();
-        files.dedup();
-    }
     let mut via = vec![Via::Own; reqs.len()];
-    let mut ids: FxHashMap<&str, usize> = FxHashMap::default();
-    let mut packages = Vec::new();
+    let mut ids: FxHashMap<(&str, Vec<u32>), usize> = FxHashMap::default();
+    let mut packages: Vec<Vec<u32>> = Vec::new();
     for group in groups {
         let first = &reqs[group.start];
-        let package = &members[first.target_path.as_str()];
-        let targets = reqs[group.clone()].iter().map(|r| r.target_fi);
-        if !targets.eq(package.iter().copied().filter(|&f| f != first.fi)) {
-            continue;
-        }
-        let id = *ids.entry(first.target_path.as_str()).or_insert_with(|| {
-            packages.push(package.clone());
-            packages.len() - 1
-        });
+        let mut files: Vec<u32> = reqs[group.clone()].iter().map(|r| r.target_fi).collect();
+        files.push(first.fi);
+        files.sort_unstable();
+        files.dedup();
+        let id = *ids
+            .entry((first.target_path.as_str(), files.clone()))
+            .or_insert_with(|| {
+                packages.push(files.clone());
+                packages.len() - 1
+            });
         via[group.start] = Via::Package(id);
         for v in &mut via[group.start + 1..group.end] {
             *v = Via::Covered;
@@ -2719,10 +2755,11 @@ mod remap_tests {
         let old_labels: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
         let label_to_fi = FxHashMap::from_iter([("a", 0u32), ("c", 1u32)]);
 
-        let lost = resolver.remap(&old_labels, &label_to_fi);
+        let declared = FxHashMap::from_iter([(1, FxHashSet::from_iter([name]))]);
+        resolver.remap(&old_labels, &label_to_fi, &declared);
 
         assert_eq!(
-            lost,
+            resolver.lost,
             FxHashMap::from_iter([(0, FxHashSet::from_iter([name]))])
         );
         assert_eq!(resolver.visible[1].get(&name), Some(&Loc::new(0, 0)));

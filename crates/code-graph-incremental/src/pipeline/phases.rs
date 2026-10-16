@@ -110,7 +110,14 @@ impl Phase<ReindexInput> for Remap {
             .chain(context.repository.files().map(|f| f.path.as_ref()))
             .collect();
         let removed_labels: FxHashSet<&str> = removed.iter().map(String::as_str).collect();
-        let dirty = remap(&mut state, &old_labels, &dirty_labels, &removed_labels);
+        let exports_key = crate::tags::ReservedTags::new(&context.env.lang).exports;
+        let dirty = remap(
+            &mut state,
+            &old_labels,
+            &dirty_labels,
+            &removed_labels,
+            exports_key,
+        );
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
@@ -120,15 +127,27 @@ impl Phase<ReindexInput> for Remap {
 
 /// `Parse` entries this crate has a grammar for become the lazy workset,
 /// Drops the dirty trees, renumbers what remains, and returns the retained
-/// files whose resolution depended on a dropped one: every importer of a
-/// modified file, and an importer of a removed file only when it mentions a
-/// name that file declared.
+/// importers of a modified file. The importers of a removed file wait for
+/// the resolver's own stale check, which knows the names that file declared.
 fn remap(
     state: &mut State,
     old_labels: &[String],
     dirty: &FxHashSet<&str>,
     removed: &FxHashSet<&str>,
+    exports_key: u32,
 ) -> FxHashSet<u32> {
+    let declared_by_removed: FxHashMap<u32, FxHashSet<u32>> = state
+        .trees
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| removed.contains(t.label.as_str()))
+        .map(|(i, t)| {
+            (
+                u32::try_from(i).expect("file index exceeds u32"),
+                crate::resolver::declared_names(t, exports_key),
+            )
+        })
+        .collect();
     state.trees.retain(|t| !dirty.contains(t.label.as_str()));
 
     let label_to_fi: FxHashMap<&str, u32> = state
@@ -168,45 +187,17 @@ fn remap(
         .map(|(i, _)| u32::try_from(i).expect("file index exceeds u32"))
         .collect();
     let was_removed = |old_fi: u32| removed.contains(old_labels[old_fi as usize].as_str());
-    let declared = |old_fi: u32| -> FxHashSet<u32> {
-        state
-            .resolver
-            .visible()
-            .get(old_fi as usize)
-            .map(|names| names.keys().copied().collect())
-            .unwrap_or_default()
-    };
-    let mut dependents = FxHashSet::default();
-    let mut watched: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
-    for r in state.resolver.reqs() {
-        if !old_dirty_fis.contains(&r.target_fi) {
-            continue;
-        }
-        let Some(&new_fi) = label_to_fi.get(old_labels[r.fi as usize].as_str()) else {
-            continue;
-        };
-        match was_removed(r.target_fi) {
-            true => watched
-                .entry(new_fi)
-                .or_default()
-                .extend(declared(r.target_fi)),
-            false => {
-                dependents.insert(new_fi);
-            }
-        }
-    }
-    for (new_fi, lost) in state.resolver.remap(old_labels, &label_to_fi) {
-        watched.entry(new_fi).or_default().extend(lost);
-    }
-    dependents.extend(
-        watched
-            .into_iter()
-            .filter(|(new_fi, names)| {
-                state.resolver.visible().is_empty()
-                    || crate::resolver::mentions(&state.trees[*new_fi as usize], names)
-            })
-            .map(|(new_fi, _)| new_fi),
-    );
+    let dependents: FxHashSet<u32> = state
+        .resolver
+        .reqs()
+        .iter()
+        .filter(|r| old_dirty_fis.contains(&r.target_fi) && !was_removed(r.target_fi))
+        .filter_map(|r| label_to_fi.get(old_labels[r.fi as usize].as_str()))
+        .copied()
+        .collect();
+    state
+        .resolver
+        .remap(old_labels, &label_to_fi, &declared_by_removed);
     dependents
 }
 
