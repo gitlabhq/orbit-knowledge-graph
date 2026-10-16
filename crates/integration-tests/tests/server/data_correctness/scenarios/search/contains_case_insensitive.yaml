@@ -1,10 +1,10 @@
-description: contains ignores case, spans a token boundary, matches a word prefix, and prunes granules with the ngram skip index
+description: contains ignores case, spans a token boundary, matches a word prefix, and prunes granules with the ngram skip index (the unrelated row sorts below the seed's primary-key range, so FINAL does not read the seed granule again)
 
 config:
   unmerged_seed: true
   extra_seed:
     gl_merge_request:
-      - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/10/1010/" }
 
 query:
   json: |

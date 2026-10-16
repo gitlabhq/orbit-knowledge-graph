@@ -442,3 +442,39 @@ fn path_pages_compare_complete_signatures_against_unpaginated_output() {
         "pages:\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [3]}}\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [4]}}\nall_pages: {matches_unpaginated: true, edge_count: 3}",
     );
 }
+
+fn username_scan(steps: Value) -> Value {
+    json!([{"Plan": {
+        "Node Type": "ReadFromMergeTree", "Description": "gkg.v1_gl_user", "Indexes": steps,
+    }}])
+}
+
+fn assert_username_index_used(plan: &Value) {
+    let expected = [super::format::ExpectedIndex {
+        table: "gl_user".into(),
+        index: "idx_username_ngram".into(),
+    }];
+    super::assert_indexes_used(plan, &expected, "indexes");
+}
+
+#[test]
+fn indexes_used_accepts_skip_index_pruning_that_reaches_the_read() {
+    assert_username_index_used(&username_scan(json!([
+        {"Type": "PrimaryKey", "Initial Granules": 978, "Selected Granules": 978},
+        {"Type": "Skip", "Name": "idx_username_ngram", "Initial Granules": 978, "Selected Granules": 50},
+        {"Type": "PrimaryKeyExpand", "Initial Granules": 50, "Selected Granules": 61},
+    ])));
+}
+
+#[test]
+fn indexes_used_rejects_pruning_that_final_expands_back() {
+    let plan = username_scan(json!([
+        {"Type": "PrimaryKey", "Initial Granules": 978, "Selected Granules": 978},
+        {"Type": "Skip", "Name": "idx_username_ngram", "Initial Granules": 978, "Selected Granules": 50},
+        {"Type": "PrimaryKeyExpand", "Initial Granules": 50, "Selected Granules": 978},
+    ]));
+    assert_panics(
+        || assert_username_index_used(&plan),
+        "selected 50 of 978 granules, but the scan reads 978 after the last index step",
+    );
+}

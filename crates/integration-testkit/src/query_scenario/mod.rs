@@ -380,6 +380,17 @@ fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], lab
             selected < initial,
             "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
         );
+
+        let read = scan["Indexes"]
+            .as_array()
+            .and_then(|steps| steps.last())
+            .and_then(|step| step["Selected Granules"].as_u64())
+            .unwrap_or(selected);
+        assert!(
+            read < initial,
+            "{label}: skip index {index} on {table} selected {selected} of {initial} granules, \
+             but the scan reads {read} after the last index step\nplan: {plan:#}"
+        );
     }
 }
 
