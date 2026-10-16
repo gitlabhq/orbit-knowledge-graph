@@ -13,7 +13,7 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
+use crate::tree::{Compact, Edge, EdgeKind, is_name_text, members_by_level};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
@@ -355,15 +355,10 @@ impl<'t> Fold<'t> {
         node.is(C::Binding) && node.has(C::Declaration) && !node.lifted()
     }
 
-    /// The children before the loop variable are the header: the iterable,
-    /// evaluated once before the loop. A loop without a declared variable
-    /// has no header.
     fn loop_header_len(c: Cursor<'_>) -> usize {
         c.children().position(Self::declares_loop_var).unwrap_or(0)
     }
 
-    /// A bare `(__declaration)` on the loop variable scopes it to the loop;
-    /// a labelled one binds where the label says.
     fn enter_loop(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
         if self.loop_ends.is_empty() {
             (self.loop_ends, self.assigned, self.loop_wildcards) =
@@ -686,9 +681,11 @@ impl<'t> Fold<'t> {
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
-            let fallback =
-                (callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar))
-                    .then(|| Rc::clone(&self.wildcards));
+            let fallback = (callee.sym_opt().is_some()
+                && !callee.has(C::Member)
+                && !callee.has(C::Ivar)
+                && self.guessable(callee.sym()))
+            .then(|| Rc::clone(&self.wildcards));
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -970,8 +967,6 @@ impl<'t> Fold<'t> {
         binding
     }
 
-    /// Declared items and imports keep their value through every shadowing
-    /// local, so a path head finds them below the locals.
     fn declare_static(&mut self, node: Cursor<'_>, name: u32, value: Value) -> u32 {
         let binding = self.declare_binding(node, name);
         self.ssa.write_variable(binding, self.cur, value.clone());
@@ -1045,6 +1040,9 @@ impl<'t> Fold<'t> {
             .child(C::Object)
             .filter(|object| !object.has(C::Qualifier))?;
         let root = self.binding(object.sym());
+        if self.statics.contains_key(&root) {
+            return None;
+        }
         Some((root, member.sym()))
     }
 
@@ -1297,9 +1295,6 @@ impl<'t> Fold<'t> {
         self.resolve_values(obj, method, from, values);
     }
 
-    /// A receiver read inside a loop sees its phi before the back edge is
-    /// sealed; the values that arrive through the back edge are resolved once
-    /// the outermost loop closes.
     fn defer_loop_receiver(&mut self, obj: Cursor, method: u32, from: u32, site: u32) {
         if self.loops.is_empty() || obj.children().next().is_some() {
             return;
@@ -1389,7 +1384,7 @@ impl<'t> Fold<'t> {
 
     fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) {
         let mut targets = self.lookup(sym);
-        if targets.is_empty() {
+        if targets.is_empty() && self.guessable(sym) {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
                 import.is_some_and(|i| i.has_tag(self.tags.callable))
@@ -1401,6 +1396,10 @@ impl<'t> Fold<'t> {
             targets = wild.map(|&n| Value::ImportRef(n)).collect();
         }
         self.emit_targets(&targets, from);
+    }
+
+    fn guessable(&self, sym: u32) -> bool {
+        is_name_text(self.syms.resolve(sym))
     }
 
     fn emit_targets(&mut self, targets: &[Value], from: u32) {

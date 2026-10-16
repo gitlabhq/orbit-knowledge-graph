@@ -179,19 +179,14 @@ stages:
       - match: '(for_statement $$$H body: $B)'
         replace: '(__ssa_loop $$$H $B)'
 
-      # Struct fields: named → field def; embedded → supertype
-      - match: '(field_declaration name: $N:field_identifier)'
-        replace: '(__def (__defname @$N) (__field_def))'
-      - match: '(field_declaration type: $T:type_identifier)'
-        replace: '(__supertype @$T)'
-
       # Interface method signatures
       - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
 
       # Types
-      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F)))'
-        replace: '(__def (__defname @$N) (__struct) $$$F)'
+      # Only a named struct type defines fields; an anonymous struct in a value does not
+      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F:field_declaration)))'
+        replace: '(__def (__defname @$N) (__struct) $$$F->struct_field)'
       - match: '(type_spec name: $N type: (interface_type $$$M))'
         replace: '(__def (__defname @$N) (__interface) $$$M)'
       - match: '(type_spec name: $N)'
@@ -212,6 +207,11 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      # Struct fields: named → field def; embedded → supertype
+      - match: '(struct_field name: $N:field_identifier)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(struct_field type: $T:type_identifier)'
+        replace: '(__supertype @$T)'
       - match: '(__ssa_return (expression_list $V:__struct_lit))'
         replace: '(__ssa_return (__call (__callee @$V) $V))'
       - match: '(__ssa_return (expression_list $V:identifier))'

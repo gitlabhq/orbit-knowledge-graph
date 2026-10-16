@@ -38,9 +38,6 @@ impl Placement {
         }
     }
 
-    /// A node a text label names stays under that label when it can move,
-    /// so the canonical nodes inside it survive `prune`. A bare leaf holds
-    /// none and is left to be removed with the target.
     fn keep(&mut self, t: &mut Tree, src: NodeId, label: NodeId) {
         let node = t.node(src);
         let holds_nodes =
