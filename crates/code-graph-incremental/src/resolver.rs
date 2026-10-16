@@ -1089,7 +1089,9 @@ fn propagate_reexports(
                 Via::Covered => continue,
             }
             let exports = req.exports(trees, visible);
-            for c in trees[req.fi as usize].cursor(req.node).names() {
+            let import = trees[req.fi as usize].cursor(req.node);
+            let file_level = import.enclosing(|p| p.is(C::Def)).is_none();
+            for c in import.names() {
                 let ns = wildcard_or_name(wildcard_sym, c);
                 if ns == wildcard_sym {
                     if let Some(alias) = namespace_alias(wildcard_sym, c)
@@ -1111,7 +1113,7 @@ fn propagate_reexports(
                         req.fi as usize,
                         c.child_sym(C::Alias).unwrap_or(ns),
                         loc,
-                        true,
+                        file_level,
                     );
                 }
             }
