@@ -249,7 +249,7 @@ impl Cluster {
             Arc::new(config.analytics.clone()),
         )
         .with_analytics(analytics.clone());
-        let client = serve_grpc(service, shutdown.clone()).await;
+        let client = serve_grpc(Arc::new(service), shutdown.clone()).await;
 
         Self {
             graph,
@@ -741,14 +741,14 @@ fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
 }
 
 pub(super) async fn serve_grpc(
-    service: OrbitServiceImpl,
+    service: Arc<OrbitServiceImpl>,
     shutdown: CancellationToken,
 ) -> OrbitServiceClient<Channel> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(OrbitServiceServer::new(service))
+            .add_service(OrbitServiceServer::from_arc(service))
             .serve_with_incoming_shutdown(TcpListenerStream::new(listener), shutdown.cancelled())
             .await
             .unwrap();
@@ -758,7 +758,7 @@ pub(super) async fn serve_grpc(
         .unwrap()
 }
 
-fn authenticated<T>(message: T) -> Request<T> {
+pub(super) fn authenticated<T>(message: T) -> Request<T> {
     let claims = Claims {
         admin: false,
         ..Claims::dummy()

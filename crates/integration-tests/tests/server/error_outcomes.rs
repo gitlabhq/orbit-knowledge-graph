@@ -1,6 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::StreamExt;
+use http_body::Frame;
+use http_body_util::StreamBody;
+use prost::Message;
+
 use clickhouse_client::ClickHouseConfigurationExt;
 use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, SeededColumnResolver, TestContext, load_ontology, t,
@@ -17,6 +23,7 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::OrbitServiceImpl;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
+use orbit_server::proto::orbit_service_server::OrbitService;
 use orbit_server::proto::{
     ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, RedactionExchange,
     RedactionResponse, redaction_exchange,
@@ -25,11 +32,16 @@ use orbit_server_config::AppConfig;
 use orbit_server_config::query::{QueryConfig, QuerySettings};
 use query_engine::shared::content::ColumnResolverRegistry;
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::{CancellationToken, DropGuard};
+use tonic::Streaming;
+use tonic::codec::Codec;
 use tonic::transport::Channel;
+use tonic_prost::ProstCodec;
 
-use super::schema_readiness::{QueryStream, serve_grpc};
+use super::schema_readiness::{QueryStream, authenticated, serve_grpc};
 
 const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const RESOLVER_CAP: usize = 2;
@@ -102,21 +114,7 @@ async fn query_memory_limit_is_a_server_error() {
 
 #[tokio::test]
 async fn clickhouse_timeout_is_a_server_error() {
-    let mut server = Server::start_with_query_limits(QueryConfig {
-        max_execution_time: Some(1),
-        ..Default::default()
-    })
-    .await;
-    server
-        .graph
-        .apply_server_config(
-            "users.d/speed.xml",
-            "<clickhouse><profiles><default><max_execution_speed>1</max_execution_speed>\
-             <timeout_before_checking_execution_speed>0</timeout_before_checking_execution_speed>\
-             </default></profiles></clickhouse>",
-        )
-        .await;
-
+    let mut server = Server::start_with_settings(&[("max_execution_time", "0.000001")]).await;
     let error = server.run(project_query(json!({}))).await.unwrap_err();
 
     assert_eq!(error.code, "execution_error");
@@ -202,6 +200,60 @@ async fn oversized_redaction_response_is_a_server_error() {
         .await;
 }
 
+// Called in process so the response stream stays open while the request body fails,
+// which a real connection reset cannot guarantee.
+#[tokio::test]
+async fn broken_request_stream_during_redaction_is_a_caller_error() {
+    let server = Server::start().await;
+    let (frames, received) = mpsc::channel::<Result<Frame<Bytes>, std::io::Error>>(2);
+    let request = ExecuteQueryMessage {
+        content: Some(Content::Request(project_query(json!({})))),
+    };
+    frames
+        .send(Ok(Frame::data(grpc_frame(&request))))
+        .await
+        .unwrap();
+    let decoder = ProstCodec::<ExecuteQueryMessage, ExecuteQueryMessage>::default().decoder();
+    let stream = Streaming::new_request(
+        decoder,
+        StreamBody::new(ReceiverStream::new(received)),
+        None,
+        None,
+    );
+
+    let mut responses = server
+        .service
+        .execute_query(authenticated(stream))
+        .await
+        .unwrap()
+        .into_inner();
+    let first = timeout(Duration::from_secs(10), responses.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(first.content, Some(Content::Redaction(_))));
+    frames
+        .send(Err(std::io::Error::other(
+            "error reading a body from connection",
+        )))
+        .await
+        .unwrap();
+    let response = timeout(Duration::from_secs(10), responses.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    let Some(Content::Error(error)) = response.content else {
+        panic!("expected a query error, got {response:?}");
+    };
+    assert_eq!(error.code, "streaming_error");
+    server
+        .assert_recorded("streaming_error", "caller_error", Some("streaming"))
+        .await;
+}
+
 #[tokio::test]
 async fn dropping_the_call_during_redaction_is_a_caller_error() {
     let mut server = Server::start().await;
@@ -277,6 +329,7 @@ async fn invalid_query_is_a_caller_error() {
 
 struct Server {
     client: OrbitServiceClient<Channel>,
+    service: Arc<OrbitServiceImpl>,
     analytics: Arc<InMemoryAnalyticsTracker>,
     meter_provider: SdkMeterProvider,
     metrics: InMemoryMetricExporter,
@@ -286,6 +339,10 @@ struct Server {
 
 impl Server {
     async fn start() -> Self {
+        Self::start_with_settings(&[]).await
+    }
+
+    async fn start_with_settings(clickhouse_settings: &[(&str, &str)]) -> Self {
         let exporter = InMemoryMetricExporter::default();
         let meter_provider = SdkMeterProvider::builder()
             .with_reader(PeriodicReader::builder(exporter.clone()).build())
@@ -294,24 +351,33 @@ impl Server {
 
         let graph = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
         seed(&graph).await;
+        let mut graph_config = graph.config.clone();
+        for (name, value) in clickhouse_settings {
+            graph_config
+                .session_settings
+                .insert(name.to_string(), value.to_string());
+        }
 
         let mut resolvers = ColumnResolverRegistry::new().with_max_batch_size(RESOLVER_CAP);
         resolvers.register("gitaly", Arc::new(SeededColumnResolver::from_yaml("{}")));
         let analytics = Arc::new(InMemoryAnalyticsTracker::new());
         let shutdown = CancellationToken::new();
-        let service = OrbitServiceImpl::new(
-            Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
-            ActiveSchema::pinned(load_ontology()),
-            graph.config.build_client("graph"),
-            ClusterHealthChecker::default().into_arc(),
-            30,
-            Arc::new(AppConfig::embedded_defaults().analytics),
-        )
-        .with_resolver_registry(Arc::new(resolvers))
-        .with_analytics(analytics.clone());
+        let service = Arc::new(
+            OrbitServiceImpl::new(
+                Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
+                ActiveSchema::pinned(load_ontology()),
+                graph_config.build_client("graph"),
+                ClusterHealthChecker::default().into_arc(),
+                30,
+                Arc::new(AppConfig::embedded_defaults().analytics),
+            )
+            .with_resolver_registry(Arc::new(resolvers))
+            .with_analytics(analytics.clone()),
+        );
 
         Self {
-            client: serve_grpc(service, shutdown.clone()).await,
+            client: serve_grpc(service.clone(), shutdown.clone()).await,
+            service,
             analytics,
             meter_provider,
             metrics: exporter,
@@ -421,6 +487,14 @@ async fn seed(graph: &TestContext) {
         ))
         .await;
     graph.optimize_all().await;
+}
+
+fn grpc_frame(message: &ExecuteQueryMessage) -> Bytes {
+    let mut frame = BytesMut::new();
+    frame.put_u8(0);
+    frame.put_u32(message.encoded_len() as u32);
+    message.encode(&mut frame).unwrap();
+    frame.freeze()
 }
 
 fn request(query: Value) -> ExecuteQueryRequest {
