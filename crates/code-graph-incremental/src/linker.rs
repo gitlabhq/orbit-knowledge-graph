@@ -685,11 +685,12 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
-            if !c.in_decorator() {
+            if !c.parent().is_some_and(|p| p.is(C::Decorator)) {
                 for edge in &mut self.edges[first..] {
                     edge.call_resolution = crate::tree::CallResolution::Reference;
                 }
-            } else {
+            }
+            if c.in_decorator() {
                 self.retarget_own_def(first);
             }
         }

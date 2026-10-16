@@ -10,6 +10,32 @@ fixtures:
           def tag(self, name=None):
               pass
 
+
+      CONST = 1
+
+  - path: colors.py
+    content: |
+      class Color:
+          RED = 1
+
+  - path: arg_refs.py
+    content: |
+      import lib
+      from colors import Color
+
+
+      def deco(*args):
+          pass
+
+
+      @deco(Color.RED, lib.CONST)
+      def arg_refs():
+          pass
+
+
+      def body_refs():
+          deco(Color.RED, lib.CONST)
+
   - path: tools.py
     content: |
       def display(ordering=None):
@@ -253,3 +279,20 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "shadow.make" } }
+
+  - name: member references in decorator arguments add no import rows, as in a body
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.name IN ['arg_refs', 'body_refs']
+      RETURN caller.name AS caller, symbol.import_path AS path
+    assert:
+      - { row_count: 0 }
+
+  - name: a decorator with member references in its arguments still names its callee
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'arg_refs' AND callee.name = 'deco'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "arg_refs.deco" } }
