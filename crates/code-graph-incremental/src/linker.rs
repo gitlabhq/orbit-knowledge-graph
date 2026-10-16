@@ -1186,9 +1186,9 @@ impl<'t> Fold<'t> {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
                 bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
+                self.map_members(&mut bound, site);
                 for r in &bound {
-                    let member = self.member_value(r, site);
-                    self.emit(&member, from);
+                    self.emit(r, from);
                 }
                 return;
             }
@@ -1205,11 +1205,8 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_name(&mut self, sym: u32, from: u32, site: Cursor<'t>, fallback: Wildcards) {
-        let mut targets: Vec<Value> = self
-            .lookup(sym)
-            .iter()
-            .map(|r| self.member_value(r, site))
-            .collect();
+        let mut targets = self.lookup(sym);
+        self.map_members(&mut targets, site);
         if targets.is_empty() {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
@@ -1312,7 +1309,11 @@ impl<'t> Fold<'t> {
         if target.has_role(role) {
             return def;
         }
-        let Some(class) = target.ancestors().find(|node| node.is_class()) else {
+        let Some(class) = target
+            .ancestors()
+            .filter(|node| node.is(C::Def))
+            .find(|node| node.is_class())
+        else {
             return def;
         };
         if !target.is_member_of(class) && shadows(target, site) {
@@ -1339,10 +1340,11 @@ impl<'t> Fold<'t> {
         std::iter::once(dn).chain(same_name).collect()
     }
 
-    fn member_value(&self, value: &Value, site: Cursor<'t>) -> Value {
-        match value {
-            Value::LocalDef(def) => Value::LocalDef(self.member_for(*def, site)),
-            _ => value.clone(),
+    fn map_members(&self, values: &mut [Value], site: Cursor<'t>) {
+        for value in values {
+            if let Value::LocalDef(def) = value {
+                *def = self.member_for(*def, site);
+            }
         }
     }
 

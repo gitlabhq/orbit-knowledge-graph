@@ -68,14 +68,19 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_dispatch_contract(self) -> bool {
         self.has(C::Trait) || self.has(C::Interface)
     }
-    pub fn is_field(self) -> bool {
-        self.has(C::FieldDef) || self.has(C::Property)
+    pub fn def_kind(self) -> Option<C> {
+        self.children()
+            .find_map(|child| C::from_repr(child.kind()).filter(|kind| kind.is_def_type()))
     }
     pub fn has_role(self, role: Role) -> bool {
-        match role {
-            Role::Value => self.is_field(),
-            Role::Callable => !self.is_field(),
-        }
+        self.def_kind().is_some_and(|kind| match role {
+            Role::Value => kind.is_value(),
+            Role::Callable => kind.is_callable(),
+        })
+    }
+    pub fn binds_ivar(self) -> bool {
+        self.child(C::Binding)
+            .is_some_and(|binding| binding.has(C::Ivar))
     }
     pub fn fills_role(self, role: Role, callable: u32) -> bool {
         self.has_role(role) || (role == Role::Callable && self.has_tag(callable))
@@ -91,17 +96,20 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         }
     }
     pub fn is_member_of(self, owner: Self) -> bool {
-        let mut def = self.ancestors().find(|node| node.is(C::Def));
-        while let Some(node) = def {
-            if node.index() == owner.index() {
+        let mut node = self;
+        loop {
+            let Some(up) = node.ancestors().find(|up| up.is(C::Def) || up.is(C::Scope)) else {
+                return false;
+            };
+            if up.index() == owner.index() {
                 return true;
             }
-            if !node.has(C::ImplBlock) {
+            let header = node.index() == self.index() && self.binds_ivar();
+            if up.is(C::Scope) || !(up.has(C::ImplBlock) || header) {
                 return false;
             }
-            def = node.ancestors().find(|outer| outer.is(C::Def));
+            node = up;
         }
-        false
     }
     pub fn reference(self) -> Self {
         self.child(C::Call)
@@ -224,19 +232,37 @@ pub enum Role {
 #[derive(Clone, Copy, Debug)]
 pub struct Slots {
     first: u32,
-    value: Option<u32>,
-    callable: Option<u32>,
+    value: Option<(u32, bool)>,
+    callable: Option<(u32, bool)>,
 }
 
 impl Slots {
+    fn new(first: u32) -> Self {
+        Self {
+            first,
+            value: None,
+            callable: None,
+        }
+    }
     pub fn slot(self, role: Role) -> Option<u32> {
         match role {
             Role::Value => self.value,
             Role::Callable => self.callable,
         }
+        .map(|(def, _)| def)
     }
     pub fn pick(self, role: Role) -> u32 {
         self.slot(role).unwrap_or(self.first)
+    }
+    fn fill<S: Storage<Node = Node>>(&mut self, def: Cursor<'_, S>) {
+        let value = def.has_role(Role::Value);
+        let callable = def.has_role(Role::Callable);
+        let exact = value != callable;
+        for (slot, has) in [(&mut self.value, value), (&mut self.callable, callable)] {
+            if has && slot.is_none_or(|(_, was_exact)| exact && !was_exact) {
+                *slot = Some((def.index(), exact));
+            }
+        }
     }
 }
 
@@ -252,17 +278,9 @@ pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberInde
         let Some(name) = def.child_sym(C::DefName) else {
             continue;
         };
-        let slots = index.entry(name).or_insert(Slots {
-            first: def.index(),
-            value: None,
-            callable: None,
-        });
+        let slots = index.entry(name).or_insert_with(|| Slots::new(def.index()));
         if def.is_member_of(owner) {
-            let slot = match def.is_field() {
-                true => &mut slots.value,
-                false => &mut slots.callable,
-            };
-            slot.get_or_insert(def.index());
+            slots.fill(def);
         }
     }
     index

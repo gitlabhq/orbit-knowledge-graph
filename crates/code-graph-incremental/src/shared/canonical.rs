@@ -15,6 +15,7 @@ pub const CANONICAL_BASE: u16 = 0xE000;
     strum::EnumString,
     strum::IntoStaticStr,
     strum::EnumProperty,
+    strum::FromRepr,
 )]
 pub enum Canonical {
     #[strum(serialize = "__def")]
@@ -129,6 +130,7 @@ pub enum Canonical {
         props(
             def_type = "true",
             callable = "true",
+            value = "true",
             scoped = "true",
             display = "Class"
         )
@@ -136,7 +138,7 @@ pub enum Canonical {
     Class,
     #[strum(
         serialize = "__struct",
-        props(def_type = "true", scoped = "true", display = "Struct")
+        props(def_type = "true", value = "true", scoped = "true", display = "Struct")
     )]
     Struct,
     #[strum(
@@ -146,42 +148,42 @@ pub enum Canonical {
     ImplBlock,
     #[strum(
         serialize = "__trait",
-        props(def_type = "true", scoped = "true", display = "Trait")
+        props(def_type = "true", value = "true", scoped = "true", display = "Trait")
     )]
     Trait,
     #[strum(
         serialize = "__interface",
-        props(def_type = "true", display = "Interface")
+        props(def_type = "true", value = "true", display = "Interface")
     )]
     Interface,
     #[strum(
         serialize = "__enum",
-        props(def_type = "true", scoped = "true", display = "Enum")
+        props(def_type = "true", value = "true", scoped = "true", display = "Enum")
     )]
     Enum,
     #[strum(
         serialize = "__variable",
-        props(def_type = "true", display = "Variable")
+        props(def_type = "true", value = "true", display = "Variable")
     )]
     Variable,
     #[strum(
         serialize = "__constant",
-        props(def_type = "true", display = "Constant")
+        props(def_type = "true", value = "true", display = "Constant")
     )]
     Constant,
     #[strum(
         serialize = "__static_constant",
-        props(def_type = "true", display = "Static")
+        props(def_type = "true", value = "true", display = "Static")
     )]
     StaticConstant,
     #[strum(
         serialize = "__type_alias",
-        props(def_type = "true", display = "TypeAlias")
+        props(def_type = "true", value = "true", display = "TypeAlias")
     )]
     TypeAlias,
     #[strum(
         serialize = "__property",
-        props(def_type = "true", display = "Property")
+        props(def_type = "true", value = "true", display = "Property")
     )]
     Property,
     #[strum(
@@ -189,11 +191,19 @@ pub enum Canonical {
         props(def_type = "true", callable = "true", display = "Lambda")
     )]
     Lambda,
-    #[strum(serialize = "__field_def", props(def_type = "true", display = "Field"))]
+    #[strum(
+        serialize = "__field_def",
+        props(def_type = "true", value = "true", display = "Field")
+    )]
     FieldDef,
     #[strum(
         serialize = "__enum_variant",
-        props(def_type = "true", callable = "true", display = "EnumVariant")
+        props(
+            def_type = "true",
+            callable = "true",
+            value = "true",
+            display = "EnumVariant"
+        )
     )]
     EnumVariant,
     #[strum(serialize = "__macro", props(def_type = "true", display = "Macro"))]
@@ -235,6 +245,9 @@ impl Canonical {
     }
     pub fn is_callable(self) -> bool {
         self.get_str("callable") == Some("true")
+    }
+    pub fn is_value(self) -> bool {
+        self.get_str("value") == Some("true")
     }
     pub fn is_scoped(self) -> bool {
         self.get_str("scoped") == Some("true")
