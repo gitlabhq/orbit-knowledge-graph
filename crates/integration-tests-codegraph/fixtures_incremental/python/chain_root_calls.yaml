@@ -24,6 +24,20 @@ fixtures:
           return Items()
 
 
+      class Store:
+          async def load(self):
+              return Items()
+
+
+      def make_store():
+          return Store()
+
+
+      async def bind_then_call():
+          x = await fetch_items()
+          x.count()
+
+
       def make_list():
           return [Items()]
 
@@ -33,7 +47,7 @@ fixtures:
 
 
       async def chain_await_prefix():
-          n = await fetch_items().count()
+          n = await make_store().load()
 
 
       def chain_through_subscript():
@@ -76,12 +90,31 @@ tests:
   - name: "the call at the root of a chain behind an await links"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.name IN ["chain_through_await", "chain_await_prefix"] AND callee.name = "fetch_items"
-      RETURN caller.name AS caller
+      WHERE caller.name IN ["chain_through_await", "chain_await_prefix"] AND callee.name IN ["fetch_items", "make_store"]
+      RETURN caller.name AS caller, callee.name AS callee
       ORDER BY caller
     assert:
       - { row_count: 2 }
-      - { column_values: { field: caller, values: ["chain_await_prefix", "chain_through_await"] } }
+      - { row: { caller: chain_await_prefix, callee: make_store } }
+      - { row: { caller: chain_through_await, callee: fetch_items } }
+
+  - name: "the method after an awaited call in parentheses resolves through the awaited return type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "chain_through_await" AND callee.name = "count"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "an awaited call binds its value and types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "bind_then_call"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["count", "fetch_items"] } }
 
   - name: "the call at the root of a chain behind a subscript links"
     # Known gap: a subscript object keeps its text form; the subscript desugar is a separate decision.
