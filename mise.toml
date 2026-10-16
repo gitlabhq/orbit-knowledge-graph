@@ -515,6 +515,10 @@ description = "Fix the layout of the YAML test suites"
 run = "uv run --quiet scripts/linting/yaml_lint_test.py"
 description = "Run the YAML layout linter's unit tests"
 
+[tasks."lint:comments:test"]
+run = "uv run --quiet scripts/linting/comment_check_test.py"
+description = "Run the comment check's unit tests"
+
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
