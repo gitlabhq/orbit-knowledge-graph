@@ -1595,7 +1595,11 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
         chain(ctx, c, &|r| {
             resolve_reference(ctx, r)
                 .or_else(|| enclosing_alias(ctx, r))
-                .or_else(|| visible_type(ctx, r.fi(), r.sym()))
+                .or_else(|| {
+                    (!imported_inline(r))
+                        .then(|| visible_type(ctx, r.fi(), r.sym()))
+                        .flatten()
+                })
         })
     });
     if !CUT.get() {
@@ -1612,6 +1616,18 @@ fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<C
     .skip(1)
     .map(|(fi, node)| ctx.corpus.jump(fi, node))
     .find(|node| node.is(C::Def))
+}
+
+/// The callee of a path call (`std::fs::Times::new()`) names only what its
+/// inline import names, never a same-named def in scope.
+fn imported_inline(callee: Cursor) -> bool {
+    callee.parent().is_some_and(|call| {
+        call.is(C::Call)
+            && call
+                .children()
+                .filter(|child| child.is(C::Import))
+                .any(|import| import.names().any(|name| name.sym() == callee.sym()))
+    })
 }
 
 /// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
