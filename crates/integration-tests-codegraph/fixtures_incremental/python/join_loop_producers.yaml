@@ -1,0 +1,72 @@
+name: "Python: joins through loops and three producers"
+
+fixtures:
+  - path: main.py
+    content: |
+      class A:
+          def m(self):
+              pass
+
+
+      class B:
+          def m(self):
+              pass
+
+
+      class C:
+          def m(self):
+              pass
+
+
+      def make():
+          return A()
+
+
+      def loop_over_constructors():
+          for x in (A(), B(), C()):
+              x.m()
+
+
+      def loop_reassigned():
+          x = make()
+          for i in range(3):
+              x.m()
+              x = B()
+
+
+      def three_producers(a, b):
+          x = make()
+          if a:
+              x = B()
+          elif b:
+              x = C()
+          x.m()
+
+tests:
+  - name: a loop variable over three constructors reaches all three methods
+    # Known gap: a loop variable bound from a tuple of calls gets no type, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'loop_over_constructors'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.A", "main.A.m", "main.B", "main.B.m", "main.C", "main.C.m"] } }
+
+  - name: a receiver reassigned in a loop body reaches both methods
+    # Known gap: a loop-carried phi gives the use inside the loop no producer, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'loop_reassigned'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.A.m", "main.B", "main.B.m", "main.make"] } }
+
+  - name: three producers reach all three methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'three_producers'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.A.m", "main.B", "main.B.m", "main.C", "main.C.m", "main.make"] } }

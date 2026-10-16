@@ -1,0 +1,93 @@
+name: "JavaScript: joins with three producers, an unknown arm, and a loop"
+
+fixtures:
+  - path: main.js
+    content: |
+      class Foo {
+        bar() {}
+      }
+
+      class Foo2 {
+        bar() {}
+      }
+
+      class Foo3 {
+        bar() {}
+      }
+
+      function make() {
+        return new Foo();
+      }
+
+      function other() {
+        return new Foo3();
+      }
+
+      function threeProducers(a, b) {
+        let x = make();
+        if (a) {
+          x = new Foo2();
+        } else if (b) {
+          x = other();
+        }
+        x.bar();
+      }
+
+      function unknownAndKnown(y, c) {
+        let x = y();
+        if (c) {
+          x = make();
+        }
+        x.bar();
+      }
+
+      function loopPhi(items) {
+        let x = make();
+        for (const item of items) {
+          x.bar();
+          x = new Foo2();
+        }
+      }
+
+      function paramAndCall(y, c) {
+        let x = y;
+        if (c) {
+          x = make();
+        }
+        x.bar();
+      }
+
+tests:
+  - name: three producers reach all three bar methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'threeProducers'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo2", "Foo2::bar", "Foo3::bar", "Foo::bar", "make", "other"] } }
+
+  - name: an unknown arm does not hide the known arm
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'unknownAndKnown'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo::bar", "make"] } }
+
+  - name: a receiver reassigned in a loop body reaches both bar methods
+    # Known gap: a loop-carried phi gives the use inside the loop no producer, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'loopPhi'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo2", "Foo2::bar", "Foo::bar", "make"] } }
+
+  - name: a parameter joined with a call result keeps its edge
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'paramAndCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo::bar", "make"] } }
