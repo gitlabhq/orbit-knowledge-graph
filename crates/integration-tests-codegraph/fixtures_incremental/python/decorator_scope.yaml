@@ -133,9 +133,6 @@ tests:
       - { row: { setter: 60, getter: 56 } }
 
   - name: a lambda parameter in a default value does not shadow the module function in the body
-    # Known gap: waits on the G9 `__lambda` wrap under `__rhs` (!2872); today the lambda
-    # parameter binds in the def, so `helper()` in the body resolves to it.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'k'
