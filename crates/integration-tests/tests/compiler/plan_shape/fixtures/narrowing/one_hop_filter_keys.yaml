@@ -1,0 +1,33 @@
+name: Filter-only keys narrow the single edge scan and the ordered endpoint's candidate scan
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 9, "iid": 42}},
+        {"id": "n", "entity": "Note", "columns": ["id", "created_at"]}
+      ],
+      "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+      "order_by": "-n.created_at",
+      "limit": 16
+    }
+  gql: |
+    MATCH (mr:MergeRequest {project_id: 9, iid: 42})-[:HAS_NOTE]->(n:Note)
+    RETURN n.id, n.created_at ORDER BY n.created_at DESC LIMIT 16
+
+logical:
+  expect:
+    - (Filter mr.project_id = 9, mr.iid = 42 (_))
+
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        exact_order: [_filter_mr, _narrow_n]
+      expect:
+        - (CTE _filter_mr (Project mr.id AS id (Filter mr.project_id = 9, mr.iid = 42, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+        - (CTE _narrow_n (Project _orbit_edge_0n.target_id AS id (Filter _orbit_edge_0n.source_id IN _filter_mr.id, ... (Scan Table(gl_edge) AS _orbit_edge_0n))))
+        - (Filter _orbit_edge_0.source_id IN _filter_mr.id, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+      reject:
+        - (Join ON mr.id = _orbit_edge_0.source_id (_) (_))

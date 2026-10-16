@@ -21,6 +21,15 @@ struct FlatBuilder<'a, M: OrbitQueryModel + ?Sized> {
     tagged: HashSet<(String, String, usize)>,
 }
 
+fn filtered_memberships(filtered: &HashSet<String>, alias: &str, hop: &Hop) -> Vec<Predicate> {
+    let (start, end) = hop.direction.edge_columns();
+    [(&hop.from_node, start), (&hop.to_node, end)]
+        .into_iter()
+        .filter(|(node, _)| filtered.contains(*node))
+        .map(|(node, column)| key_membership(alias, column, format!("_filter_{node}")))
+        .collect()
+}
+
 pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
     facts: &PlanningContext<'_, M>,
 ) -> Result<ExecutionPlan> {
@@ -65,7 +74,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         }
         let mut plan = ExecutionPlan {
             source: source.ok_or_else(|| QueryError::Lowering("no hops in plan".into()))?,
-            definitions: std::mem::take(&mut self.definitions),
+            definitions: self.definitions,
             outputs: Vec::new(),
             bindings: Vec::new(),
         };
@@ -129,7 +138,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     let scan_alias = format!("{edge}n");
                     let mut predicates = self.facts.edge_predicates(&scan_alias, hop, false);
                     predicates.extend(self.facts.node_id_predicates(&scan_alias, hop));
-                    predicates.extend(self.filtered_memberships(&scan_alias, hop));
+                    predicates.extend(filtered_memberships(&self.filtered, &scan_alias, hop));
                     let keys = PhysicalPlan {
                         source: PhysicalSource::edge_keys(
                             hop,
@@ -238,20 +247,11 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         let mut predicates =
             self.facts
                 .filtered_edge_predicates(&alias, previous, &mut HashSet::new());
-        predicates.extend(self.filtered_memberships(&alias, previous));
+        predicates.extend(filtered_memberships(&self.filtered, &alias, previous));
         Some(PhysicalPlan {
             source: PhysicalSource::edge_keys(previous, &alias, predicates, upstream),
             outputs: vec![Projection::col(&alias, &join.prev_col)],
         })
-    }
-
-    fn filtered_memberships(&self, alias: &str, hop: &Hop) -> Vec<Predicate> {
-        let (start, end) = hop.direction.edge_columns();
-        [(&hop.from_node, start), (&hop.to_node, end)]
-            .into_iter()
-            .filter(|(node, _)| self.filtered.contains(*node))
-            .map(|(node, column)| key_membership(alias, column, format!("_filter_{node}")))
-            .collect()
     }
 
     fn edge(

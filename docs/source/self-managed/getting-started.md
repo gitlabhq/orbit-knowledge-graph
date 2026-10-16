@@ -54,8 +54,8 @@ Steps 1 to 3 do not depend on GitLab Orbit. You can verify each one on its own.
 
 GitLab Orbit requires ClickHouse 26.2 or later, because the graph uses full-text indexes introduced in that
 release. GitLab supports any 25.x or 26.x release, so a 25.x release serves the rest of GitLab but not GitLab
-Orbit. Materialized common table expressions need ClickHouse 26.3 or later. GitLab Orbit uses them only when the
-`materialized_ctes_enabled` query setting is on. All other GitLab requirements for ClickHouse are unchanged.
+Orbit. Materialized common table expressions need ClickHouse 26.4 or later. GitLab Orbit uses them only when
+`query.default.materialized_ctes_enabled` is on. All other GitLab requirements for ClickHouse are unchanged.
 
 Set up ClickHouse for GitLab first. For more information, see
 [ClickHouse](https://docs.gitlab.com/integration/clickhouse/). Complete every step on that page, including

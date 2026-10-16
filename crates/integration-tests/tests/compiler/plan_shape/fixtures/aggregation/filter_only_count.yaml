@@ -1,0 +1,23 @@
+name: Non-nullable property counts of a filter-only node drop the argument
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"aggregations":[{"count":"a.fqn","as":"n"}]}
+  gql: |
+    MATCH (a:Definition {name: 'compile'})-[:CALLS]->(b:Definition)
+    RETURN count(a.fqn) AS n
+
+logical:
+  expect:
+    - (Aggregate COUNT(a.fqn) AS n (_))
+
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        exact_order: [_filter_a]
+      expect:
+        - (Aggregate COUNT() FILTER ? AS n, ... (_))
+      reject:
+        - (Aggregate COUNT(a.fqn) FILTER ? AS n, ... (_))
+        - (Join ON a.id = _orbit_edge_0.source_id (_) (_))

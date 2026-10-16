@@ -92,7 +92,7 @@ pub struct QueryConfig {
     #[serde(default, skip_serializing)]
     pub graph_query_cache_ttl: Option<u32>,
 
-    /// Materialize CTEs that a query references more than once (ClickHouse 26.3+).
+    /// Materialize CTEs that a query references more than once (ClickHouse 26.4+).
     /// Excluded from ClickHouse SETTINGS (app-level only).
     #[serde(default, skip_serializing)]
     pub materialized_ctes_enabled: Option<bool>,
@@ -104,7 +104,7 @@ pub struct QueryConfig {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompilerDerivedSettings {
     /// ClickHouse `enable_materialized_cte`. Required when any CTE uses
-    /// the `MATERIALIZED` keyword (ClickHouse 26.3+).
+    /// the `MATERIALIZED` keyword (ClickHouse 26.4+).
     pub enable_materialized_cte: bool,
     /// ClickHouse `query_plan_optimize_join_order_algorithm`. When set,
     /// enables dynamic-programming join reordering for queries with 3+
