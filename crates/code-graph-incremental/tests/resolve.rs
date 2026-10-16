@@ -489,3 +489,107 @@ fn a_path_through_a_re_export_stays_resolved_on_a_noop_reindex() {
         through_re_export
     );
 }
+
+#[test]
+fn rust_import_shapes_stay_resolved_on_a_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    for dir in ["crates/a/src/gen", "crates/a/src/link", "crates/b/src/link"] {
+        std::fs::create_dir_all(repo.path().join(dir)).unwrap();
+    }
+    let manifest = |name: &str| {
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n")
+    };
+    write_all(
+        repo.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"crates/a\", \"crates/b\"]\n",
+            ),
+            ("crates/a/Cargo.toml", &manifest("a")),
+            (
+                "crates/a/src/lib.rs",
+                "mod gen;\npub mod link;\npub mod marks;\npub mod ops;\n\npub use crate::gen::consts;\n\npub fn load() {}\n",
+            ),
+            ("crates/a/src/link/mod.rs", "pub fn open() {}\n"),
+            (
+                "crates/a/src/marks.rs",
+                "pub struct Mark;\n\nimpl Mark {\n    pub fn new() -> Mark {\n        Mark\n    }\n}\n",
+            ),
+            ("crates/a/src/gen/mod.rs", "pub mod consts;\n"),
+            (
+                "crates/a/src/gen/consts.rs",
+                "pub struct Zero;\n\nimpl Zero {\n    pub fn new() -> Zero {\n        Zero\n    }\n}\n",
+            ),
+            (
+                "crates/a/src/ops.rs",
+                "use crate::load;\n\npub fn run() {\n    use crate::consts::*;\n    load();\n    crate::marks::Mark::new();\n    Zero::new();\n}\n",
+            ),
+            ("crates/b/Cargo.toml", &manifest("b")),
+            ("crates/b/src/lib.rs", "pub mod link;\npub mod store;\n"),
+            ("crates/b/src/link/mod.rs", "pub fn open() {}\n"),
+            (
+                "crates/b/src/store.rs",
+                "use crate::link::*;\n\npub fn start() {\n    open();\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let (resolved, skipped) = resolve_repo(&env, repo.path());
+    assert!(skipped.is_empty());
+    let calls = [
+        pair("crates/a/src/ops.rs:run", "crates/a/src/gen/consts.rs:new"),
+        pair("crates/a/src/ops.rs:run", "crates/a/src/lib.rs:load"),
+        pair("crates/a/src/ops.rs:run", "crates/a/src/marks.rs:new"),
+        pair(
+            "crates/b/src/store.rs:start",
+            "crates/b/src/link/mod.rs:open",
+        ),
+    ];
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        resolved.state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+
+    write_all(
+        repo.path(),
+        &[(
+            "crates/a/src/gen/consts.rs",
+            "pub struct Zero;\n\nimpl Zero {\n    pub fn new() -> Zero {\n        Zero\n    }\n}\n\npub fn extra() {}\n",
+        )],
+    );
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["crates/a/src/gen/consts.rs".into()],
+    });
+    let (context, resolved) =
+        templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+            .unwrap()
+            .finish();
+    assert!(context.report.skipped.is_empty());
+    assert_eq!(
+        context.report.files.keys().collect::<Vec<_>>(),
+        ["crates/a/src/gen/consts.rs"]
+    );
+    assert_eq!(
+        resolved_paths(&resolved),
+        [
+            "crates/a/src/gen/consts.rs",
+            "crates/a/src/gen/mod.rs",
+            "crates/a/src/lib.rs",
+            "crates/a/src/ops.rs"
+        ]
+    );
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+}
