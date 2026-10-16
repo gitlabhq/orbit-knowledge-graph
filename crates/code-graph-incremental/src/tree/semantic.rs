@@ -81,7 +81,7 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.sym_opt().is_some() && !self.has(C::Member) && !self.has(C::Ivar)
     }
     pub fn decorator_head(self) -> Option<Self> {
-        if self.sym_opt().is_some() {
+        if self.sym_opt().is_some() || self.has(C::Member) {
             return Some(self);
         }
         match self.child(C::Call) {
