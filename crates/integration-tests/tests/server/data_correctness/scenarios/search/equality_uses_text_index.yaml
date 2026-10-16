@@ -1,0 +1,64 @@
+cases:
+  - name: equality
+    description: Equality on a text-indexed title keeps exact matching and prunes granules with the text skip index
+
+    config:
+      unmerged_seed: true
+      extra_seed:
+        gl_merge_request:
+          - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": "Ship feature E"}}],
+          "order_by": "mr.id",
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title = 'Ship feature E'
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+
+    expect:
+      sql_contains: ["lower(mr.title) = lower("]
+      indexes_used: [{ table: gl_merge_request, index: idx_title }]
+      node_count: 1
+      nodes:
+        MergeRequest:
+          rows:
+            - { id: 2004, title: Ship feature E }
+
+  - name: membership
+    description: Membership on a text-indexed title keeps exact matching and prunes granules with the text skip index
+
+    config:
+      unmerged_seed: true
+      extra_seed:
+        gl_merge_request:
+          - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": {"in": ["Ship feature E", "ship feature f"]}}}],
+          "order_by": "mr.id",
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title IN ['Ship feature E', 'ship feature f']
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+
+    expect:
+      sql_contains: ["lower(mr.title) IN tuple(lower("]
+      indexes_used: [{ table: gl_merge_request, index: idx_title }]
+      node_count: 1
+      nodes:
+        MergeRequest:
+          rows:
+            - { id: 2004, title: Ship feature E }

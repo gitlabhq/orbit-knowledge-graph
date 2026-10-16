@@ -18,6 +18,6 @@ physical:
         exact_order: [_nf_a, forward]
       expect:
         - (CTE _nf_a (Limit 500 (_)))
-        - (Filter a.username = 'alice' (Deduplicate Final (Scan Table(gl_user) AS a)))
+        - (Filter a.username = 'alice', Lower(a.username) = Lower('alice') (Deduplicate Final (Scan Table(gl_user) AS a)))
         - (Filter e1.source_id IN _nf_a.id, ... (_))
       reject: ["(CTE _path_scope_traversal_paths (_))", "(Scan Table(gl_group) ...)"]
