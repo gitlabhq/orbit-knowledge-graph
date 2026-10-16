@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, ROOT_PATH, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::file_tree::LookupConfig;
 use crate::intern::Lang;
@@ -849,27 +849,23 @@ fn gather_imports_for(
     let tags = ReservedTags::new(lang);
     let resolved_tag_key = tags.resolved_source;
     let root_relative = lang.syms.lookup("source_root_rel");
-    let declared_roots: FxHashSet<_> = trees
-        .iter()
-        .filter_map(|tree| {
-            let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
-            tree.label
-                .strip_suffix(relative)
-                .map(|root| root.trim_end_matches(PATH_SEP))
-        })
-        .collect();
+    let root_of = |tree| source_root(tree, lang, root_relative);
+    let declared_roots: FxHashSet<_> = trees.iter().filter_map(root_of).collect();
     let stdlib_prefixes: Vec<_> = lookup
         .prefixes
         .iter()
         .filter(|prefix| declared_roots.contains(prefix.as_str()))
         .cloned()
         .collect();
-    let root_of = |tree| source_root(tree, lang, root_relative);
     let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
         .map(|&fi| {
             let tree = &trees[fi as usize];
+            let own_root = root_of(tree);
+            let own_prefix = own_root
+                .filter(|root| !root.is_empty())
+                .map(|root| (root, format!("{root}{PATH_SEP}")));
             tree.root()
                 .fold_tree((Vec::new(), Vec::new()), |(reqs, edges), cur, _w| {
                     if cur.kind() != C::Import && cur.kind() != C::ImportType {
@@ -904,31 +900,36 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let own_root = root_of(tree);
                     let mut target_path = match mapped {
                         Some(ref path) => path.clone(),
-                        None if raw_path == "." => own_root.unwrap_or_default().to_owned(),
+                        None if raw_path == ROOT_PATH => own_root.unwrap_or_default().to_owned(),
                         None => raw_path.to_owned(),
                     };
                     let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
-                    if let Some(root) = own_root.filter(|root| mapped.is_none() && !root.is_empty())
+                    if let Some((root, prefix)) = own_prefix.as_ref().filter(|_| mapped.is_none())
                         && !direct.is_empty()
-                        && direct.iter().all(|loc| {
-                            let hit = &trees[loc.fi as usize];
-                            !hit.label.starts_with(&format!("{root}{PATH_SEP}"))
-                                && root_of(hit).is_some_and(|hit_root| {
-                                    !hit_root.is_empty()
-                                        && !root.starts_with(&format!("{hit_root}{PATH_SEP}"))
-                                })
-                        })
                     {
-                        let local = format!("{root}{PATH_SEP}{target_path}");
-                        let mut found = resolve_glob(&local, file_index, prefixes);
-                        found.retain(|loc| loc.fi != fi);
-                        if !found.is_empty() {
-                            direct = found;
-                            target_path = local;
+                        let inside =
+                            |loc: &Loc| trees[loc.fi as usize].label.starts_with(prefix.as_str());
+                        let sibling = |loc: &Loc| {
+                            root_of(&trees[loc.fi as usize]).is_some_and(|hit_root| {
+                                !hit_root.is_empty()
+                                    && root
+                                        .strip_prefix(hit_root)
+                                        .is_none_or(|rest| !rest.starts_with(PATH_SEP))
+                            })
+                        };
+                        if direct.iter().any(inside) {
+                            direct.retain(inside);
+                        } else if direct.iter().all(sibling) {
+                            let local = format!("{prefix}{target_path}");
+                            let mut found = resolve_glob(&local, file_index, prefixes);
+                            found.retain(|loc| loc.fi != fi);
+                            if !found.is_empty() {
+                                direct = found;
+                                target_path = local;
+                            }
                         }
                     }
                     if direct.is_empty() && stdlib {

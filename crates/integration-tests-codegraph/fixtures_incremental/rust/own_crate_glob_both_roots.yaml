@@ -1,0 +1,56 @@
+name: "Rust: a glob of a module that two crates both have reaches only the importing crate's copy"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["alpha", "beta"]
+
+  - path: alpha/Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: alpha/src/lib.rs
+    content: |
+      pub mod link;
+      pub mod store;
+
+  - path: alpha/src/link/mod.rs
+    content: |
+      pub fn open() {}
+
+  - path: alpha/src/store.rs
+    content: |
+      use crate::link::*;
+
+      pub fn start() {
+          open();
+      }
+
+  - path: beta/Cargo.toml
+    content: |
+      [package]
+      name = "beta"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: beta/src/lib.rs
+    content: |
+      pub mod link;
+
+  - path: beta/src/link/mod.rs
+    content: |
+      pub fn open() {}
+
+tests:
+  - name: "start calls alpha's open only"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'start'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: alpha/src/link/mod.rs } }
