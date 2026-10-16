@@ -186,8 +186,8 @@ local glance = [
   ),
   tile(
     'Rejected',
-    'Share of all queries in the selected time range that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.',
-    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / sum(increase(%s{%s}[$__range]))' % [Q, SEL, REJECTED, Q, SEL],
+    'Share of queries in the selected time range (schema calls excluded) that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.',
+    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / (sum(increase(%s{%s}[$__range])) - (sum(increase(%s{%s, %s}[$__range])) or vector(0)))' % [Q, SEL, REJECTED, Q, SEL, Q, SEL, SCHEMA],
     'percentunit', NEUTRAL, 1,
   ),
   volume(
