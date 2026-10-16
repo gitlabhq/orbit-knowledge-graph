@@ -125,8 +125,8 @@ The query pipeline instruments end-to-end query execution from security check th
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `gkg.query.pipeline.queries` | Counter | count | `query_type`, `status` (ok / error code) | Total queries processed through the pipeline |
-| `gkg.query.pipeline.duration` | Histogram | s | `query_type`, `status` | End-to-end pipeline duration from security check to formatted output |
+| `gkg.query.pipeline.queries` | Counter | count | `query_type`, `status` (ok / error code), `outcome` (success / caller_error / server_error) | Total queries processed through the pipeline. `outcome` uses the same rule as the `orbit_query` analytics event, so an error SLI can exclude `caller_error`. |
+| `gkg.query.pipeline.duration` | Histogram | s | `query_type`, `status`, `outcome` | End-to-end pipeline duration from security check to formatted output |
 | `gkg.query.pipeline.compile.duration` | Histogram | s | `query_type` | Time spent compiling a query from JSON to parameterized SQL |
 | `gkg.query.pipeline.execute.duration` | Histogram | s | `query_type` | Time spent executing the compiled query against ClickHouse |
 | `gkg.query.pipeline.authorization.duration` | Histogram | s | `query_type` | Time spent on authorization exchange with Rails |
@@ -137,7 +137,7 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.ch.read_rows` | Counter | count | `query_type`, `label` | ClickHouse rows read per query execution (from `X-ClickHouse-Summary` header) |
 | `gkg.query.pipeline.ch.read` | Counter | By | `query_type`, `label` | ClickHouse bytes read per query execution (from `X-ClickHouse-Summary` header) |
 | `gkg.query.pipeline.ch.memory_usage` | Histogram | By | `query_type`, `label` | ClickHouse peak memory usage per query execution (from `X-ClickHouse-Summary` header) |
-| `gkg.query.pipeline.failed` | Counter | count | `failure_reason` (security/execution/authorization/content_resolution/streaming/custom) | Post-compile pipeline failure counter. Compile-time rejections are excluded; they are tracked on `gkg.query.engine.compiler.rejected`. |
+| `gkg.query.pipeline.failed` | Counter | count | `failure_reason` (security/execution/authorization/content_resolution/streaming/timeout/custom, or a ClickHouse limit such as too_slow/memory_limit/total_memory_limit for execution failures) | Post-compile pipeline failure counter. Compile-time rejections are excluded; they are tracked on `gkg.query.engine.compiler.rejected`. |
 
 *Content resolution metrics:*
 

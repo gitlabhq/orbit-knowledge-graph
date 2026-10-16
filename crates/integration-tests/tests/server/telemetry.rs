@@ -96,3 +96,47 @@ async fn pipeline_observer_records_ch_resource_metrics() {
 
     provider.shutdown().unwrap();
 }
+
+#[tokio::test]
+async fn pipeline_observer_labels_queries_with_their_outcome() {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, SumDataPoint};
+    use query_engine::pipeline::PipelineError;
+
+    let (provider, exporter) = setup_meter_provider();
+
+    OTelPipelineObserver::start().finish(1, 0);
+    OTelPipelineObserver::start().record_error(&PipelineError::client_closed());
+    OTelPipelineObserver::start().record_error(&PipelineError::Timeout);
+
+    sleep(Duration::from_millis(150)).await;
+    provider.force_flush().unwrap();
+
+    let metrics = exporter.get_finished_metrics().unwrap();
+    let queries = find_metric(&metrics, "gkg.query.pipeline.queries").expect("queries metric");
+    let AggregatedMetrics::U64(MetricData::Sum(sum)) = queries.data() else {
+        panic!("queries is not a u64 counter");
+    };
+    let label = |point: &SumDataPoint<u64>, key: &str| {
+        point
+            .attributes()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| kv.value.to_string())
+            .unwrap_or_default()
+    };
+    let mut recorded: Vec<(String, String)> = sum
+        .data_points()
+        .map(|point| (label(point, "status"), label(point, "outcome")))
+        .collect();
+    recorded.sort();
+
+    assert_eq!(
+        recorded,
+        [
+            ("ok".to_string(), "success".to_string()),
+            ("streaming_error".to_string(), "caller_error".to_string()),
+            ("timeout".to_string(), "server_error".to_string()),
+        ]
+    );
+
+    provider.shutdown().unwrap();
+}

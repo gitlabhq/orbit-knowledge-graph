@@ -87,6 +87,7 @@ pub async fn send_query_error(
     let reason = failure_reason(&error).unwrap_or_else(|| error.code());
     error!(
         code = error.code(),
+        outcome = error.outcome(),
         failure_reason = reason,
         client_safe,
         error = %error,
@@ -139,7 +140,7 @@ fn sanitize_error_message(error: &PipelineError) -> String {
 /// the failure class and generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
     match ClickHouseLimit::from_message(msg) {
-        Some(ClickHouseLimit::MemoryLimit) => {
+        Some(ClickHouseLimit::MemoryLimit | ClickHouseLimit::TotalMemoryLimit) => {
             "Query used too much memory. This usually means the query is \
              scanning too much data. Try: add a project_id filter, use \
              node_ids to pin specific entities, or reduce hops/max_depth."
@@ -189,6 +190,12 @@ mod tests {
             "got: {}",
             classify_execution_error(msg)
         );
+    }
+
+    #[test]
+    fn classify_total_memory_keeps_the_memory_hint() {
+        let msg = "query error: bad response: Code: 241. DB::Exception: (total) memory limit exceeded: would use 32.41 GiB";
+        assert!(classify_execution_error(msg).contains("too much memory"));
     }
 
     #[test]

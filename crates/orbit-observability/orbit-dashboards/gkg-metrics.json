@@ -1065,7 +1065,8 @@
       "unit": "s",
       "labels": [
         "query_type",
-        "status"
+        "status",
+        "outcome"
       ],
       "buckets": [
         0.1,
@@ -1149,7 +1150,8 @@
       "kind": "counter",
       "labels": [
         "query_type",
-        "status"
+        "status",
+        "outcome"
       ],
       "stability": "stable",
       "domain": "query.pipeline"

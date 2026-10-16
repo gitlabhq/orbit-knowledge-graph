@@ -53,7 +53,7 @@ pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
     match err {
         PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => Some("security"),
         PipelineError::Compile { .. } => None,
-        PipelineError::Execution(_) => Some("execution"),
+        PipelineError::Execution(_) => Some(err.failure_reason().as_str()),
         PipelineError::Authorization(_) => Some("authorization"),
         PipelineError::ContentResolution(_) => Some("content_resolution"),
         PipelineError::Streaming(_) => Some("streaming"),
@@ -75,13 +75,14 @@ pub struct OTelPipelineObserver {
 
 impl OTelPipelineObserver {
     pub(super) fn finish_schema(&self) {
-        self.record_outcome("ok");
+        self.record_outcome("ok", "success");
     }
 
-    fn record_outcome(&self, status: &'static str) {
+    fn record_outcome(&self, status: &'static str, outcome: &'static str) {
         let attrs = [
             KeyValue::new(spec::labels::QUERY_TYPE, self.query_type),
             KeyValue::new(spec::labels::STATUS, status),
+            KeyValue::new(spec::labels::OUTCOME, outcome),
         ];
         METRICS.queries.add(1, &attrs);
         METRICS
@@ -143,7 +144,7 @@ impl PipelineObserver for OTelPipelineObserver {
     }
 
     fn record_error(&self, err: &PipelineError) {
-        self.record_outcome(err.code());
+        self.record_outcome(err.code(), err.outcome());
 
         if let Some(reason) = failure_reason(err) {
             METRICS
@@ -154,7 +155,7 @@ impl PipelineObserver for OTelPipelineObserver {
 
     fn finish(&self, row_count: usize, redacted_count: usize) {
         let qt = [KeyValue::new(spec::labels::QUERY_TYPE, self.query_type)];
-        self.record_outcome("ok");
+        self.record_outcome("ok", "success");
         METRICS.compile_duration.record(self.compile_secs, &qt);
         METRICS.execute_duration.record(self.execute_secs, &qt);
         METRICS
@@ -164,5 +165,34 @@ impl PipelineObserver for OTelPipelineObserver {
         METRICS.batches.record(self.batch_count as u64, &qt);
         METRICS.result_set_rows.record(row_count as u64, &qt);
         METRICS.redactions.record(redacted_count as u64, &qt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_failures_report_the_clickhouse_limit() {
+        let cases = [
+            ("Code: 159. DB::Exception: Timeout exceeded", "too_slow"),
+            (
+                "Code: 241. DB::Exception: Query memory limit exceeded",
+                "memory_limit",
+            ),
+            (
+                "Code: 241. DB::Exception: (total) memory limit exceeded",
+                "total_memory_limit",
+            ),
+            (
+                "Code: 457. DB::Exception: Value garbage",
+                "bad_query_parameter",
+            ),
+            ("Code: 47. DB::Exception: Unknown identifier", "execution"),
+        ];
+        for (message, reason) in cases {
+            let err = PipelineError::Execution(format!("query error: bad response: {message}"));
+            assert_eq!(failure_reason(&err), Some(reason), "{message}");
+        }
     }
 }
