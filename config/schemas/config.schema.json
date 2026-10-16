@@ -630,12 +630,6 @@
           "format": "uint",
           "minimum": 0
         },
-        "max_inflight_source_bytes": {
-          "description": "Source bytes one job holds in flight through the incremental engine's\nper-file phases (parse to link) at the same time, admitted in arrival\norder. A file larger than the budget runs alone. Bounds the per-file\nmemory, which is 50 to 190 times the file size, to the budget instead\nof the worker count. 0 = no limit.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
         "memory_kill_percent": {
           "description": "Share of the pod's cgroup memory limit, in percent, at which the\nindexer cancels the in-flight code job with the most source bytes so\nthe kernel does not kill the whole pod. 0 = off; values above 100 count\nas 100.",
           "type": "integer",
@@ -734,7 +728,6 @@
         "max_cross_file_names",
         "max_manifest_bytes",
         "max_file_edges",
-        "max_inflight_source_bytes",
         "memory_kill_percent",
         "job_timeout_secs",
         "fetch_concurrency",

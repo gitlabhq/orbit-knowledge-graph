@@ -1,58 +1,46 @@
-//! The kill path under a fake cgroup, and the gated proof under a real memory
-//! limit (`mise run test:integration:memory`), where the kernel would otherwise
-//! kill the whole process and every job in it.
-
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use indexer::handler::{Handler, HandlerContext, HandlerError, PermanentAction};
+use indexer::modules::code::MemoryWatchdog;
+use indexer::modules::code::metrics::CodeMetrics;
 use indexer::nats::{MessageAcker, NatsError, ProgressNotifier};
 use indexer::testkit::{MockLockService, MockNatsServices};
-use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
-use integration_testkit::{TestContext, t};
+use integration_testkit::TestContext;
 use orbit_server_config::CodeIndexingPipelineConfig;
-use orbit_utils::traversal_path::TraversalPath;
+use orbit_server_config::resources::MemoryPressure;
 
-use indexer::modules::code::metrics::CodeMetrics;
-use indexer::modules::code::{Cgroup, MemoryWatchdog};
-
-use super::helpers::{CodeIndexingDeps, MockGitlabServer, enable_incremental, handler_context};
+use super::helpers::{
+    CodeIndexingDeps, MockGitlabServer, checkpointed, code_indexing_backfill_envelope,
+    enable_incremental, handler_context,
+};
 
 const BIG: i64 = 4300;
 const SMALL: i64 = 4301;
 const BRANCH: &str = "main";
+const LIMIT: u64 = 1000;
 
 fn traversal_path(project_id: i64) -> String {
     format!("1/{project_id}/")
 }
 
 fn envelope(project_id: i64, attempt: u32) -> Envelope {
-    let mut envelope = Envelope::new(&CodeIndexingTaskRequest {
-        task_id: 0,
-        project_id,
-        branch: Some(BRANCH.to_string()),
-        commit_sha: None,
-        traversal_path: TraversalPath::new_unchecked(traversal_path(project_id)),
-        dispatch_id: uuid::Uuid::new_v4(),
-        campaign_id: None,
-    })
-    .expect("envelope");
+    let mut envelope = code_indexing_backfill_envelope(project_id, 0, &traversal_path(project_id));
     envelope.attempt = attempt;
     envelope
 }
 
+async fn clickhouse() -> TestContext {
+    TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await
+}
+
 async fn indexed(clickhouse: &TestContext, project_id: i64) -> bool {
-    let rows = clickhouse
-        .query(&format!(
-            "SELECT last_task_id FROM {} FINAL \
-             WHERE traversal_path = '{}' AND project_id = {project_id} \
-             AND branch = '{BRANCH}' AND indexed_at IS NOT NULL AND _deleted = false",
-            t("code_indexing_checkpoint"),
-            traversal_path(project_id)
-        ))
-        .await;
-    rows.first().is_some_and(|b| b.num_rows() > 0)
+    checkpointed(clickhouse, &traversal_path(project_id), project_id, BRANCH).await
 }
 
 fn big_repository(files: usize) -> Vec<(String, String)> {
@@ -69,72 +57,98 @@ fn big_repository(files: usize) -> Vec<(String, String)> {
         .collect()
 }
 
-fn fake_cgroup(dir: &std::path::Path, limit: u64, anon: u64) {
-    std::fs::write(dir.join("memory.max"), format!("{limit}\n")).expect("memory.max");
-    std::fs::write(dir.join("memory.stat"), format!("anon {anon}\nfile 0\n")).expect("memory.stat");
+fn add_project(mock: &MockGitlabServer, project_id: i64, files: &[(String, String)]) {
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(path, content)| (path.as_str(), content.as_str()))
+        .collect();
+    mock.add_project(project_id, BRANCH, &files);
 }
 
-#[tokio::test]
-async fn a_job_killed_under_pressure_is_retried_then_dead_lettered_and_a_small_job_lands() {
-    enable_incremental(&traversal_path(BIG));
-    let clickhouse = TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-    let mock = MockGitlabServer::start().await;
-    {
-        let big = big_repository(300);
-        let files: Vec<(&str, &str)> = big
-            .iter()
-            .map(|(path, content)| (path.as_str(), content.as_str()))
-            .collect();
-        mock.add_project(BIG, BRANCH, &files);
-    }
+fn big_and_small(mock: &MockGitlabServer, big_files: usize) {
+    add_project(mock, BIG, &big_repository(big_files));
     mock.add_project(
         SMALL,
         BRANCH,
         &[("src/main.py", "def small():\n    pass\n")],
     );
-    let cgroup = tempfile::tempdir().expect("cgroup dir");
-    fake_cgroup(cgroup.path(), 1000, 950);
-    let watchdog = MemoryWatchdog::new(
-        Cgroup::v2(cgroup.path().to_path_buf()),
+}
+
+fn fake_pressure(used: &Arc<AtomicU64>) -> Arc<MemoryWatchdog> {
+    let used = used.clone();
+    MemoryWatchdog::new(
+        Box::new(move || {
+            Some(MemoryPressure {
+                used: used.load(Ordering::Relaxed),
+                limit: LIMIT,
+            })
+        }),
         CodeMetrics::new(),
         90,
-    );
+    )
+}
+
+fn without_file_budgets() -> CodeIndexingPipelineConfig {
+    CodeIndexingPipelineConfig {
+        per_file_timeout_ms: 0,
+        per_file_parse_timeout_ms: 0,
+        per_file_walk_timeout_ms: 0,
+        per_file_ssa_timeout_ms: 0,
+        ..indexer::testkit::test_pipeline_configuration()
+    }
+}
+
+fn retried<T>(result: &Result<T, HandlerError>) -> bool {
+    matches!(result, Err(HandlerError::Processing(message)) if message.contains("memory pressure"))
+}
+
+fn dead_lettered<T>(result: &Result<T, HandlerError>) -> bool {
+    matches!(
+        result,
+        Err(HandlerError::Permanent { action: PermanentAction::DeadLetter, message })
+            if message.contains("memory pressure")
+    )
+}
+
+async fn assert_only_the_small_job_landed(deps: &CodeIndexingDeps, clickhouse: &TestContext) {
+    deps.code_indexing_task_handler()
+        .flush()
+        .await
+        .expect("flush");
+    assert!(indexed(clickhouse, SMALL).await);
+    assert!(!indexed(clickhouse, BIG).await);
+}
+
+#[tokio::test]
+async fn a_job_killed_under_pressure_is_retried_then_dead_lettered_and_a_small_job_lands() {
+    enable_incremental(&traversal_path(BIG));
+    let clickhouse = clickhouse().await;
+    let mock = MockGitlabServer::start().await;
+    big_and_small(&mock, 60);
+    let used = Arc::new(AtomicU64::new(950));
     let deps = CodeIndexingDeps::new_with_memory_watchdog(
         &mock,
         &clickhouse,
         indexer::testkit::test_pipeline_configuration(),
-        watchdog,
+        fake_pressure(&used),
     );
     let handler = deps.code_indexing_task_handler();
 
     let first = handler.handle(handler_context(), envelope(BIG, 1)).await;
-    assert!(
-        matches!(&first, Err(HandlerError::Processing(message)) if message.contains("memory pressure")),
-        "the first attempt is retried: {first:?}"
-    );
+    assert!(retried(&first), "the first attempt is retried: {first:?}");
+    used.store(960, Ordering::Relaxed);
     let second = handler.handle(handler_context(), envelope(BIG, 2)).await;
     assert!(
-        matches!(
-            &second,
-            Err(HandlerError::Permanent { action: PermanentAction::DeadLetter, message })
-                if message.contains("memory pressure")
-        ),
-        "the second attempt dead-letters: {second:?}"
+        dead_lettered(&second),
+        "the retry parses again, memory rises, the second attempt dead-letters: {second:?}"
     );
 
-    fake_cgroup(cgroup.path(), 1000, 500);
+    used.store(500, Ordering::Relaxed);
     let small = handler.handle(handler_context(), envelope(SMALL, 1)).await;
     assert!(small.is_ok(), "{small:?}");
-    handler.flush().await.expect("flush");
-    assert!(indexed(&clickhouse, SMALL).await);
-    assert!(!indexed(&clickhouse, BIG).await);
+    assert_only_the_small_job_landed(&deps, &clickhouse).await;
 }
 
-/// Counts in-progress acks; a job sends its first one right before it waits for a lane.
 #[derive(Default)]
 struct ProgressAcks(AtomicUsize);
 
@@ -155,48 +169,26 @@ impl MessageAcker for ProgressAcks {
     }
 }
 
-fn refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
-    files
-        .iter()
-        .map(|(path, content)| (path.as_str(), content.as_str()))
-        .collect()
-}
-
 #[tokio::test]
 async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
     const PARSING: i64 = 4302;
     const WAITING: i64 = 4303;
     enable_incremental(&traversal_path(PARSING));
-    let clickhouse = TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
+    let clickhouse = clickhouse().await;
     let mock = MockGitlabServer::start().await;
-    let parsing = big_repository(60);
-    mock.add_project(PARSING, BRANCH, &refs(&parsing));
-    let waiting = big_repository(70);
-    mock.add_project_with_slow_archive_files(WAITING, BRANCH, &refs(&waiting));
-    let cgroup = tempfile::tempdir().expect("cgroup dir");
-    fake_cgroup(cgroup.path(), 1000, 500);
-    let watchdog = MemoryWatchdog::new(
-        Cgroup::v2(cgroup.path().to_path_buf()),
-        CodeMetrics::new(),
-        90,
-    );
+    add_project(&mock, PARSING, &big_repository(60));
+    add_project(&mock, WAITING, &big_repository(70));
+    mock.slow_archive(WAITING);
+    let used = Arc::new(AtomicU64::new(500));
     let deps = CodeIndexingDeps::new_with_memory_watchdog(
         &mock,
         &clickhouse,
         CodeIndexingPipelineConfig {
             small_repo_max_files: 0,
             big_indexing_slots: Some(1),
-            per_file_timeout_ms: 0,
-            per_file_parse_timeout_ms: 0,
-            per_file_walk_timeout_ms: 0,
-            per_file_ssa_timeout_ms: 0,
-            ..indexer::testkit::test_pipeline_configuration()
+            ..without_file_budgets()
         },
-        watchdog,
+        fake_pressure(&used),
     );
     let first = deps.code_indexing_task_handler();
     let second = deps.code_indexing_task_handler();
@@ -223,21 +215,13 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
         !parsing_job.is_finished(),
         "the parsing job must still hold the lane when the pressure rises"
     );
-    fake_cgroup(cgroup.path(), 1000, 950);
+    used.store(950, Ordering::Relaxed);
     let parsed = parsing_job.await.expect("join");
-    fake_cgroup(cgroup.path(), 1000, 500);
+    used.store(500, Ordering::Relaxed);
     let waited = waiting_job.await.expect("join");
-    let victim = match (&parsed, &waited) {
-        (Err(_), Ok(_)) => "the parsing job",
-        (Ok(_), Err(_)) => "the lane waiter",
-        (Err(_), Err(_)) => "the lane waiter first, then the parsing job",
-        (Ok(_), Ok(_)) => "nobody",
-    };
-    eprintln!("victim: {victim}; parsing: {parsed:?}; waiting: {waited:?}");
     assert!(
-        matches!(&parsed, Err(HandlerError::Processing(message)) if message.contains("memory pressure"))
-            && waited.is_ok(),
-        "the victim must be the job on the lane, not the waiter; it was {victim}: parsing {parsed:?}, waiting {waited:?}"
+        retried(&parsed) && waited.is_ok(),
+        "the victim must be the job on the lane, not the waiter: parsing {parsed:?}, waiting {waited:?}"
     );
     deps.code_indexing_task_handler()
         .flush()
@@ -248,37 +232,18 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
 }
 
 #[tokio::test]
-#[ignore = "needs a cgroup limit: mise run test:integration:memory"]
-async fn a_job_under_memory_pressure_dead_letters_alone_and_a_small_job_lands() {
+#[ignore = "needs a 1 GiB cgroup: systemd-run --user --scope -p MemoryMax=1G -- cargo nextest run --all-features -p integration-tests --test containers --retries 0 --run-ignored ignored-only -E 'test(memory_pressure)'"]
+async fn a_job_under_a_real_memory_limit_dead_letters_alone_and_a_small_job_lands() {
     enable_incremental(&traversal_path(BIG));
-    let clickhouse = TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
+    let clickhouse = clickhouse().await;
     let mock = MockGitlabServer::start().await;
-    {
-        let big = big_repository(1200);
-        let files: Vec<(&str, &str)> = big
-            .iter()
-            .map(|(path, content)| (path.as_str(), content.as_str()))
-            .collect();
-        mock.add_project(BIG, BRANCH, &files);
-    }
-    mock.add_project(
-        SMALL,
-        BRANCH,
-        &[("src/main.py", "def small():\n    pass\n")],
-    );
+    big_and_small(&mock, 1200);
     let deps = CodeIndexingDeps::new_with_pipeline_config(
         &mock,
         &clickhouse,
         CodeIndexingPipelineConfig {
-            per_file_timeout_ms: 0,
-            per_file_parse_timeout_ms: 0,
-            per_file_walk_timeout_ms: 0,
-            per_file_ssa_timeout_ms: 0,
-            ..indexer::testkit::test_pipeline_configuration()
+            memory_kill_percent: 90,
+            ..without_file_budgets()
         },
     );
     let handler = deps.code_indexing_task_handler();
@@ -287,26 +252,12 @@ async fn a_job_under_memory_pressure_dead_letters_alone_and_a_small_job_lands() 
         handler.handle(handler_context(), envelope(BIG, 1)),
         handler.handle(handler_context(), envelope(SMALL, 1)),
     );
-    eprintln!("big job, attempt 1: {first:?}");
-    eprintln!("small job: {small:?}");
     assert!(small.is_ok(), "the co-scheduled job lands: {small:?}");
-    assert!(
-        matches!(&first, Err(HandlerError::Processing(message)) if message.contains("memory pressure")),
-        "the first attempt is retried: {first:?}"
-    );
-
+    assert!(retried(&first), "the first attempt is retried: {first:?}");
     let second = handler.handle(handler_context(), envelope(BIG, 2)).await;
-    eprintln!("big job, attempt 2: {second:?}");
     assert!(
-        matches!(
-            &second,
-            Err(HandlerError::Permanent { action: PermanentAction::DeadLetter, message })
-                if message.contains("memory pressure")
-        ),
+        dead_lettered(&second),
         "the second attempt dead-letters: {second:?}"
     );
-
-    handler.flush().await.expect("flush");
-    assert!(indexed(&clickhouse, SMALL).await);
-    assert!(!indexed(&clickhouse, BIG).await);
+    assert_only_the_small_job_landed(&deps, &clickhouse).await;
 }

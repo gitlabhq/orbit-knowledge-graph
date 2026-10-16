@@ -34,6 +34,7 @@ pub fn test_pipeline_configuration() -> CodeIndexingPipelineConfig {
     pipeline.write_buffer_age_secs = 1;
     pipeline.write_max_flush_age_secs = 1;
     pipeline.write_min_flush_rows = 1;
+    pipeline.memory_kill_percent = 0;
     pipeline
 }
 

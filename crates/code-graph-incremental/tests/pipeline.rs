@@ -199,12 +199,21 @@ fn item_phases_pipe_into_one_named_pass() {
 
 #[derive(Default)]
 struct Ledger {
+    refuse_over: u64,
     admitted: Mutex<Vec<u64>>,
     inflight: AtomicU64,
 }
 
 impl code_graph_incremental::Admission for Ledger {
     fn admit(&self, bytes: u64, _: &Sentinel) -> Result<(), Killed> {
+        if self.refuse_over > 0 && bytes > self.refuse_over {
+            return Err(Killed::limit(
+                "admission",
+                "",
+                bytes as usize,
+                self.refuse_over as usize,
+            ));
+        }
         self.admitted.lock().unwrap().push(bytes);
         self.inflight.fetch_add(bytes, Ordering::Relaxed);
         Ok(())
@@ -214,67 +223,24 @@ impl code_graph_incremental::Admission for Ledger {
     }
 }
 
-struct RefuseOver(u64);
-
-impl code_graph_incremental::Admission for RefuseOver {
-    fn admit(&self, bytes: u64, _: &Sentinel) -> Result<(), Killed> {
-        if bytes > self.0 {
-            return Err(Killed::limit(
-                "admission",
-                "",
-                bytes as usize,
-                self.0 as usize,
-            ));
-        }
-        Ok(())
-    }
-    fn release(&self, _: u64) {}
+struct Probe {
+    ledger: Arc<Ledger>,
+    fails: &'static str,
+    panics: &'static str,
 }
 
-struct FailsOn(&'static str, Arc<Ledger>);
-
-impl ItemPhase<SourceFile> for FailsOn {
+impl ItemPhase<SourceFile> for Probe {
     type Output = ();
     fn name(&self) -> Cow<'static, str> {
-        "fails".into()
+        "probe".into()
     }
     fn run(&self, _: &Env, _: &Sentinel, file: SourceFile) -> Result<(), Killed> {
-        assert!(self.1.inflight.load(Ordering::Relaxed) >= file.content.len() as u64);
-        if file.path == self.0 {
+        assert!(self.ledger.inflight.load(Ordering::Relaxed) >= file.content.len() as u64);
+        assert_ne!(file.path, self.panics);
+        if file.path == self.fails {
             return Err(Killed::limit("phase", &file.path, 1, 0));
         }
         Ok(())
-    }
-}
-
-struct Passes;
-
-impl ItemPhase<SourceFile> for Passes {
-    type Output = ();
-    fn name(&self) -> Cow<'static, str> {
-        "passes".into()
-    }
-    fn run(&self, _: &Env, _: &Sentinel, _: SourceFile) -> Result<(), Killed> {
-        Ok(())
-    }
-}
-
-struct PanicsOn(&'static str);
-
-impl ItemPhase<SourceFile> for PanicsOn {
-    type Output = ();
-    fn name(&self) -> Cow<'static, str> {
-        "panics".into()
-    }
-    fn run(&self, _: &Env, _: &Sentinel, file: SourceFile) -> Result<(), Killed> {
-        assert_ne!(file.path, self.0, "the item phase panics on {}", self.0);
-        Ok(())
-    }
-}
-
-fn write_files(repo: &std::path::Path, files: &[(String, String)]) {
-    for (path, content) in files {
-        std::fs::write(repo.join(path), content).unwrap();
     }
 }
 
@@ -284,112 +250,71 @@ fn sized_files(count: usize) -> Vec<(String, String)> {
         .collect()
 }
 
-fn run_each<P>(
-    repo: &std::path::Path,
-    admission: Arc<dyn code_graph_incremental::Admission>,
-    phase: P,
-) -> (usize, Vec<Killed>)
-where
-    P: ItemPhase<SourceFile, Output = ()> + Send + Sync,
-{
+fn write_files(repo: &std::path::Path, files: &[(String, String)]) {
+    for (path, content) in files {
+        std::fs::write(repo.join(path), content).unwrap();
+    }
+}
+
+fn sorted(mut values: Vec<u64>) -> Vec<u64> {
+    values.sort_unstable();
+    values
+}
+
+fn sizes(files: &[(String, String)]) -> Vec<u64> {
+    files.iter().map(|(_, c)| c.len() as u64).collect()
+}
+
+fn admitted(ledger: &Ledger) -> Vec<u64> {
+    ledger.admitted.lock().unwrap().clone()
+}
+
+fn run_each(repo: &std::path::Path, ledger: Arc<Ledger>, probe: Probe) -> (usize, Vec<Killed>) {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     rayon::ThreadPoolBuilder::new()
         .num_threads(8)
         .build()
         .unwrap()
         .install(|| {
-            let (context, workset) = Pipeline::new(
-                Context::new(&env, common::walk(repo)).admit_with(admission),
-                (),
-            )
-            .then(Prepare)
-            .unwrap()
-            .then(Each(phase))
-            .unwrap()
-            .finish();
+            let mut context = Context::new(&env, common::walk(repo));
+            context.admission = ledger;
+            let (context, workset) = Pipeline::new(context, ())
+                .then(Prepare)
+                .unwrap()
+                .then(Each(probe))
+                .unwrap()
+                .finish();
             (workset.items.len(), context.report.skipped)
         })
 }
 
-struct SeesItsSlot(Arc<Ledger>);
-
-impl ItemPhase<SourceFile> for SeesItsSlot {
-    type Output = ();
-    fn name(&self) -> Cow<'static, str> {
-        "slot".into()
-    }
-    fn run(&self, _: &Env, _: &Sentinel, file: SourceFile) -> Result<(), Killed> {
-        assert!(self.0.inflight.load(Ordering::Relaxed) >= file.content.len() as u64);
-        Ok(())
-    }
-}
-
 #[test]
-fn each_admits_every_item_before_its_phase_and_releases_it_after() {
-    let files: Vec<_> = (1..=8)
-        .map(|i| (format!("f{i}.py"), "x = 1\n".repeat(i * 1000)))
-        .collect();
-    let repo = tempfile::tempdir().unwrap();
-    for (path, content) in &files {
-        std::fs::write(repo.path().join(path), content).unwrap();
-    }
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
-    let ledger = Arc::new(Ledger::default());
-    let items = rayon::ThreadPoolBuilder::new()
-        .num_threads(8)
-        .build()
-        .unwrap()
-        .install(|| {
-            Pipeline::new(
-                Context::new(&env, common::walk(repo.path())).admit_with(ledger.clone()),
-                (),
-            )
-            .then(Prepare)
-            .unwrap()
-            .then(Each(SeesItsSlot(ledger.clone())))
-            .unwrap()
-            .into_value()
-            .items
-            .len()
-        });
-    assert_eq!(items, 8);
-    let mut admitted = ledger.admitted.lock().unwrap().clone();
-    admitted.sort_unstable();
-    let mut sizes: Vec<u64> = files.iter().map(|(_, c)| c.len() as u64).collect();
-    sizes.sort_unstable();
-    assert_eq!(admitted, sizes);
-    assert_eq!(ledger.inflight.load(Ordering::Relaxed), 0);
-}
-
-#[test]
-fn a_refused_item_is_reported_as_skipped_and_the_others_run() {
-    let files = sized_files(3);
-    let repo = tempfile::tempdir().unwrap();
-    write_files(repo.path(), &files);
-    let limit = files[1].1.len() as u64;
-    let (items, skipped) = run_each(repo.path(), Arc::new(RefuseOver(limit)), Passes);
-    assert_eq!(items, 2);
-    assert_eq!(skipped.len(), 1);
-    assert_eq!(skipped[0].label, "admission");
-}
-
-#[test]
-fn a_slot_is_released_after_a_killed_item_and_after_a_panic() {
+fn each_admits_an_item_before_its_phase_and_releases_it_after_a_pass_a_refusal_a_kill_and_a_panic()
+{
     let files = sized_files(4);
     let repo = tempfile::tempdir().unwrap();
     write_files(repo.path(), &files);
-    let ledger = Arc::new(Ledger::default());
-    let (items, skipped) = run_each(
-        repo.path(),
-        ledger.clone(),
-        FailsOn("f2.py", ledger.clone()),
-    );
-    assert_eq!((items, skipped.len()), (3, 1));
+    let probe = |ledger: &Arc<Ledger>, panics| Probe {
+        ledger: ledger.clone(),
+        fails: "f2.py",
+        panics,
+    };
+
+    let ledger = Arc::new(Ledger {
+        refuse_over: files[2].1.len() as u64,
+        ..Ledger::default()
+    });
+    let (items, skipped) = run_each(repo.path(), ledger.clone(), probe(&ledger, ""));
+    assert_eq!(items, 2);
+    let mut labels: Vec<_> = skipped.iter().map(|k| k.label.as_ref()).collect();
+    labels.sort_unstable();
+    assert_eq!(labels, ["admission", "phase"]);
+    assert_eq!(sorted(admitted(&ledger)), sorted(sizes(&files[..3])));
     assert_eq!(ledger.inflight.load(Ordering::Relaxed), 0);
 
     let ledger = Arc::new(Ledger::default());
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_each(repo.path(), ledger.clone(), PanicsOn("f3.py"))
+        run_each(repo.path(), ledger.clone(), probe(&ledger, "f3.py"))
     }));
     assert!(panicked.is_err());
     assert_eq!(ledger.inflight.load(Ordering::Relaxed), 0);
@@ -430,10 +355,6 @@ fn the_admission_in_the_options_reaches_every_family() {
         |_| Ok::<(), String>(()),
     )
     .unwrap();
-    let mut admitted = ledger.admitted.lock().unwrap().clone();
-    admitted.sort_unstable();
-    let mut sizes: Vec<u64> = files.iter().map(|(_, c)| c.len() as u64).collect();
-    sizes.sort_unstable();
-    assert_eq!(admitted, sizes);
+    assert_eq!(sorted(admitted(&ledger)), sorted(sizes(&files)));
     assert_eq!(ledger.inflight.load(Ordering::Relaxed), 0);
 }

@@ -28,6 +28,4 @@ pub mod rules {
 
 pub use env::Env;
 pub use export::{Envelope, Scalar, export};
-pub use pipeline::{
-    Admission, Context, ItemPhase, Observer, Phase, Pipeline, Report, State, Unbounded,
-};
+pub use pipeline::{Admission, Context, ItemPhase, Observer, Phase, Pipeline, Report, State};

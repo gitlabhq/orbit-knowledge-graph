@@ -6,14 +6,14 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
 use gitlab_client::GitlabClientError;
-use orbit_server_config::CodeIndexingPipelineConfig;
+use orbit_server_config::{CodeIndexingPipelineConfig, resources::MemoryPressure};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
-use super::memory::{MemoryKill, MemoryWatchdog, Registration};
+use super::memory::MemoryWatchdog;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
 use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
@@ -73,7 +73,7 @@ enum Fetched {
 
 pub enum IndexError {
     BudgetExceeded { budget: Duration },
-    MemoryExceeded(MemoryKill),
+    MemoryExceeded(MemoryPressure),
     Overloaded(GitlabClientError),
     NoLane { waited: Duration },
     Failed(HandlerError),
@@ -83,11 +83,6 @@ impl From<HandlerError> for IndexError {
     fn from(err: HandlerError) -> Self {
         Self::Failed(err)
     }
-}
-
-/// A failure during a memory kill is the kill, whatever shape the cancel took.
-fn unless_killed(memory: &Registration, error: IndexError) -> IndexError {
-    memory.exceeded().map_or(error, IndexError::MemoryExceeded)
 }
 
 struct WorkClock {
@@ -321,9 +316,8 @@ impl CodeIndexer {
         }
     }
 
-    pub fn with_memory_watchdog(mut self, memory: Arc<MemoryWatchdog>) -> Self {
+    pub fn set_memory_watchdog(&mut self, memory: Arc<MemoryWatchdog>) {
         self.memory = memory;
-        self
     }
 
     /// Derived inflight cap for the engine listen loop: a download can pre-fetch ahead of
@@ -367,7 +361,6 @@ impl CodeIndexer {
     ) -> Result<IndexOutcome, IndexError> {
         let budget = self.pipeline_config.job_timeout();
         let mut clock = WorkClock::new(budget);
-        let _holds_memory = self.memory.hold();
 
         // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
         let Some(fetched) = clock.run(self.fetch_repository(context, request)).await else {
@@ -400,17 +393,16 @@ impl CodeIndexer {
             ))
             .await;
         let run = match indexed {
-            Some(Ok(run)) => run,
-            Some(Err(error)) => return Err(unless_killed(&memory, IndexError::Failed(error))),
+            Some(result) => result.map_err(IndexError::Failed),
             None => {
                 // The blocking parse outlives the dropped future; cancel makes it bail.
                 cancel.cancel();
-                let budget = IndexError::BudgetExceeded {
+                Err(IndexError::BudgetExceeded {
                     budget: budget.unwrap_or_default(),
-                };
-                return Err(unless_killed(&memory, budget));
+                })
             }
-        };
+        }
+        .map_err(|error| memory.exceeded().map_or(error, IndexError::MemoryExceeded))?;
         drop(memory);
 
         drop(repository);
@@ -757,7 +749,7 @@ impl CodeIndexer {
             batch_bytes: orbit_arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
-            admission: super::inflight::budget(self.pipeline_config.max_inflight_source_bytes),
+            admission: super::memory::budget(),
             phase_started: {
                 let span = span.clone();
                 Arc::new(move |family, phase, files| {

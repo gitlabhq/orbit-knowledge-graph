@@ -36,6 +36,12 @@ pub struct ContainerResources {
     pub memory_limit_bytes: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemoryPressure {
+    pub used: u64,
+    pub limit: u64,
+}
+
 impl ContainerResources {
     pub fn detect() -> Self {
         Self {
@@ -142,20 +148,32 @@ fn datalake_batch_size_for_memory_limit(memory_limit_bytes: u64) -> u64 {
 
 /// The cgroup limit where one applies (containers), otherwise total RAM (VMs, bare metal, macOS/Windows).
 fn read_memory_ceiling_bytes() -> Option<u64> {
-    let mut system = System::new();
-    if let Ok(pid) = get_current_pid() {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            false,
-            ProcessRefreshKind::nothing(),
-        );
-        if let Some(limits) = system.process(pid).and_then(|p| p.cgroup_limits()) {
-            return Some(limits.total_memory);
-        }
+    if let Some(cgroup) = cgroup_memory() {
+        return Some(cgroup.limit);
     }
+    let mut system = System::new();
     system.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
     let total_ram = system.total_memory();
     (total_ram > 0).then_some(total_ram)
+}
+
+pub fn cgroup_memory() -> Option<MemoryPressure> {
+    let mut system = System::new();
+    let pid = get_current_pid().ok()?;
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing(),
+    );
+    let limits = system
+        .process(pid)
+        .and_then(|process| process.cgroup_limits())
+        .or_else(|| system.cgroup_limits())?;
+    system.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
+    (limits.total_memory < system.total_memory()).then_some(MemoryPressure {
+        used: limits.rss,
+        limit: limits.total_memory,
+    })
 }
 
 #[cfg(test)]

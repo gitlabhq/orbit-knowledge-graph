@@ -10,9 +10,9 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Admission, Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase,
-    Labelled, LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile,
-    SourcePaths, State, Workset,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase, Labelled,
+    LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
+    Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
@@ -205,10 +205,10 @@ where
                 let path = item.label().to_string();
                 let bytes = item.bytes();
                 let started = Instant::now();
-                let outcome = match Slot::admit(admission, bytes, run) {
-                    Ok(_slot) => phase.run(env, run, item),
-                    Err(killed) => Err(killed),
-                };
+                let outcome = admission.admit(bytes, run).and_then(|()| {
+                    let _slot = Slot(admission, bytes);
+                    phase.run(env, run, item)
+                });
                 Ok((outcome, path, bytes, started.elapsed()))
             })
             .collect();
@@ -251,21 +251,23 @@ where
     }
 }
 
-struct Slot<'a> {
-    admission: &'a dyn Admission,
-    bytes: u64,
+pub trait Admission: Send + Sync {
+    fn admit(&self, bytes: u64, run: &Sentinel) -> Result<(), Killed>;
+    fn release(&self, bytes: u64);
 }
 
-impl<'a> Slot<'a> {
-    fn admit(admission: &'a dyn Admission, bytes: u64, run: &Sentinel) -> Result<Self, Killed> {
-        admission.admit(bytes, run)?;
-        Ok(Self { admission, bytes })
+impl Admission for () {
+    fn admit(&self, _: u64, _: &Sentinel) -> Result<(), Killed> {
+        Ok(())
     }
+    fn release(&self, _: u64) {}
 }
+
+struct Slot<'a>(&'a dyn Admission, u64);
 
 impl Drop for Slot<'_> {
     fn drop(&mut self) {
-        self.admission.release(self.bytes);
+        self.0.release(self.1);
     }
 }
 

@@ -23,9 +23,10 @@ use indexer::modules::code::{
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
-use indexer::types::Event;
+use indexer::types::{Envelope, Event};
 use integration_testkit::{TestContext, t};
 use orbit_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
+use orbit_utils::traversal_path::TraversalPath;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -33,6 +34,40 @@ use std::collections::HashMap;
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
 const SLOW_ARCHIVE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
+pub fn code_indexing_backfill_envelope(
+    project_id: i64,
+    task_id: i64,
+    traversal_path: &str,
+) -> Envelope {
+    Envelope::new(&CodeIndexingTaskRequest {
+        task_id,
+        project_id,
+        branch: Some("main".to_string()),
+        commit_sha: None,
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
+        dispatch_id: uuid::Uuid::new_v4(),
+        campaign_id: None,
+    })
+    .expect("failed to create envelope")
+}
+
+pub async fn checkpointed(
+    clickhouse: &TestContext,
+    traversal_path: &str,
+    project_id: i64,
+    branch: &str,
+) -> bool {
+    let rows = clickhouse
+        .query(&format!(
+            "SELECT last_task_id FROM {} FINAL \
+             WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
+             AND branch = '{branch}' AND indexed_at IS NOT NULL AND _deleted = false",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    rows.first().is_some_and(|b| b.num_rows() > 0)
+}
 
 pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexer>,
@@ -62,31 +97,24 @@ impl CodeIndexingDeps {
         Self::new_with_ontology(mock, clickhouse, pipeline_config, ontology)
     }
 
-    pub fn new_with_ontology(
-        mock: &MockGitlabServer,
-        clickhouse: &TestContext,
-        pipeline_config: CodeIndexingPipelineConfig,
-        ontology: ontology::Ontology,
-    ) -> Self {
-        Self::build(mock, clickhouse, pipeline_config, ontology, None)
-    }
-
     pub fn new_with_memory_watchdog(
         mock: &MockGitlabServer,
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
         watchdog: Arc<MemoryWatchdog>,
     ) -> Self {
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        Self::build(mock, clickhouse, pipeline_config, ontology, Some(watchdog))
+        let mut deps = Self::new_with_pipeline_config(mock, clickhouse, pipeline_config);
+        Arc::get_mut(&mut deps.pipeline)
+            .expect("the indexer has no other owner yet")
+            .set_memory_watchdog(watchdog);
+        deps
     }
 
-    fn build(
+    pub fn new_with_ontology(
         mock: &MockGitlabServer,
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
         ontology: ontology::Ontology,
-        watchdog: Option<Arc<MemoryWatchdog>>,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client("graph"));
@@ -124,7 +152,7 @@ impl CodeIndexingDeps {
         ));
 
         let shutdown = tokio_util::sync::CancellationToken::new();
-        let pipeline = CodeIndexer::new(
+        let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,
             Arc::clone(&checkpoint_store) as _,
@@ -134,11 +162,7 @@ impl CodeIndexingDeps {
             Arc::new(ontology),
             pipeline_config,
             shutdown.clone(),
-        );
-        let pipeline = Arc::new(match watchdog {
-            Some(watchdog) => pipeline.with_memory_watchdog(watchdog),
-            None => pipeline,
-        });
+        ));
 
         Self {
             pipeline,
@@ -231,7 +255,6 @@ struct ProjectData {
     /// projects that lack repository content. `u32::MAX` means always.
     empty_archive_responses: u32,
     slow_archive: bool,
-    archive_downloads: u32,
     archive_status: Option<StatusCode>,
 }
 
@@ -281,33 +304,6 @@ impl MockGitlabServer {
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {
-        self.insert_project(project_id, default_branch, files, false);
-    }
-
-    pub fn archive_downloads(&self, project_id: i64) -> u32 {
-        self.state
-            .projects
-            .lock()
-            .get(&project_id)
-            .map_or(0, |p| p.archive_downloads)
-    }
-
-    pub fn add_project_with_slow_archive_files(
-        &self,
-        project_id: i64,
-        default_branch: &str,
-        files: &[(&str, &str)],
-    ) {
-        self.insert_project(project_id, default_branch, files, true);
-    }
-
-    fn insert_project(
-        &self,
-        project_id: i64,
-        default_branch: &str,
-        files: &[(&str, &str)],
-        slow_archive: bool,
-    ) {
         let archive_files: Vec<(String, Vec<u8>)> = files
             .iter()
             .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
@@ -318,11 +314,16 @@ impl MockGitlabServer {
                 default_branch: default_branch.to_string(),
                 archive_files,
                 empty_archive_responses: 0,
-                slow_archive,
-                archive_downloads: 0,
+                slow_archive: false,
                 archive_status: None,
             },
         );
+    }
+
+    pub fn slow_archive(&self, project_id: i64) {
+        if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
+            project.slow_archive = true;
+        }
     }
 
     /// Register a project whose archive endpoint sleeps, so a short job timeout fires mid-fetch.
@@ -337,7 +338,6 @@ impl MockGitlabServer {
                 )],
                 empty_archive_responses: 0,
                 slow_archive: true,
-                archive_downloads: 0,
                 archive_status: None,
             },
         );
@@ -354,7 +354,6 @@ impl MockGitlabServer {
                 archive_files: Vec::new(),
                 empty_archive_responses: u32::MAX,
                 slow_archive: false,
-                archive_downloads: 0,
                 archive_status: None,
             },
         );
@@ -428,9 +427,6 @@ async fn handle_download_archive(
         tokio::time::sleep(SLOW_ARCHIVE_DELAY).await;
     }
     let mut projects = state.projects.lock();
-    if let Some(project) = projects.get_mut(&project_id) {
-        project.archive_downloads += 1;
-    }
     match projects.get_mut(&project_id) {
         Some(ProjectData {
             archive_status: Some(status),

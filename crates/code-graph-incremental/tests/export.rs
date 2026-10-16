@@ -236,7 +236,7 @@ fn strs(row: &[&str]) -> Vec<String> {
 
 fn options() -> templates::Options {
     templates::Options {
-        admission: std::sync::Arc::new(code_graph_incremental::Unbounded),
+        admission: std::sync::Arc::new(()),
         limits: Limits::UNLIMITED,
         worker_threads: 0,
         concurrent_families: 2,

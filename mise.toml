@@ -151,13 +151,6 @@ run = "cargo nextest run --all-features --test containers --no-fail-fast --retri
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
-[tasks."test:integration:memory"]
-run = [
-  "cargo nextest run --all-features -p integration-tests --test containers --no-run",
-  "systemd-run --user --scope -p MemoryMax=1G -- cargo nextest run --all-features -p integration-tests --test containers --retries 0 --run-ignored ignored-only -E 'test(memory_pressure)'",
-]
-description = "Prove that one code job under a 1 GiB cgroup limit dead-letters alone while the process and a co-scheduled job survive (Linux with a systemd user session and Docker)"
-
 [tasks."test:integration:server"]
 run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }

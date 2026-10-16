@@ -2272,23 +2272,6 @@ fn code_indexing_task_envelope(
     .expect("failed to create envelope")
 }
 
-fn code_indexing_backfill_envelope(
-    project_id: i64,
-    task_id: i64,
-    traversal_path: &str,
-) -> Envelope {
-    Envelope::new(&CodeIndexingTaskRequest {
-        task_id,
-        project_id,
-        branch: Some("main".to_string()),
-        commit_sha: None,
-        traversal_path: TraversalPath::new_unchecked(traversal_path),
-        dispatch_id: uuid::Uuid::new_v4(),
-        campaign_id: None,
-    })
-    .expect("failed to create envelope")
-}
-
 async fn assert_file_not_active(
     clickhouse: &integration_testkit::TestContext,
     project_id: i64,

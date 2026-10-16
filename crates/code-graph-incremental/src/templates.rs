@@ -171,14 +171,14 @@ pub fn repository<E: std::fmt::Display>(
                             let (report, batches) = {
                                 let mut env = Env::with_limits(language, limits)?;
                                 env.export_config = export_config.clone();
-                                let mut context = Context::new(&env, repository.clone())
-                                    .observe(PhaseStarted {
+                                let mut context =
+                                    Context::new(&env, repository.clone()).observe(PhaseStarted {
                                         family,
                                         files: file_count,
                                         hook: phase_started.clone(),
-                                    })
-                                    .admit_with(admission.clone());
+                                    });
                                 context.run = run.clone();
+                                context.admission = admission.clone();
                                 let (context, graph) = index(context)?.then(Display)?.finish();
                                 let mut report = context.report;
                                 report.unread_files.retain(|path| owns(family, path));

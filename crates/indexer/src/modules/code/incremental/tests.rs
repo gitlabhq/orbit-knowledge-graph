@@ -721,7 +721,7 @@ fn config() -> CodeIndexingPipelineConfig {
 
 fn options() -> Options {
     Options {
-        admission: Arc::new(code_graph_incremental::Unbounded),
+        admission: Arc::new(()),
         limits: code_graph_incremental::Limits::UNLIMITED,
         worker_threads: config().worker_threads,
         concurrent_families: code_graph::v2::PipelineConfig::default().concurrent_languages(),

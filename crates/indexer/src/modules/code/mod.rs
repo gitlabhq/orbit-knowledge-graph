@@ -3,7 +3,6 @@ mod checkpoint;
 pub mod config;
 mod handler;
 mod incremental;
-mod inflight;
 mod memory;
 pub mod metrics;
 pub(crate) mod observer;
@@ -30,7 +29,7 @@ use repository::RepositoryResolver;
 
 pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
 pub use handler::{CodeIndexingTaskHandler, project_lock_key};
-pub use memory::{Cgroup, MemoryWatchdog};
+pub use memory::MemoryWatchdog;
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,

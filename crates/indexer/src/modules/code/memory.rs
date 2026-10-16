@@ -1,149 +1,123 @@
-//! Cancels one code job when the pod's cgroup nears its memory limit, so the
-//! kernel's OOM killer does not take the process and every co-scheduled job
-//! with it. The victim is the in-flight job with the most repository bytes,
-//! the newest on a tie, and the next kill waits until it has unwound.
-
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
+use std::time::Duration;
 
 use code_graph::v2::CancellationToken;
-use tracing::{info, warn};
+use code_graph_incremental::{Admission, Killed, Sentinel};
+use orbit_server_config::resources::{MemoryPressure, cgroup_memory};
+use tracing::warn;
 
 use super::metrics::CodeMetrics;
 
+const INFLIGHT_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
 const INTERVAL: Duration = Duration::from_millis(100);
-/// Freed memory shows up in the cgroup a little after a cancelled job unwinds;
-/// memory that keeps rising past the last kill does not wait for it.
-const SETTLE_AFTER_UNWIND: Duration = Duration::from_millis(750);
-const UNREADABLE_SAMPLES_BEFORE_GIVING_UP: u32 = 10;
-/// cgroup v1 reports "no limit" as a value near i64::MAX; at or above this
-/// threshold there is none.
-const V1_NO_LIMIT: u64 = 1 << 62;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Pressure {
-    pub used: u64,
-    pub limit: u64,
+pub(super) fn budget() -> Arc<dyn Admission> {
+    Arc::new(InflightBudget::new(INFLIGHT_SOURCE_BYTES))
 }
 
-/// What a cancelled job sees: the pressure at the kill, and whether it was
-/// the only job in flight, which decides whether the attempt counts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MemoryKill {
-    pub pressure: Pressure,
-    pub alone: bool,
+struct InflightBudget {
+    budget: u64,
+    used: Mutex<u64>,
+    changed: Condvar,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Sample {
-    Pressure(Pressure),
-    NoLimit,
-    Unreadable,
+impl InflightBudget {
+    fn new(budget: u64) -> Self {
+        Self {
+            budget,
+            used: Mutex::new(0),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn used(&self) -> MutexGuard<'_, u64> {
+        self.used.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
-/// The files to read: cgroup v2 (`memory.max`, `anon` in `memory.stat`) or
-/// v1 (`memory.limit_in_bytes`, `rss` in `memory.stat`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Cgroup {
-    dir: PathBuf,
-    v1: bool,
-}
+impl Admission for InflightBudget {
+    fn admit(&self, bytes: u64, run: &Sentinel) -> Result<(), Killed> {
+        let mut used = self.used();
+        while *used != 0 && *used + bytes > self.budget {
+            run.check()?;
+            used = self
+                .changed
+                .wait(used)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        *used += bytes;
+        Ok(())
+    }
 
-impl Cgroup {
-    pub fn v2(dir: PathBuf) -> Self {
-        Self { dir, v1: false }
+    fn release(&self, bytes: u64) {
+        *self.used() -= bytes;
+        self.changed.notify_all();
     }
 }
 
 struct Job {
-    id: u64,
     bytes: u64,
     cancel: CancellationToken,
-    killed: Arc<OnceLock<MemoryKill>>,
+    killed: Arc<OnceLock<MemoryPressure>>,
 }
 
 pub struct MemoryWatchdog {
-    cgroup: Cgroup,
+    sample: Box<dyn Fn() -> Option<MemoryPressure> + Send + Sync>,
     kill_at_percent: u64,
     metrics: CodeMetrics,
     jobs: Mutex<Vec<Job>>,
-    holding: Arc<AtomicUsize>,
-    settled_at: Mutex<Option<Instant>>,
     used_at_last_kill: AtomicU64,
-    next_id: AtomicU64,
     watching: AtomicBool,
 }
 
-/// A job that holds memory, from its fetch to its last durable write; a kill
-/// is `alone` only when no other job holds any.
-pub struct Hold(Arc<AtomicUsize>);
-
-impl Drop for Hold {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-/// Keeps the job eligible for cancellation; dropping it withdraws the job.
 pub struct Registration {
     watchdog: Arc<MemoryWatchdog>,
-    id: u64,
-    killed: Arc<OnceLock<MemoryKill>>,
+    killed: Arc<OnceLock<MemoryPressure>>,
 }
 
 impl Registration {
-    pub fn exceeded(&self) -> Option<MemoryKill> {
+    pub fn exceeded(&self) -> Option<MemoryPressure> {
         self.killed.get().copied()
     }
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.watchdog.jobs().retain(|job| job.id != self.id);
-        if self.killed.get().is_some() {
-            *self
-                .watchdog
-                .settled_at
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) =
-                Some(Instant::now() + SETTLE_AFTER_UNWIND);
-        }
+        self.watchdog
+            .jobs()
+            .retain(|job| !Arc::ptr_eq(&job.killed, &self.killed));
     }
 }
 
 impl MemoryWatchdog {
-    /// `kill_at_percent` of the cgroup limit triggers a cancellation; 0 turns
-    /// the watchdog off.
     pub fn for_this_process(metrics: CodeMetrics, kill_at_percent: u64) -> Arc<Self> {
-        Self::new(own_cgroup(), metrics, kill_at_percent)
+        if cgroup_memory().is_none() {
+            warn!("memory watchdog inert: this process has no cgroup memory limit");
+            return Self::new(Box::new(|| None), metrics, 0);
+        }
+        Self::new(Box::new(cgroup_memory), metrics, kill_at_percent)
     }
 
-    pub fn new(cgroup: Cgroup, metrics: CodeMetrics, kill_at_percent: u64) -> Arc<Self> {
+    pub fn new(
+        sample: Box<dyn Fn() -> Option<MemoryPressure> + Send + Sync>,
+        metrics: CodeMetrics,
+        kill_at_percent: u64,
+    ) -> Arc<Self> {
         Arc::new(Self {
-            cgroup,
+            sample,
             kill_at_percent: kill_at_percent.min(100),
             metrics,
             jobs: Mutex::new(Vec::new()),
-            holding: Arc::new(AtomicUsize::new(0)),
-            settled_at: Mutex::new(None),
             used_at_last_kill: AtomicU64::new(0),
-            next_id: AtomicU64::new(0),
             watching: AtomicBool::new(false),
         })
     }
 
-    pub fn hold(&self) -> Hold {
-        self.holding.fetch_add(1, Ordering::AcqRel);
-        Hold(self.holding.clone())
-    }
-
     pub fn register(self: &Arc<Self>, bytes: u64, cancel: CancellationToken) -> Registration {
         let killed = Arc::new(OnceLock::new());
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.jobs().push(Job {
-            id,
+        let mut jobs = self.jobs();
+        jobs.push(Job {
             bytes,
             cancel,
             killed: killed.clone(),
@@ -153,428 +127,181 @@ impl MemoryWatchdog {
         }
         Registration {
             watchdog: self.clone(),
-            id,
             killed,
         }
     }
 
     async fn watch(watchdog: Weak<Self>) {
-        let mut armed = false;
-        let mut unreadable = 0;
-        loop {
-            let Some(watchdog) = watchdog.upgrade() else {
-                return;
-            };
-            let cgroup = &watchdog.cgroup;
-            match sample(cgroup) {
-                Sample::Pressure(pressure) => {
-                    if !armed {
-                        info!(cgroup = %cgroup.dir.display(), limit = pressure.limit, "memory watchdog armed");
-                        armed = true;
-                    }
-                    unreadable = 0;
-                    if let Some((kill, bytes)) = watchdog.tick(pressure) {
-                        warn!(
-                            used = kill.pressure.used,
-                            limit = kill.pressure.limit,
-                            repository_bytes = bytes,
-                            alone = kill.alone,
-                            "cancelling the largest code indexing job under pod memory pressure"
-                        );
-                    }
-                }
-                Sample::NoLimit => {
-                    warn!(cgroup = %cgroup.dir.display(), "memory watchdog inert: this cgroup has no memory limit");
-                    return;
-                }
-                Sample::Unreadable => {
-                    unreadable += 1;
-                    if unreadable >= UNREADABLE_SAMPLES_BEFORE_GIVING_UP {
-                        warn!(cgroup = %cgroup.dir.display(), "memory watchdog inert: cannot read the cgroup memory files");
-                        return;
-                    }
-                }
+        while let Some(this) = watchdog.upgrade() {
+            if let Some(pressure) = (this.sample)() {
+                this.tick(pressure);
             }
-            drop(watchdog);
+            if this.unwatch_when_idle() {
+                return;
+            }
+            drop(this);
             tokio::time::sleep(INTERVAL).await;
         }
     }
 
-    /// At most one cancellation per sample; returns the kill and the victim's
-    /// repository bytes when a job was cancelled.
-    fn tick(&self, pressure: Pressure) -> Option<(MemoryKill, u64)> {
+    fn unwatch_when_idle(&self) -> bool {
+        let jobs = self.jobs();
+        let idle = jobs.is_empty();
+        if idle {
+            self.watching.store(false, Ordering::Release);
+        }
+        idle
+    }
+
+    fn tick(&self, pressure: MemoryPressure) -> Option<u64> {
         if self.kill_at_percent == 0
             || u128::from(pressure.used) * 100
                 < u128::from(pressure.limit) * u128::from(self.kill_at_percent)
         {
-            return None;
-        }
-        let settling = self
-            .settled_at
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some_and(|until| Instant::now() < until);
-        if settling && pressure.used <= self.used_at_last_kill.load(Ordering::Relaxed) {
+            self.used_at_last_kill.store(0, Ordering::Relaxed);
             return None;
         }
         let jobs = self.jobs();
-        if jobs.iter().any(|job| job.killed.get().is_some()) {
+        let last_kill = self.used_at_last_kill.load(Ordering::Relaxed);
+        if jobs.iter().any(|job| job.killed.get().is_some())
+            || (last_kill != 0 && pressure.used <= last_kill)
+        {
             return None;
         }
         let victim = jobs.iter().max_by_key(|job| job.bytes)?;
-        let kill = MemoryKill {
-            pressure,
-            alone: self.holding.load(Ordering::Acquire) <= 1,
-        };
-        let _ = victim.killed.set(kill);
+        let _ = victim.killed.set(pressure);
         self.used_at_last_kill
             .store(pressure.used, Ordering::Relaxed);
         victim.cancel.cancel();
         self.metrics.record_stage_error("memory_pressure");
-        Some((kill, victim.bytes))
+        warn!(
+            used = pressure.used,
+            limit = pressure.limit,
+            repository_bytes = victim.bytes,
+            "cancelling the largest code indexing job under pod memory pressure"
+        );
+        Some(victim.bytes)
     }
 
-    fn jobs(&self) -> std::sync::MutexGuard<'_, Vec<Job>> {
+    fn jobs(&self) -> MutexGuard<'_, Vec<Job>> {
         self.jobs.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-fn sample(cgroup: &Cgroup) -> Sample {
-    let (limit_file, usage_key) = if cgroup.v1 {
-        ("memory.limit_in_bytes", "rss ")
-    } else {
-        ("memory.max", "anon ")
-    };
-    let Ok(limit) = std::fs::read_to_string(cgroup.dir.join(limit_file)) else {
-        return Sample::Unreadable;
-    };
-    let limit = match limit.trim().parse::<u64>() {
-        Ok(limit) if limit < V1_NO_LIMIT => limit,
-        Ok(_) => return Sample::NoLimit,
-        Err(_) if limit.trim() == "max" => return Sample::NoLimit,
-        Err(_) => return Sample::Unreadable,
-    };
-    let Ok(stat) = std::fs::read_to_string(cgroup.dir.join("memory.stat")) else {
-        return Sample::Unreadable;
-    };
-    match stat
-        .lines()
-        .find_map(|line| line.strip_prefix(usage_key))
-        .and_then(|value| value.trim().parse().ok())
-    {
-        Some(used) => Sample::Pressure(Pressure { used, limit }),
-        None => Sample::Unreadable,
-    }
-}
-
-/// The process's own cgroup from `/proc/self/cgroup`: the `0::` line names
-/// the v2 path (`/` inside a container); otherwise the line that lists the
-/// v1 `memory` controller names the v1 path.
-fn own_cgroup() -> Cgroup {
-    let cgroups = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
-    cgroup_from(&cgroups, Path::new("/sys/fs/cgroup"))
-}
-
-fn cgroup_from(cgroups: &str, root: &Path) -> Cgroup {
-    let mut v2 = None;
-    let mut v1 = None;
-    for line in cgroups.lines() {
-        let mut fields = line.splitn(3, ':');
-        let (Some(_), Some(controllers), Some(path)) =
-            (fields.next(), fields.next(), fields.next())
-        else {
-            continue;
-        };
-        if controllers.is_empty() {
-            v2 = Some(path);
-        } else if controllers.split(',').any(|c| c == "memory") {
-            v1 = Some(path);
-        }
-    }
-    let v2 = v2.map(|path| at(root.to_path_buf(), path, false));
-    match (v2, v1) {
-        (Some(cgroup), None) => cgroup,
-        (Some(cgroup), Some(_)) if cgroup.dir.join("memory.max").exists() => cgroup,
-        (_, Some(path)) => at(root.join("memory"), path, true),
-        (None, None) => Cgroup {
-            dir: root.to_path_buf(),
-            v1: false,
-        },
-    }
-}
-
-/// The named cgroup under its mount, or the mount root itself when the name
-/// is the host's view (no cgroup namespace) and does not exist there.
-fn at(mount: PathBuf, path: &str, v1: bool) -> Cgroup {
-    let limit_file = if v1 {
-        "memory.limit_in_bytes"
-    } else {
-        "memory.max"
-    };
-    let nested = mount.join(path.trim_start_matches('/'));
-    let dir = if nested.join(limit_file).exists() || !mount.join(limit_file).exists() {
-        nested
-    } else {
-        mount
-    };
-    Cgroup { dir, v1 }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Barrier;
+
     use super::*;
 
-    fn cgroup(limit: &str, anon: u64) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        set(&dir, limit, anon);
-        dir
+    const MIB: u64 = 1024 * 1024;
+
+    fn pressure(used: u64) -> MemoryPressure {
+        MemoryPressure { used, limit: 1000 }
     }
 
-    fn set(dir: &tempfile::TempDir, limit: &str, anon: u64) {
-        std::fs::write(dir.path().join("memory.max"), format!("{limit}\n"))
+    fn watchdog(kill_at_percent: u64) -> Arc<MemoryWatchdog> {
+        MemoryWatchdog::new(Box::new(|| None), CodeMetrics::new(), kill_at_percent)
+    }
+
+    #[test]
+    fn a_waiter_leaves_on_cancel_and_an_oversize_item_runs_alone() {
+        let budget = InflightBudget::new(2 * MIB);
+        budget
+            .admit(2 * MIB, &Sentinel::disabled())
             .unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(
-            dir.path().join("memory.stat"),
-            format!("file 4096\nanon {anon}\nkernel 128\n"),
-        )
-        .unwrap_or_else(|e| panic!("{e}"));
+        let cancelled = Sentinel::new("run", "", u64::MAX).with_cancellation(Arc::new(|| true));
+        assert!(
+            budget
+                .admit(MIB, &cancelled)
+                .is_err_and(|killed| killed.cancelled)
+        );
+        budget.release(2 * MIB);
+        budget
+            .admit(3 * MIB, &Sentinel::disabled())
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(*budget.used(), 3 * MIB);
     }
 
-    fn v2(dir: &tempfile::TempDir) -> Cgroup {
-        Cgroup {
-            dir: dir.path().to_path_buf(),
-            v1: false,
-        }
-    }
-
-    fn watchdog(dir: &tempfile::TempDir) -> Arc<MemoryWatchdog> {
-        MemoryWatchdog::new(v2(dir), CodeMetrics::new(), 90)
+    #[test]
+    fn bytes_in_flight_stay_under_the_budget() {
+        let budget = InflightBudget::new(2 * MIB);
+        let pair = Barrier::new(2);
+        let (inflight, peak) = (AtomicU64::new(0), AtomicU64::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    budget
+                        .admit(MIB, &Sentinel::disabled())
+                        .unwrap_or_else(|e| panic!("{e}"));
+                    let now = inflight.fetch_add(MIB, Ordering::Relaxed) + MIB;
+                    peak.fetch_max(now, Ordering::Relaxed);
+                    pair.wait();
+                    inflight.fetch_sub(MIB, Ordering::Relaxed);
+                    budget.release(MIB);
+                });
+            }
+        });
+        assert_eq!(peak.load(Ordering::Relaxed), 2 * MIB);
     }
 
     #[tokio::test]
-    async fn zero_percent_turns_the_watchdog_off() {
-        let dir = cgroup("1000", 1000);
-        let watchdog = MemoryWatchdog::new(v2(&dir), CodeMetrics::new(), 0);
-        let only = CancellationToken::new();
-        let _job = watchdog.register(7, only.clone());
-        assert_eq!(watchdog.tick(pressure(&dir)), None);
-        assert!(!only.is_cancelled());
-    }
-
-    fn pressure(dir: &tempfile::TempDir) -> Pressure {
-        match sample(&v2(dir)) {
-            Sample::Pressure(pressure) => pressure,
-            other => panic!("{other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn under_pressure_the_largest_newest_job_is_cancelled_and_then_waited_for() {
-        let dir = cgroup("1000", 500);
-        let watchdog = watchdog(&dir);
-        let _holds: Vec<_> = (0..3).map(|_| watchdog.hold()).collect();
+    async fn the_largest_newest_job_is_cancelled_and_the_next_kill_waits_for_memory_past_the_kill_level()
+     {
+        let watchdog = watchdog(90);
         let (small, big, newest) = (
             CancellationToken::new(),
             CancellationToken::new(),
             CancellationToken::new(),
         );
         let _small = watchdog.register(10, small.clone());
-        let _big = watchdog.register(50, big.clone());
+        let big_job = watchdog.register(50, big.clone());
         let newest_job = watchdog.register(50, newest.clone());
 
+        assert_eq!(watchdog.tick(pressure(500)), None);
+        assert_eq!(watchdog.tick(pressure(900)), Some(50));
+        assert!(newest.is_cancelled() && !big.is_cancelled() && !small.is_cancelled());
+        assert_eq!(newest_job.exceeded(), Some(pressure(900)));
         assert_eq!(
-            watchdog.tick(pressure(&dir)),
-            None,
-            "half the limit is not pressure"
-        );
-
-        set(&dir, "1000", 900);
-        let kill = MemoryKill {
-            pressure: Pressure {
-                used: 900,
-                limit: 1000,
-            },
-            alone: false,
-        };
-        assert_eq!(watchdog.tick(pressure(&dir)), Some((kill, 50)));
-        assert!(newest.is_cancelled(), "the newest of the two largest jobs");
-        assert!(!big.is_cancelled() && !small.is_cancelled());
-        assert_eq!(newest_job.exceeded(), Some(kill));
-
-        assert_eq!(
-            watchdog.tick(pressure(&dir)),
+            watchdog.tick(pressure(950)),
             None,
             "one cancellation unwinds at a time"
         );
+
         drop(newest_job);
         assert_eq!(
-            watchdog.tick(pressure(&dir)),
+            watchdog.tick(pressure(900)),
             None,
-            "freed memory needs a moment to show in the cgroup"
+            "the pod sits at the level of the kill"
         );
-        set(&dir, "1000", 960);
-        let rising = MemoryKill {
-            pressure: Pressure {
-                used: 960,
-                limit: 1000,
-            },
-            alone: false,
-        };
         assert_eq!(
-            watchdog.tick(pressure(&dir)),
-            Some((rising, 50)),
-            "memory that rises past the last kill does not wait out the settle"
+            watchdog.tick(pressure(960)),
+            Some(50),
+            "memory that rises past the kill level does not wait"
         );
         assert!(big.is_cancelled() && !small.is_cancelled());
+
+        drop(big_job);
+        assert_eq!(watchdog.tick(pressure(500)), None);
+        assert_eq!(
+            watchdog.tick(pressure(900)),
+            Some(10),
+            "pressure that dropped below the threshold re-arms the watchdog"
+        );
+        assert!(small.is_cancelled());
     }
 
     #[tokio::test]
-    async fn a_percent_above_one_hundred_counts_as_one_hundred() {
-        let dir = cgroup("1000", 999);
-        let watchdog = MemoryWatchdog::new(v2(&dir), CodeMetrics::new(), 150);
-        let _hold = watchdog.hold();
+    async fn zero_percent_is_off_and_more_than_one_hundred_counts_as_one_hundred() {
         let only = CancellationToken::new();
-        let _job = watchdog.register(7, only.clone());
-        assert_eq!(watchdog.tick(pressure(&dir)), None);
-        set(&dir, "1000", 1000);
-        assert!(watchdog.tick(pressure(&dir)).is_some() && only.is_cancelled());
-    }
+        let off = watchdog(0);
+        let _job = off.register(7, only.clone());
+        assert_eq!(off.tick(pressure(1000)), None);
 
-    #[tokio::test]
-    async fn a_kill_is_alone_only_when_no_other_job_holds_memory() {
-        let dir = cgroup("1000", 950);
-        let watchdog = watchdog(&dir);
-        let flushing = watchdog.hold();
-        let _parsing = watchdog.hold();
-        let only = CancellationToken::new();
-        let job = watchdog.register(7, only.clone());
-        let (kill, bytes) = watchdog
-            .tick(pressure(&dir))
-            .unwrap_or_else(|| panic!("a kill"));
-        assert!(!kill.alone, "another job still holds its write buffers");
+        let clamped = watchdog(150);
+        let _job = clamped.register(7, only.clone());
+        assert_eq!(clamped.tick(pressure(999)), None);
+        assert_eq!(clamped.tick(pressure(1000)), Some(7));
         assert!(only.is_cancelled());
-        assert_eq!((bytes, job.exceeded()), (7, Some(kill)));
-        drop(job);
-        std::thread::sleep(SETTLE_AFTER_UNWIND);
-
-        drop(flushing);
-        let again = CancellationToken::new();
-        let job = watchdog.register(7, again.clone());
-        let (kill, _) = watchdog
-            .tick(pressure(&dir))
-            .unwrap_or_else(|| panic!("a kill"));
-        assert!(kill.alone && again.is_cancelled());
-        assert_eq!(job.exceeded(), Some(kill));
-    }
-    #[tokio::test]
-    async fn no_jobs_means_nothing_to_cancel() {
-        let dir = cgroup("1000", 1000);
-        assert_eq!(watchdog(&dir).tick(pressure(&dir)), None);
-    }
-
-    #[test]
-    fn samples_read_v2_and_v1_files_and_tell_no_limit_from_unreadable() {
-        let dir = cgroup("2048", 1536);
-        assert_eq!(
-            sample(&v2(&dir)),
-            Sample::Pressure(Pressure {
-                used: 1536,
-                limit: 2048
-            })
-        );
-        set(&dir, "max", 1);
-        assert_eq!(sample(&v2(&dir)), Sample::NoLimit);
-        assert_eq!(
-            sample(&Cgroup {
-                dir: PathBuf::from("/nonexistent"),
-                v1: false
-            }),
-            Sample::Unreadable
-        );
-
-        let v1 = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        let v1_cgroup = Cgroup {
-            dir: v1.path().to_path_buf(),
-            v1: true,
-        };
-        std::fs::write(v1.path().join("memory.limit_in_bytes"), "4096\n")
-            .unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(
-            v1.path().join("memory.stat"),
-            "cache 10\nrss 3000\ntotal_rss 3000\n",
-        )
-        .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(
-            sample(&v1_cgroup),
-            Sample::Pressure(Pressure {
-                used: 3000,
-                limit: 4096
-            })
-        );
-        std::fs::write(
-            v1.path().join("memory.limit_in_bytes"),
-            "9223372036854771712\n",
-        )
-        .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(sample(&v1_cgroup), Sample::NoLimit);
-    }
-
-    #[test]
-    fn the_own_cgroup_follows_the_v2_line_and_falls_back_to_the_v1_memory_controller() {
-        let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        let scope = root.path().join("user.slice/run-1.scope");
-        std::fs::create_dir_all(&scope).unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(scope.join("memory.max"), "1\n").unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(
-            cgroup_from("0::/user.slice/run-1.scope\n", root.path()),
-            Cgroup {
-                dir: scope,
-                v1: false
-            }
-        );
-        assert_eq!(
-            cgroup_from("0::/\n", root.path()),
-            Cgroup {
-                dir: root.path().to_path_buf(),
-                v1: false
-            }
-        );
-        let v1_pod = root.path().join("memory/kubepods/pod1");
-        std::fs::create_dir_all(&v1_pod).unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(v1_pod.join("memory.limit_in_bytes"), "1\n")
-            .unwrap_or_else(|e| panic!("{e}"));
-        let v1_lines =
-            "11:cpu,cpuacct:/kubepods/pod1\n10:memory:/kubepods/pod1\n1:name=systemd:/x\n";
-        assert_eq!(
-            cgroup_from(v1_lines, root.path()),
-            Cgroup {
-                dir: v1_pod,
-                v1: true
-            }
-        );
-    }
-
-    #[test]
-    fn a_host_view_path_that_is_not_mounted_falls_back_to_the_mount_root() {
-        let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(root.path().join("memory.max"), "1\n").unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(
-            cgroup_from("0::/kubepods/burstable/pod1/abc\n", root.path()),
-            Cgroup {
-                dir: root.path().to_path_buf(),
-                v1: false
-            }
-        );
-        let v1_root = root.path().join("memory");
-        std::fs::create_dir_all(&v1_root).unwrap_or_else(|e| panic!("{e}"));
-        std::fs::write(v1_root.join("memory.limit_in_bytes"), "1\n")
-            .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(
-            cgroup_from("10:memory:/kubepods/pod1\n", root.path()),
-            Cgroup {
-                dir: v1_root,
-                v1: true
-            }
-        );
     }
 }

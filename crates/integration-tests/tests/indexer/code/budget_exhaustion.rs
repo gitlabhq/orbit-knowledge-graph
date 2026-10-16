@@ -2,43 +2,24 @@
 //! landing writes one, which is what stops it.
 
 use indexer::handler::Handler;
-use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
-use integration_testkit::t;
 use orbit_server_config::CodeIndexingPipelineConfig;
 
 use super::helpers::{
-    CodeIndexingDeps, MockGitlabServer, both_engines, enable_incremental, handler_context,
+    CodeIndexingDeps, MockGitlabServer, both_engines, checkpointed,
+    code_indexing_backfill_envelope, enable_incremental, handler_context,
 };
-use orbit_utils::traversal_path::TraversalPath;
 
 const PROJECT_ID: i64 = 4242;
 const TRAVERSAL_PATH: &str = "1/4242/";
 const BRANCH: &str = "main";
 
 fn backfill_envelope() -> Envelope {
-    Envelope::new(&CodeIndexingTaskRequest {
-        task_id: 0,
-        project_id: PROJECT_ID,
-        branch: Some(BRANCH.to_string()),
-        commit_sha: None,
-        traversal_path: TraversalPath::new_unchecked(TRAVERSAL_PATH),
-        dispatch_id: uuid::Uuid::new_v4(),
-        campaign_id: None,
-    })
-    .expect("envelope")
+    code_indexing_backfill_envelope(PROJECT_ID, 0, TRAVERSAL_PATH)
 }
 
 async fn project_indexed(clickhouse: &integration_testkit::TestContext) -> bool {
-    let rows = clickhouse
-        .query(&format!(
-            "SELECT last_task_id FROM {} FINAL \
-             WHERE traversal_path = '{TRAVERSAL_PATH}' AND project_id = {PROJECT_ID} \
-             AND branch = '{BRANCH}' AND indexed_at IS NOT NULL AND _deleted = false",
-            t("code_indexing_checkpoint")
-        ))
-        .await;
-    rows.first().is_some_and(|b| b.num_rows() > 0)
+    checkpointed(clickhouse, TRAVERSAL_PATH, PROJECT_ID, BRANCH).await
 }
 
 async fn index_once(

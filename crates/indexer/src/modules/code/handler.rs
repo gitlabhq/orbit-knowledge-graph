@@ -8,7 +8,6 @@ use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
-use super::memory::MemoryKill;
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
@@ -35,26 +34,6 @@ const JOB_TIMEOUT_RETRY: GlobalRetry = GlobalRetry {
     max_attempts: 2,
     dead_letter: true,
 };
-
-/// A job cancelled while others shared the pod may fit alone, so it gets more
-/// retries than a job cancelled alone; both still dead-letter.
-const MEMORY_SHARED_RETRY: GlobalRetry = GlobalRetry {
-    max_attempts: 4,
-    dead_letter: true,
-};
-
-fn memory_failure(attempt: u32, kill: MemoryKill) -> HandlerError {
-    let message = format!(
-        "code indexing job cancelled under pod memory pressure ({} of {} bytes in use)",
-        kill.pressure.used, kill.pressure.limit
-    );
-    let policy = if kill.alone {
-        JOB_TIMEOUT_RETRY
-    } else {
-        MEMORY_SHARED_RETRY
-    };
-    policy.global_failure(attempt, message)
-}
 
 pub fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
@@ -431,17 +410,13 @@ impl CodeIndexingTaskHandler {
                     ),
                 ))
             }
-            Err(IndexError::MemoryExceeded(kill)) => {
-                warn!(
-                    project_id,
-                    branch = %branch,
-                    used = kill.pressure.used,
-                    limit = kill.pressure.limit,
-                    alone = kill.alone,
-                    "code indexing job cancelled under pod memory pressure"
-                );
-                Err(memory_failure(attempt, kill))
-            }
+            Err(IndexError::MemoryExceeded(pressure)) => Err(JOB_TIMEOUT_RETRY.global_failure(
+                attempt,
+                format!(
+                    "code indexing job cancelled under pod memory pressure ({} of {} bytes in use)",
+                    pressure.used, pressure.limit
+                ),
+            )),
             Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
                 "no indexing lane within {}s",
                 waited.as_secs()
@@ -633,41 +608,6 @@ mod tests {
             let key = project_lock_key(project_id, branch);
             self.mock_locks.is_held(&key)
         }
-    }
-
-    #[test]
-    fn a_memory_kill_spends_an_attempt_only_when_the_job_was_alone() {
-        use super::super::memory::Pressure;
-        use crate::handler::PermanentAction;
-        let kill = |alone| MemoryKill {
-            pressure: Pressure {
-                used: 950,
-                limit: 1000,
-            },
-            alone,
-        };
-        assert!(matches!(
-            memory_failure(1, kill(true)),
-            HandlerError::Processing(_)
-        ));
-        assert!(matches!(
-            memory_failure(2, kill(true)),
-            HandlerError::Permanent {
-                action: PermanentAction::DeadLetter,
-                ..
-            }
-        ));
-        assert!(matches!(
-            memory_failure(2, kill(false)),
-            HandlerError::Processing(_)
-        ));
-        assert!(matches!(
-            memory_failure(4, kill(false)),
-            HandlerError::Permanent {
-                action: PermanentAction::DeadLetter,
-                ..
-            }
-        ));
     }
 
     #[tokio::test]

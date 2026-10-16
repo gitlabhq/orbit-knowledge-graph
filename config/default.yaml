@@ -131,7 +131,6 @@ engine:
         max_cross_file_names: 40000000
         max_manifest_bytes: 67108864
         max_file_edges: 2000000
-        max_inflight_source_bytes: 4194304
         memory_kill_percent: 90
         job_timeout_secs: 1500
         fetch_concurrency: 10
