@@ -254,13 +254,13 @@ impl Slots {
     pub fn pick(self, role: Role) -> u32 {
         self.slot(role).unwrap_or(self.first)
     }
-    fn fill<S: Storage<Node = Node>>(&mut self, def: Cursor<'_, S>) {
-        let value = def.has_role(Role::Value);
-        let callable = def.has_role(Role::Callable);
+    fn fill(&mut self, def: u32, kind: Option<C>) {
+        let value = kind.is_some_and(C::is_value);
+        let callable = kind.is_some_and(C::is_callable);
         let exact = value != callable;
         for (slot, has) in [(&mut self.value, value), (&mut self.callable, callable)] {
             if has && slot.is_none_or(|(_, was_exact)| exact && !was_exact) {
-                *slot = Some((def.index(), exact));
+                *slot = Some((def, exact));
             }
         }
     }
@@ -271,16 +271,33 @@ pub type MemberIndex = rustc_hash::FxHashMap<u32, Slots>;
 pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberIndex {
     let nested = |node: Cursor<'_, S>| node.is_class() && !node.has(C::ImplBlock);
     let mut index = MemberIndex::default();
-    for def in owner
-        .descendants_pruned(nested)
-        .filter(|node| node.is(C::Def))
-    {
-        let Some(name) = def.child_sym(C::DefName) else {
+    let mut locals: Vec<(u32, bool)> = Vec::new();
+    for node in owner.descendants_pruned(nested) {
+        while locals.last().is_some_and(|&(end, _)| node.start() >= end) {
+            locals.pop();
+        }
+        if node.is(C::Scope) {
+            locals.push((node.end(), false));
             continue;
+        }
+        if !node.is(C::Def) {
+            continue;
+        }
+        let member = match locals.as_slice() {
+            [] => true,
+            [(_, true)] => node.binds_ivar(),
+            _ => false,
         };
-        let slots = index.entry(name).or_insert_with(|| Slots::new(def.index()));
-        if def.is_member_of(owner) {
-            slots.fill(def);
+        if let Some(name) = node.child_sym(C::DefName) {
+            let slots = index
+                .entry(name)
+                .or_insert_with(|| Slots::new(node.index()));
+            if member {
+                slots.fill(node.index(), node.def_kind());
+            }
+        }
+        if !node.has(C::ImplBlock) && !nested(node) {
+            locals.push((node.end(), true));
         }
     }
     index
