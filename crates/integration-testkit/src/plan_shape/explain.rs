@@ -976,16 +976,26 @@ fn exact_assertions_preserve_nested_filter_order() {
         },
     ];
     let mut graph = RelationGraph::default();
-    let read = graph.read("gl_project", "p", false, None);
-    let source = predicates.iter().fold(read, |input, predicate| {
-        graph.filter(input, vec![predicate.clone()])
+    let read = graph.add(RelationNode::Read {
+        table: "gl_project".into(),
+        alias: "p".into(),
+        final_: false,
     });
+    let source = predicates
+        .iter()
+        .fold(graph.from(read), |relation, predicate| {
+            relation.filter(vec![predicate.clone()])
+        })
+        .finish();
     let assertions: super::Assertions = orbit_utils::yaml::from_str(
         "exact: (Filter p.id = 1, p.star_count = 2 (Scan Table(gl_project) AS p))",
     )
     .unwrap();
     assertions
-        .check(&relation_node(source, &graph), "planned")
+        .check(
+            &relation_node(source, &graph, &Default::default(), None),
+            "planned",
+        )
         .unwrap();
     let emitted = query_filter(
         &Expr::conjoin(vec![
