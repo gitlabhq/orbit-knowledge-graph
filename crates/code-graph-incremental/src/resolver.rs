@@ -900,16 +900,17 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let mut target_path = match mapped {
+                    let target_path = match mapped {
                         Some(ref path) => path.clone(),
                         None if raw_path == ROOT_PATH => own_root.unwrap_or_default().to_owned(),
                         None => raw_path.to_owned(),
                     };
-                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
-                    direct.retain(|loc| loc.fi != fi);
-                    if let Some((root, prefix)) = own_prefix.as_ref().filter(|_| mapped.is_none())
-                        && !direct.is_empty()
-                    {
+                    let prefer_own = |path: String, mut hits: Vec<Loc>| {
+                        hits.retain(|loc| loc.fi != fi);
+                        let Some((root, prefix)) = own_prefix.as_ref().filter(|_| !hits.is_empty())
+                        else {
+                            return (path, hits);
+                        };
                         let inside =
                             |loc: &Loc| trees[loc.fi as usize].label.starts_with(prefix.as_str());
                         let sibling = |loc: &Loc| {
@@ -920,16 +921,22 @@ fn gather_imports_for(
                                         .is_none_or(|rest| !rest.starts_with(PATH_SEP))
                             })
                         };
-                        if !direct.iter().any(inside) && direct.iter().all(sibling) {
-                            let local = format!("{prefix}{target_path}");
-                            let mut found = resolve_glob(&local, file_index, prefixes);
-                            found.retain(|loc| loc.fi != fi);
+                        if path.starts_with(prefix.as_str()) || hits.iter().any(inside) {
+                            hits.retain(inside);
+                        } else if mapped.is_none() && hits.iter().all(sibling) {
+                            let local = format!("{prefix}{path}");
+                            let found = resolve_glob(&local, file_index, &[]);
                             if !found.is_empty() {
-                                direct = found;
-                                target_path = local;
+                                return (
+                                    local,
+                                    found.into_iter().filter(|loc| loc.fi != fi).collect(),
+                                );
                             }
                         }
-                    }
+                        (path, hits)
+                    };
+                    let direct = resolve_glob(&target_path, file_index, prefixes);
+                    let (target_path, direct) = prefer_own(target_path, direct);
                     if direct.is_empty() && stdlib {
                         return;
                     }
@@ -942,9 +949,9 @@ fn gather_imports_for(
                         true => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
-                            resolve_glob(&submod, file_index, &lookup.prefixes)
-                                .into_iter()
-                                .map(move |loc| (loc, submod.clone(), true))
+                            let hits = resolve_glob(&submod, file_index, &lookup.prefixes);
+                            let (submod, hits) = prefer_own(submod, hits);
+                            hits.into_iter().map(move |loc| (loc, submod.clone(), true))
                         })),
                     };
                     for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
