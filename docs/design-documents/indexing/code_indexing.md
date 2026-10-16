@@ -361,7 +361,9 @@ A scope tagged `hoisted` binds its member defs when it opens, before its body
 runs, so a member can name a later sibling. Rust and Elixir blocks and the JVM
 and C# class bodies use it. A member that shares the name of its owner, such as a
 constructor, is the target of a call to that name inside the owner. A value the
-call builds is typed by the owner, so its members resolve.
+call builds is typed by the owner, so its members resolve. A member lookup that
+finds the calling def itself prefers another member of that name in the same
+owner. So a delegating overload does not call itself.
 
 A `__ssa_loop` has one header shape. The loop variable is a `__binding` with a
 `__declaration` that the loop rule places directly under the loop. The children

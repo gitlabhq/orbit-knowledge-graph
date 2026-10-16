@@ -1,0 +1,88 @@
+name: "C#: an implicit call in a hoisted class takes the member path"
+
+fixtures:
+  - path: R.cs
+    content: |
+      namespace N
+      {
+          class Base
+          {
+              public void Inherited() {}
+          }
+
+          class R : Base
+          {
+              void Run()
+              {
+                  Helper(1);
+                  Inherited();
+              }
+
+              void Helper(int x) {}
+
+              void Helper() {}
+
+              void Shadow()
+              {
+                  System.Action Helper = () => {};
+                  Helper();
+              }
+
+              void Delegating(int x)
+              {
+                  Delegating(x, 0);
+              }
+
+              void Delegating(int x, int y) {}
+
+              void Recurse(int n)
+              {
+                  Recurse(n - 1);
+              }
+          }
+      }
+
+tests:
+  - name: an implicit overload call names the first declared overload, one row
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'N.R.Run' AND callee.name = 'Helper'
+      RETURN callee.start_line AS line
+    assert:
+      - { row_count: 1 }
+      - { row: { line: 16 } }
+
+  - name: an implicit call to an inherited member follows the supertypes
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'N.R.Run' AND callee.name = 'Inherited'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "N.Base.Inherited" } }
+
+  - name: a local that shadows a member name wins over the member path
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'N.R.Shadow' AND callee.name = 'Helper'
+      RETURN callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: a delegating overload names the other overload, not itself
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'N.R.Delegating' AND caller.start_line = 26 AND callee.name = 'Delegating'
+      RETURN callee.start_line AS line
+    assert:
+      - { row_count: 1 }
+      - { row: { line: 31 } }
+
+  - name: a recursive call with no other overload keeps itself
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'N.R.Recurse' AND callee.name = 'Recurse'
+      RETURN callee.start_line AS line
+    assert:
+      - { row_count: 1 }
+      - { row: { line: 33 } }

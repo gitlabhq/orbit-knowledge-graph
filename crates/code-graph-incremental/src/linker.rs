@@ -1693,8 +1693,19 @@ impl<'t> Fold<'t> {
             .map_or(def, |owner| owner.index())
     }
 
+    fn another_member(&self, container: u32, name: u32, except: u32) -> Option<u32> {
+        let class = self.tree.cursor(container);
+        let nested = |n: Cursor| n.index() != container && n.is_class() && !n.has(C::ImplBlock);
+        class
+            .descendants_pruned(nested)
+            .filter(|n| n.is(C::Def) && n.index() != except)
+            .find(|n| n.child_sym(C::DefName) == Some(name))
+            .map(|n| n.index())
+    }
+
     fn find_method_in(&self, container: u32, name: u32) -> Vec<u32> {
         let container = self.owner_type(container);
+        let caller = self.enclosing();
         let wrappers = |dn: u32| {
             let c = self.tree.cursor(dn);
             let same_name = c
@@ -1710,7 +1721,13 @@ impl<'t> Fold<'t> {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(wrappers).collect::<Vec<_>>()
         };
-        let found = |dn| self.member_of(dn, name);
+        let found = |dn| {
+            let member = self.member_of(dn, name)?;
+            Some(match member == caller {
+                true => self.another_member(dn, name, caller).unwrap_or(member),
+                false => member,
+            })
+        };
         members_by_level(wrappers(container), supers, found)
     }
 }
