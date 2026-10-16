@@ -1,0 +1,60 @@
+name: "Python: an imported call decorator gives one CALLS row per site"
+
+fixtures:
+  - path: m.py
+    content: |
+      def deco(n):
+          def wrap(f):
+              return f
+          return wrap
+
+
+      class Registry:
+          def tag(self, name):
+              def wrap(f):
+                  return f
+              return wrap
+
+
+      registry = Registry()
+
+  - path: main.py
+    content: |
+      from m import deco, registry
+
+
+      @deco(1)
+      def plain():
+          pass
+
+
+      @registry.tag("x")
+      def member():
+          pass
+
+tests:
+  - name: an explicitly imported call decorator gives one row to the function
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'plain'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "m.deco" } }
+
+  - name: an explicitly imported member call decorator gives one row to the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'member'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "m.Registry.tag" } }
+
+  - name: neither decorated function gets an imported-symbol fallback row
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['plain', 'member']
+      RETURN caller.name AS caller, sym.identifier_name AS name
+    assert:
+      - { empty: true }

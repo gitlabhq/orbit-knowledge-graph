@@ -354,7 +354,8 @@ and before its body. The header is the supertypes, the decorators, and the
 default values of the parameters. A call in a decorator or a default value gets
 an edge from the decorated def. A name in the header resolves outside the body,
 as Python, Java and TypeScript resolve it. A decorator that names the def itself
-names the previous def of that name in the same owner, as `@x.setter` does.
+finds the previous def of that name, as `@x.setter` does, because the def's name
+is not bound yet. A header edge that still lands on the def is dropped.
 
 A `__ssa_loop` has one header shape. The loop variable is a `__binding` with a
 `__declaration` that the loop rule places directly under the loop. The children

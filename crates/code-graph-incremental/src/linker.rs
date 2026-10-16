@@ -583,10 +583,6 @@ impl<'t> Fold<'t> {
         }
     }
 
-    /// Decorators and default values run in the enclosing scope, before the
-    /// def's own name is bound, with the def as the edge source. A header
-    /// edge that still lands on the def itself names a predeclared def, so it
-    /// goes to the previous def of that name in the same owner.
     fn walk_header(&mut self, c: Cursor<'t>) {
         let first = self.edges.len();
         self.def_stack.push(c.index());
@@ -620,11 +616,9 @@ impl<'t> Fold<'t> {
             }
         }
         self.def_stack.pop();
-        self.retarget_own_def(c.index(), first);
+        self.drop_own_edges(c.index(), first);
     }
 
-    /// A parameter: a named binding the def rule places directly under the
-    /// def. A binding lifted out of the body block is a statement.
     fn is_header_binding(node: Cursor<'_>) -> bool {
         node.is(C::Binding)
             && node.sym_opt().is_some()
@@ -632,27 +626,10 @@ impl<'t> Fold<'t> {
             && node.parent().is_some_and(|parent| parent.is(C::Def))
     }
 
-    fn previous_def_named(&self, dn: u32) -> Option<u32> {
-        let def = self.tree.cursor(dn);
-        let name = def.child_sym(C::DefName)?;
-        let owner = def.parent().map(|parent| parent.index());
-        self.defs_named(name)
-            .filter(|&d| d < dn && self.tree.cursor(d).parent().map(|p| p.index()) == owner)
-            .max()
-    }
-
-    fn retarget_own_def(&mut self, owner: u32, first: usize) {
-        if !self.edges[first..].iter().any(|edge| edge.to_node == owner) {
-            return;
-        }
-        let previous = self.previous_def_named(owner);
+    fn drop_own_edges(&mut self, owner: u32, first: usize) {
         let tail = self.edges.split_off(first);
-        self.edges.extend(tail.into_iter().filter_map(|mut edge| {
-            if edge.to_node == owner {
-                edge.to_node = previous?;
-            }
-            Some(edge)
-        }));
+        self.edges
+            .extend(tail.into_iter().filter(|edge| edge.to_node != owner));
     }
 
     fn predeclare(&mut self, scope: Cursor<'t>) {

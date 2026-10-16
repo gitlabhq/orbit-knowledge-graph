@@ -102,8 +102,6 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_bare_name(self) -> bool {
         self.sym_opt().is_some() && !self.has(C::Member) && !self.has(C::Ivar)
     }
-    /// The node a decorator names: itself when it is a name or a member, the
-    /// bare callee of a call decorator, nothing for a lambda or a subscript.
     pub fn decorator_head(self) -> Option<Self> {
         if self.sym_opt().is_some() || self.has(C::Member) {
             return Some(self);
