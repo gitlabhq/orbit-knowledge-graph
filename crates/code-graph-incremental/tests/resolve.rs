@@ -522,3 +522,57 @@ fn a_nested_class_import_resolves_and_survives_a_noop_reindex() {
     assert!(context.report.files.is_empty());
     assert!(resolved.resolved.is_empty());
 }
+
+#[test]
+fn a_submodule_import_in_a_sibling_crate_survives_a_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"alpha\", \"beta\"]\n",
+        )],
+    );
+    for krate in ["alpha", "beta"] {
+        let root = repo.path().join(krate);
+        std::fs::create_dir_all(root.join("src/outer/foo")).unwrap();
+        let manifest =
+            format!("[package]\nname = \"{krate}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n");
+        write_all(
+            &root,
+            &[
+                ("Cargo.toml", manifest.as_str()),
+                (
+                    "src/lib.rs",
+                    "mod outer {\n    pub mod foo {\n        pub mod bar;\n    }\n}\n\npub mod user;\n",
+                ),
+                ("src/outer/foo/bar.rs", "pub fn f() {}\n"),
+                (
+                    "src/user.rs",
+                    "use crate::outer::foo::bar;\n\npub fn run() {\n    bar::f();\n}\n",
+                ),
+            ],
+        );
+    }
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [
+            pair("alpha/src/user.rs:run", "alpha/src/outer/foo/bar.rs:f"),
+            pair("beta/src/user.rs:run", "beta/src/outer/foo/bar.rs:f"),
+        ]
+    );
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        resolved.state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+}

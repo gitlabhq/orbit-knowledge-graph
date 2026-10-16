@@ -193,35 +193,50 @@ impl Resolver {
         if self.visible.is_empty() {
             return (0..trees.len() as u32).collect();
         }
+        let root_relative = env.lang.syms.lookup("source_root_rel");
+        let own_prefixes: FxHashMap<u32, (&str, String)> = self
+            .reqs
+            .iter()
+            .map(|req| req.fi)
+            .collect::<FxHashSet<_>>()
+            .into_iter()
+            .filter_map(|fi| {
+                let root = source_root(&trees[fi as usize], &env.lang, root_relative)
+                    .filter(|root| !root.is_empty())?;
+                Some((fi, (root, format!("{root}{PATH_SEP}"))))
+            })
+            .collect();
         let mut invalidated: FxHashSet<u32> = self
             .reqs
             .iter()
             .filter(|req| {
-                let tree = &trees[req.fi as usize];
-                let root_relative = env.lang.syms.lookup("source_root_rel");
-                let own_root =
-                    source_root(tree, &env.lang, root_relative).filter(|root| !root.is_empty());
-                let own_prefix = own_root.map(|root| format!("{root}{PATH_SEP}"));
+                if self.lookup != *lookup {
+                    return true;
+                }
+                let names: Vec<u32> = trees[req.fi as usize]
+                    .cursor(req.node)
+                    .names()
+                    .map(|name| name.sym())
+                    .collect();
                 let origin = ImportOrigin {
                     fi: req.fi,
-                    own: own_root.zip(own_prefix.as_deref()),
-                    imported: tree
-                        .cursor(req.node)
-                        .names()
-                        .exactly_one()
-                        .ok()
-                        .map(|name| name.sym()),
+                    own: own_prefixes
+                        .get(&req.fi)
+                        .map(|(root, prefix)| (*root, prefix.as_str())),
+                    imported: (names.len() == 1).then(|| names[0]),
                 };
-                self.lookup != *lookup
-                    || !request_targets(
-                        trees,
-                        &env.lang,
-                        &self.file_index,
-                        &lookup.prefixes,
-                        &origin,
-                        &req.target_path,
-                    )
-                    .contains(&Loc::new(req.target_fi as usize, req.anchor))
+                let stored = Loc::new(req.target_fi as usize, req.anchor);
+                !import_candidates(
+                    trees,
+                    &env.lang,
+                    &self.file_index,
+                    &lookup.prefixes,
+                    &origin,
+                    names.iter().copied(),
+                    &req.target_path,
+                )
+                .iter()
+                .any(|(loc, _, _)| *loc == stored)
             })
             .map(|req| req.fi)
             .chain(dirty_fis.iter().copied())
@@ -935,36 +950,30 @@ fn gather_imports_for(
                             .map(|(root, prefix)| (*root, prefix.as_str())),
                         imported: cur.names().exactly_one().ok().map(|name| name.sym()),
                     };
-                    let (direct, target_path) =
-                        direct_targets(trees, lang, file_index, prefixes, &origin, &target_path);
-                    if direct.is_empty() && stdlib {
-                        return;
-                    }
-                    let mut candidates: Vec<(Loc, String, bool)> = match direct.is_empty() {
-                        false => direct
+                    let candidates: Vec<(Loc, String, bool)> = if stdlib {
+                        let (direct, target_path) = direct_targets(
+                            trees,
+                            lang,
+                            file_index,
+                            prefixes,
+                            &origin,
+                            &target_path,
+                        );
+                        direct
                             .into_iter()
                             .map(|loc| (loc, target_path.clone(), false))
-                            .collect(),
-                        true => cur
-                            .names()
-                            .flat_map(|c| {
-                                let submod = format!(
-                                    "{target_path}{PATH_SEP}{}",
-                                    lang.syms.resolve(c.sym())
-                                );
-                                resolve_glob(&submod, file_index, &lookup.prefixes)
-                                    .into_iter()
-                                    .map(move |loc| (loc, submod.clone(), true))
-                            })
-                            .collect(),
+                            .collect()
+                    } else {
+                        import_candidates(
+                            trees,
+                            lang,
+                            file_index,
+                            prefixes,
+                            &origin,
+                            cur.names().map(|name| name.sym()),
+                            &target_path,
+                        )
                     };
-                    if candidates.is_empty() {
-                        candidates =
-                            defs_on_path(trees, lang, file_index, prefixes, &origin, &target_path)
-                                .into_iter()
-                                .map(|(loc, path)| (loc, path, false))
-                                .collect();
-                    }
                     for (loc, path, is_sub) in candidates.into_iter().filter(|c| c.0.fi != fi) {
                         if is_sub {
                             edges.push(Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports));
@@ -1077,21 +1086,37 @@ fn defs_on_path(
     Vec::new()
 }
 
-fn request_targets(
+fn import_candidates(
     trees: &[Tree],
     lang: &Lang,
     file_index: &FileIndex,
     prefixes: &[String],
     origin: &ImportOrigin,
+    names: impl Iterator<Item = u32>,
     target_path: &str,
-) -> Vec<Loc> {
-    let (direct, _) = direct_targets(trees, lang, file_index, prefixes, origin, target_path);
+) -> Vec<(Loc, String, bool)> {
+    let (direct, target_path) =
+        direct_targets(trees, lang, file_index, prefixes, origin, target_path);
     if !direct.is_empty() {
-        return direct;
+        return direct
+            .into_iter()
+            .map(|loc| (loc, target_path.clone(), false))
+            .collect();
     }
-    defs_on_path(trees, lang, file_index, prefixes, origin, target_path)
+    let submodules: Vec<_> = names
+        .flat_map(|name| {
+            let submodule = format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(name));
+            let (found, path) =
+                direct_targets(trees, lang, file_index, prefixes, origin, &submodule);
+            found.into_iter().map(move |loc| (loc, path.clone(), true))
+        })
+        .collect();
+    if !submodules.is_empty() {
+        return submodules;
+    }
+    defs_on_path(trees, lang, file_index, prefixes, origin, &target_path)
         .into_iter()
-        .map(|(loc, _)| loc)
+        .map(|(loc, path)| (loc, path, false))
         .collect()
 }
 
