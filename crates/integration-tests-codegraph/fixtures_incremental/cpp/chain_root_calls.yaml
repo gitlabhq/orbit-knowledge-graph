@@ -49,6 +49,13 @@ fixtures:
           (*fp_other)(get_items()).count();
       }
 
+      template <class T>
+      Items make_items(T x) { return Items(); }
+
+      void specialized_root() {
+          make_items<int>(1).count();
+      }
+
       Items get_items() { return Items(); }
 
       Items make_items() { return Items(); }
@@ -162,6 +169,17 @@ tests:
     assert:
       - { empty: true }
       - { not: true, row: { owner: Items } }
+
+  - name: "an explicit specialization call reaches its template through a using directive"
+    # Known gap: the callee text `make_items<int>` is not a plain name, so it makes no glob guess through
+    # `using namespace`; main matched it by name. A specialization-aware callee is a C++ rule follow-up (R1).
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "specialized_root" AND callee.name = "make_items"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
 
   - name: "the call at the root of a chain in a for condition links"
     query: |
