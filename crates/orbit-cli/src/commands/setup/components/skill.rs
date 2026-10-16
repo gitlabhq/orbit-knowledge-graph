@@ -69,8 +69,7 @@ fn is_ours(path: &Path) -> bool {
     tree_digest(&current) == marker.digest || is_wrapper_tree(&current)
 }
 
-/// The launcher of a lone `SKILL.md` equal to this release's wrapper for it, apart from its
-/// `version:` line. That is what `glab skills update` writes when glab ships another release.
+/// Matches a lone wrapper `SKILL.md` ignoring its `version:` line, which `glab skills update` rewrites.
 fn wrapper_launcher(tree: &BTreeMap<String, Vec<u8>>) -> Option<&'static str> {
     let [(path, contents)] = tree.iter().collect::<Vec<_>>()[..] else {
         return None;
@@ -91,7 +90,6 @@ fn wrapper_launcher(tree: &BTreeMap<String, Vec<u8>>) -> Option<&'static str> {
         })
 }
 
-/// Whether `current` is a wrapper for the launcher that `tree` does not use.
 fn is_other_launcher_wrapper(
     current: &BTreeMap<String, Vec<u8>>,
     tree: &BTreeMap<String, Vec<u8>>,
@@ -262,8 +260,6 @@ impl Skill<'_> {
         read_marker(&skill.root).map_or(SkillKind::Wrapper, |marker| marker.kind)
     }
 
-    /// Whether a wrapper for the launcher setup does not use can run here, so keeping it
-    /// leaves the skill working.
     fn other_launcher_runs(&self) -> bool {
         let other = match spec::launcher() {
             spec::GLAB_LAUNCHER => spec::DIRECT_LAUNCHER,
@@ -445,8 +441,7 @@ fn write_skill_files(
         agents: owners,
         digest: tree_digest(tree),
     };
-    // A tree identical to ours (for example one `glab skills install` wrote) is adopted as is,
-    // and so is a wrapper for the other launcher, which `glab skills update` would swap back.
+    // Keeping the other launcher's wrapper stops `glab skills update` from swapping it back.
     if let Some(current) = read_tree(skill_root).filter(|current| {
         current == tree
             || (kind == SkillKind::Wrapper
@@ -472,8 +467,8 @@ fn write_skill_files(
     Ok(())
 }
 
-/// Clears `path` for a new install. What `orbit setup` wrote, unchanged, and a lone wrapper
-/// `SKILL.md` are replaced; anything else is renamed to a sibling whose `SKILL.md` no longer loads, so the user's files survive.
+/// Clears `path` for a new install. Setup's own files and a lone wrapper are replaced; anything
+/// else is renamed to a sibling whose `SKILL.md` no longer loads.
 fn make_room(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());

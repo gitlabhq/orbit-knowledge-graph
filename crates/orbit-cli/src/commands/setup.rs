@@ -293,12 +293,9 @@ pub(crate) enum SkillKind {
 pub(crate) struct SkillRequest {
     pub(crate) kind: Option<SkillKind>,
     pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
-    /// Where to look for the other launcher's program; the process `PATH` when unset.
     pub(crate) search_path: Option<std::ffi::OsString>,
 }
 
-/// Whether the final agent selection ends up with the full skill, so the instance's tree is
-/// worth fetching.
 fn needs_instance_skill(request: &SkillRequest, selected: &[spec::Agent], target: &Target) -> bool {
     if let Some(kind) = request.kind {
         return kind == SkillKind::Full;
@@ -862,7 +859,6 @@ mod tests {
         std::fs::write(skills.join("orbit/SKILL.md"), &tree["SKILL.md"]).unwrap();
     }
 
-    /// A search path holding an executable named `program`, or nothing at all.
     fn search_path_with(program: Option<&str>) -> (tempfile::TempDir, std::ffi::OsString) {
         let bin = tempfile::tempdir().unwrap();
         if let Some(program) = program {
