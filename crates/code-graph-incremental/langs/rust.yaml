@@ -153,18 +153,18 @@ stages:
       # use a::b::*;  and  pub use a::b::*;
       - match: '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))'
         replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name "*"))'
-        tag: { import_type: ReExportGlob, reexport: "true" }
+        tag: { import_type: ReExportGlob, shadows_nested: "true" }
       - match: '(use_declaration argument: (use_wildcard $P))'
         replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name "*"))'
-        tag: { import_type: GlobUse }
+        tag: { import_type: GlobUse, shadows_nested: "true" }
 
       # use a::b as c;  pub(crate) stays private
       - match: '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))'
         replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$P|or("field:name","id") (__alias @$A)))'
-        tag: { import_type: ReExportAliased, reexport: "true" }
+        tag: { import_type: ReExportAliased, shadows_nested: "true" }
       - match: '(use_declaration argument: (use_as_clause path: $P alias: $A))'
         replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$P|or("field:name","id") (__alias @$A)))'
-        tag: { import_type: AliasedUse }
+        tag: { import_type: AliasedUse, shadows_nested: "true" }
 
       # use a::{b, c as d, self};  one import per entry, built in the next stage
       - match: '(use_declaration (__visibility !(crate)) argument: (scoped_use_list path: $P list: (use_list $$$E)))'
@@ -175,42 +175,42 @@ stages:
       # use crate::foo::Bar;
       - match: '(use_declaration (__visibility !(crate)) argument: $A:scoped_identifier)'
         replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$A|field("name")))'
-        tag: { import_type: PubUse, reexport: "true" }
+        tag: { import_type: PubUse, shadows_nested: "true" }
       - match: '(use_declaration argument: $A:scoped_identifier)'
         replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$A|field("name")))'
-        tag: { import_type: Use }
+        tag: { import_type: Use, shadows_nested: "true" }
 
       # use foo;
       - match: '(use_declaration argument: $A:identifier)'
         replace: '(__import (__source @$A) (__source_path "") (__name @$A))'
-        tag: { import_type: Use }
+        tag: { import_type: Use, shadows_nested: "true" }
 
   - name: import-entries
     rules:
       - match: '(use_entry path: (self) alias: $A)'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::") (__alias @$A)))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry path: (self) alias: $A)'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::") (__alias @$A)))'
-        tag: { import_type: PubUseGroup, reexport: "true" }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry "self")'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry "self")'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
-        tag: { import_type: PubUseGroup, reexport: "true" }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry path: $N alias: $A)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry path: $N alias: $A)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
-        tag: { import_type: PubUseGroup, reexport: "true" }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "id")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$ROOT))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "id")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$ROOT))'
-        tag: { import_type: PubUseGroup, reexport: "true" }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_group $$$I:__import)'
         replace: '$$$I'
 
