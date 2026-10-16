@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_no_group_by_preserves_relationship_kind
 description: Ungrouped aggregation preserves relationship_kind filter in WHERE clause
 
 config:

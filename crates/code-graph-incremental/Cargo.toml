@@ -10,6 +10,9 @@ ignored = ["pest"] # used by pest_derive-generated code
 [lints]
 workspace = true
 
+[features]
+pretty-print = []
+
 [dependencies]
 arrow = { workspace = true }
 cpu-time = { workspace = true }
@@ -30,7 +33,6 @@ serde_json = { workspace = true }
 smallvec = { workspace = true }
 stacker = { workspace = true }
 strum = { workspace = true }
-termtree = "1.0"
 toml = { workspace = true }
 zstd = "0.13"
 tree-sitter = "0.26.3"
@@ -56,7 +58,9 @@ tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 
 [dev-dependencies]
+termtree = "1.0"
 tempfile = { workspace = true }
 zstd = "0.13"

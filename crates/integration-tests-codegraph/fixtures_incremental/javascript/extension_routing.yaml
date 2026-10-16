@@ -1,11 +1,13 @@
 name: "JavaScript generic extension routing"
 pipeline: generic
+
 fixtures:
   - path: jsx/component.jsx
     content: |
       export function renderBadge() {
         return 'badge';
       }
+
   - path: jsx/consumer.js
     content: |
       import { renderBadge } from './component.jsx';
@@ -19,6 +21,7 @@ fixtures:
       export function renderPanel(): string {
         return 'panel';
       }
+
   - path: tsx/consumer.ts
     content: |
       import { renderPanel } from './component.tsx';
@@ -32,6 +35,7 @@ fixtures:
       export function normalizeMjs(value) {
         return value.trim();
       }
+
   - path: esm/consumer.js
     content: |
       import { normalizeMjs } from './component.mjs';
@@ -45,6 +49,7 @@ fixtures:
       exports.runCjs = function runCjs() {
         return 'ok';
       };
+
   - path: cjs/consumer.js
     content: |
       const { runCjs } = require('./component.cjs');
@@ -58,6 +63,7 @@ fixtures:
       export function formatMts(value: string): string {
         return value.trim();
       }
+
   - path: mts/consumer.ts
     content: |
       import { formatMts } from './component.mts';
@@ -71,6 +77,7 @@ fixtures:
       export function formatCts(value: string): string {
         return value.toLowerCase();
       }
+
   - path: cts/consumer.ts
     content: |
       import { formatCts } from './component.cts';
@@ -87,12 +94,13 @@ tests:
       RETURN file.path AS file, d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 6 }
-      - { row: { file: 'jsx/component.jsx', name: renderBadge, type: Function } }
-      - { row: { file: 'tsx/component.tsx', name: renderPanel, type: Function } }
-      - { row: { file: 'esm/component.mjs', name: normalizeMjs, type: Function } }
-      - { row: { file: 'cjs/component.cjs', name: runCjs, type: Function } }
-      - { row: { file: 'mts/component.mts', name: formatMts, type: Function } }
-      - { row: { file: 'cts/component.cts', name: formatCts, type: Function } }
+      - { row: { file: "jsx/component.jsx", name: renderBadge, type: Function } }
+      - { row: { file: "tsx/component.tsx", name: renderPanel, type: Function } }
+      - { row: { file: "esm/component.mjs", name: normalizeMjs, type: Function } }
+      - { row: { file: "cjs/component.cjs", name: runCjs, type: Function } }
+      - { row: { file: "mts/component.mts", name: formatMts, type: Function } }
+      - { row: { file: "cts/component.cts", name: formatCts, type: Function } }
+
   - name: Generic pipeline catalogs files for JS-family extensions
     query: |
       MATCH (file:File)

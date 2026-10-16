@@ -1,4 +1,5 @@
 name: "Rust: precision and resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -168,7 +169,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
+      - { row: { src: "src/lib.rs", tgt: "src/lib.rs" } }
 
   - name: "local closure shadowing does not create a bogus local edge"
     query: |
@@ -278,7 +279,7 @@ tests:
       RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', fqn: 'dep::Service::new', type: 'AssociatedFunction' } }
+      - { row: { src: "src/lib.rs", fqn: "dep::Service::new", type: "AssociatedFunction" } }
 
   - name: "generic trait-bound method calls resolve to the trait method"
     query: |
@@ -287,7 +288,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::Pinger::trait_ping', type: 'Method' } }
+      - { row: { fqn: "dep::Pinger::trait_ping", type: "Method" } }
 
   - name: "generic trait-bound default calls resolve to the trait default method"
     query: |
@@ -296,7 +297,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::Pinger::defaulted', type: 'Method' } }
+      - { row: { fqn: "dep::Pinger::defaulted", type: "Method" } }
 
   - name: "trait default bodies still resolve their internal calls"
     query: |
@@ -305,7 +306,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::helper', type: 'Function' } }
+      - { row: { fqn: "dep::helper", type: "Function" } }
 
   - name: "inherent methods still resolve on concrete receivers"
     query: |
@@ -314,4 +315,4 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'dep::Service::inherent_ping', type: 'Method' } }
+      - { row: { fqn: "dep::Service::inherent_ping", type: "Method" } }

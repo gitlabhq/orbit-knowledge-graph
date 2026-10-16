@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::search_returns_correct_work_item_properties
 description: WorkItem search returns correct properties and ordering
 
 query:
@@ -21,5 +20,5 @@ expect:
       rows:
         - { id: 4000, title: "Implement login page", state: opened, work_item_type: issue, confidential: false, weight: 3 }
         - { id: 4001, state: closed, work_item_type: incident, confidential: true, weight: 8 }
-        - { id: 4002, work_item_type: task, weight: null }
+        - { id: 4002, work_item_type: task }
         - { id: 4003, work_item_type: epic, weight: 13 }

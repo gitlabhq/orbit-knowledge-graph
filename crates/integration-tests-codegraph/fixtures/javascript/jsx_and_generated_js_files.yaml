@@ -1,5 +1,6 @@
 name: "JavaScript JSX and generated file parsing"
 pipeline: js
+
 fixtures:
   - path: frontend/src/App.js
     content: |

@@ -1,0 +1,39 @@
+name: "TypeScript: deeply nested code links on the worker stack"
+
+fixtures:
+  - path: src/deep.ts
+    content:
+      - "export function target(): void {}\nfunction wrap(x: number): number { return x; }\n\nfunction insideIf(c: boolean) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - "target();\n"
+      - { repeat: 10000, text: "}\n" }
+      - "}\n\nfunction nestedIf(c: boolean) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n\nfunction elseIf(c: boolean) {\nif (c) {\n"
+      - { repeat: 10000, text: "} else if (c) {\n" }
+      - "}\ntarget();\n}\n\nfunction nestedLoop(c: boolean) {\n"
+      - { repeat: 10000, text: "while (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n\nfunction nestedTry() {\n"
+      - { repeat: 10000, text: "try {\n" }
+      - { repeat: 10000, text: "} catch (e) {}\n" }
+      - "target();\n}\n\nfunction nestedBlock() {\n"
+      - { repeat: 10000, text: "{\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n\nfunction nestedCall() {\nwrap("
+      - { repeat: 10000, text: "wrap(" }
+      - "0"
+      - { repeat: 10000, text: ")" }
+      - ");\ntarget();\n}\n"
+
+tests:
+  - name: "each function calls its target inside or after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - column_values:
+          field: caller
+          values: [insideIf, nestedIf, elseIf, nestedLoop, nestedTry, nestedBlock, nestedCall]

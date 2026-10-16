@@ -1,12 +1,15 @@
 description: Self-loop aggregation binds both edge endpoints to the same node
+
 config:
   extra_seed:
     gl_definition:
       - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: audit_caller, fqn: audit_caller }
     gl_code_edge:
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99000, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
+
 query:
   json: |
     {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"audit_caller"}}],"relationships":[{"type":"CALLS","from":"a","to":"a"}],"aggregations":[{"count":"a","as":"n"}]}
+
 expect:
   compile_error: "relationship endpoints must use different node aliases"

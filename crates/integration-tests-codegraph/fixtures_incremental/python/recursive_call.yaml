@@ -1,4 +1,5 @@
 name: "Python: recursive function call"
+
 fixtures:
   - path: main.py
     content: |

@@ -22,6 +22,10 @@ impl Column {
 #[derive(Clone)]
 pub enum Predicate {
     Boolean(crate::input::BooleanExpression<Box<Predicate>>),
+    ColumnsEqual {
+        left: Column,
+        right: Column,
+    },
     Property {
         column: Column,
         filter: InputFilter,

@@ -1,0 +1,27 @@
+# config/ontology/edges/created_mr.yaml
+
+description: Agent session created a merge request
+
+variants:
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "Agent session created the merge request."
+
+# link_type 1 is a merge request the flow created; 0 is the one it was started against.
+# Edges are best effort; known limits (replication ordering, deletes,
+# knowledge-graph#1308) are described in created_mr.sql.j2.
+indexer:
+  reindex: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
+pipelines:
+  - name: CREATED_MR_siphon_duo_workflows_workflow_merge_requests
+    extract:
+      type: clickhouse
+      tables: [siphon_duo_workflows_workflow_merge_requests, siphon_ai_governance_sessions]
+      order_by: [traversal_path, workflow_id, id]
+      query: created_mr.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: AgentSession }
+          to: { field: target_id, kind: MergeRequest }
+          label: CREATED_MR

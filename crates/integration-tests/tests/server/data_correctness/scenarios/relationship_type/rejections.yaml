@@ -1,134 +1,152 @@
 cases:
-- name: aggregation
-  description: RETURN type(r) as an aggregation group key rejects until relationship-type grouping exists
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN type(r), count(mr) AS n
-  expect: {compile_error: grouping by relationship type is not supported yet}
-- name: conflict
-  description: type(r) that excludes every type declared on the relationship rejects instead of returning
-    nothing
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE type(r) = 'APPROVED' RETURN u, mr LIMIT 10
-  expect: {compile_error: type(r) excludes every relationship type the pattern allows}
-- name: duplicate_column
-  description: A type(r) alias that repeats a node variable rejects because the gql table would have two
-    columns with one name
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, type(r) AS mr LIMIT 10
-  expect: {compile_error: duplicate RETURN column name}
-- name: empty_list
-  description: type(r) IN [] rejects because it needs at least one relationship type name
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN [] RETURN u LIMIT 10
-  expect: {compile_error: IN requires 1-100 values}
-- name: neighbors_alias
-  description: Renaming type(r) on a neighbors query rejects because neighbors return one path column
-    that already shows each edge type
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n, type(r) AS kind
-  expect: {compile_error: 'kind: neighbors and path finding return one path column that shows each edge
-      type'}
-- name: not_excludes_all
-  description: NOT type(r) that removes every type the pattern declares rejects instead of returning nothing
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
-      WHERE NOT type(r) IN ['AUTHORED', 'APPROVED']
-      RETURN u LIMIT 10
-  expect: {compile_error: type(r) excludes every relationship type the pattern allows}
-- name: not_group
-  description: type(r) inside a NOT group rejects at its position without echoing the type name
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
-      WHERE NOT (type(r) = 'PRIVATE_QUERY_TYPE' AND mr.state = 'opened')
-      RETURN u LIMIT 10
-  expect:
-    compile_error: type(r) cannot be used inside a NOT group
-    compile_error_not_contains: [PRIVATE_QUERY_TYPE]
-- name: not_neighbors
-  description: Neighbors queries reject NOT type(r) IN [...] like any other negated list
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) IN ['MEMBER_OF'] RETURN g, n
-  expect: {compile_error: 'neighbors queries support NOT only on =, <>, IS NULL, and IS NOT NULL conditions'}
-- name: on_node
-  description: type() on a node variable rejects and says it takes a relationship variable
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(u) = 'AUTHORED' RETURN u LIMIT 10
-  expect: {compile_error: 'type() takes a relationship variable, such as r in -[r]->, but u is a node'}
-- name: operator
-  description: type(r) with an operator other than =, <>, or IN rejects without echoing the compared literal
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) STARTS WITH 'private-query-literal' RETURN u LIMIT 10
-  expect:
-    compile_error: type(r) supports =, <>, or IN with relationship type names
-    compile_error_not_contains: [private-query-literal]
-- name: order_aggregation
-  description: ORDER BY type(r) in an aggregation rejects until relationship-type grouping exists
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN mr.state, count(mr) AS n ORDER BY type(r)
-  expect: {compile_error: ORDER BY type(r) is not supported in aggregations yet}
-- name: order_neighbors
-  description: ORDER BY type(r) on a neighbors query rejects because neighbors have a fixed order
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n ORDER BY type(r)
-  expect: {compile_error: path finding and neighbors have fixed result ordering}
-- name: order_variable_length
-  description: ORDER BY type(r) on a variable-length relationship rejects because the variable binds a
-    list
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, g ORDER BY type(r) LIMIT 10
-  expect: {compile_error: r has a variable length and binds a list}
-- name: path_variable_length
-  description: RETURN p, type(r) on a variable-length shortest path rejects because r binds a list
-  query:
-    gql: |
-      MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1000}) RETURN p, type(r)
-  expect: {compile_error: r has a variable length and binds a list}
-- name: return_variable_length
-  description: RETURN type(r) on a variable-length traversal relationship rejects because the variable
-    binds a list
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN g, type(r) LIMIT 10
-  expect: {compile_error: r has a variable length and binds a list}
-- name: shared_foreign_key
-  description: SCANS and IN_PROJECT both come from the scanner's project_id column, so a foreign-key row
-    cannot say which type it is. type(r) on that hop rejects instead of labeling every row with one of
-    the two types.
-  query:
-    gql: |
-      MATCH (s:VulnerabilityScanner)-[r:SCANS|IN_PROJECT]->(p:Project {id: 1000})
-      RETURN s, p, type(r) LIMIT 10
-  expect: {compile_error: SCANS|IN_PROJECT share one foreign key between VulnerabilityScanner and Project}
-- name: unsupported_position
-  description: type(r) on the right side of a property comparison rejects and names the supported forms
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
-  expect: {compile_error: 'function type() is not supported: type() takes one relationship variable and
-      works in WHERE type(r) = ''CLOSES'''}
-- name: variable_length
-  description: WHERE type(r) on a variable-length relationship rejects and points to the typed pattern
-    form
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r*1..2]->(p:Project) WHERE type(r) = 'MEMBER_OF' RETURN u, p LIMIT 10
-  expect: {compile_error: r has a variable length and binds a list}
-- name: variable_length_return
-  description: RETURN r on a variable-length relationship rejects because r binds a list
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, r, g LIMIT 10
-  expect: {compile_error: r has a variable length and binds a list}
+  - name: aggregation
+    description: RETURN type(r) as an aggregation group key rejects until relationship-type grouping exists
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN type(r), count(mr) AS n
+    expect: { compile_error: grouping by relationship type is not supported yet }
+
+  - name: conflict
+    description: type(r) that excludes every type declared on the relationship rejects instead of returning
+      nothing
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE type(r) = 'APPROVED' RETURN u, mr LIMIT 10
+    expect: { compile_error: type(r) excludes every relationship type the pattern allows }
+
+  - name: duplicate_column
+    description: A type(r) alias that repeats a node variable rejects because the gql table would have two
+      columns with one name
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, type(r) AS mr LIMIT 10
+    expect: { compile_error: duplicate RETURN column name }
+
+  - name: empty_list
+    description: type(r) IN [] rejects because it needs at least one relationship type name
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN [] RETURN u LIMIT 10
+    expect: { compile_error: IN requires 1-100 values }
+
+  - name: neighbors_alias
+    description: Renaming type(r) on a neighbors query rejects because neighbors return one path column
+      that already shows each edge type
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n, type(r) AS kind
+    expect: { compile_error: "kind: neighbors and path finding return one path column that shows each edge
+          type" }
+
+  - name: not_excludes_all
+    description: NOT type(r) that removes every type the pattern declares rejects instead of returning nothing
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
+        WHERE NOT type(r) IN ['AUTHORED', 'APPROVED']
+        RETURN u LIMIT 10
+    expect: { compile_error: type(r) excludes every relationship type the pattern allows }
+
+  - name: not_group
+    description: type(r) inside a NOT group rejects at its position without echoing the type name
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+        WHERE NOT (type(r) = 'PRIVATE_QUERY_TYPE' AND mr.state = 'opened')
+        RETURN u LIMIT 10
+    expect:
+      compile_error: type(r) cannot be used inside a NOT group
+      compile_error_not_contains: [PRIVATE_QUERY_TYPE]
+
+  - name: not_neighbors
+    description: Neighbors queries reject NOT type(r) IN [...] like any other negated list
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) IN ['MEMBER_OF'] RETURN g, n
+    expect: { compile_error: "neighbors queries support NOT only on =, <>, IS NULL, and IS NOT NULL conditions" }
+
+  - name: on_node
+    description: type() on a node variable rejects and says it takes a relationship variable
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(u) = 'AUTHORED' RETURN u LIMIT 10
+    expect: { compile_error: "type() takes a relationship variable, such as r in -[r]->, but u is a node" }
+
+  - name: operator
+    description: type(r) with an operator other than =, <>, or IN rejects without echoing the compared literal
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) STARTS WITH 'private-query-literal' RETURN u LIMIT 10
+    expect:
+      compile_error: type(r) supports =, <>, or IN with relationship type names
+      compile_error_not_contains: [private-query-literal]
+
+  - name: order_aggregation
+    description: ORDER BY type(r) in an aggregation rejects until relationship-type grouping exists
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN mr.state, count(mr) AS n ORDER BY type(r)
+    expect: { compile_error: ORDER BY type(r) is not supported in aggregations yet }
+
+  - name: order_neighbors
+    description: ORDER BY type(r) on a neighbors query rejects because neighbors have a fixed order
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n ORDER BY type(r)
+    expect: { compile_error: path finding and neighbors have fixed result ordering }
+
+  - name: order_variable_length
+    description: ORDER BY type(r) on a variable-length relationship rejects because the variable binds a
+      list
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, g ORDER BY type(r) LIMIT 10
+    expect: { compile_error: r has a variable length and binds a list }
+
+  - name: path_variable_length
+    description: RETURN p, type(r) on a variable-length shortest path rejects because r binds a list
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF|`CONTAINS`*1..3]->(`end`:Project {id: 1000}) RETURN p, type(r)
+    expect: { compile_error: r has a variable length and binds a list }
+
+  - name: return_variable_length
+    description: RETURN type(r) on a variable-length traversal relationship rejects because the variable
+      binds a list
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN g, type(r) LIMIT 10
+    expect: { compile_error: r has a variable length and binds a list }
+
+  - name: shared_foreign_key
+    description: SCANS and IN_PROJECT both come from the scanner's project_id column, so a foreign-key row
+      cannot say which type it is. type(r) on that hop rejects instead of labeling every row with one of
+      the two types.
+    query:
+      gql: |
+        MATCH (s:VulnerabilityScanner)-[r:SCANS|IN_PROJECT]->(p:Project {id: 1000})
+        RETURN s, p, type(r) LIMIT 10
+    expect: { compile_error: SCANS|IN_PROJECT share one foreign key between VulnerabilityScanner and Project }
+
+  - name: unsupported_position
+    description: type(r) on the right side of a property comparison rejects and names the supported forms
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
+    expect: { compile_error: "function type() is not supported: type() takes one relationship variable and
+          works in WHERE type(r) = 'CLOSES'" }
+
+  - name: variable_length
+    description: WHERE type(r) on a variable-length relationship rejects and points to the typed pattern
+      form
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r*1..2]->(p:Project) WHERE type(r) = 'MEMBER_OF' RETURN u, p LIMIT 10
+    expect: { compile_error: r has a variable length and binds a list }
+
+  - name: variable_length_return
+    description: RETURN r on a variable-length relationship rejects because r binds a list
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, r, g LIMIT 10
+    expect: { compile_error: r has a variable length and binds a list }

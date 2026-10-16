@@ -47,6 +47,9 @@ pre-commit:
         - "skills/**/*.md"
         - "config/prompts/**/*.yml"
         - "config/setup/setup.yaml"
+    - name: yaml-suites
+      run: mise exec -- uv run --quiet scripts/linting/yaml_lint.py {staged_files}
+      glob: "**/*.{yaml,yml}"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:

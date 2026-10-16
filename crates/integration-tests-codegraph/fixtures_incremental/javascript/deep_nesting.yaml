@@ -1,0 +1,86 @@
+name: "JavaScript: deeply nested control flow and returns link on the worker stack"
+
+fixtures:
+  - path: target.js
+    content: |
+      export function target() {}
+
+  - path: nested_if.js
+    content:
+      - "import { target } from './target';\nfunction nestedIf(c) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - "function innermostIf() {}\n"
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n"
+
+  - path: else_if.js
+    content:
+      - "import { target } from './target';\nfunction elseIf(c) {\nif (c) {\n"
+      - { repeat: 10000, text: "} else if (c) {\n" }
+      - "function innermostElseIf() {}\n}\ntarget();\n}\n"
+
+  - path: nested_try.js
+    content:
+      - "import { target } from './target';\nfunction nestedTry() {\n"
+      - { repeat: 10000, text: "try {\n" }
+      - "function innermostTry() {}\n"
+      - { repeat: 10000, text: "} catch (e) {}\n" }
+      - "target();\n}\n"
+
+  - path: nested_loop.js
+    content:
+      - "import { target } from './target';\nfunction nestedLoop() {\n"
+      - { repeat: 10000, text: "while (true) {\n" }
+      - "function innermostLoop() {}\n"
+      - { repeat: 10000, text: "}\n" }
+      - "target();\n}\n"
+
+  - path: nested_ternary.js
+    content:
+      - "import { target } from './target';\nfunction nestedTernary(c) {\nconst v =\n"
+      - { repeat: 10000, text: "c ? (\n" }
+      - "0\n"
+      - { repeat: 10000, text: ") : 0\n" }
+      - ";\ntarget();\n}\n"
+
+  - path: return_ternary.js
+    content:
+      - "class Made {\ngo() {}\n}\nfunction make(c) {\nreturn (\n"
+      - { repeat: 5000, text: "c ? (\n" }
+      - "new Made()\n"
+      - { repeat: 5000, text: ") : new Made()\n" }
+      - ");\n}\nfunction useMake(c) {\nmake(c).go();\n}\n"
+
+tests:
+  - name: "each function calls its target after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 5 }
+      - column_values:
+          field: caller
+          values: [nestedIf, elseIf, nestedTry, nestedLoop, nestedTernary]
+
+  - name: "the innermost definition of each nesting belongs to its function"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(nested:Definition)
+      WHERE nested.name IN ['innermostIf', 'innermostElseIf', 'innermostTry', 'innermostLoop']
+      RETURN owner.name AS owner, nested.name AS nested
+    assert:
+      - { row_count: 4 }
+      - { row: { owner: nestedIf, nested: innermostIf } }
+      - { row: { owner: elseIf, nested: innermostElseIf } }
+      - { row: { owner: nestedTry, nested: innermostTry } }
+      - { row: { owner: nestedLoop, nested: innermostLoop } }
+
+  - name: "a call on the value of a deeply nested return reaches its method"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useMake'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: make } }
+      - { row: { callee: go } }

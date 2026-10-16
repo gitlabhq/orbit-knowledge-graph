@@ -440,6 +440,7 @@ on its own.
 | Handler outcome: `skipped_lock` | Messages skipped (another worker holds the lock) |
 | Handler outcome: `error` | Failed processing attempts |
 | Error stage: `repository_fetch` | Repository download failures |
+| Error stage: `repository_fetch_overload` | Archive endpoint answered 429, 502, 503 or 504; task is retried, never checkpointed as empty |
 | Error stage: `checkpoint` | Checkpoint read/write failures |
 | Error stage: `indexing` | Parse or graph build failures |
 | Error stage: `arrow_conversion` | Schema conversion failures |

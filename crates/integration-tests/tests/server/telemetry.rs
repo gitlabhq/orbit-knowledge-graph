@@ -1,17 +1,10 @@
-use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::Body;
-use axum::http::Request;
 use opentelemetry::global;
-use opentelemetry_sdk::metrics::data::{AggregatedMetrics, HistogramDataPoint, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
-use orbit_server::active_schema::ActiveSchema;
 use orbit_server::pipeline::OTelPipelineObserver;
-use orbit_server::webserver::create_router;
 use query_engine::pipeline::PipelineObserver;
 use tokio::time::sleep;
-use tower::ServiceExt;
 
 fn setup_meter_provider() -> (SdkMeterProvider, InMemoryMetricExporter) {
     let exporter = InMemoryMetricExporter::default();
@@ -32,116 +25,6 @@ fn find_metric<'a>(
             .flat_map(|sm| sm.metrics())
             .find(|m| m.name() == name)
     })
-}
-
-fn extract_histogram_points(
-    metric: &opentelemetry_sdk::metrics::data::Metric,
-) -> Vec<&HistogramDataPoint<f64>> {
-    match metric.data() {
-        AggregatedMetrics::F64(MetricData::Histogram(h)) => h.data_points().collect(),
-        _ => vec![],
-    }
-}
-
-fn pinned_schema() -> Arc<ActiveSchema> {
-    ActiveSchema::pinned(Arc::new(ontology::Ontology::load_embedded().unwrap()))
-}
-
-#[tokio::test]
-async fn http_request_records_duration_metric() {
-    let (provider, exporter) = setup_meter_provider();
-    let router = create_router(pinned_schema());
-
-    let request = Request::get("/live").body(Body::empty()).unwrap();
-    let response = router.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
-
-    sleep(Duration::from_millis(150)).await;
-    provider.force_flush().unwrap();
-
-    let metrics = exporter.get_finished_metrics().unwrap();
-    assert!(
-        find_metric(&metrics, "http.server.request.duration").is_some(),
-        "http.server.request.duration metric should be recorded"
-    );
-
-    provider.shutdown().unwrap();
-}
-
-#[tokio::test]
-async fn http_metric_has_correct_attributes() {
-    let (provider, exporter) = setup_meter_provider();
-    let router = create_router(pinned_schema());
-
-    let request = Request::get("/live").body(Body::empty()).unwrap();
-    router.oneshot(request).await.unwrap();
-
-    sleep(Duration::from_millis(150)).await;
-    provider.force_flush().unwrap();
-
-    let metrics = exporter.get_finished_metrics().unwrap();
-    let metric =
-        find_metric(&metrics, "http.server.request.duration").expect("metric should exist");
-    let points = extract_histogram_points(metric);
-    assert!(!points.is_empty());
-
-    let dp = points[0];
-    let has_method = dp
-        .attributes()
-        .any(|kv| kv.key.as_str() == "http.request.method" && kv.value.as_str() == "GET");
-    let has_status = dp
-        .attributes()
-        .any(|kv| kv.key.as_str() == "http.response.status_code" && kv.value.as_str() == "200");
-    let has_route = dp
-        .attributes()
-        .any(|kv| kv.key.as_str() == "http.route" && kv.value.as_str() == "/live");
-
-    assert!(has_method, "should have http.request.method=GET");
-    assert!(has_status, "should have http.response.status_code=200");
-    assert!(has_route, "should have http.route=/live");
-
-    provider.shutdown().unwrap();
-}
-
-#[tokio::test]
-async fn correlation_id_echoed_in_response() {
-    let _guard = labkit::Builder::new("test")
-        .propagate_correlation(true)
-        .echo_response_header(true)
-        .init()
-        .expect("labkit init");
-
-    let router = create_router(pinned_schema());
-
-    let request = Request::get("/live")
-        .header("x-request-id", "test-correlation-789")
-        .body(Body::empty())
-        .unwrap();
-    let response = router.oneshot(request).await.unwrap();
-
-    assert_eq!(
-        response.headers().get("x-request-id").unwrap(),
-        "test-correlation-789"
-    );
-}
-
-#[tokio::test]
-async fn correlation_id_generated_when_absent() {
-    let _guard = labkit::Builder::new("test")
-        .echo_response_header(true)
-        .init()
-        .expect("labkit init");
-
-    let router = create_router(pinned_schema());
-
-    let request = Request::get("/live").body(Body::empty()).unwrap();
-    let response = router.oneshot(request).await.unwrap();
-
-    let header = response
-        .headers()
-        .get("x-request-id")
-        .expect("response should have x-request-id");
-    assert_eq!(header.len(), 26, "should be a 26-char ULID");
 }
 
 #[tokio::test]

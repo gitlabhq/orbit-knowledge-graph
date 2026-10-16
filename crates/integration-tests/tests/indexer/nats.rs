@@ -1015,3 +1015,236 @@ async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() 
         .expect("reconciler task panicked")
         .expect("reconciler run returned an error");
 }
+
+mod archive_lease {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use code_graph::v2::CancellationToken as CodeCancellationToken;
+    use indexer::locking::{LockGuard, NatsLockService};
+    use indexer::modules::code::LocalRepositoryCache;
+    use indexer::modules::code::RepositoryCache;
+    use indexer::modules::code::metrics::CodeMetrics;
+    use indexer::modules::code::repository::{ArchiveLeases, LeaseError, LeaseSettings, slot_key};
+    use indexer::nats::NatsServicesImpl;
+
+    use super::*;
+
+    const TTL: Duration = Duration::from_secs(3);
+
+    async fn pod(url: &str, budget: usize, max_wait: Duration) -> (ArchiveLeases, Arc<NatsBroker>) {
+        let broker = Arc::new(connect_broker(&default_config(url)).await);
+        broker
+            .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
+            .await
+            .expect("ensure bucket");
+        let locks = Arc::new(NatsLockService::new(Arc::new(NatsServicesImpl::new(
+            Arc::clone(&broker),
+        ))));
+        let settings = LeaseSettings {
+            storage_budget: budget,
+            tenant_budget: budget,
+            ttl: TTL,
+            max_wait,
+        };
+        let leases = ArchiveLeases::new(
+            locks,
+            settings,
+            CodeCancellationToken::new(),
+            CodeMetrics::default(),
+        );
+        (leases, broker)
+    }
+
+    #[tokio::test]
+    async fn independent_pods_never_exceed_the_storage_budget() {
+        let (_container, url) = start_nats_container().await;
+        let budget = 2;
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let mut downloads = Vec::new();
+        for _ in 0..3 {
+            let (leases, _broker) = pod(&url, budget, Duration::from_secs(60)).await;
+            for _ in 0..3 {
+                let leases = leases.clone();
+                let (in_flight, peak) = (Arc::clone(&in_flight), Arc::clone(&peak));
+                downloads.push(tokio::spawn(async move {
+                    leases
+                        .run(Some("gitaly-1"), async {
+                            let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                            peak.fetch_max(now, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(1500)).await;
+                            in_flight.fetch_sub(1, Ordering::SeqCst);
+                        })
+                        .await
+                }));
+            }
+        }
+        for download in downloads {
+            download
+                .await
+                .unwrap()
+                .expect("every download gets a slot eventually");
+        }
+
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            budget,
+            "9 downloads over 3 pods must saturate, and never exceed, the budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_storage_does_not_hold_back_another_storage() {
+        let (_container, url) = start_nats_container().await;
+        let (busy_pod, _b1) = pod(&url, 1, Duration::from_secs(1)).await;
+        let (other_pod, _b2) = pod(&url, 1, Duration::from_secs(1)).await;
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let holder = tokio::spawn({
+            let busy_pod = busy_pod.clone();
+            async move {
+                busy_pod
+                    .run(Some("gitaly-1"), async {
+                        let _ = release_rx.await;
+                    })
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let blocked = other_pod.run(Some("gitaly-1"), async {}).await;
+        let unrelated = other_pod.run(Some("gitaly-2"), async {}).await;
+
+        assert!(matches!(blocked, Err(LeaseError::Timeout { .. })));
+        assert!(unrelated.is_ok());
+        release_tx.send(()).unwrap();
+        holder.await.unwrap().unwrap();
+    }
+
+    fn archive() -> Vec<u8> {
+        use std::io::Write;
+        let content: Vec<u8> = (0..200_000u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 24) as u8)
+            .collect();
+        let mut tar = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        tar.append_data(&mut header, "src/a.rs", &content[..])
+            .unwrap();
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(&tar.into_inner().unwrap()).unwrap();
+        gz.finish().unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pod_that_loses_its_slot_to_another_pod_stops_streaming_the_archive() {
+        let (_container, url) = start_nats_container().await;
+        let (pod_a, _a) = pod(&url, 1, Duration::from_secs(1)).await;
+        let (pod_b, broker_b) = pod(&url, 1, Duration::from_secs(20)).await;
+        let archive = archive();
+        let total_chunks = archive.len().div_ceil(64);
+        let pulled = Arc::new(AtomicUsize::new(0));
+        let stream: indexer::modules::code::repository::ByteStream = {
+            let chunks: Vec<Bytes> = archive.chunks(64).map(Bytes::copy_from_slice).collect();
+            let pulled = Arc::clone(&pulled);
+            Box::pin(futures::stream::unfold(
+                chunks.into_iter(),
+                move |mut chunks| {
+                    let pulled = Arc::clone(&pulled);
+                    async move {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        let next = chunks.next()?;
+                        pulled.fetch_add(1, Ordering::SeqCst);
+                        Some((Ok(next), chunks))
+                    }
+                },
+            ))
+        };
+        let cache_dir = tempfile::TempDir::new().unwrap();
+        let cache = LocalRepositoryCache::new(
+            cache_dir.path().to_path_buf(),
+            u64::MAX,
+            0,
+            CodeMetrics::default(),
+        );
+
+        let download = tokio::spawn(async move {
+            pod_a
+                .run(Some("gitaly-1"), async move {
+                    cache.extract_archive(stream).await.map(|_| ())
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        broker_b
+            .kv_delete(INDEXING_LOCKS_BUCKET, &slot_key(Some("gitaly-1"), 0))
+            .await
+            .expect("expire slot key");
+        let (b_started_tx, b_started_rx) = tokio::sync::oneshot::channel::<()>();
+        let (b_release_tx, b_release_rx) = tokio::sync::oneshot::channel::<()>();
+        let b_download = tokio::spawn(async move {
+            pod_b
+                .run(Some("gitaly-1"), async {
+                    let _ = b_started_tx.send(());
+                    let _ = b_release_rx.await;
+                })
+                .await
+        });
+        b_started_rx.await.expect("pod B takes the slot");
+
+        let outcome = tokio::time::timeout(Duration::from_secs(10), download)
+            .await
+            .expect("lost lease must end the download within a few heartbeats")
+            .unwrap();
+        let at_loss = pulled.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let later = pulled.load(Ordering::SeqCst);
+
+        assert!(matches!(outcome, Err(LeaseError::Lost(_))));
+        assert!(
+            at_loss < total_chunks,
+            "archive must still be streaming at loss"
+        );
+        assert!(
+            later <= at_loss + 2,
+            "stream kept flowing: {at_loss} -> {later}"
+        );
+        let entry = broker_b
+            .kv_get(INDEXING_LOCKS_BUCKET, &slot_key(Some("gitaly-1"), 0))
+            .await
+            .expect("kv_get");
+        assert!(
+            entry.is_some(),
+            "the new owner's key survives the old holder's loss"
+        );
+        b_release_tx.send(()).unwrap();
+        b_download.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_crashed_pods_slot_is_recovered_after_the_ttl() {
+        let (_container, url) = start_nats_container().await;
+        let (survivor, broker) = pod(&url, 1, Duration::from_secs(30)).await;
+        let locks = Arc::new(NatsLockService::new(Arc::new(NatsServicesImpl::new(
+            broker,
+        ))));
+        LockGuard::acquire(locks, &slot_key(Some("gitaly-1"), 0), TTL)
+            .await
+            .unwrap()
+            .expect("slot free")
+            .abandon();
+
+        let started = std::time::Instant::now();
+        survivor
+            .run(Some("gitaly-1"), async {})
+            .await
+            .expect("slot frees once the crashed lease expires");
+
+        assert!(
+            started.elapsed() >= Duration::from_secs(2),
+            "must wait for expiry"
+        );
+        assert!(started.elapsed() < Duration::from_secs(15));
+    }
+}

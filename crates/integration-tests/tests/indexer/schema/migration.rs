@@ -1414,8 +1414,8 @@ async fn code_migration_clone_converges_after_reindex_and_sweep() {
         "SDLC edges must never be touched by the code stale sweep"
     );
     assert!(
-        scenario.live_edge_exists("CONTAINS", 1).await,
-        "known gap: Branch-source code edges are not swept until the sweep covers Branch/Project"
+        !scenario.live_edge_exists("CONTAINS", 1).await,
+        "the cloned Branch-source code edge must be tombstoned once its project re-indexes"
     );
 }
 

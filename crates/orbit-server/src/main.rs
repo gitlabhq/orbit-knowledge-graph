@@ -20,7 +20,6 @@ use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
 use orbit_server::probes;
 use orbit_server::shutdown;
-use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
@@ -48,9 +47,7 @@ async fn main() -> anyhow::Result<()> {
     orbit_server_config::query::init(config.query.clone());
     orbit_server_config::features::init(config.features.clone());
 
-    let mut builder = labkit::Builder::new(args.mode.service_name())
-        .propagate_correlation(true)
-        .echo_response_header(true);
+    let mut builder = labkit::Builder::new(args.mode.service_name()).propagate_correlation(true);
     if let Some(level) = config
         .metrics
         .log_level
@@ -111,9 +108,15 @@ async fn main() -> anyhow::Result<()> {
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, serving, shutdown)
-                .await
-                .map_err(Into::into)
+            indexer::run(
+                &indexer_config,
+                ontology,
+                serving,
+                shutdown,
+                indexer_datafusion::sql_transform(),
+            )
+            .await
+            .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
@@ -190,8 +193,6 @@ async fn run_webserver(
         shutdown.clone(),
     );
 
-    let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
-    info!(addr = %config.bind_address, "HTTP server bound");
     let grpc_listener = tokio::net::TcpListener::bind(config.grpc_bind_address).await?;
     info!(addr = %config.grpc_bind_address, "gRPC server bound");
 
@@ -275,7 +276,6 @@ async fn run_webserver(
     serving.store(true, Ordering::Relaxed);
 
     let result = tokio::select! {
-        res = http_server.run() => res.map_err(Into::into),
         res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
     };

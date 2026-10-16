@@ -14,6 +14,8 @@ use super::plan::Selection;
 use super::spec::{self, Agent};
 use super::{Component, Target};
 
+pub(super) use skill::records_full_skill;
+
 pub(super) trait Installer {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>>;
 
@@ -42,7 +44,7 @@ pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
     match component {
         Component::Instructions => &instructions::Instructions,
         Component::Hooks => &hooks::Hooks,
-        Component::Skill => &skill::Skill,
+        Component::Skill => &skill::WITHOUT_FILES,
         Component::Mcp => &mcp::McpServer,
     }
 }
@@ -76,7 +78,12 @@ impl Report {
 pub(super) fn install(selection: &Selection, target: &Target, report: &mut Report) -> Result<()> {
     for component in &selection.components {
         report.start_group(component.label());
-        let installer = installer_for(*component);
+        let installer: &dyn Installer = match component {
+            Component::Skill => &skill::Skill {
+                request: &selection.skill,
+            },
+            other => installer_for(*other),
+        };
         installer.install(&selection.agents, target, report)?;
     }
     if spec::launcher() == spec::GLAB_LAUNCHER {

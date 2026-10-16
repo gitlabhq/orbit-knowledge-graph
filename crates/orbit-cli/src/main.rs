@@ -518,6 +518,7 @@ impl SetupFlags {
         all: bool,
         index: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
+        skill: commands::setup::SkillRequest,
     ) -> commands::setup::Options {
         commands::setup::Options {
             agents,
@@ -527,12 +528,13 @@ impl SetupFlags {
             verbose: self.verbose,
             index,
             components,
+            skill,
         }
     }
 
-    fn target(self) -> Result<commands::setup::Target> {
+    fn target(&self) -> Result<commands::setup::Target> {
         if self.project || self.dir.is_some() {
-            commands::setup::Target::project(self.dir)
+            commands::setup::Target::project(self.dir.clone())
         } else {
             Ok(commands::setup::Target::Global)
         }
@@ -576,6 +578,16 @@ enum Commands {
         /// Do not index the current repository after configuring.
         #[arg(long)]
         no_index: bool,
+
+        /// What to install as the `orbit` skill. `wrapper` loads the real
+        /// skill when the agent reads it. `full` writes the skill tree now,
+        /// for agents that cannot run commands at that point; it needs the
+        /// instance for the current content and falls back to the embedded
+        /// skill when the instance does not answer. Without this flag, an
+        /// agent that cannot run commands (Duo) gets `full`, and a directory
+        /// keeps the kind it already has.
+        #[arg(long, value_enum)]
+        skill: Option<commands::setup::SkillKind>,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -886,12 +898,24 @@ async fn dispatch(
             mcp,
             skip,
             no_index,
+            skill,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, !no_index, components);
             let machine = commands::setup::detect::Machine::current()?;
-            let run = commands::setup::install(options, flags.target()?, &machine)?;
+            let target = flags.target()?;
+            let options = flags.to_options(
+                agents,
+                all,
+                !no_index,
+                components,
+                commands::setup::SkillRequest {
+                    kind: skill,
+                    full_tree: None,
+                    search_path: None,
+                },
+            );
+            let run = commands::setup::install(options, target, &machine).await?;
             if let Some(tracker) = &tracker {
                 telemetry::emit_setup_event(
                     tracker,
@@ -903,7 +927,8 @@ async fn dispatch(
             Ok(())
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(agents, false, false, Default::default());
+            let options =
+                flags.to_options(agents, false, false, Default::default(), Default::default());
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {

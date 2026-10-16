@@ -231,6 +231,11 @@ pub struct CodeIndexingPipelineConfig {
     /// per-repo disk so fetch/index concurrency can rise without exhausting the
     /// pod volume. 0 = no limit.
     pub max_total_bytes: u64,
+    /// Files that pass the content filter above which a repository is skipped
+    /// entirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,
+    /// oversize, symlinks) do not count; past the same number they get no File
+    /// row and are counted as skipped. 0 = no limit.
+    pub max_repository_files: usize,
     pub source_memory_budget_bytes: u64,
     pub source_compress_spill: bool,
     pub worker_threads: usize,
@@ -253,14 +258,40 @@ pub struct CodeIndexingPipelineConfig {
     pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
     /// (import edges, call edges). Incremental engine:
-    /// `cross_file_resolve_ms`. 0 = no timeout.
+    /// `cross_file_resolve_ms`. On a timeout the language family keeps its
+    /// per-file graph, the cross-file edges of the waves that finished, and
+    /// the part of the last wave that finished, which depends on thread
+    /// scheduling. 0 = no timeout.
     pub cross_file_resolve_timeout_ms: u64,
+    /// Syntax tree depth at which the incremental engine cuts a file: it drops
+    /// the deeper nodes, indexes the rest, and reports the file as limited
+    /// (deeply_nested). A left-nested chain of one operator adds no depth.
+    /// 0 = no limit.
+    pub max_tree_depth: usize,
+    /// Names that cross-file resolution may make visible across all files of
+    /// one language family before it stops as an overrun. 0 = no limit.
+    pub max_cross_file_names: usize,
+    /// Manifest bytes (package.json, Cargo.toml, and the like) that one language
+    /// family reads for resolution. A manifest past the limit is not read, keeps
+    /// its File row, and is counted as too_many_manifest_bytes. 0 = no limit.
+    pub max_manifest_bytes: u64,
+    /// Edges that the incremental engine's linker may emit for one file. A file
+    /// past the limit is skipped as too_many_edges. 0 = no limit.
+    pub max_file_edges: usize,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
     /// code indexer. 0 = no limit.
     pub fetch_concurrency: usize,
+    /// Maximum archive downloads in flight per Gitaly storage across all indexer pods, enforced with a NATS KV lease. 0 = no limit.
+    pub archive_storage_budget: usize,
+    /// Maximum archive downloads in flight across the whole tenant for projects whose Gitaly storage is unknown (GitLab versions whose `/info` omits `repository_storage`, or a failed lookup). Independent of `archive_storage_budget`, so during a mixed rollout a storage can see both budgets. 0 = no limit.
+    pub archive_tenant_budget: usize,
+    /// Seconds an archive lease stays valid without a heartbeat (minimum 1). A pod that crashes mid-download frees its slot after this long; a pod that loses the lease cancels its download.
+    pub archive_lease_ttl_secs: u64,
+    /// Seconds a download queues for an archive lease while holding a fetch slot. After that the task is NAKed without spending a checkpoint attempt, so a busy storage cannot hold every fetch slot of a pod. Each NAK still counts toward the stream's `max_deliver`.
+    pub archive_lease_max_wait_secs: u64,
     /// In-flight batches the streaming sink holds before back-pressuring the parser.
     pub write_channel_capacity: usize,
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending.

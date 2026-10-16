@@ -10,6 +10,9 @@ pub use partitioning::PARTITION_MIN_ROWS;
 mod plan;
 mod transform;
 
+pub use plan::{SOURCE_DATA_TABLE, Transformation};
+pub use transform::{BlockTransform, SqlTransformFactory, TableBatch};
+
 use std::sync::Arc;
 
 use ontology::EtlScope;
@@ -36,13 +39,17 @@ const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
 pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(SDLC_CONCURRENCY_GROUP.to_string()),
-        max_attempts: Some(1),
-        retry_interval_secs: None,
+        max_attempts: Some(5),
+        retry_interval_secs: Some(60),
         dead_letter_on_exhaustion: None,
         max_ack_pending: None,
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "handler wiring takes each collaborator explicitly"
+)]
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
@@ -51,6 +58,7 @@ pub async fn register_handlers(
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     partition_min_rows: u64,
+    sql_transform: SqlTransformFactory,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
@@ -73,7 +81,7 @@ pub async fn register_handlers(
     )
     .map_err(HandlerInitError::new)?;
 
-    let mut transform_registry = transform::TransformRegistry::default();
+    let mut transform_registry = transform::TransformRegistry::new(sql_transform);
     transform::system_notes::register(
         &mut transform_registry,
         Arc::clone(&datalake),
@@ -82,15 +90,13 @@ pub async fn register_handlers(
     );
     let transform_registry = Arc::new(transform_registry);
 
-    let pipeline = Arc::new(
-        Pipeline::new(
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
-            metrics.clone(),
-            config.engine.datalake_retry.clone(),
-        )
-        .with_registry(Arc::clone(&transform_registry)),
-    );
+    let pipeline = Arc::new(Pipeline::new(
+        Arc::clone(&datalake),
+        Arc::clone(&checkpoint_store),
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+        Arc::clone(&transform_registry),
+    ));
 
     let global_policy = sdlc_dispatch_topic_policy()
         .with_optional_override(config.engine.topics.get(GLOBAL_HANDLER_TOPIC));
@@ -174,9 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn declared_dispatch_policy_does_not_retry() {
+    fn declared_dispatch_policy_retries_transient_failures() {
         let policy = sdlc_dispatch_topic_policy();
-        assert_eq!(policy.max_attempts, Some(1));
+        assert_eq!(policy.max_attempts, Some(5));
+        assert_eq!(policy.retry_interval_secs, Some(60));
         assert_eq!(policy.dead_letter_on_exhaustion, None);
         assert_eq!(policy.concurrency_group.as_deref(), Some("sdlc"));
     }

@@ -6,9 +6,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
-const MAX_READ_DEPTH: usize = 10_000;
-const RED_ZONE: usize = 128 * 1024;
-const STACK_SEGMENT: usize = 4 * 1024 * 1024;
+const FRAMES_PER_BLOCK: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
@@ -42,14 +40,33 @@ struct Block {
     sealed: bool,
 }
 
+enum Frame {
+    Read(BlockId),
+    Single(BlockId),
+    Merge {
+        block: BlockId,
+        next: usize,
+        same: Option<Value>,
+        need_phi: bool,
+    },
+    Operands {
+        phi: PhiId,
+        next: usize,
+    },
+    Phi(BlockId),
+}
+
 pub struct SsaEngine {
     blocks: Vec<Block>,
     phis: Vec<PhiNode>,
+    users: Vec<SmallVec<[PhiId; 2]>>,
+    replaced: Vec<Option<Value>>,
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
-    read_depth: usize,
+    frames: Vec<Frame>,
     written: FxHashSet<u32>,
     unsealed: usize,
+    writes: usize,
 }
 
 impl SsaEngine {
@@ -57,11 +74,14 @@ impl SsaEngine {
         Self {
             blocks: Vec::with_capacity(32),
             phis: Vec::with_capacity(8),
+            users: Vec::with_capacity(8),
+            replaced: Vec::with_capacity(8),
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
-            read_depth: 0,
+            frames: Vec::new(),
             written: FxHashSet::default(),
             unsealed: 0,
+            writes: 0,
         }
     }
 
@@ -128,6 +148,10 @@ impl SsaEngine {
         self.add_sealed_successor(header)
     }
 
+    pub fn writes(&self) -> usize {
+        self.writes
+    }
+
     pub fn has_variable_in_block(&self, variable: u32, block: BlockId) -> bool {
         self.current_def
             .get(&variable)
@@ -152,6 +176,7 @@ impl SsaEngine {
     }
 
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
+        self.writes += 1;
         self.written.insert(variable);
         self.current_def
             .entry(variable)
@@ -170,86 +195,156 @@ impl SsaEngine {
         {
             return value.clone();
         }
-        // No unsealed block means no phi to create.
-        if self.unsealed == 0 && !self.written.contains(&variable) {
-            return Value::Undefined;
-        }
-        if self.read_depth >= MAX_READ_DEPTH {
-            return Value::Opaque;
-        }
-        self.read_depth += 1;
-        let val = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-            self.read_variable_recursive(variable, block)
-        });
-        self.read_depth -= 1;
-        val
+        let mut frames = std::mem::take(&mut self.frames);
+        let ret = self.descend(variable, block, &mut frames);
+        self.run(variable, frames, ret)
     }
 
-    fn read_variable_recursive(&mut self, variable: u32, block: BlockId) -> Value {
-        let sealed = self.blocks[block.0 as usize].sealed;
-        let num_preds = self.blocks[block.0 as usize].predecessors.len();
-
-        let val = if !sealed {
-            let phi_id = self.new_phi(block, variable);
-            self.incomplete_phis
-                .entry(block)
-                .or_default()
-                .insert(variable, phi_id);
-            Value::Phi(phi_id)
-        } else if num_preds == 0 {
-            Value::Undefined
-        } else if num_preds == 1 {
-            let pred = self.blocks[block.0 as usize].predecessors[0];
-            self.read_variable_internal(variable, pred)
-        } else {
-            self.read_variable_marker(variable, block)
-        };
-
+    fn set(&mut self, variable: u32, block: BlockId, value: Value) {
         self.current_def
             .entry(variable)
             .or_default()
-            .insert(block, val.clone());
-        val
+            .insert(block, value);
     }
 
-    fn read_variable_marker(&mut self, variable: u32, block: BlockId) -> Value {
-        self.current_def
-            .entry(variable)
-            .or_default()
-            .insert(block, Value::Marker);
-
-        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0 as usize].predecessors.clone();
-        let mut same: Option<Value> = None;
-        let mut need_phi = false;
-
-        for &pred in &preds {
-            let pred_val = self.read_variable_internal(variable, pred);
-            if pred_val == Value::Marker {
-                need_phi = true;
-                continue;
-            }
-            match &same {
-                None => same = Some(pred_val),
-                Some(s) if *s == pred_val => {}
-                Some(_) => {
-                    need_phi = true;
-                    break;
+    fn run(&mut self, variable: u32, mut frames: Vec<Frame>, mut ret: Option<Value>) -> Value {
+        while let Some(frame) = frames.last_mut() {
+            match frame {
+                Frame::Read(block) => {
+                    let block = *block;
+                    frames.pop();
+                    ret = self.enter(variable, block, &mut frames);
+                }
+                Frame::Single(block) => {
+                    let block = *block;
+                    frames.pop();
+                    let value = ret.take().expect("a read returns a value");
+                    if value != Value::Marker {
+                        self.set(variable, block, value.clone());
+                    }
+                    ret = Some(value);
+                }
+                Frame::Phi(block) => {
+                    let block = *block;
+                    frames.pop();
+                    let value = ret.take().expect("phi operands return a value");
+                    self.set(variable, block, value.clone());
+                    ret = Some(value);
+                }
+                Frame::Merge {
+                    block,
+                    next,
+                    same,
+                    need_phi,
+                } => {
+                    let block = *block;
+                    let preds = self.blocks[block.0 as usize].predecessors.len();
+                    if let Some(value) = ret.take() {
+                        if value == Value::Marker {
+                            *need_phi = true;
+                        } else {
+                            match same {
+                                None => *same = Some(value),
+                                Some(s) if *s == value => {}
+                                Some(_) => {
+                                    *need_phi = true;
+                                    *next = preds;
+                                }
+                            }
+                        }
+                    }
+                    if *next < preds {
+                        let pred = self.blocks[block.0 as usize].predecessors[*next];
+                        *next += 1;
+                        frames.push(Frame::Read(pred));
+                        continue;
+                    }
+                    let (need_phi, same) = (*need_phi, same.take());
+                    frames.pop();
+                    if need_phi {
+                        let phi = self.new_phi(block, variable);
+                        self.set(variable, block, Value::Phi(phi));
+                        frames.push(Frame::Phi(block));
+                        frames.push(Frame::Operands { phi, next: 0 });
+                    } else {
+                        let value = same.unwrap_or(Value::Opaque);
+                        self.set(variable, block, value.clone());
+                        ret = Some(value);
+                    }
+                }
+                Frame::Operands { phi, next } => {
+                    let phi_id = *phi;
+                    if let Some(value) = ret.take() {
+                        self.add_operand(phi_id, value);
+                    }
+                    let block = self.phis[phi_id.0 as usize].block;
+                    if let Some(&pred) = self.blocks[block.0 as usize].predecessors.get(*next) {
+                        *next += 1;
+                        frames.push(Frame::Read(pred));
+                        continue;
+                    }
+                    frames.pop();
+                    ret = Some(self.try_remove_trivial_phi(phi_id));
                 }
             }
         }
-
-        if !need_phi {
-            return same.unwrap_or(Value::Opaque);
-        }
-
-        let phi_id = self.new_phi(block, variable);
-        self.current_def
-            .entry(variable)
-            .or_default()
-            .insert(block, Value::Phi(phi_id));
-        self.add_phi_operands(variable, phi_id)
+        self.frames = frames;
+        ret.expect("a read returns a value")
     }
 
+    fn enter(&mut self, variable: u32, block: BlockId, frames: &mut Vec<Frame>) -> Option<Value> {
+        if let Some(value) = self
+            .current_def
+            .get(&variable)
+            .and_then(|defs| defs.get(&block))
+        {
+            return Some(value.clone());
+        }
+        self.descend(variable, block, frames)
+    }
+
+    fn descend(&mut self, variable: u32, block: BlockId, frames: &mut Vec<Frame>) -> Option<Value> {
+        if self.unsealed == 0 && !self.written.contains(&variable) {
+            return Some(Value::Undefined);
+        }
+        if frames.len() > FRAMES_PER_BLOCK * (self.blocks.len() + 1) {
+            return Some(Value::Opaque);
+        }
+        let node = &self.blocks[block.0 as usize];
+        let shape = (
+            node.sealed,
+            node.predecessors.len(),
+            node.predecessors[..].first().copied(),
+        );
+        let value = match shape {
+            (false, ..) => {
+                let phi_id = self.new_phi(block, variable);
+                self.incomplete_phis
+                    .entry(block)
+                    .or_default()
+                    .insert(variable, phi_id);
+                Value::Phi(phi_id)
+            }
+            (true, 0, _) => Value::Undefined,
+            (true, 1, Some(pred)) => {
+                frames.push(Frame::Single(block));
+                frames.push(Frame::Read(pred));
+                return None;
+            }
+            _ => {
+                self.set(variable, block, Value::Marker);
+                frames.push(Frame::Merge {
+                    block,
+                    next: 0,
+                    same: None,
+                    need_phi: false,
+                });
+                return None;
+            }
+        };
+        self.set(variable, block, value.clone());
+        Some(value)
+    }
     fn new_phi(&mut self, block: BlockId, variable: u32) -> PhiId {
         let id = PhiId(u32::try_from(self.phis.len()).expect("phi index exceeds u32"));
         self.phis.push(PhiNode {
@@ -258,28 +353,47 @@ impl SsaEngine {
             operands: SmallVec::new(),
             witnesses: [None, None],
         });
+        self.users.push(SmallVec::new());
+        self.replaced.push(None);
         id
     }
 
     fn add_phi_operands(&mut self, variable: u32, phi_id: PhiId) -> Value {
-        let block = self.phis[phi_id.0 as usize].block;
-        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0 as usize].predecessors.clone();
-        for pred in preds {
-            let val = self.read_variable_internal(variable, pred);
-            if val != Value::Phi(phi_id) {
-                let phi = &mut self.phis[phi_id.0 as usize];
-                if phi.witnesses[0].is_none() {
-                    phi.witnesses[0] = Some(val.clone());
-                } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val) {
-                    phi.witnesses[1] = Some(val.clone());
-                }
+        let mut frames = std::mem::take(&mut self.frames);
+        frames.push(Frame::Operands {
+            phi: phi_id,
+            next: 0,
+        });
+        self.run(variable, frames, None)
+    }
+
+    fn add_operand(&mut self, phi_id: PhiId, val: Value) {
+        let val = self.forward(&val);
+        if val != Value::Phi(phi_id) {
+            let phi = &mut self.phis[phi_id.0 as usize];
+            if phi.witnesses[0].is_none() {
+                phi.witnesses[0] = Some(val.clone());
+            } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val) {
+                phi.witnesses[1] = Some(val.clone());
             }
-            self.phis[phi_id.0 as usize].operands.push(val);
         }
-        self.try_remove_trivial_phi(phi_id)
+        if let Value::Phi(used) = val {
+            self.users[used.0 as usize].push(phi_id);
+        }
+        self.phis[phi_id.0 as usize].operands.push(val);
     }
 
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
+        let mut pending: SmallVec<[PhiId; 8]> = SmallVec::from_slice(&[phi_id]);
+        let mut first = None;
+        while let Some(phi) = pending.pop() {
+            let value = self.remove_if_trivial(phi, &mut pending);
+            first.get_or_insert(value);
+        }
+        first.expect("the first phi is always checked")
+    }
+
+    fn remove_if_trivial(&mut self, phi_id: PhiId, pending: &mut SmallVec<[PhiId; 8]>) -> Value {
         let w = &self.phis[phi_id.0 as usize].witnesses;
         if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
             && w0 != w1
@@ -302,6 +416,7 @@ impl SsaEngine {
         }
 
         let replacement = same.unwrap_or(Value::Opaque);
+        self.replaced[phi_id.0 as usize] = Some(replacement.clone());
 
         let variable = self.phis[phi_id.0 as usize].variable;
         let block = self.phis[phi_id.0 as usize].block;
@@ -311,17 +426,15 @@ impl SsaEngine {
             block_defs.insert(block, replacement.clone());
         }
 
-        let phi_users: Vec<PhiId> = self
-            .phis
-            .iter()
-            .enumerate()
-            .filter(|(i, phi)| {
-                *i != phi_id.0 as usize && phi.operands.contains(&Value::Phi(phi_id))
-            })
-            .map(|(i, _)| PhiId(u32::try_from(i).expect("phi index exceeds u32")))
-            .collect();
-
         let phi_val = Value::Phi(phi_id);
+        let mut phi_users = std::mem::take(&mut self.users[phi_id.0 as usize]);
+        phi_users.retain(|user| {
+            self.replaced[user.0 as usize].is_none()
+                && self.phis[user.0 as usize].operands.contains(&phi_val)
+        });
+        phi_users.sort_unstable_by_key(|user| user.0);
+        phi_users.dedup();
+
         for user_id in &phi_users {
             let user = &mut self.phis[user_id.0 as usize];
             for op in &mut user.operands {
@@ -329,6 +442,10 @@ impl SsaEngine {
                     *op = replacement.clone();
                 }
             }
+            if let Value::Phi(used) = replacement {
+                self.users[used.0 as usize].push(*user_id);
+            }
+            let user = &mut self.phis[user_id.0 as usize];
             for w in &mut user.witnesses {
                 if w.as_ref() == Some(&phi_val) {
                     *w = None;
@@ -336,11 +453,7 @@ impl SsaEngine {
             }
         }
 
-        for user_id in phi_users {
-            stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-                self.try_remove_trivial_phi(user_id)
-            });
-        }
+        pending.extend(phi_users.into_iter().rev());
 
         replacement
     }
@@ -411,7 +524,6 @@ impl SsaEngine {
                     .into_iter()
                     .next()
                     .expect("a trivial phi has exactly one outer value");
-                let phi_vals: Vec<Value> = scc.iter().map(|&p| Value::Phi(p)).collect();
                 for &pid in &scc {
                     let variable = self.phis[pid.0 as usize].variable;
                     let block = self.phis[pid.0 as usize].block;
@@ -421,16 +533,25 @@ impl SsaEngine {
                         block_defs.insert(block, replacement.clone());
                     }
                 }
-                for phi in &mut self.phis {
+                let in_scc = |value: &Value| matches!(value, Value::Phi(p) if scc_set.contains(p));
+                let mut users: Vec<PhiId> = scc
+                    .iter()
+                    .flat_map(|p| self.users[p.0 as usize].iter().copied())
+                    .collect();
+                users.sort_unstable_by_key(|user| user.0);
+                users.dedup();
+                for user in users {
+                    let phi = &mut self.phis[user.0 as usize];
                     for op in &mut phi.operands {
-                        if phi_vals.contains(op) {
+                        if in_scc(op) {
                             *op = replacement.clone();
+                            if let Value::Phi(used) = replacement {
+                                self.users[used.0 as usize].push(user);
+                            }
                         }
                     }
                     for w in &mut phi.witnesses {
-                        if let Some(wv) = w
-                            && phi_vals.contains(wv)
-                        {
+                        if w.as_ref().is_some_and(in_scc) {
                             *w = None;
                         }
                     }
@@ -441,7 +562,25 @@ impl SsaEngine {
         }
     }
 
-    pub(crate) fn resolve_value(&self, value: &Value) -> Vec<Value> {
+    fn forward(&mut self, value: &Value) -> Value {
+        let mut end = value.clone();
+        while let Value::Phi(phi) = end
+            && let Some(next) = &self.replaced[phi.0 as usize]
+        {
+            end = next.clone();
+        }
+        let mut cur = value.clone();
+        while let Value::Phi(phi) = cur
+            && let Some(next) = self.replaced[phi.0 as usize].as_mut()
+            && *next != end
+        {
+            cur = std::mem::replace(next, end.clone());
+        }
+        end
+    }
+
+    pub(crate) fn resolve_value(&mut self, value: &Value) -> Vec<Value> {
+        let value = &self.forward(value);
         if !matches!(value, Value::Phi(_)) {
             return match value {
                 Value::Undefined | Value::Marker => vec![],
@@ -480,68 +619,47 @@ fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let mut indices = vec![usize::MAX; n];
     let mut lowlinks = vec![0usize; n];
     let mut result = Vec::new();
+    let mut calls: Vec<(usize, usize)> = Vec::new();
 
-    #[allow(clippy::too_many_arguments)]
-    fn strongconnect(
-        v: usize,
-        adj: &[Vec<usize>],
-        index_counter: &mut usize,
-        stack: &mut Vec<usize>,
-        on_stack: &mut [bool],
-        indices: &mut [usize],
-        lowlinks: &mut [usize],
-        result: &mut Vec<Vec<usize>>,
-    ) {
-        indices[v] = *index_counter;
-        lowlinks[v] = *index_counter;
-        *index_counter += 1;
-        stack.push(v);
-        on_stack[v] = true;
-
-        for &w in &adj[v] {
-            if indices[w] == usize::MAX {
-                strongconnect(
-                    w,
-                    adj,
-                    index_counter,
-                    stack,
-                    on_stack,
-                    indices,
-                    lowlinks,
-                    result,
-                );
-                lowlinks[v] = lowlinks[v].min(lowlinks[w]);
-            } else if on_stack[w] {
-                lowlinks[v] = lowlinks[v].min(indices[w]);
-            }
+    for root in 0..n {
+        if indices[root] != usize::MAX {
+            continue;
         }
-
-        if lowlinks[v] == indices[v] {
-            let mut scc = Vec::new();
-            loop {
-                let w = stack.pop().expect("scc stack holds the current node");
-                on_stack[w] = false;
-                scc.push(w);
-                if w == v {
-                    break;
+        calls.push((root, 0));
+        while let Some((v, edge)) = calls.last_mut() {
+            let v = *v;
+            if indices[v] == usize::MAX {
+                indices[v] = index_counter;
+                lowlinks[v] = index_counter;
+                index_counter += 1;
+                stack.push(v);
+                on_stack[v] = true;
+            }
+            if let Some(&w) = adj[v].get(*edge) {
+                *edge += 1;
+                if indices[w] == usize::MAX {
+                    calls.push((w, 0));
+                } else if on_stack[w] {
+                    lowlinks[v] = lowlinks[v].min(indices[w]);
                 }
+                continue;
             }
-            result.push(scc);
-        }
-    }
-
-    for v in 0..n {
-        if indices[v] == usize::MAX {
-            strongconnect(
-                v,
-                adj,
-                &mut index_counter,
-                &mut stack,
-                &mut on_stack,
-                &mut indices,
-                &mut lowlinks,
-                &mut result,
-            );
+            calls.pop();
+            if let Some(&(caller, _)) = calls.last() {
+                lowlinks[caller] = lowlinks[caller].min(lowlinks[v]);
+            }
+            if lowlinks[v] == indices[v] {
+                let mut scc = Vec::new();
+                loop {
+                    let w = stack.pop().expect("scc stack holds the current node");
+                    on_stack[w] = false;
+                    scc.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                result.push(scc);
+            }
         }
     }
     result
@@ -550,6 +668,438 @@ fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ORACLE_MAX_READ_DEPTH: usize = 1_000;
+
+    thread_local! {
+        static ORACLE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    impl SsaEngine {
+        fn oracle_seal_block(&mut self, block: BlockId) {
+            if let Some(incomplete) = self.incomplete_phis.remove(&block) {
+                for (variable, phi_id) in incomplete {
+                    self.oracle_add_phi_operands(variable, phi_id);
+                }
+            }
+            if !self.blocks[block.0 as usize].sealed {
+                self.blocks[block.0 as usize].sealed = true;
+                self.unsealed -= 1;
+            }
+        }
+
+        fn oracle_internal(&mut self, variable: u32, block: BlockId) -> Value {
+            if let Some(block_defs) = self.current_def.get(&variable)
+                && let Some(value) = block_defs.get(&block)
+            {
+                return value.clone();
+            }
+            if self.unsealed == 0 && !self.written.contains(&variable) {
+                return Value::Undefined;
+            }
+            if ORACLE_DEPTH.get() >= ORACLE_MAX_READ_DEPTH {
+                return Value::Opaque;
+            }
+            ORACLE_DEPTH.set(ORACLE_DEPTH.get() + 1);
+            let val = self.oracle_recursive(variable, block);
+            ORACLE_DEPTH.set(ORACLE_DEPTH.get() - 1);
+            val
+        }
+
+        fn oracle_recursive(&mut self, variable: u32, block: BlockId) -> Value {
+            let sealed = self.blocks[block.0 as usize].sealed;
+            let num_preds = self.blocks[block.0 as usize].predecessors.len();
+
+            let val = if !sealed {
+                let phi_id = self.new_phi(block, variable);
+                self.incomplete_phis
+                    .entry(block)
+                    .or_default()
+                    .insert(variable, phi_id);
+                Value::Phi(phi_id)
+            } else if num_preds == 0 {
+                Value::Undefined
+            } else if num_preds == 1 {
+                let pred = self.blocks[block.0 as usize].predecessors[0];
+                self.oracle_internal(variable, pred)
+            } else {
+                self.oracle_marker(variable, block)
+            };
+
+            if val != Value::Marker {
+                self.current_def
+                    .entry(variable)
+                    .or_default()
+                    .insert(block, val.clone());
+            }
+            val
+        }
+
+        fn oracle_marker(&mut self, variable: u32, block: BlockId) -> Value {
+            self.current_def
+                .entry(variable)
+                .or_default()
+                .insert(block, Value::Marker);
+
+            let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0 as usize].predecessors.clone();
+            let mut same: Option<Value> = None;
+            let mut need_phi = false;
+
+            for &pred in &preds {
+                let pred_val = self.oracle_internal(variable, pred);
+                if pred_val == Value::Marker {
+                    need_phi = true;
+                    continue;
+                }
+                match &same {
+                    None => same = Some(pred_val),
+                    Some(s) if *s == pred_val => {}
+                    Some(_) => {
+                        need_phi = true;
+                        break;
+                    }
+                }
+            }
+
+            if !need_phi {
+                return same.unwrap_or(Value::Opaque);
+            }
+
+            let phi_id = self.new_phi(block, variable);
+            self.current_def
+                .entry(variable)
+                .or_default()
+                .insert(block, Value::Phi(phi_id));
+            self.oracle_add_phi_operands(variable, phi_id)
+        }
+
+        fn oracle_add_phi_operands(&mut self, variable: u32, phi_id: PhiId) -> Value {
+            let block = self.phis[phi_id.0 as usize].block;
+            let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0 as usize].predecessors.clone();
+            for pred in preds {
+                let val = self.oracle_internal(variable, pred);
+                if val != Value::Phi(phi_id) {
+                    let phi = &mut self.phis[phi_id.0 as usize];
+                    if phi.witnesses[0].is_none() {
+                        phi.witnesses[0] = Some(val.clone());
+                    } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val)
+                    {
+                        phi.witnesses[1] = Some(val.clone());
+                    }
+                }
+                if let Value::Phi(used) = val {
+                    self.users[used.0 as usize].push(phi_id);
+                }
+                self.phis[phi_id.0 as usize].operands.push(val);
+            }
+            self.oracle_try_remove_trivial_phi(phi_id)
+        }
+
+        fn oracle_try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
+            let w = &self.phis[phi_id.0 as usize].witnesses;
+            if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
+                && w0 != w1
+                && *w0 != Value::Phi(phi_id)
+                && *w1 != Value::Phi(phi_id)
+            {
+                return Value::Phi(phi_id);
+            }
+
+            let mut same: Option<Value> = None;
+            for i in 0..self.phis[phi_id.0 as usize].operands.len() {
+                let op = self.phis[phi_id.0 as usize].operands[i].clone();
+                if op == Value::Phi(phi_id) || Some(&op) == same.as_ref() {
+                    continue;
+                }
+                if same.is_some() {
+                    return Value::Phi(phi_id);
+                }
+                same = Some(op);
+            }
+
+            let replacement = same.unwrap_or(Value::Opaque);
+
+            let variable = self.phis[phi_id.0 as usize].variable;
+            let block = self.phis[phi_id.0 as usize].block;
+            if let Some(block_defs) = self.current_def.get_mut(&variable)
+                && block_defs.get(&block) == Some(&Value::Phi(phi_id))
+            {
+                block_defs.insert(block, replacement.clone());
+            }
+
+            let phi_val = Value::Phi(phi_id);
+            let phi_users: Vec<PhiId> = (0..self.phis.len() as u32)
+                .map(PhiId)
+                .filter(|&user| {
+                    user != phi_id && self.phis[user.0 as usize].operands.contains(&phi_val)
+                })
+                .collect();
+
+            for user_id in &phi_users {
+                let user = &mut self.phis[user_id.0 as usize];
+                for op in &mut user.operands {
+                    if *op == phi_val {
+                        *op = replacement.clone();
+                    }
+                }
+                for w in &mut user.witnesses {
+                    if w.as_ref() == Some(&phi_val) {
+                        *w = None;
+                    }
+                }
+            }
+
+            for user_id in phi_users {
+                self.oracle_try_remove_trivial_phi(user_id);
+            }
+
+            replacement
+        }
+
+        fn oracle_read_variable(&mut self, variable: u32, block: BlockId) -> Vec<Value> {
+            let value = self.oracle_internal(variable, block);
+            self.resolve_value(&value)
+        }
+    }
+
+    fn next(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[derive(Clone, Copy)]
+    enum Op {
+        Write(u32, usize, u32),
+        Seal(usize),
+        Read(u32, usize),
+    }
+
+    fn random_cfg(seed: u64) -> (Vec<Vec<usize>>, Vec<Op>) {
+        let mut state = seed | 1;
+        let spine = 2 + (next(&mut state) % 40) as usize;
+        let cycle = match next(&mut state) % 3 {
+            0 => 1 + (next(&mut state) % 4) as usize,
+            _ => 0,
+        };
+        let n = spine + cycle;
+        let mut preds: Vec<Vec<usize>> = (0..n)
+            .map(|i| match i {
+                0 => vec![],
+                _ if i >= spine => vec![spine + (i - spine + 1) % cycle],
+                _ => vec![(next(&mut state) % i as u64) as usize],
+            })
+            .collect();
+        for (i, block_preds) in preds.iter_mut().enumerate().take(spine).skip(1) {
+            match next(&mut state) % 6 {
+                0 => block_preds.push(i),
+                1 => block_preds.push((next(&mut state) % n as u64) as usize),
+                2 => block_preds.push((next(&mut state) % i as u64) as usize),
+                _ => {}
+            }
+        }
+        let mut ops: Vec<Op> = [0].into_iter().chain(spine..n).map(Op::Seal).collect();
+        let mut unsealed: Vec<usize> = (1..spine).collect();
+        for _ in 0..3 * n {
+            match next(&mut state) % 4 {
+                0 => ops.push(Op::Write(
+                    1 + (next(&mut state) % 2) as u32,
+                    (next(&mut state) % n as u64) as usize,
+                    (next(&mut state) % 5) as u32,
+                )),
+                1 if !unsealed.is_empty() => {
+                    let i = (next(&mut state) % unsealed.len() as u64) as usize;
+                    ops.push(Op::Seal(unsealed.swap_remove(i)));
+                }
+                _ => ops.push(Op::Read(
+                    1 + (next(&mut state) % 2) as u32,
+                    (next(&mut state) % n as u64) as usize,
+                )),
+            }
+        }
+        (preds, ops)
+    }
+
+    type Replay = (Vec<Vec<Value>>, FxHashMap<BlockId, FxHashMap<u32, PhiId>>);
+
+    fn replay(preds: &[Vec<usize>], ops: &[Op], oracle: bool) -> Replay {
+        let mut ssa = SsaEngine::new();
+        let ids: Vec<BlockId> = preds.iter().map(|_| ssa.add_block()).collect();
+        for (i, block_preds) in preds.iter().enumerate() {
+            for &p in block_preds {
+                ssa.add_predecessor(ids[i], ids[p]);
+            }
+        }
+        let mut reads = Vec::new();
+        let read = |ssa: &mut SsaEngine, variable: u32, block: BlockId| match oracle {
+            true => ssa.oracle_read_variable(variable, block),
+            false => ssa.read_variable(variable, block),
+        };
+        for &op in ops {
+            match op {
+                Op::Write(variable, block, def) => {
+                    ssa.write_variable(variable, ids[block], Value::LocalDef(def))
+                }
+                Op::Seal(block) if oracle => ssa.oracle_seal_block(ids[block]),
+                Op::Seal(block) => ssa.seal_block(ids[block]),
+                Op::Read(variable, block) => reads.push(read(&mut ssa, variable, ids[block])),
+            }
+        }
+        for &id in &ids {
+            match oracle {
+                true => ssa.oracle_seal_block(id),
+                false => ssa.seal_block(id),
+            }
+        }
+        ssa.remove_redundant_phi_sccs();
+        for variable in [1, 2, 3] {
+            for &id in &ids {
+                reads.push(read(&mut ssa, variable, id));
+            }
+        }
+        (reads, ssa.incomplete_phis)
+    }
+
+    #[test]
+    fn iterative_reads_match_the_recursive_reads_on_random_cfgs() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(compare_random_cfgs)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn compare_random_cfgs() {
+        for seed in 1..2_000u64 {
+            let (preds, ops) = random_cfg(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            assert_eq!(
+                replay(&preds, &ops, true),
+                replay(&preds, &ops, false),
+                "seed {seed}"
+            );
+            for query in 0..preds.len() {
+                let read = [Op::Seal(query), Op::Read(1, query)];
+                let ops: Vec<Op> = ops
+                    .iter()
+                    .copied()
+                    .filter(|op| !matches!(op, Op::Read(..)))
+                    .chain(read)
+                    .collect();
+                assert_eq!(
+                    replay(&preds, &ops, true),
+                    replay(&preds, &ops, false),
+                    "seed {seed}, query {query}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_read_through_a_long_chain_resolves_on_a_small_stack() {
+        let values = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let mut ssa = SsaEngine::new();
+                let entry = ssa.add_block();
+                ssa.seal_block(entry);
+                ssa.write_variable(1, entry, Value::LocalDef(0));
+                let mut block = entry;
+                for _ in 0..50_000 {
+                    let left = ssa.add_sealed_successor(block);
+                    let right = ssa.add_sealed_successor(block);
+                    block = ssa.add_sealed_join([left, right]);
+                    block = ssa.add_sealed_successor(block);
+                }
+                ssa.read_variable(1, block)
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(values, vec![Value::LocalDef(0)]);
+    }
+
+    #[test]
+    fn a_read_around_a_cycle_without_a_merge_block_ends() {
+        let mut ssa = SsaEngine::new();
+        let elsewhere = ssa.add_block();
+        let a = ssa.add_block();
+        let b = ssa.add_block();
+        ssa.add_predecessor(a, b);
+        ssa.add_predecessor(b, a);
+        for block in [elsewhere, a, b] {
+            ssa.seal_block(block);
+        }
+        ssa.write_variable(1, elsewhere, Value::LocalDef(0));
+        assert_eq!(ssa.read_variable(1, a), vec![Value::Opaque]);
+    }
+
+    #[test]
+    fn a_read_after_a_loop_leaves_no_marker_in_the_body() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable(1, entry, Value::LocalDef(0));
+        let (header, body) = ssa.begin_loop(entry);
+        let exit = ssa.finish_loop(header, body);
+        assert_eq!(ssa.read_variable(1, exit), vec![Value::LocalDef(0)]);
+        assert_eq!(ssa.read_variable(1, body), vec![Value::LocalDef(0)]);
+        assert!(
+            ssa.phis
+                .iter()
+                .all(|phi| !phi.operands.contains(&Value::Marker))
+        );
+    }
+
+    #[test]
+    fn many_redundant_phi_cycles_collapse_through_their_users() {
+        let mut ssa = SsaEngine::new();
+        let block = ssa.add_block();
+        let cycles: Vec<_> = (0..10_000)
+            .map(|k| {
+                let (a, b) = (ssa.new_phi(block, 1), ssa.new_phi(block, 1));
+                ssa.add_operand(a, Value::LocalDef(k));
+                ssa.add_operand(a, Value::Phi(b));
+                ssa.add_operand(b, Value::Phi(a));
+                ssa.add_operand(b, Value::Phi(a));
+                (k, a)
+            })
+            .collect();
+        ssa.remove_redundant_phi_sccs();
+        for (k, a) in cycles {
+            assert_eq!(ssa.resolve_value(&Value::Phi(a)), vec![Value::LocalDef(k)]);
+        }
+    }
+
+    #[test]
+    fn nested_loops_keep_short_users_lists_and_direct_pointers() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable(1, entry, Value::LocalDef(0));
+        let (mut headers, mut reads) = (Vec::new(), Vec::new());
+        let mut block = entry;
+        for _ in 0..1_000 {
+            let (header, body) = ssa.begin_loop(block);
+            headers.push(header);
+            reads.push(ssa.read_variable_internal(1, body));
+            block = body;
+        }
+        for header in headers.into_iter().rev() {
+            block = ssa.finish_loop(header, block);
+            assert!(ssa.users.iter().all(|users| users.len() <= 2));
+        }
+        for read in &reads {
+            assert_eq!(ssa.resolve_value(read), vec![Value::LocalDef(0)]);
+        }
+        assert!(
+            ssa.replaced
+                .iter()
+                .flatten()
+                .all(|value| !matches!(value, Value::Phi(_)))
+        );
+    }
 
     #[test]
     fn single_block_write_read() {
@@ -699,6 +1249,20 @@ mod tests {
         ssa.remove_redundant_phi_sccs();
         let result = ssa.read_variable(1, exit);
         assert_eq!(result, vec![Value::LocalDef(0)]);
+    }
+
+    #[test]
+    fn scc_search_on_a_long_phi_cycle_fits_a_small_stack() {
+        let n = 100_000;
+        let adj: Vec<Vec<usize>> = (0..n).map(|v| vec![(v + 1) % n]).collect();
+        let sccs = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || tarjan_scc(&adj))
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0].len(), n);
     }
 
     #[test]

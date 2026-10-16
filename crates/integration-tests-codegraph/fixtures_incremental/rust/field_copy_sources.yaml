@@ -1,4 +1,5 @@
 name: "Rust: field copies require an actual source value"
+
 fixtures:
   - path: main.rs
     content: |
@@ -43,6 +44,7 @@ fixtures:
           let x = r;
           (x.cb)();
       }
+
 tests:
   - name: "Calls and untracked members do not inherit argument or receiver fields"
     query: |
@@ -52,6 +54,7 @@ tests:
       RETURN caller.name
     assert:
       - { empty: true }
+
   - name: "Plain bindings still copy callable fields"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)

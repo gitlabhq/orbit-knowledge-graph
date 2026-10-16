@@ -1,4 +1,5 @@
 name: "Rust: trait implementation and method dispatch"
+
 fixtures:
   - path: main.rs
     content: |

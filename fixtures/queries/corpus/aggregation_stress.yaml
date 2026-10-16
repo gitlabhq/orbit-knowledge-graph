@@ -2942,4 +2942,3 @@ join_pipeline_project_100_by_status_and_visibility:
       "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
-

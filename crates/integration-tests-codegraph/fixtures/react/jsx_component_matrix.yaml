@@ -1,5 +1,6 @@
 name: "React JSX component resolution matrix"
 pipeline: js
+
 fixtures:
   - path: src/components/button.tsx
     content: |

@@ -1,4 +1,5 @@
 name: "Python: aliased imports and partial resolution"
+
 fixtures:
   - path: mathlib.py
     content: |

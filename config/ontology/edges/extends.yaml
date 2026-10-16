@@ -1,7 +1,6 @@
 # config/ontology/edges/extends.yaml
 
 description: Supertype relationships in source code (inheritance, interface implementation, struct embedding, mixin composition)
-table: gl_code_edge
 
 variants:
   - from_node: { type: Definition, id: id }

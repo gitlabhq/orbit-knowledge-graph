@@ -7,6 +7,8 @@ use crate::tree::{EdgeKind, Node, Storage, Tree};
 
 use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
 
+const MAX_REGEX_LOOP_PASSES: usize = 64;
+
 fn child_sym<S: Storage<Node = Node>>(
     t: &Tree<S>,
     lang: &Lang,
@@ -108,6 +110,16 @@ impl Tf {
                 let b = parse_nested_tf(arg(2)?, ctx)?;
                 Tf::Concat(s(0)?, Box::new(a), Box::new(b))
             }
+            "keep_last" => {
+                let count = |i: usize| {
+                    arg(i)?
+                        .parse::<usize>()
+                        .ok()
+                        .filter(|&count| count > 0)
+                        .ok_or_else(|| LoadError(format!("{name} needs a positive count")))
+                };
+                Tf::KeepLast(s(0)?, count(1)?, count(2)?)
+            }
             "or" => {
                 let a = parse_nested_tf(arg(0)?, ctx.as_deref_mut())?;
                 let b = parse_nested_tf(arg(1)?, ctx)?;
@@ -129,6 +141,9 @@ impl Tf {
         );
         match self {
             Tf::Id => Cow::Borrowed(s),
+            Tf::KeepLast(sep, segments, bytes) => {
+                Cow::Borrowed(keep_last(s, sep, *segments, *bytes))
+            }
             Tf::Strip(p) => match s.strip_prefix(&**p) {
                 Some(rest) => Cow::Borrowed(rest),
                 None => Cow::Borrowed(s),
@@ -205,7 +220,7 @@ impl Tf {
             Tf::RegexFirst(re, replacement) => re.replace(s, &**replacement),
             Tf::RegexLoop(re, replacement) => {
                 let mut cur = Cow::Borrowed(s);
-                loop {
+                for _ in 0..MAX_REGEX_LOOP_PASSES {
                     let next = re.replace_all(&cur, &**replacement);
                     if let Cow::Borrowed(_) = next {
                         break;
@@ -360,4 +375,23 @@ impl Tf {
             }
         }
     }
+}
+
+fn keep_last<'a>(s: &'a str, sep: &str, segments: usize, bytes: usize) -> &'a str {
+    if sep.is_empty() {
+        return s;
+    }
+    let mut start = s
+        .rmatch_indices(sep)
+        .nth(segments - 1)
+        .map_or(0, |(i, _)| i + sep.len());
+    if s.len() - start > bytes {
+        let min = s.ceil_char_boundary(s.len() - bytes);
+        start = s[min..]
+            .find(sep)
+            .map(|i| min + i + sep.len())
+            .filter(|&i| i < s.len())
+            .unwrap_or(min);
+    }
+    &s[start..]
 }

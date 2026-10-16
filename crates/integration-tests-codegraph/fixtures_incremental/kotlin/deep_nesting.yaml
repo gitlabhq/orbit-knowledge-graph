@@ -1,0 +1,39 @@
+name: "Kotlin: deeply nested code links on the worker stack"
+
+fixtures:
+  - path: src/main/kotlin/app/Deep.kt
+    content:
+      - "package app\n\nfun target() {}\nfun wrap(x: Int): Int = x\n\nfun insideIf(c: Boolean) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - "target()\n"
+      - { repeat: 10000, text: "}\n" }
+      - "}\n\nfun nestedIf(c: Boolean) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\nfun elseIf(c: Boolean) {\nif (c) {\n"
+      - { repeat: 10000, text: "} else if (c) {\n" }
+      - "}\ntarget()\n}\n\nfun nestedLoop(c: Boolean) {\n"
+      - { repeat: 10000, text: "while (c) {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\nfun nestedTry() {\n"
+      - { repeat: 10000, text: "try {\n" }
+      - { repeat: 10000, text: "} catch (e: Exception) {}\n" }
+      - "target()\n}\n\nfun nestedLambda() {\n"
+      - { repeat: 10000, text: "run {\n" }
+      - { repeat: 10000, text: "}\n" }
+      - "target()\n}\n\nfun nestedCall() {\nwrap("
+      - { repeat: 10000, text: "wrap(" }
+      - "0"
+      - { repeat: 10000, text: ")" }
+      - ")\ntarget()\n}\n"
+
+tests:
+  - name: "each function calls its target inside or after the nesting"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target'
+      RETURN caller.name AS caller
+    assert:
+      - column_values:
+          field: caller
+          values: [insideIf, nestedIf, elseIf, nestedLoop, nestedTry, nestedLambda, nestedCall]

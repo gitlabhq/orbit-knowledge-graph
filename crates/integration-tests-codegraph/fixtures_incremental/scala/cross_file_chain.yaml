@@ -1,0 +1,48 @@
+name: "Scala: objects in one package call each other across files"
+
+fixtures:
+  - path: src/main/scala/app/End.scala
+    content: |
+      package app
+
+      object End {
+        def stop(): Unit = ()
+      }
+
+  - path: src/main/scala/app/Middle.scala
+    content: |
+      package app
+
+      object Middle {
+        def go(): Unit = End.stop()
+      }
+
+  - path: src/main/scala/app/Start.scala
+    content: |
+      package app
+
+      object Start {
+        def run(): Unit = Middle.go()
+      }
+
+tests:
+  - name: "each file defines its method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['stop', 'go', 'run']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: app.End.stop } }
+      - { row: { fqn: app.Middle.go } }
+      - { row: { fqn: app.Start.run } }
+
+  - name: "calls in one package link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'stop']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: go, file: src/main/scala/app/Middle.scala } }
+      - { row: { caller: go, callee: stop, file: src/main/scala/app/End.scala } }

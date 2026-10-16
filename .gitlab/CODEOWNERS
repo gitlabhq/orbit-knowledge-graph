@@ -1,5 +1,5 @@
-# SOX scope for billing emission: see ADR 013
-# (docs/design-documents/decisions/013_billing_sox_scope.md).
+# SOX scope for billing emission: see ADR 020
+# (docs/design-documents/decisions/020_billing_sox_scope.md).
 
 [SOX Billing] @gitlab-org/orbit/team
 /crates/orbit-billing/
@@ -11,12 +11,14 @@
 /crates/orbit-server/src/main.rs
 /crates/query-engine/pipeline/
 /crates/integration-tests/tests/billing_boundary.rs
+/crates/gitlab-client/src/cc_token.rs
+/config/default.yaml
 /.gitlab/CODEOWNERS
 
 [Architecture] @gitlab-org/orbit/team
 /docs/design-documents/decisions/
 
-[Technical Writing] @gitlab-org/technical-writing/tw-docops @gitlab-org/tw-leadership
+[Technical Writing] @gitlab-org/technical-writing/tw-docops @gitlab-org/tw-leadership @gitlab-org/orbit/team
 /.vale/
 .markdownlint-cli2.yaml
 

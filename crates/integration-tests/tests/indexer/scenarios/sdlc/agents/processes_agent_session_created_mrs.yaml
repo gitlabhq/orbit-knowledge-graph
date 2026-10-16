@@ -1,0 +1,32 @@
+description: Only link_type 1 (created) rows become AgentSession CREATED_MR MergeRequest edges, sourced from the governance session id and sitting in the workflow's namespace for same-project and sibling-project links; links without a project gitlab_duo session are skipped
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+    - { id: 1001, namespace_id: 100, traversal_path: "1/100/1001/" }
+  merge_requests:
+    - { id: 10, iid: 1, title: Same project, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
+    - { id: 20, iid: 2, title: Sibling project, source_branch: b, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1001, author_id: 1, traversal_path: "1/100/1001/" }
+    - { id: 30, iid: 3, title: Source MR, source_branch: c, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
+  siphon_ai_governance_sessions:
+    - { id: 11, namespace_id: 100, project_id: 1000, user_id: 7, workflow_id: 1, source: 0, flow_type: developer, session_started_at: "2024-01-15 10:00:00", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 12, namespace_id: 100, project_id: null, user_id: 7, workflow_id: 2, source: 0, flow_type: developer, session_started_at: "2024-01-15 10:00:00", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/" }
+  siphon_duo_workflows_workflow_merge_requests:
+    - { id: 5, workflow_id: 99, merge_request_id: 30, project_id: 1000, link_type: 1, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 1, workflow_id: 1, merge_request_id: 10, project_id: 1000, link_type: 1, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 2, workflow_id: 1, merge_request_id: 20, project_id: 1000, link_type: 1, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 3, workflow_id: 2, merge_request_id: 20, namespace_id: 100, link_type: 1, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/" }
+    - { id: 4, workflow_id: 1, merge_request_id: 30, project_id: 1000, link_type: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+
+expect:
+  edges:
+    - kind: CREATED_MR
+      from: AgentSession
+      to: MergeRequest
+      count: 2
+      rows:
+        - { source_id: 11, target_id: 10, traversal_path: "1/100/1000/" }
+        - { source_id: 11, target_id: 20, traversal_path: "1/100/1000/" }

@@ -44,14 +44,14 @@ mod tests {
     fn reordered_tables_retain_source_columns_and_dependencies() {
         let model = ClickHouseDataModel::derive(overlay_ontology("reordered_edges")).unwrap();
         let layouts = model.backend().equivalent_layouts("gl_code_edge");
-        assert_eq!(layouts, ["gl_code_edge_by_target"]);
+        assert!(layouts.is_empty());
         let storage = model.layout().schema();
         let source = storage.table("gl_code_edge").unwrap();
-        let copy = storage.table(layouts[0]).unwrap();
+        let copy = storage.table("gl_code_edge_by_target").unwrap();
         assert_eq!(copy.columns.len(), source.columns.len());
         assert_eq!(copy.sort_key[1], "target_id");
         assert_eq!(
-            storage.dependencies()[layouts[0]],
+            storage.dependencies()["gl_code_edge_by_target"],
             std::collections::BTreeSet::from(["gl_code_edge".to_string()])
         );
     }
@@ -88,6 +88,30 @@ mod tests {
                 local.backend().default_edge_table()
             );
         }
+    }
+
+    #[test]
+    fn writer_catalog_tracks_exact_node_mapping_routes() {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let model = ClickHouseDataModel::derive(ontology).unwrap();
+
+        let code_writers = model.layout().schema().writers("gl_code_edge").unwrap();
+        assert!(code_writers.contains("Branch"));
+        assert!(code_writers.contains("Directory"));
+        assert!(!code_writers.contains("Group"));
+        assert!(!code_writers.contains("Project"));
+
+        let default_writers = model.layout().schema().writers("gl_edge").unwrap();
+        assert!(default_writers.contains("Group"));
+        assert!(default_writers.contains("Project"));
+
+        let ci_writers = model.layout().schema().writers("gl_ci_edge").unwrap();
+        assert!(ci_writers.contains("Pipeline"));
+        assert!(!ci_writers.contains("Vulnerability"));
+
+        let security_writers = model.layout().schema().writers("gl_sec_edge").unwrap();
+        assert!(security_writers.contains("Vulnerability"));
+        assert!(!security_writers.contains("Pipeline"));
     }
 
     #[test]
@@ -280,10 +304,7 @@ mod tests {
             local.backend().entity(definition).unwrap().table,
             "gl_definition"
         );
-        assert_eq!(
-            remote.backend().relationship_table(contains),
-            Some("gl_edge")
-        );
+        assert_eq!(remote.backend().relationship_table(contains), None);
         assert_eq!(
             local.backend().relationship_table(contains),
             Some("gl_edge")

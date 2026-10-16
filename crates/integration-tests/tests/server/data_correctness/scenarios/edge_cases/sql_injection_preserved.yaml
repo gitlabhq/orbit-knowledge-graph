@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::sql_injection_string_preserved
 description: SQL-injection payload stored verbatim, not executed
 
 query:

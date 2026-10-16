@@ -1,5 +1,6 @@
 name: "TypeScript: class inheritance and implements"
 pipeline: js
+
 fixtures:
   - path: main.ts
     content: |

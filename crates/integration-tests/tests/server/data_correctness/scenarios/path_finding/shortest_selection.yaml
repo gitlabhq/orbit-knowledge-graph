@@ -1,4 +1,5 @@
 description: ANY SHORTEST returns one minimum-length path for an endpoint pair
+
 config:
   redaction:
     allow:
@@ -14,10 +15,12 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: MEMBER_OF, target_id: 1000, target_kind: Project }
       - { traversal_path: "1/100/", source_id: 99002, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99003, target_kind: Group }
       - { traversal_path: "1/100/1000/", source_id: 99003, source_kind: Group, relationship_kind: CONTAINS, target_id: 1000, target_kind: Project }
+
 query:
   gql: |
     MATCH path = ANY SHORTEST (u:User {id: 99002})-[:MEMBER_OF|CONTAINS*1..2]->(p:Project {id: 1000})
     RETURN path
+
 expect:
   path_count: 1
   path_edges:

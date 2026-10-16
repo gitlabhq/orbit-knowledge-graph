@@ -2,12 +2,13 @@ use either::Either;
 use itertools::Itertools;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::file_tree::LookupConfig;
 use crate::intern::Lang;
@@ -337,13 +338,19 @@ impl Resolver {
         let (new_reqs, mut cross_edges) =
             gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
         self.reqs.extend(new_reqs);
-        let ambiguous = propagate_reexports(
+        let packages: Vec<_> = match config.merge_same_named_types {
+            true => trees.iter().map(package_owners).collect(),
+            false => Vec::new(),
+        };
+        let (ambiguous, too_many_names) = propagate_reexports(
             trees,
             &self.reqs,
             &mut self.visible,
             self.wildcard_sym,
             self.tags,
-            config.merge_same_named_types,
+            &packages,
+            run,
+            env.limits.max_cross_file_names,
         );
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
@@ -387,29 +394,8 @@ impl Resolver {
             }
         }
 
-        let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
-        let declared_members: Vec<FxHashMap<(u32, u32), u32>> = trees
-            .par_iter()
-            .map(|tree| {
-                let mut members = FxHashMap::default();
-                for member in tree.root().descendants().filter(|node| node.is(C::Def)) {
-                    let Some(name) = member.child_sym(C::DefName) else {
-                        continue;
-                    };
-                    for owner in member.ancestors() {
-                        if owner.is(C::Def) {
-                            members
-                                .entry((owner.index(), name))
-                                .or_insert(member.index());
-                        }
-                        if owner.is_class() && !owner.has(C::ImplBlock) {
-                            break;
-                        }
-                    }
-                }
-                members
-            })
-            .collect();
+        let (partials, extensions) = gather_members(trees, &packages);
+        let declared_members: Vec<MemberCache> = trees.iter().map(|_| Default::default()).collect();
         let exporters: Vec<FxHashSet<u32>> = self
             .visible
             .iter()
@@ -455,6 +441,7 @@ impl Resolver {
             extends_of,
             imports_to,
             call_at_site,
+            wave_callees: FxHashMap::default(),
             corpus: Cursor::new(trees, 0, 0),
             type_uses,
             producers,
@@ -466,10 +453,11 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             tags: self.tags,
-            merge_types: config.merge_same_named_types,
+            packages: &packages,
             partials: &partials,
             extensions: &extensions,
             declared_members: &declared_members,
+            chains: trees.iter().map(|_| Default::default()).collect(),
             exporters: &exporters,
             imports: &imports,
         };
@@ -495,7 +483,7 @@ impl Resolver {
             &mut cross_edges,
         ) {
             Err(k) if k.cancelled => return Err(k),
-            outcome => outcome.err(),
+            outcome => too_many_names.or(outcome.err()),
         };
         let mut seen: FxHashSet<_> = edges
             .iter()
@@ -557,8 +545,9 @@ impl Resolver {
             }
         }
 
-        if let Some(overrun) = overrun {
-            killed.retain(|k| (k.label, &k.path) != (overrun.label, &overrun.path));
+        if let Some(mut overrun) = overrun {
+            overrun.family = Some(support_lang);
+            killed.retain(|k| (&k.label, &k.path) != (&overrun.label, &overrun.path));
             killed.push(overrun);
             *self = Self::new(lang);
         }
@@ -583,11 +572,11 @@ fn expand(
     per_file: Vec<Vec<Edge>>,
     cross_edges: &mut Vec<Edge>,
 ) -> Result<(), Killed> {
-    let deadline = ctx.run.check();
     let wave1: Vec<Edge> = reqs
         .par_iter()
         .filter(|r| {
-            deadline.is_ok() && (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+            (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+                && ctx.run.check().is_ok()
         })
         .flat_map(|req| resolve_one_import(ctx, req))
         .chain(per_file.into_par_iter().flatten())
@@ -601,8 +590,10 @@ fn expand(
     for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
+    ctx.chains
+        .iter_mut()
+        .for_each(|memo| memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear());
     cross_edges.extend(&wave1);
-    deadline?;
     ctx.run.check()?;
 
     // Wildcard references come from the linker and from wave 1's unbound
@@ -621,15 +612,29 @@ fn expand(
         }
     }
     let wildcard_edges: Vec<Edge> = reqs
+        .chunk_by(|a, b| (a.fi, a.node) == (b.fi, b.node))
+        .collect::<Vec<_>>()
         .par_iter()
-        .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
-        .flat_map_iter(|req| {
-            let import = ctx.corpus.jump(req.fi, req.node);
-            import
-                .names()
-                .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
-                .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
-                .flat_map(|(n, r)| wildcard_uses(ctx, req, n, r))
+        .flat_map_iter(|imports| {
+            let mut emitted = FxHashSet::default();
+            imports
+                .iter()
+                .filter(|r| {
+                    (dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
+                        && ctx.run.check().is_ok()
+                })
+                .flat_map(|req| {
+                    let import = ctx.corpus.jump(req.fi, req.node);
+                    import
+                        .names()
+                        .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
+                        .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
+                        .flat_map(|(n, r)| wildcard_uses(ctx, req, n, r))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|e| {
+                    emitted.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution as u8))
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -640,10 +645,22 @@ fn expand(
         .type_uses
         .par_iter()
         .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
-        .filter(|(producer, _)| producer.is(C::Binding) || external_of(ctx, *producer).is_some())
+        .filter(|(producer, uses)| {
+            (producer.is(C::Binding)
+                || (producer.is(C::Call)
+                    && !uses
+                        .iter()
+                        .any(|e| e.call_resolution == CallResolution::NonCallable)
+                    && !ctx
+                        .call_at_site
+                        .contains_key(&(producer.fi(), producer.index())))
+                || external_of(ctx, *producer).is_some())
+                && ctx.run.check().is_ok()
+        })
         .flat_map(|(producer, uses)| dispatch(ctx, producer, producer_class(ctx, producer), uses))
         .collect();
     cross_edges.extend(&wave2);
+    ctx.run.check()?;
 
     let mut wave: Vec<Edge> = edges
         .iter()
@@ -659,6 +676,16 @@ fn expand(
         .collect();
     while !wave.is_empty() {
         ctx.run.check()?;
+        for e in wave.iter().filter(|e| e.kind == EdgeKind::Calls) {
+            if let Some(site) = e.site
+                && ctx.type_uses.contains_key(&(e.from_tree, site))
+                && !ctx.call_at_site.contains_key(&(e.from_tree, site))
+            {
+                ctx.wave_callees
+                    .entry((e.from_tree, site))
+                    .or_insert(e.to());
+            }
+        }
         wave = wave
             .par_iter()
             .flat_map(|ce| resolve_type_edges(ctx, ce))
@@ -682,6 +709,7 @@ struct ResolveCtx<'a> {
     extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
     imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     call_at_site: FxHashMap<(u32, u32), &'a Edge>,
+    wave_callees: FxHashMap<(u32, u32), (u32, u32)>,
     corpus: Cursor<'a>,
     type_uses: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     producers: FxHashMap<(u32, u32), Vec<&'a Edge>>,
@@ -693,10 +721,11 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     tags: ReservedTags,
-    merge_types: bool,
+    packages: &'a [FxHashMap<u32, u32>],
     partials: &'a FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
-    declared_members: &'a [FxHashMap<(u32, u32), u32>],
+    declared_members: &'a [MemberCache],
+    chains: Vec<ChainMemo>,
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -916,15 +945,53 @@ fn gather_imports_for(
     (all_reqs, all_edges)
 }
 
+const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
+type MemberCache = std::sync::Mutex<FxHashMap<u32, std::sync::Arc<FxHashMap<u32, u32>>>>;
+
+fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<FxHashMap<u32, u32>> {
+    let cache = &ctx.declared_members[owner.fi() as usize];
+    if let Some(members) = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&owner.index())
+    {
+        return members.clone();
+    }
+    let mut members = FxHashMap::default();
+    let mut walk = owner.walk();
+    while let Some(node) = walk.next() {
+        if node.is(C::Def) {
+            if let Some(name) = node.child_sym(C::DefName) {
+                members.entry(name).or_insert(node.index());
+            }
+            if node.is_class() && !node.has(C::ImplBlock) {
+                walk.skip_subtree();
+            }
+        }
+    }
+    cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(owner.index())
+        .or_insert_with(|| std::sync::Arc::new(members))
+        .clone()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn propagate_reexports(
     trees: &[Tree],
     reqs: &[ImportReq],
     visible: &mut VisibleMap,
     wildcard_sym: u32,
     tags: ReservedTags,
-    merge_types: bool,
-) -> FxHashSet<(u32, u32)> {
+    owners: &[FxHashMap<u32, u32>],
+    run: &Sentinel,
+    max_names: usize,
+) -> (FxHashSet<(u32, u32)>, Option<Killed>) {
     let mut ambiguous: FxHashSet<(u32, u32)> = FxHashSet::default();
+    let mut names: usize = visible.iter().map(FxHashMap::len).sum();
+    let mut too_many_names = None;
+    let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), owners);
 
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
@@ -938,14 +1005,55 @@ fn propagate_reexports(
             }
         }
     }
-    loop {
-        let mut new_exports = Vec::new();
-        let mut export = |fi: usize, name, loc| {
-            if !visible[fi].contains_key(&name) {
-                new_exports.push((fi, name, loc));
+    let (via, packages) = package_imports(trees, reqs, wildcard_sym);
+    'propagate: loop {
+        if run.check().is_err() {
+            break;
+        }
+        let mut unions: Vec<Option<PackageExports>> = vec![None; packages.len()];
+        let mut new_exports: indexmap::IndexMap<(usize, u32), Loc, rustc_hash::FxBuildHasher> =
+            Default::default();
+        let added = std::cell::Cell::new(0);
+        let mut export = |fi: usize, name, loc: Loc| {
+            if visible[fi].contains_key(&name) {
+                return;
+            }
+            match new_exports.entry((fi, name)) {
+                indexmap::map::Entry::Vacant(entry) => {
+                    entry.insert(loc);
+                    added.set(added.get() + 1);
+                }
+                indexmap::map::Entry::Occupied(entry) => {
+                    let existing = *entry.get();
+                    if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
+                        ambiguous
+                            .insert((u32::try_from(fi).expect("file index exceeds u32"), name));
+                    }
+                }
             }
         };
-        for req in reqs {
+        for (i, req) in reqs.iter().enumerate() {
+            if i % PROPAGATE_CHECK_INTERVAL == 0 && run.check().is_err() {
+                break 'propagate;
+            }
+            if max_names > 0 && names + added.get() > max_names {
+                too_many_names = Some(Killed::limit("names", "", names + added.get(), max_names));
+                break 'propagate;
+            }
+            match via[i] {
+                Via::Own => {}
+                Via::Package(package) => {
+                    let union = unions[package]
+                        .get_or_insert_with(|| package_exports(&packages[package], visible));
+                    for (&name, locs) in union.iter() {
+                        for &loc in locs {
+                            export(req.fi as usize, name, loc);
+                        }
+                    }
+                    continue;
+                }
+                Via::Covered => continue,
+            }
             let exports = req.exports(trees, visible);
             for c in trees[req.fi as usize].cursor(req.node).names() {
                 let ns = wildcard_or_name(wildcard_sym, c);
@@ -994,18 +1102,97 @@ fn propagate_reexports(
         if new_exports.is_empty() {
             break;
         }
-        for (fi, ns, loc) in new_exports {
-            if let Some(&existing) = visible[fi].get(&ns) {
-                let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), merge_types);
-                if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
-                    ambiguous.insert((u32::try_from(fi).expect("file index exceeds u32"), ns));
-                }
-                continue;
-            }
+        names += new_exports.len();
+        for ((fi, ns), loc) in new_exports {
             visible[fi].insert(ns, loc);
         }
     }
-    ambiguous
+    (ambiguous, too_many_names)
+}
+
+type PackageExports = indexmap::IndexMap<u32, SmallVec<[Loc; 1]>, rustc_hash::FxBuildHasher>;
+
+#[derive(Clone, Copy)]
+enum Via {
+    Own,
+    Package(usize),
+    Covered,
+}
+
+fn package_imports(
+    trees: &[Tree],
+    reqs: &[ImportReq],
+    wildcard_sym: u32,
+) -> (Vec<Via>, Vec<Vec<u32>>) {
+    let wildcard_only = |req: &ImportReq| {
+        let mut names = trees[req.fi as usize].cursor(req.node).names();
+        let only = names.next().filter(|c| {
+            wildcard_or_name(wildcard_sym, *c) == wildcard_sym
+                && !(namespace_alias(wildcard_sym, *c).is_some()
+                    && c.ancestors().any(|node| node.is(C::ModuleExport)))
+        });
+        req.anchor == 0 && only.is_some() && names.next().is_none()
+    };
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    for (i, req) in reqs.iter().enumerate() {
+        if !wildcard_only(req) {
+            continue;
+        }
+        match groups.last_mut() {
+            Some(group)
+                if group.end == i
+                    && (reqs[group.start].fi, reqs[group.start].node) == (req.fi, req.node) =>
+            {
+                group.end = i + 1;
+            }
+            _ => groups.push(i..i + 1),
+        }
+    }
+    let mut members: FxHashMap<&str, Vec<u32>> = FxHashMap::default();
+    for group in &groups {
+        let path = reqs[group.start].target_path.as_str();
+        members
+            .entry(path)
+            .or_default()
+            .extend(reqs[group.clone()].iter().map(|r| r.target_fi));
+    }
+    for files in members.values_mut() {
+        files.sort_unstable();
+        files.dedup();
+    }
+    let mut via = vec![Via::Own; reqs.len()];
+    let mut ids: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut packages = Vec::new();
+    for group in groups {
+        let first = &reqs[group.start];
+        let package = &members[first.target_path.as_str()];
+        let targets = reqs[group.clone()].iter().map(|r| r.target_fi);
+        if !targets.eq(package.iter().copied().filter(|&f| f != first.fi)) {
+            continue;
+        }
+        let id = *ids.entry(first.target_path.as_str()).or_insert_with(|| {
+            packages.push(package.clone());
+            packages.len() - 1
+        });
+        via[group.start] = Via::Package(id);
+        for v in &mut via[group.start + 1..group.end] {
+            *v = Via::Covered;
+        }
+    }
+    (via, packages)
+}
+
+fn package_exports(files: &[u32], visible: &VisibleMap) -> PackageExports {
+    let mut union = PackageExports::default();
+    for &fi in files {
+        for (&name, &loc) in &visible[fi as usize] {
+            let locs = union.entry(name).or_default();
+            if !locs.contains(&loc) {
+                locs.push(loc);
+            }
+        }
+    }
+    union
 }
 
 fn name_target(ctx: &ResolveCtx, req: &ImportReq, c: Cursor) -> Option<Loc> {
@@ -1246,9 +1433,13 @@ fn dispatch(
             let class = match reaching {
                 Some(reaching) if reaching.len() > 1 => lub(
                     ctx,
-                    reaching
-                        .iter()
-                        .map(|e| producer_class(ctx, ctx.corpus.follow(e))),
+                    reaching.iter().map(|e| {
+                        let reached = ctx.corpus.follow(e);
+                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
+                            true => class,
+                            false => producer_class(ctx, reached),
+                        }
+                    }),
                 ),
                 _ => class,
             };
@@ -1330,7 +1521,11 @@ fn callee_of<'a>(ctx: &'a ResolveCtx, call: Cursor<'a>) -> Option<Cursor<'a>> {
     let local = ctx
         .call_at_site
         .get(&(call.fi(), call.index()))
-        .map(|e| ctx.corpus.follow(e));
+        .map(|e| ctx.corpus.follow(e))
+        .or_else(|| {
+            let &(fi, node) = ctx.wave_callees.get(&(call.fi(), call.index()))?;
+            Some(ctx.corpus.jump(fi, node))
+        });
     local.or_else(|| resolve_chain(ctx, call.child(C::Callee)?))
 }
 
@@ -1358,12 +1553,56 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
     Some(ctx.corpus.jump(loc.fi, loc.node))
 }
 
+thread_local! {
+    static RESOLVING: std::cell::RefCell<FxHashSet<(u32, u32)>> = Default::default();
+    static CUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+type ChainMemo = std::sync::Mutex<FxHashMap<u32, Option<(u32, u32)>>>;
+
+struct Resolving((u32, u32));
+
+impl Resolving {
+    fn enter(key: (u32, u32)) -> Option<Self> {
+        let entered = RESOLVING.with_borrow_mut(|resolving| resolving.insert(key));
+        CUT.set(CUT.get() || !entered);
+        entered.then_some(Self(key))
+    }
+}
+
+impl Drop for Resolving {
+    fn drop(&mut self) {
+        RESOLVING.with_borrow_mut(|resolving| resolving.remove(&self.0));
+    }
+}
+
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
-    chain(ctx, c, &|r| {
-        resolve_reference(ctx, r)
-            .or_else(|| enclosing_alias(ctx, r))
-            .or_else(|| visible_type(ctx, r.fi(), r.sym()))
-    })
+    let memo = || {
+        ctx.chains[c.fi() as usize]
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    };
+    if let Some(&found) = memo().get(&c.index()) {
+        return found.map(|(fi, node)| ctx.corpus.jump(fi, node));
+    }
+    let _resolving = Resolving::enter((c.fi(), c.index()))?;
+    if ctx.run.check().is_err() {
+        CUT.set(true);
+        return None;
+    }
+    let outer = CUT.replace(false);
+    let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
+        chain(ctx, c, &|r| {
+            resolve_reference(ctx, r)
+                .or_else(|| enclosing_alias(ctx, r))
+                .or_else(|| visible_type(ctx, r.fi(), r.sym()))
+        })
+    });
+    if !CUT.get() {
+        memo().insert(c.index(), found.map(|f| (f.fi(), f.index())));
+    }
+    CUT.set(outer || CUT.get());
+    found
 }
 
 fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<Cursor<'a>> {
@@ -1401,7 +1640,8 @@ fn chain<'a>(
     let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
         return value_type(ctx, root(c)?);
     };
-    let receiver = chain(ctx, m.child(C::Object)?, root)?;
+    let object = m.child(C::Object)?;
+    let receiver = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || chain(ctx, object, root))?;
     let targets = member_targets(ctx, m, receiver);
     let member = targets.into_iter().exactly_one().ok()?;
     value_type(ctx, member)
@@ -1426,13 +1666,24 @@ fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
     }
 }
 
-fn partial_key(d: Cursor, merge_types: bool) -> Option<(u32, u32, u32)> {
-    if !merge_types || !d.is_class() {
+fn package_owners(tree: &Tree) -> FxHashMap<u32, u32> {
+    let mut owners = FxHashMap::default();
+    for c in tree.root().descendants() {
+        if let Some(package) = c.child_sym(C::Package)
+            && let Some(owner) = c.parent()
+        {
+            owners.entry(owner.index()).or_insert(package);
+        }
+    }
+    owners
+}
+
+fn partial_key(d: Cursor, packages: &[FxHashMap<u32, u32>]) -> Option<(u32, u32, u32)> {
+    let owners = packages.get(d.fi() as usize)?;
+    if !d.is_class() {
         return None;
     }
-    let pkg = d
-        .ancestors()
-        .find_map(|a| a.children().find_map(|c| c.child_sym(C::Package)));
+    let pkg = d.ancestors().find_map(|a| owners.get(&a.index()).copied());
     let arity = d
         .children()
         .filter(|c| c.is(C::Binding) && c.sym_opt().is_some() && c.children().next().is_none())
@@ -1449,25 +1700,22 @@ type Members = (
     FxHashMap<u32, Vec<Loc>>,
 );
 
-fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
+fn gather_members(trees: &[Tree], packages: &[FxHashMap<u32, u32>]) -> Members {
     let (mut parts, mut extensions) = Members::default();
     for (fi, tree) in trees.iter().enumerate() {
-        for d in tree.root().descendants().filter(|d| d.is(C::Def)) {
+        let defs = tree
+            .root()
+            .descendants_pruned(|d| d.is(C::Def) && !d.has(C::ImplBlock))
+            .filter(|d| d.is(C::Def));
+        for d in defs {
             let Some(name) = d.child_sym(C::DefName) else {
                 continue;
             };
-            let nested = d.ancestors().any(|a| a.is(C::Def) && !a.has(C::ImplBlock));
-            if nested {
-                continue;
-            }
             let loc = Loc::new(fi, d.index());
-            if let Some(key) = partial_key(d, merge_types) {
+            if let Some(key) = partial_key(d, packages) {
                 parts.entry(key).or_default().push(loc);
             }
-            let wrapped = d
-                .parent()
-                .is_some_and(|p| p.is(C::Def) && p.has(C::ImplBlock));
-            if wrapped {
+            if d.parent().is_some_and(|p| p.is(C::Def)) {
                 extensions.entry(name).or_default().push(loc);
             }
         }
@@ -1522,9 +1770,10 @@ fn lub<'a>(
     for set in sets {
         common.retain(|t| set.as_ref().is_some_and(|a| a.contains(t)));
     }
+    let above: FxHashMap<_, _> = common.iter().map(|&u| (u, ancestors(u))).collect();
     let mut least = common
         .iter()
-        .filter(|t| !common.iter().any(|u| u != *t && ancestors(*u).contains(*t)));
+        .filter(|t| !common.iter().any(|u| u != *t && above[u].contains(*t)));
     let &(fi, n) = least.next()?;
     least.next().is_none().then(|| ctx.corpus.jump(fi, n))
 }
@@ -1541,7 +1790,7 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
                 return None;
             }
             Some(if tail.is(C::SsaBranch) {
-                branch_type(ctx, tail)
+                stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || branch_type(ctx, tail))
             } else {
                 resolve_chain(ctx, tail.child(C::Callee)?)
             })
@@ -1632,15 +1881,15 @@ fn extension_members<'a>(
 }
 
 fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
-    let parts = partial_key(cls, ctx.merge_types).and_then(|k| ctx.partials.get(&k));
+    let parts = partial_key(cls, ctx.packages).and_then(|k| ctx.partials.get(&k));
     let parts = parts.into_iter().flatten().map(|l| cls.jump(l.fi, l.node));
     std::iter::once(cls)
         .chain(impl_blocks_of(ctx, cls))
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
         .find_map(|owner| {
             if owner.is(C::Def) {
-                ctx.declared_members[owner.fi() as usize]
-                    .get(&(owner.index(), name))
+                members_of(ctx, owner)
+                    .get(&name)
                     .map(|&node| owner.jump(owner.fi(), node))
             } else {
                 find_method_in(owner, name)
@@ -1678,12 +1927,19 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
     let cross = |c: Cursor| c.fi() != fi as u32;
     let mut bound_in: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
 
+    let mut path: Vec<(u32, Option<Cursor>)> = Vec::new();
     for node in root.descendants() {
         ctx.run.check().and_then(|()| file.check())?;
-        let Some(from) = Some(node)
-            .filter(|n| n.is(C::Def))
-            .or_else(|| node.enclosing(|e| e.is(C::Def)))
-        else {
+        let parent = node.parent().expect("a descendant has a parent");
+        while path.last().is_some_and(|&(id, _)| id != parent.index()) {
+            path.pop();
+        }
+        let enclosing = match parent.is(C::Def) {
+            true => Some(parent),
+            false => path.last().and_then(|&(_, enclosing)| enclosing),
+        };
+        path.push((node.index(), enclosing));
+        let Some(from) = Some(node).filter(|n| n.is(C::Def)).or(enclosing) else {
             continue;
         };
         if node.is(C::Def) {
@@ -1986,5 +2242,49 @@ mod remap_tests {
 
         assert_eq!(lost, FxHashSet::from_iter([0]));
         assert_eq!(resolver.visible[1].get(&name), Some(&Loc::new(0, 0)));
+    }
+}
+
+#[cfg(test)]
+mod resolving_tests {
+    use super::*;
+
+    #[test]
+    fn files_of_one_namespace_import_it_as_one_shared_package() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join("Big")).unwrap();
+        for f in 0..4 {
+            let source = format!("namespace Big;\npublic class C{f} {{}}\n");
+            std::fs::write(repo.path().join(format!("Big/F{f}.cs")), source).unwrap();
+        }
+        let env = Env::with_limits(SupportLang::CSharp, crate::Limits::UNLIMITED).unwrap();
+        let repository = std::sync::Arc::new(
+            orbit_utils::vfs::Vfs::load(
+                orbit_utils::vfs::sources::Directory(repo.path()),
+                orbit_utils::vfs_policies::CodePolicy,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        let graph = crate::templates::index(crate::pipeline::Context::new(&env, repository));
+        let (_, resolved) = graph.unwrap().finish();
+        let state = &resolved.state;
+        let resolver = &state.resolver;
+        let (via, packages) = package_imports(&state.trees, &resolver.reqs, resolver.wildcard_sym);
+        assert_eq!(packages, [vec![0, 1, 2, 3]]);
+        let shared = via.iter().filter(|v| matches!(v, Via::Package(0))).count();
+        assert_eq!(shared, 4);
+    }
+
+    #[test]
+    fn a_panic_while_resolving_releases_the_name() {
+        let key = (0, 7);
+        let panicked = std::panic::catch_unwind(|| {
+            let _resolving = Resolving::enter(key);
+            panic!("resolution failed");
+        });
+        assert!(panicked.is_err());
+        assert!(Resolving::enter(key).is_some());
     }
 }

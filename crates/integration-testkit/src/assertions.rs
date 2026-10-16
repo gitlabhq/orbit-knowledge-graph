@@ -1,5 +1,5 @@
 use arrow::array::StringArray;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -10,8 +10,18 @@ use crate::t;
 static ONTOLOGY: LazyLock<ontology::Ontology> =
     LazyLock::new(|| ontology::Ontology::load_embedded().expect("embedded ontology should load"));
 
-pub(crate) fn edge_table(relationship_kind: &str) -> String {
-    t(ONTOLOGY.edge_table_for_relationship(relationship_kind))
+pub(crate) fn edge_table(relationship_kind: &str, source_kind: &str, target_kind: &str) -> String {
+    t(ONTOLOGY
+        .edge_table_for_variant(relationship_kind, source_kind, target_kind)
+        .unwrap())
+}
+
+pub(crate) fn edge_tables(relationship_kind: &str) -> Vec<String> {
+    ONTOLOGY
+        .edge_tables_for_relationship(relationship_kind)
+        .into_iter()
+        .map(t)
+        .collect()
 }
 
 pub async fn assert_node_count(ctx: &TestContext, table: &str, expected: usize) {
@@ -31,7 +41,7 @@ pub async fn assert_edge_count(
     target_kind: &str,
     expected: usize,
 ) {
-    let edge_table = edge_table(relationship_kind);
+    let edge_table = edge_table(relationship_kind, source_kind, target_kind);
     let query = format!(
         "SELECT source_id, target_id FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -57,7 +67,7 @@ pub async fn assert_edge_count_for_traversal_path(
     traversal_path: &TraversalPath,
     expected: usize,
 ) {
-    let edge_table = edge_table(relationship_kind);
+    let edge_table = edge_table(relationship_kind, source_kind, target_kind);
     let query = format!(
         "SELECT 1 FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -81,7 +91,7 @@ pub async fn assert_edges_have_traversal_path(
     expected_traversal_path: &TraversalPath,
     expected_count: usize,
 ) {
-    let edge_table = edge_table(relationship_kind);
+    let edge_table = edge_table(relationship_kind, source_kind, target_kind);
     let query = format!(
         "SELECT traversal_path FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -118,7 +128,7 @@ pub async fn assert_edge_tags(
     tag_column: &str,
     expected_tags: &[&str],
 ) {
-    let edge_table = edge_table(relationship_kind);
+    let edge_table = edge_table(relationship_kind, source_kind, target_kind);
     let query = format!(
         "SELECT {tag_column} FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -153,7 +163,7 @@ pub async fn assert_edge_tags_by_source(
     tag_column: &str,
     expected: &[(i64, &[&str])],
 ) {
-    let edge_table = edge_table(relationship_kind);
+    let edge_table = edge_table(relationship_kind, source_kind, target_kind);
     let query = format!(
         "SELECT source_id, {tag_column} FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -195,7 +205,7 @@ pub async fn assert_edge_tags_by_target(
     tag_column: &str,
     expected: &[(i64, &[&str])],
 ) {
-    let edge_table = edge_table(relationship_kind);
+    let edge_table = edge_table(relationship_kind, source_kind, target_kind);
     let query = format!(
         "SELECT target_id, {tag_column} FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \

@@ -101,7 +101,10 @@ fn write_glab_stub(dir: &std::path::Path, body: &str) {
 
 fn hermetic_orbit(cache: &tempfile::TempDir, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
-    command.args(args).env("XDG_CACHE_HOME", cache.path());
+    command
+        .args(args)
+        .env("XDG_CACHE_HOME", cache.path())
+        .env("HOME", cache.path().join("home"));
     command.env("PATH", PATH_WITHOUT_GLAB);
     for key in [
         "ORBIT_API_BASE_URL",
@@ -747,4 +750,181 @@ fn walk_files(root: &std::path::Path) -> Vec<String> {
         }
     }
     files
+}
+
+fn setup_skill(
+    base_url: Option<&str>,
+    project: &tempfile::TempDir,
+    skill_args: &[&str],
+) -> (Output, std::path::PathBuf) {
+    let cache = tempfile::tempdir().unwrap();
+    let dir = project.path().to_str().unwrap();
+    let mut args = vec![
+        "setup",
+        "codex",
+        "--yes",
+        "--skip",
+        "instructions",
+        "--no-index",
+        "--project",
+        "--dir",
+        dir,
+    ];
+    args.extend_from_slice(skill_args);
+    let output = run_orbit(base_url, &cache, &args);
+    (output, project.path().join(".agents/skills"))
+}
+
+fn installed_manifest(skills: &std::path::Path) -> String {
+    assert!(skills.join(".orbit-managed").is_file());
+    assert!(!skills.join("orbit-cli").exists());
+    let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+    assert!(manifest.contains("\nname: orbit\n"), "{manifest}");
+    manifest
+}
+
+#[test]
+fn setup_installs_the_wrapper_without_contacting_the_instance() {
+    let project = tempfile::tempdir().unwrap();
+    // No reply is queued: any request would fail the mock server's accept deadline.
+    let (url, server) = mock_server(vec![]);
+
+    let (output, skills) = setup_skill(Some(&url), &project, &[]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let manifest = installed_manifest(&skills);
+    assert!(manifest.contains("skills get orbit"), "{manifest}");
+    assert!(!skills.join("orbit/references").exists());
+    assert!(server.join().unwrap().is_empty());
+}
+
+#[test]
+fn setup_full_installs_the_composed_instance_skill() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote v1")]);
+
+    let (output, skills) = setup_skill(Some(&url), &project, &["--skill", "full"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let manifest = installed_manifest(&skills);
+    assert!(manifest.contains("# Remote v1"), "{manifest}");
+    assert!(skills.join("orbit/references/remote.md").is_file());
+    assert!(skills.join("orbit/references/local/cli.md").is_file());
+    assert_eq!(server.join().unwrap().len(), 1);
+}
+
+#[test]
+fn setup_full_falls_back_to_the_embedded_skill_when_the_instance_fails() {
+    for (status, reason) in [
+        (401, "Unauthorized"),
+        (403, "Forbidden"),
+        (429, "Too Many Requests"),
+        (503, "Service Unavailable"),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        let failure = Reply {
+            status,
+            reason,
+            etag: None,
+            body: String::new(),
+        };
+        let (url, server) = mock_server(vec![failure]);
+
+        let (output, skills) = setup_skill(Some(&url), &project, &["--skill", "full"]);
+
+        assert!(output.status.success(), "{status}: {}", stderr(&output));
+        installed_manifest(&skills);
+        assert!(skills.join("orbit/references/local/cli.md").is_file());
+        assert!(!skills.join("orbit/references/remote.md").exists());
+        assert_eq!(server.join().unwrap().len(), 1, "{status}");
+    }
+}
+
+#[test]
+fn setup_full_without_credentials_installs_the_embedded_skill() {
+    let project = tempfile::tempdir().unwrap();
+
+    let (output, skills) = setup_skill(None, &project, &["--skill", "full"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    installed_manifest(&skills);
+    assert!(skills.join("orbit/references/local/cli.md").is_file());
+}
+
+#[test]
+fn setup_full_falls_back_when_the_instance_is_unreachable() {
+    let project = tempfile::tempdir().unwrap();
+    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+
+    let (output, skills) = setup_skill(Some(&url), &project, &["--skill", "full"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    installed_manifest(&skills);
+    assert!(skills.join("orbit/references/local/cli.md").is_file());
+}
+
+#[test]
+fn a_rerun_without_skill_flag_keeps_the_instance_full_tree() {
+    let project = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote v1")]);
+    let (output, skills) = setup_skill(Some(&url), &project, &["--skill", "full"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(skills.join("orbit/references/remote.md").is_file());
+    assert_eq!(server.join().unwrap().len(), 1);
+
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote v1")]);
+    let cache = tempfile::tempdir().unwrap();
+    let dir = project.path().to_str().unwrap();
+    let args = [
+        "setup",
+        "claude",
+        "--yes",
+        "--skip",
+        "instructions",
+        "--no-index",
+        "--project",
+        "--dir",
+        dir,
+    ];
+    let output = run_orbit(Some(&url), &cache, &args);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(server.join().unwrap().len(), 1);
+    assert!(
+        skills.join("orbit/references/remote.md").is_file(),
+        "a rerun replaced the instance's full tree with the embedded one"
+    );
+}
+
+#[test]
+fn a_wrapper_request_warns_when_a_recorded_agent_cannot_run_it() {
+    let project = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let dir = project.path().to_str().unwrap();
+    let setup = |agent: &str, skill: &[&str]| {
+        let mut args = vec![
+            "setup",
+            agent,
+            "--yes",
+            "--skip",
+            "instructions",
+            "--no-index",
+            "--project",
+            "--dir",
+            dir,
+        ];
+        args.extend_from_slice(skill);
+        run_orbit(None, &cache, &args)
+    };
+    assert!(setup("duo", &[]).status.success());
+
+    let output = setup("claude", &["--skill", "wrapper"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("cannot run"),
+        "{}",
+        stderr(&output)
+    );
 }

@@ -3,8 +3,7 @@
 ## Overview
 
 Orbit separates local pod probes from dependency health. Every mode runs the labkit probe server
-with local-only liveness and readiness endpoints for Kubernetes. The Webserver, Indexer, and
-Dispatcher also keep their own `/live` and `/ready` endpoints. The HealthCheck runtime performs
+with local-only liveness and readiness endpoints for Kubernetes. The HealthCheck runtime performs
 networked infrastructure checks, while the Webserver presents those results together with migration
 and GitLab diagnostics through the `GetClusterHealth` gRPC method.
 
@@ -16,29 +15,14 @@ server binds whether or not metrics are enabled. `/-/liveness` returns `200` whi
 runs. `/-/readiness` returns `200` when every registered check passes and `503` otherwise, with a
 JSON body that names each check and its result. The Webserver registers a `schema` check that reads
 the active schema snapshot and a `startup` check that reads its in-memory serving flag. The
-Webserver sets that flag when startup is complete and its HTTP and gRPC listeners are bound. Thus
+Webserver sets that flag when startup is complete and its gRPC listener is bound. Thus
 Kubernetes does not send traffic to a port that is not open. The Indexer and Dispatcher register a
 `schema_gate` check that reads their in-memory serving flag. The HealthCheck runtime registers no
 check, so its readiness is always `200`.
 
-The `/live` and `/ready` endpoints below read the same state. The Helm chart probes them today.
-Once the chart can probe `/-/liveness` and `/-/readiness` on the probe server port, they are
-deprecated and a later release removes them.
-
-### `/live`
-
-The Webserver, Indexer, and Dispatcher return an immediate local response. The handler makes no
-network calls and does not test ClickHouse, NATS, GitLab, or another pod. Kubernetes uses this
-endpoint to determine whether the process can answer HTTP.
-
-### `/ready`
-
-Readiness is also local-only. The Webserver is ready (`200`) while its `ActiveSchema` holds a
-serving snapshot and pending (`503`, `schema_pending`) otherwise; see
-[schema management](schema_management.md#webserver-readiness-gate). The Indexer and Dispatcher
-read an in-memory serving flag that is set after their startup gates have cleared. These handlers
-make no network calls, so a dependency outage cannot restart otherwise healthy pods or prevent a
-rollout from converging.
+See [schema management](schema_management.md#webserver-readiness-gate) for when the Webserver
+`schema` check passes. The checks make no network calls and do not test ClickHouse, NATS, GitLab,
+or another pod. Thus a dependency outage cannot restart healthy pods or stop a rollout.
 
 ## HealthCheck runtime endpoints
 
@@ -59,9 +43,8 @@ indexers. NATS is not included in the `/health` aggregate.
 ### `GetClusterHealth` (gRPC)
 
 The Webserver returns the detailed component breakdown through the `GetClusterHealth` gRPC method.
-It supports `ResponseFormat::Raw` (structured proto) and `ResponseFormat::Llm` (TOON text). The
-gkg-server HTTP router does not expose a cluster-health route; it registers only `/live` and
-`/ready`. Rails calls the gRPC method and exposes the result to HTTP consumers at
+It supports `ResponseFormat::Raw` (structured proto) and `ResponseFormat::Llm` (TOON text). Rails
+calls the gRPC method and exposes the result to HTTP consumers at
 `GET /api/v4/orbit/status`.
 
 ## Data flow
@@ -83,8 +66,8 @@ GitLab ─────────── connectivity/JWT check ────┘ 
 
 NATS JetStream ─► HealthChecker.queue_depth() ─► HealthCheck /queue-depth ─► KEDA
 
-Local ActiveSchema/serving flag ─► pod /-/readiness (and legacy /ready)
-Local process response ────────────► pod /-/liveness (and legacy /live)
+Local ActiveSchema/serving flag ─► pod /-/readiness
+Local process response ────────────► pod /-/liveness
 ```
 
 ## GitLab diagnostic

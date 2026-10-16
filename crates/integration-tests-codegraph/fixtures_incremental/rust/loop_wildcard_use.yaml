@@ -1,0 +1,97 @@
+name: "Rust: a wildcard use inside a loop binds its names for reads in the loop"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "loop_wildcard_use"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub enum Kind {
+          Wrap(i32),
+      }
+
+      mod helpers {
+          pub fn help() {}
+      }
+
+      pub fn wraps(xs: &[i32]) {
+          for x in xs {
+              use Kind::*;
+              let _ = Wrap(*x);
+          }
+      }
+
+      fn other() {}
+
+      mod clock {
+          pub fn tick() {}
+      }
+
+      fn start() {}
+
+      pub fn shadows_a_module_def(xs: &[i32]) {
+          let tick = start;
+          for x in xs {
+              use Kind::*;
+              let _ = Wrap(*x);
+              tick();
+          }
+      }
+
+      pub fn keeps_outer_names(xs: &[i32]) {
+          fn local() {}
+          let helper = other;
+          for x in xs {
+              use Kind::*;
+              let _ = Wrap(*x);
+              local();
+              helper();
+          }
+      }
+
+      pub fn helps(mut n: i32) {
+          while n > 0 {
+              use crate::helpers::*;
+              help();
+              n -= 1;
+          }
+      }
+
+tests:
+  - name: "calls through a wildcard use in a loop body link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['wraps', 'helps']
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: helps, callee: help } }
+      - { row: { caller: wraps, callee: Wrap } }
+
+  - name: "a wildcard use in a loop does not hide names that it cannot bind"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'keeps_outer_names'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Wrap } }
+      - { row: { callee: local } }
+      - { row: { callee: other } }
+
+  - name: "a local named like a def in another module keeps its value in the loop"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadows_a_module_def'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Wrap } }
+      - { row: { callee: start } }

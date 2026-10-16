@@ -1,0 +1,81 @@
+name: "JavaScript: under the default budgets, a file nested past max_tree_depth is cut and keeps what lies above the cut"
+
+limits: default
+max_tree_depth: 64
+
+limited:
+  - { path: cut_class.js, label: depth }
+  - { path: nested_if.js, label: depth }
+  - { path: top_call.js, label: depth }
+
+fixtures:
+  - path: target.js
+    content: |
+      export function target() {}
+
+  - path: nested_if.js
+    content:
+      - "import { target } from './target';\nfunction nestedIf(c) {\n"
+      - { repeat: 200, text: "if (c) {\n" }
+      - "function innermostIf() {}\n"
+      - { repeat: 200, text: "}\n" }
+      - "target();\n}\n"
+
+  - path: top_call.js
+    content:
+      - "function top() {}\nfunction nested(c) {\ntop();\n"
+      - { repeat: 200, text: "if (c) {\n" }
+      - { repeat: 200, text: "}\n" }
+      - "}\n"
+
+  - path: cut_class.js
+    content:
+      - "class Shallow {\n  method(c) {\n"
+      - { repeat: 200, text: "if (c) {\n" }
+      - { repeat: 200, text: "}\n" }
+      - "  }\n}\n"
+
+  - path: shallow.js
+    content: |
+      import { target } from './target';
+      function shallow() {
+        target();
+      }
+
+tests:
+  - name: "the shallow file still links to the target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'target' AND caller.name = 'shallow'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "the cut file keeps the definitions above the cut"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'nested_if.js'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: nestedIf } }
+
+  - name: "a call above the cut keeps its edge"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'top_call.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: nested, callee: top } }
+
+  - name: "a class whose body is cut keeps its definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'cut_class.js'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: Shallow } }
+      - { row: { name: method } }

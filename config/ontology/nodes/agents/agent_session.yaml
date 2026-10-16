@@ -1,0 +1,145 @@
+# config/ontology/nodes/agents/agent_session.yaml
+
+node_type: AgentSession
+domain: agents
+description: An AI agent session in a project, recorded in the AI governance sessions table. Existence, source and flow type only, never its content
+label: flow_type
+destination_table: gl_agent_session
+default_columns: [id, source, flow_type, session_started_at]
+
+style:
+  size: 24
+  color: "#A78BFA"
+
+# Project-delegated on purpose: the session's existence is visible to anyone with
+# read_code (Reporter+) on the project, like the source-code nodes. read_duo_workflow
+# is invoker-only for non-pipeline sessions and would hide that. Only
+# source = gitlab_duo is extracted today; the other values are declared for later.
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Governance session ID."
+
+  flow_type:
+    type: enum
+    source: flow_type
+    nullable: false
+    description: "Kind of flow, from the workflow definition with its version dropped (developer/v1 becomes developer). Unrecognized definitions, and flows addressed by display name, are 'other'."
+    enum_type: string
+    selectivity: low
+    values:
+      0: software_development
+      1: external_agent
+      2: ai_catalog_agent
+      3: claude_code_compliance_api
+      4: chat
+      5: agentic_chat
+      6: developer
+      7: code_review
+      8: deep_code_review
+      9: fix_pipeline
+      10: convert_to_gl_ci
+      11: resolve_sast_vulnerability
+      12: sast_fp_detection
+      13: secrets_fp_detection
+      14: security_review
+      15: recommend_reviewers
+      16: risk_classification
+      17: workplan
+      18: readiness_score
+      19: slack_assistant
+      20: resolve_dependency_bump
+      21: bl_security
+      22: business_context_security_guidelines
+      23: orbit_agent
+      24: duo_planner
+      25: security_analyst_agent
+      26: analytics_agent
+      27: ci_expert_agent
+      28: duo_permissions_assistant
+      29: support_assistant
+      30: onboarding_guide
+      31: flow_creator
+      32: other
+      33: ambient
+      34: issue_to_merge_request
+      35: convert_to_gitlab_ci
+
+  source:
+    type: enum
+    source: source
+    nullable: false
+    description: "Where the session was recorded. Only gitlab_duo sessions are indexed today."
+    selectivity: low
+    values:
+      0: gitlab_duo
+      1: claude_code_compliance_api
+      2: claude_code_glab
+      3: mcp
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  session_started_at:
+    type: timestamp
+    source: session_started_at
+    nullable: false
+    mutable: false
+    description: "When the session started."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    hidden: true
+    nullable: false
+    description: "Namespace path for authz."
+
+indexer:
+  reindex: [siphon_ai_governance_sessions]
+pipelines:
+  - name: AgentSession
+    extract:
+      type: clickhouse
+      tables: [siphon_ai_governance_sessions]
+      order_by: [traversal_path, session_started_at, id]
+      query: agent_session.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: AgentSession
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+
+storage:
+  primary_key: [traversal_path, id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: flow_type, type: "LowCardinality(String)", default: "'other'", codec: ["LZ4"]}
+    - {name: source, type: "LowCardinality(String)", default: "'gitlab_duo'", codec: ["LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: session_started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_flow_type, column: flow_type, type: "set(64)", granularity: 2}
+    - {name: idx_source, column: source, type: "set(8)", granularity: 2}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

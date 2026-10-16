@@ -1,4 +1,5 @@
 name: "Python: imported-symbol fallback matrix"
+
 fixtures:
   - path: main.py
     content: |

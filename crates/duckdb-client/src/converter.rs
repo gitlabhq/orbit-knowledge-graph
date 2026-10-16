@@ -1,6 +1,6 @@
 use arrow::record_batch::RecordBatch;
 use ontology::{DataType as OntDataType, Ontology};
-use orbit_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
+use orbit_arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 
 use crate::error::Result;
 
@@ -142,22 +142,19 @@ pub fn convert_v2_graph(
         })
         .collect();
 
-    let edge_batch = orbit_utils::arrow::BatchBuilder::new(
-        &edge_specs(ontology),
-        edge_indices.len(),
-    )?
-    .build(&edge_indices, |&ei, b| {
-        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-        let edge = &graph.graph[ei];
-        EdgeRow {
-            source_id: ids[src.index()],
-            target_id: ids[tgt.index()],
-            edge_kind: edge.relationship.edge_kind.as_ref(),
-            source_node_kind: edge.relationship.source_node.as_ref(),
-            target_node_kind: edge.relationship.target_node.as_ref(),
-        }
-        .write_row(b, &())
-    })?;
+    let edge_batch = orbit_arrow::BatchBuilder::new(&edge_specs(ontology), edge_indices.len())?
+        .build(&edge_indices, |&ei, b| {
+            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+            let edge = &graph.graph[ei];
+            EdgeRow {
+                source_id: ids[src.index()],
+                target_id: ids[tgt.index()],
+                edge_kind: edge.relationship.edge_kind.as_ref(),
+                source_node_kind: edge.relationship.source_node.as_ref(),
+                target_node_kind: edge.relationship.target_node.as_ref(),
+            }
+            .write_row(b, &())
+        })?;
     tables.push((edge_table, edge_batch));
 
     Ok(LocalGraphData { tables })

@@ -201,13 +201,21 @@ impl Engine {
             .subscribe(&subscription, runtime.metrics.clone())
             .await?;
         let mut inflight = tokio::task::JoinSet::new();
+        let work = Arc::new(tokio::sync::Semaphore::new(max_inflight));
+        let mut permit = None;
 
         loop {
             tokio::select! {
                 _ = self.cancel.cancelled() => break,
-                Some(message) = messages.next(), if inflight.len() < max_inflight => {
+                acquired = work.clone().acquire_owned(), if permit.is_none() => {
+                    permit = acquired.ok();
+                }
+                Some(message) = messages.next(), if permit.is_some() => {
                     let message = message?;
                     let progress = message.progress_notifier();
+                    let redelivered_on_failure = subscription
+                        .retry_policy()
+                        .is_some_and(|policy| policy.should_redeliver(message.envelope.attempt));
                     let span = tracing::info_span!(
                         "process_message",
                         correlation_id = %message.envelope.id.0,
@@ -217,7 +225,9 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
-                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress),
+                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress)
+                            .with_work_slot(permit.take())
+                            .with_redelivery(redelivered_on_failure),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),
@@ -275,7 +285,7 @@ impl Engine {
 enum HandlerTaskOutcome {
     Ok,
     RetryRequested,
-    Backpressure,
+    Backpressure(Option<Duration>),
     TransientError(String),
     Exhausted(String),
     Dropped(String),
@@ -394,6 +404,7 @@ async fn run_handlers(
     subscription: &Subscription,
 ) -> HandlersOutcome {
     let concurrency_group = subscription.concurrency_group.clone();
+    let retry_interval = subscription.retry_interval();
     let mut tasks = tokio::task::JoinSet::new();
 
     for handler in handlers {
@@ -438,22 +449,27 @@ async fn run_handlers(
                 .metrics
                 .record_handler_error(handler.name(), error.error_kind());
 
-            if let HandlerError::Backpressure(reason) = &error {
+            let retry_delay = match &error {
+                HandlerError::Backpressure(_) => Some(retry_interval),
+                HandlerError::Deferred { delay, .. } => Some(Some(*delay)),
+                _ => None,
+            };
+            if let Some(retry_delay) = retry_delay {
                 info!(
                     handler = handler.name(),
                     subject = %envelope.subject,
-                    reason,
-                    "no capacity for this message; redelivering without counting an attempt"
+                    %error,
+                    "redelivering without counting an attempt"
                 );
-                return HandlerTaskOutcome::Backpressure;
+                return HandlerTaskOutcome::Backpressure(retry_delay);
             }
 
-            if error.is_permanent() {
-                let action = match &error {
-                    HandlerError::Permanent { action, .. } => *action,
-                    HandlerError::Deserialization(_) => PermanentAction::DeadLetter,
-                    _ => unreachable!("is_permanent() returned true"),
-                };
+            let permanent_action = match &error {
+                HandlerError::Permanent { action, .. } => Some(*action),
+                HandlerError::Deserialization(_) => Some(PermanentAction::DeadLetter),
+                _ => None,
+            };
+            if let Some(action) = permanent_action {
                 warn!(
                     handler = handler.name(),
                     subject = %envelope.subject,
@@ -476,6 +492,7 @@ async fn run_handlers(
     let mut dropped_error: Option<String> = None;
     let mut has_retry_requested = false;
     let mut has_backpressure = false;
+    let mut backpressure_delay: Option<Duration> = None;
     let mut transient_error: Option<String> = None;
 
     while let Some(result) = tasks.join_next().await {
@@ -484,8 +501,9 @@ async fn run_handlers(
             Ok(HandlerTaskOutcome::RetryRequested) => {
                 has_retry_requested = true;
             }
-            Ok(HandlerTaskOutcome::Backpressure) => {
+            Ok(HandlerTaskOutcome::Backpressure(delay)) => {
                 has_backpressure = true;
+                backpressure_delay = backpressure_delay.max(delay);
             }
             Ok(HandlerTaskOutcome::TransientError(error)) => {
                 transient_error.get_or_insert(error);
@@ -518,7 +536,7 @@ async fn run_handlers(
     // Skips the `should_redeliver` check below: contention must not spend an attempt.
     if has_backpressure {
         return HandlersOutcome::Failed {
-            retry_delay: subscription.retry_interval(),
+            retry_delay: backpressure_delay,
         };
     }
     if let Some(error) = transient_error {
@@ -628,6 +646,37 @@ mod tests {
         assert!(
             matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(5))),
             "expected Failed with 5s delay, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_at_retry_limit_redelivers_after_its_own_delay() {
+        let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Deferred {
+            reason: "project lock held".into(),
+            delay: Duration::from_secs(42),
+        });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&test_engine_configuration());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(42))),
+            "expected Failed with the handler's 42s delay, got {outcome:?}"
         );
     }
 
@@ -871,6 +920,57 @@ mod tests {
         );
     }
 
+    /// `MockHandler` rewrites deserialization errors as processing errors, so this
+    /// handler returns the real variant.
+    struct DeserializationFailingHandler(std::sync::Mutex<Option<serde_json::Error>>);
+
+    #[async_trait::async_trait]
+    impl Handler for DeserializationFailingHandler {
+        fn name(&self) -> &str {
+            "deserialization-failing"
+        }
+
+        fn subscription(&self) -> Subscription {
+            Subscription::new("stream", "subject")
+        }
+
+        async fn handle(
+            &self,
+            _context: HandlerContext,
+            _message: Envelope,
+        ) -> Result<(), HandlerError> {
+            match self.0.lock().ok().and_then(|mut error| error.take()) {
+                Some(error) => Err(HandlerError::Deserialization(error)),
+                None => Ok(()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn deserialization_error_returns_exhausted() {
+        let deserialization_error = serde_json::from_str::<u32>("not json").unwrap_err();
+        let handler =
+            DeserializationFailingHandler(std::sync::Mutex::new(Some(deserialization_error)));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+
+        let envelope = TestEnvelopeFactory::simple("payload");
+        let runtime = test_runtime(&test_engine_configuration());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Exhausted { .. }),
+            "deserialization failure should produce Exhausted, got {outcome:?}"
+        );
+    }
+
     #[tokio::test]
     async fn permanent_dead_letter_error_returns_exhausted() {
         let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Permanent {
@@ -963,8 +1063,8 @@ mod tests {
 
     /// Validates the backpressure mechanism in the listen loop.
     ///
-    /// The select loop guards message consumption with `if inflight.len() < max_inflight`.
-    /// Without this guard, all messages are pulled immediately and queued on the
+    /// The select loop pulls a message only while it holds a `max_inflight` work permit.
+    /// Without this gate, all messages are pulled immediately and queued on the
     /// worker pool semaphore — causing NATS ack_wait timeouts and infinite redelivery.
     #[tokio::test]
     async fn listen_loop_caps_inflight_to_max() {

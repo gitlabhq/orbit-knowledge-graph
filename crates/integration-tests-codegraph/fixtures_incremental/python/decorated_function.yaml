@@ -1,4 +1,5 @@
 name: "Python: decorated function call"
+
 fixtures:
   - path: main.py
     content: |

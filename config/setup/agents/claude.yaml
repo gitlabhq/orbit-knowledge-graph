@@ -32,3 +32,10 @@ skills:
   link:
     project: .claude/skills
     global: "~/.claude/skills"
+  permissions:
+    file:
+      project: .claude/settings.json
+      global: "~/.claude/settings.json"
+    rules:
+      - "Bash({{orbit}} skills get orbit)"
+      - "Bash({{orbit}} skills get orbit *)"

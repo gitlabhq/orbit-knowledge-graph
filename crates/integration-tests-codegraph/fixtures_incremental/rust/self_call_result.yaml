@@ -1,0 +1,48 @@
+name: "Rust: the result of Self::new is typed by its return type"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "self_call_result"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      mod tree;
+
+  - path: src/tree/mod.rs
+    content: |
+      mod node;
+
+      pub struct Tree;
+
+      impl Tree {
+          pub fn new() -> Self {
+              Tree
+          }
+
+          pub fn set_tag(&mut self) {}
+      }
+
+  - path: src/tree/node.rs
+    content: |
+      use super::Tree;
+
+      impl Tree {
+          pub fn unparsed() -> Self {
+              let mut tree = Self::new();
+              tree.set_tag();
+              tree
+          }
+      }
+
+tests:
+  - name: "unparsed calls set_tag on the tree that Self::new returns"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'unparsed' AND callee.name = 'set_tag'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }

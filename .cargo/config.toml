@@ -1,5 +1,6 @@
 [alias]
 xtask = "run --package xtask --"
+synth = "run --profile synth --package xtask -- synth"
 
 [env]
 CONFIG_DIR = { value = "config", relative = true }

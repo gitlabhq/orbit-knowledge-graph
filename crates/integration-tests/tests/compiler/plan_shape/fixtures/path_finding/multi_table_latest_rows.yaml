@@ -1,18 +1,21 @@
-name: Multi-table path frontiers select current edge versions in every union arm
+name: CI path frontiers select current edge versions
+
 query:
   json: |
     {"query_type":"path_finding","nodes":[{"id":"a","entity":"Pipeline","node_ids":[99000]},{"id":"b","entity":"Pipeline","node_ids":[99002]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["CHILD_OF","AUTO_CANCELED_BY"]}}
   gql: |
     MATCH path = ANY SHORTEST (a:Pipeline {id: 99000})-[:CHILD_OF|AUTO_CANCELED_BY*1..2]->(b:Pipeline {id: 99002})
     RETURN path
+
 logical:
   expect:
     - (Input path_finding (...))
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge, gl_edge] relationships=[CHILD_OF, AUTO_CANCELED_BY] ... (_) (_))
+        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_ci_edge] relationships=[CHILD_OF, AUTO_CANCELED_BY] ... (_) (_))
     emitted:
       expect:
-        - (Union ALL AS e1 (Project ... (Deduplicate Final (Scan Table(gl_ci_edge) AS _e1))) (Project ... (Deduplicate Final (Scan Table(gl_edge) AS _e1))))
+        - (Deduplicate Final (Scan Table(gl_ci_edge) AS e1))

@@ -6,7 +6,7 @@ use arrow::record_batch::RecordBatch;
 use compiler::{Frontend, compile_local};
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
@@ -20,15 +20,21 @@ pub struct Failure {
     pub message: String,
 }
 
+/// With `probe_skipped`, the queries of skipped tests still run, without
+/// their assertions.
 pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
+    probe_skipped: bool,
 ) -> Vec<Failure> {
     let mut failures = undeclared_edges(client, ontology);
     for test in &suite.tests {
         if test.skip {
             eprintln!("  [SKIP] \"{}\"", test.name);
+            if probe_skipped {
+                failures.extend(probe_test(test, client, ontology));
+            }
             continue;
         }
         failures.extend(run_test(test, client, ontology));
@@ -101,11 +107,21 @@ fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) ->
     failures
 }
 
+/// A skipped test's queries without its assertions, so a query that no
+/// longer runs or needs a LIMIT fails the suite while it stays skipped.
+fn probe_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
+    test.all_queries()
+        .iter()
+        .filter_map(|block| run_query(&test.name, test.severity, block, client, ontology).err())
+        .flatten()
+        .collect()
+}
+
 fn execute_cypher(
     cypher: &str,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
-) -> anyhow::Result<RecordBatch> {
+) -> anyhow::Result<(RecordBatch, bool)> {
     let (clean_query, aliases) = rewrite_query(cypher);
     if !aliases.is_empty() {
         eprintln!("  ALIASES: {aliases:?}");
@@ -124,7 +140,10 @@ fn execute_cypher(
         arrow::compute::concat_batches(&batches[0].schema(), &batches)
             .map_err(|e| anyhow::anyhow!("concat batches: {e}"))?
     };
-    Ok(apply_aliases(batch, &compiled.input, &aliases))
+    let window = compiled.input.limit as usize;
+    let has_more = batch.num_rows() > window;
+    let batch = batch.slice(0, batch.num_rows().min(window));
+    Ok((apply_aliases(batch, &compiled.input, &aliases), has_more))
 }
 
 /// Rewrite a fixture Cypher query for the Orbit GQL compiler:
@@ -225,11 +244,39 @@ fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
     eprintln!("\n  ╔══ DEBUG DUMP ══════════════════════════════════════");
     for (label, cypher) in debug_queries {
         match execute_cypher(cypher, client, ontology) {
-            Ok(batch) => print_result(&format!("  {label}"), cypher, &batch),
+            Ok((batch, _)) => print_result(&format!("  {label}"), cypher, &batch),
             Err(e) => eprintln!("  {label}: query failed: {e}"),
         }
     }
     eprintln!("  ╚══════════════════════════════════════════════════\n");
+}
+
+fn run_query(
+    label: &str,
+    severity: Severity,
+    block: &QueryBlock,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+) -> Result<RecordBatch, Vec<Failure>> {
+    match execute_cypher(&block.query, client, ontology) {
+        Ok((batch, has_more)) if has_more && !has_explicit_limit(&block.query) => {
+            print_result(label, &block.query, &batch);
+            Err(vec![fail(
+                label,
+                severity,
+                format!(
+                    "More than the default {} rows match; add LIMIT so the assertions see every row",
+                    batch.num_rows()
+                ),
+            )])
+        }
+        Ok((batch, _)) => Ok(batch),
+        Err(e) => Err(vec![fail(
+            label,
+            severity,
+            format!("Query execution error: {e}"),
+        )]),
+    }
 }
 
 fn run_query_block(
@@ -239,9 +286,9 @@ fn run_query_block(
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
 ) -> Vec<Failure> {
-    let batch = match execute_cypher(&block.query, client, ontology) {
-        Ok(b) => b,
-        Err(e) => return vec![fail(label, severity, format!("Query execution error: {e}"))],
+    let batch = match run_query(label, severity, block, client, ontology) {
+        Ok(batch) => batch,
+        Err(failures) => return failures,
     };
 
     let failures = check_assertions(label, severity, &block.assert, &batch);
@@ -249,6 +296,12 @@ fn run_query_block(
         print_result(label, &block.query, &batch);
     }
     failures
+}
+
+fn has_explicit_limit(query: &str) -> bool {
+    regex::Regex::new(r"(?i)\bLIMIT\s+\d+")
+        .unwrap()
+        .is_match(query)
 }
 
 fn print_result(label: &str, query: &str, batch: &RecordBatch) {

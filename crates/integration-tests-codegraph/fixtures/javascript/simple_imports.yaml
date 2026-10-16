@@ -1,5 +1,6 @@
 name: "JavaScript: simple ES module imports and cross-file resolution"
 pipeline: js
+
 fixtures:
   - path: utils.js
     content: |

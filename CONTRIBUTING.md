@@ -27,7 +27,7 @@ Core tasks:
 | Apply lint fixes | `mise lint:code:fix` |
 | Validate doc changes | `mise lint:docs` |
 
-For the full local setup (GDK, ClickHouse, NATS), see [Local development](docs/dev/local-development.md).
+For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Siphon), see [Local development](docs/dev/local-development.md).
 
 ## Testing
 

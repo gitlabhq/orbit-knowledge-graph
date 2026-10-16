@@ -1,4 +1,5 @@
 name: "Python: inter-file resolution"
+
 fixtures:
   # ── Layer 1: base models ──────────────────
   - path: models/user.py

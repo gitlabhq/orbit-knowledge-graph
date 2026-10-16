@@ -22,16 +22,27 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use thiserror::Error;
+use tokio::sync::OwnedSemaphorePermit;
 
 use super::types::{Envelope, Subscription};
 use crate::{
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
 };
+
+#[derive(Clone, Default)]
+pub struct WorkSlot(Arc<Mutex<Option<OwnedSemaphorePermit>>>);
+
+impl WorkSlot {
+    pub fn release(&self) {
+        self.0.lock().take();
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermanentAction {
@@ -48,6 +59,10 @@ pub enum HandlerError {
     /// Never got capacity to run; redelivered without spending an attempt or dead-lettering.
     #[error("backpressure: {0}")]
     Backpressure(String),
+
+    /// Another holder owns the work; redelivered after `delay` without spending an attempt.
+    #[error("deferred for {delay:?}: {reason}")]
+    Deferred { reason: String, delay: Duration },
 
     /// A deterministic failure that will never succeed on retry.
     #[error("permanent failure: {message}")]
@@ -71,13 +86,10 @@ impl HandlerError {
         match self {
             HandlerError::Processing(_) => "processing",
             HandlerError::Backpressure(_) => "backpressure",
+            HandlerError::Deferred { .. } => "deferred",
             HandlerError::Permanent { .. } => "permanent",
             HandlerError::Deserialization(_) => "deserialization",
         }
-    }
-
-    pub fn is_permanent(&self) -> bool {
-        matches!(self, Self::Permanent { .. } | Self::Deserialization(_))
     }
 
     /// A deterministic failure that will never succeed on retry; dead-letter it for inspection.
@@ -113,6 +125,8 @@ pub struct HandlerContext {
     pub lock_service: Arc<dyn LockService>,
     /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
+    pub work: WorkSlot,
+    pub redelivered_on_failure: bool,
 }
 
 impl HandlerContext {
@@ -125,7 +139,19 @@ impl HandlerContext {
             nats,
             lock_service,
             progress,
+            work: WorkSlot::default(),
+            redelivered_on_failure: true,
         }
+    }
+
+    pub fn with_work_slot(mut self, permit: Option<OwnedSemaphorePermit>) -> Self {
+        self.work = WorkSlot(Arc::new(Mutex::new(permit)));
+        self
+    }
+
+    pub fn with_redelivery(mut self, redelivered_on_failure: bool) -> Self {
+        self.redelivered_on_failure = redelivered_on_failure;
+        self
     }
 }
 

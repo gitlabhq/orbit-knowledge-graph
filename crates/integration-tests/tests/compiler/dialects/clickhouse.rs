@@ -591,10 +591,8 @@ fn multi_table_code_edge_routes_to_code_table() {
 }
 
 #[test]
-fn multi_table_wildcard_scans_all_tables() {
+fn multi_table_wildcard_keeps_the_default_table_scan() {
     let orbit_query = "MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25";
-    // v2 planner routes wildcard to the default edge table for a single hop.
-    // It does not generate UNION ALL across edge tables per hop.
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -604,20 +602,14 @@ fn multi_table_wildcard_scans_all_tables() {
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-    assert!(
-        rendered.contains("gl_edge"),
-        "wildcard should route to default gl_edge: {rendered}"
-    );
+    let compiled = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
+    assert!(compiled.base.render().contains("FROM gl_edge"));
 }
 
 #[test]
-fn multi_table_mixed_types_scans_both_tables() {
+fn multi_table_mixed_types_scan_every_route() {
     let orbit_query =
         "MATCH (u:User {id: 1})-[:AUTHORED|DEFINES]->(p:Project) RETURN u, p LIMIT 25";
-    // v2 planner routes a single hop to one table (the first matched).
-    // Mixed edge types in a single relationship entry go to one table.
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -629,14 +621,9 @@ fn multi_table_mixed_types_scans_both_tables() {
     }"#;
     let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
-    assert!(
-        rendered.contains("gl_edge"),
-        "mixed types should route to first matched table (gl_edge): {rendered}"
-    );
-    assert!(
-        rendered.contains("AUTHORED") && rendered.contains("DEFINES"),
-        "both relationship types should appear in the SQL: {rendered}"
-    );
+    assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
+    assert!(rendered.contains("FROM gl_edge"), "{rendered}");
+    assert!(rendered.contains("UNION ALL"), "{rendered}");
 }
 
 #[test]

@@ -14,10 +14,7 @@
 # genuine universal default. Local-development-only tuning lives in config/dev.yaml, which the mise
 # dev tasks merge into the generated .dev/<mode>.yaml, not here.
 
-bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"
-indexer_health_bind_address: "0.0.0.0:4202"
-dispatcher_health_bind_address: "0.0.0.0:4203"
 jwt_clock_skew_secs: 60
 # health_check_url: "http://localhost:4201"
 probe_server: {}
@@ -120,6 +117,7 @@ engine:
         max_file_size_bytes: 5000000
         max_files: 1000000
         max_total_bytes: 2000000000
+        max_repository_files: 2000000
         source_memory_budget_bytes: 67108864
         source_compress_spill: false
         worker_threads: 0
@@ -129,8 +127,16 @@ engine:
         per_file_walk_timeout_ms: 100
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
+        max_tree_depth: 4096
+        max_cross_file_names: 40000000
+        max_manifest_bytes: 67108864
+        max_file_edges: 2000000
         job_timeout_secs: 1500
         fetch_concurrency: 10
+        archive_storage_budget: 4
+        archive_tenant_budget: 8
+        archive_lease_ttl_secs: 30
+        archive_lease_max_wait_secs: 30
         write_channel_capacity: 8
         write_slice_rows: 1000000
         write_buffer_age_secs: 60

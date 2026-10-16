@@ -1,4 +1,5 @@
 description: Incoming-neighbor lookup preserves cross-namespace edge sources
+
 config:
   security:
     paths: ["1/"]
@@ -11,10 +12,12 @@ config:
       - { id: 99001, traversal_path: "1/200/1001/", project_id: 1001, title: audit_source }
     gl_edge:
       - { traversal_path: "1/200/1001/", source_id: 99001, source_kind: MergeRequest, relationship_kind: MENTIONS, target_id: 99000, target_kind: MergeRequest }
+
 query:
   gql: |
     MATCH (mr:MergeRequest {id: 99000})<-[:MENTIONS]-(neighbor)
     RETURN neighbor
+
 expect:
   node_count: 2
   nodes:

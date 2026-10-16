@@ -16,6 +16,26 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 108
+  scope: none
+  note: >-
+    AgentSession pages by its table sort key (traversal_path, session_started_at,
+    id) instead of (traversal_path, id); only extract page order changes, so every
+    indexed row is byte-identical.
+- version: 107
+  scope: "*"
+  note: >-
+    Drops auto_statistics_types from every table. Loading the statistics cost
+    250-1050 ms per query with no better plans; a full rebuild creates the tables without
+    them (a clone would copy the old SETTINGS).
+- version: 106
+  scope: "*"
+- version: 105
+  scope: "*"
+  note: >-
+    Registers the AgentSession node and the CREATED_MR edge in schema.yaml. The
+    scope deriver widens any schema.yaml change to a full rebuild, so no narrower scope
+    is accepted.
 - version: 104
   scope: "*"
 - version: 103

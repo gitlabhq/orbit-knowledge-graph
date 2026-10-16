@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_variable_length_reaches_depth_2
 description: Variable-length CONTAINS with hops [1,2] reaches depth-2 groups
 
 query:
@@ -22,5 +21,5 @@ expect:
       ids: [100, 200, 300]
   edge_exists:
     CONTAINS:
-      - [100, 200]
-      - [100, 300]
+      - { from: Group, from_id: 100, to: Group, to_id: 200 }
+      - { from: Group, from_id: 100, to: Group, to_id: 300 }

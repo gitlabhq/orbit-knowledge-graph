@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_three_hop_pages_cover_all_edges
 description: Three-hop traversal pages cover all 14 edges in 4 pages
 
 query:
@@ -21,10 +20,39 @@ query:
 
 expect:
   all_pages:
+    node_ids:
+      User: [1, 2, 3, 4, 5, 6]
+      Group: [100, 101, 102]
+      Project: [1000, 1001, 1002, 1003, 1004]
     edge_count: 14
     page_count: 4
+    matches_unpaginated: true
   pages:
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - node_count: 7
+      nodes:
+        User: { ids: [1, 2] }
+        Group: { ids: [100, 102] }
+        Project: { ids: [1000, 1002, 1004] }
+      edge_count: { MEMBER_OF: 3, CONTAINS: 3 }
+      has_more: true
+    - node_count: 7
+      nodes:
+        User: { ids: [3, 4] }
+        Group: { ids: [101, 102] }
+        Project: { ids: [1001, 1003, 1004] }
+      edge_count: { MEMBER_OF: 3, CONTAINS: 3 }
+      has_more: true
+    - node_count: 8
+      nodes:
+        User: { ids: [5, 6] }
+        Group: { ids: [100, 101] }
+        Project: { ids: [1000, 1001, 1002, 1003] }
+      edge_count: { MEMBER_OF: 3, CONTAINS: 4 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        User: { ids: [6] }
+        Group: { ids: [101] }
+        Project: { ids: [1003] }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+      has_more: false

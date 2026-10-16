@@ -1,4 +1,5 @@
 name: "Kotlin: suspend functions and coroutine patterns"
+
 fixtures:
   - path: com/example/repo.kt
     content: |

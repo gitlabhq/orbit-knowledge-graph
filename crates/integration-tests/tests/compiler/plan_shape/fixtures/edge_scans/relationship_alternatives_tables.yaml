@@ -1,16 +1,20 @@
-name: Traversal relationship alternatives scan every declared route
+name: Typed CI relationship alternatives share the CI edge table
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"a","entity":"Pipeline","node_ids":[99000]},{"id":"b","entity":"Pipeline"}],"relationships":[{"type":["CHILD_OF","AUTO_CANCELED_BY"],"from":"a","to":"b"}]}
   gql: |
     MATCH (a:Pipeline {id: 99000})-[:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
     RETURN a,b
+
 logical:
   expect:
     - (NodeScan Pipeline AS a)
+
 physical:
   clickhouse:
     planned:
       expect:
+        - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+      reject:
         - (Scan Table(gl_edge) ...)
-        - (Scan Table(gl_ci_edge) ...)

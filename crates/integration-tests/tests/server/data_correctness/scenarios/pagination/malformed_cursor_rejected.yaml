@@ -1,4 +1,3 @@
-# source: (no direct Rust counterpart — complementary to sql_injection_cursor)
 description: Malformed cursor after token is rejected at compile time
 
 query:
@@ -14,4 +13,4 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.username PAGE 2 AFTER 'invalid-but-must-not-crash'
 
 expect:
-  compile_error: true
+  compile_error: malformed cursor.after token

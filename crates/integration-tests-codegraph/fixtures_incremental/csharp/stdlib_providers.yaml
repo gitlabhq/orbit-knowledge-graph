@@ -1,4 +1,5 @@
 name: CSharp static standard provider is scoped to its import
+
 fixtures:
   - path: Main.cs
     content: |
@@ -6,6 +7,7 @@ fixtures:
       class Main {
         double Run(double x) { return Sqrt(x); }
       }
+
 tests:
   - name: Static standard symbol is not a speculative wildcard call
     query: |

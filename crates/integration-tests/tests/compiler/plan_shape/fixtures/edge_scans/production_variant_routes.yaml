@@ -1,0 +1,314 @@
+physical:
+  clickhouse:
+    planned:
+      occurrences:
+        - { pattern: "(Scan Table(?) AS _orbit_edge_0)", count: 1 }
+
+cases:
+  - name: Pipeline IN_PROJECT scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"pipeline","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (pipeline:Pipeline {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN pipeline, project
+    logical: { expect: ["(EdgeScan IN_PROJECT pipeline->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Stage IN_PROJECT scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"stage","entity":"Stage","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"stage","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (stage:Stage {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN stage, project
+    logical: { expect: ["(EdgeScan IN_PROJECT stage->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Job IN_PROJECT scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"job","entity":"Job","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"job","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (job:Job {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN job, project
+    logical: { expect: ["(EdgeScan IN_PROJECT job->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Deployment IN_PROJECT scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"deployment","entity":"Deployment","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"deployment","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (deployment:Deployment {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN deployment, project
+    logical: { expect: ["(EdgeScan IN_PROJECT deployment->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Environment IN_PROJECT scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"environment","entity":"Environment","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"environment","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (environment:Environment {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN environment, project
+    logical: { expect: ["(EdgeScan IN_PROJECT environment->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: CHILD_OF scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"child","entity":"Pipeline","node_ids":[1]},{"id":"parent","entity":"Pipeline"}],"relationships":[{"type":"CHILD_OF","from":"child","to":"parent","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (child:Pipeline {id: 1})-[:CHILD_OF {target_id: 1}]->(parent:Pipeline) RETURN child, parent
+    logical: { expect: ["(EdgeScan CHILD_OF child->parent AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Package BUILT_BY scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"package","entity":"Package","node_ids":[1]},{"id":"pipeline","entity":"Pipeline"}],"relationships":[{"type":"BUILT_BY","from":"package","to":"pipeline","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (package:Package {id: 1})-[:BUILT_BY {target_id: 1}]->(pipeline:Pipeline) RETURN package, pipeline
+    logical: { expect: ["(EdgeScan BUILT_BY package->pipeline AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: PackageFile BUILT_BY scans the CI edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"file","entity":"PackageFile","node_ids":[1]},{"id":"pipeline","entity":"Pipeline"}],"relationships":[{"type":"BUILT_BY","from":"file","to":"pipeline","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (file:PackageFile {id: 1})-[:BUILT_BY {target_id: 1}]->(pipeline:Pipeline) RETURN file, pipeline
+    logical: { expect: ["(EdgeScan BUILT_BY file->pipeline AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Vulnerability IN_PROJECT scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"vulnerability","entity":"Vulnerability","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"vulnerability","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (vulnerability:Vulnerability {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN vulnerability, project
+    logical: { expect: ["(EdgeScan IN_PROJECT vulnerability->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Finding IN_PROJECT scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"finding","entity":"Finding","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"finding","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (finding:Finding {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN finding, project
+    logical: { expect: ["(EdgeScan IN_PROJECT finding->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: VulnerabilityIdentifier IN_PROJECT scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"identifier","entity":"VulnerabilityIdentifier","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"identifier","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (identifier:VulnerabilityIdentifier {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN identifier, project
+    logical: { expect: ["(EdgeScan IN_PROJECT identifier->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: SecurityScan IN_PROJECT scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (scan:SecurityScan {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN scan, project
+    logical: { expect: ["(EdgeScan IN_PROJECT scan->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: VulnerabilityScanner IN_PROJECT scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"scanner","entity":"VulnerabilityScanner","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"scanner","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (scanner:VulnerabilityScanner {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN scanner, project
+    logical: { expect: ["(EdgeScan IN_PROJECT scanner->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: VulnerabilityOccurrence IN_PROJECT scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"occurrence","entity":"VulnerabilityOccurrence","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"occurrence","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (occurrence:VulnerabilityOccurrence {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN occurrence, project
+    logical: { expect: ["(EdgeScan IN_PROJECT occurrence->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Vulnerability AUTHORED scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"AUTHORED","from":"user","to":"vulnerability","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED {target_id: 1}]->(vulnerability:Vulnerability) RETURN user, vulnerability
+    logical: { expect: ["(EdgeScan AUTHORED user->vulnerability AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: CONFIRMED_BY scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"CONFIRMED_BY","from":"user","to":"vulnerability","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:CONFIRMED_BY {target_id: 1}]->(vulnerability:Vulnerability) RETURN user, vulnerability
+    logical: { expect: ["(EdgeScan CONFIRMED_BY user->vulnerability AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: RESOLVED_BY scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"RESOLVED_BY","from":"user","to":"vulnerability","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:RESOLVED_BY {target_id: 1}]->(vulnerability:Vulnerability) RETURN user, vulnerability
+    logical: { expect: ["(EdgeScan RESOLVED_BY user->vulnerability AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: DISMISSED_BY scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"DISMISSED_BY","from":"user","to":"vulnerability","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:DISMISSED_BY {target_id: 1}]->(vulnerability:Vulnerability) RETURN user, vulnerability
+    logical: { expect: ["(EdgeScan DISMISSED_BY user->vulnerability AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: FIXES scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"merge_request","entity":"MergeRequest","node_ids":[1]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"FIXES","from":"merge_request","to":"vulnerability","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (merge_request:MergeRequest {id: 1})-[:FIXES {target_id: 1}]->(vulnerability:Vulnerability) RETURN merge_request, vulnerability
+    logical: { expect: ["(EdgeScan FIXES merge_request->vulnerability AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: HAS_VULNERABILITY scans the security edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"package","entity":"Package","node_ids":[1]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"HAS_VULNERABILITY","from":"package","to":"vulnerability","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (package:Package {id: 1})-[:HAS_VULNERABILITY {target_id: 1}]->(vulnerability:Vulnerability) RETURN package, vulnerability
+    logical: { expect: ["(EdgeScan HAS_VULNERABILITY package->vulnerability AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: MergeRequestDiff IN_PROJECT scans the diff edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"diff","entity":"MergeRequestDiff","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"diff","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (diff:MergeRequestDiff {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN diff, project
+    logical: { expect: ["(EdgeScan IN_PROJECT diff->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_diff_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: MergeRequestDiffFile IN_PROJECT scans the diff edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"file","entity":"MergeRequestDiffFile","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"file","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (file:MergeRequestDiffFile {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN file, project
+    logical: { expect: ["(EdgeScan IN_PROJECT file->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_diff_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Branch IN_PROJECT scans the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"branch","entity":"Branch","node_ids":[1]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"branch","to":"project","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (branch:Branch {id: 1})-[:IN_PROJECT {target_id: 1}]->(project:Project) RETURN branch, project
+    logical: { expect: ["(EdgeScan IN_PROJECT branch->project AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Project CONTAINS Branch scans the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"project","entity":"Project","node_ids":[1]},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"CONTAINS","from":"project","to":"branch","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (project:Project {id: 1})-[:CONTAINS {target_id: 1}]->(branch:Branch) RETURN project, branch
+    logical: { expect: ["(EdgeScan CONTAINS project->branch AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Branch CONTAINS Directory scans the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"branch","entity":"Branch","node_ids":[1]},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"CONTAINS","from":"branch","to":"directory","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (branch:Branch {id: 1})-[:CONTAINS {target_id: 1}]->(directory:Directory) RETURN branch, directory
+    logical: { expect: ["(EdgeScan CONTAINS branch->directory AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Branch CONTAINS File scans the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"branch","entity":"Branch","node_ids":[1]},{"id":"file","entity":"File"}],"relationships":[{"type":"CONTAINS","from":"branch","to":"file","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (branch:Branch {id: 1})-[:CONTAINS {target_id: 1}]->(file:File) RETURN branch, file
+    logical: { expect: ["(EdgeScan CONTAINS branch->file AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Directory CONTAINS Directory scans the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"parent","entity":"Directory","node_ids":[1]},{"id":"child","entity":"Directory"}],"relationships":[{"type":"CONTAINS","from":"parent","to":"child","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (parent:Directory {id: 1})-[:CONTAINS {target_id: 1}]->(child:Directory) RETURN parent, child
+    logical: { expect: ["(EdgeScan CONTAINS parent->child AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+
+  - name: Directory CONTAINS File scans the code edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"directory","entity":"Directory","node_ids":[1]},{"id":"file","entity":"File"}],"relationships":[{"type":"CONTAINS","from":"directory","to":"file","filters":{"target_id":1}}]}
+      gql: |
+        MATCH (directory:Directory {id: 1})-[:CONTAINS {target_id: 1}]->(file:File) RETURN directory, file
+    logical: { expect: ["(EdgeScan CONTAINS directory->file AS e0)"] }
+    physical:
+      clickhouse:
+        planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }

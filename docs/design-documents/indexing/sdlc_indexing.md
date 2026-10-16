@@ -107,7 +107,7 @@ The data is transformed from ClickHouse to a graph-like format using the followi
   - Core attributes relevant to that entity type
   - Metadata fields (created_at, updated_at, deleted_at for soft deletes)
 
-- **Edges**: Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each edge YAML can set a `table:` field to route that relationship type to a dedicated table. `settings.edge_tables` in `schema.yaml` defines the available tables and their storage layout. Each edge table contains:
+- **Edges**: Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each transform resolves the relationship kind and both endpoint kinds to one ontology variant. A table can claim node domains. Edge-level and variant-level `table:` values override domain routing. `settings.edge_tables` in `schema.yaml` defines the tables and their storage layout. Each edge table contains:
   - Traversal path (namespace scoping)
   - Source node identifier and kind
   - Relationship kind
@@ -120,7 +120,7 @@ The transformation from CDC data to the graph schema is handled by the ETL Index
 ##### Core components
 
 - `gkg-indexer`: The ETL pipeline for GitLab SDLC data.
-- `gkg-webserver`: The gRPC and HTTP interface to query Orbit.
+- `gkg-webserver`: The gRPC interface to query Orbit.
 - `NATS JetStream`: The message broker for Orbit.
 - `NATS KV`: The key-value store for Orbit.
 - `ClickHouse`: The OLAP database for GitLab and Orbit.
@@ -287,7 +287,7 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 
 1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
 2. Start from the pipeline's resolved extraction SQL template and build a parameterized datalake query, adding the current watermark window and (for namespaced entities) traversal path.
-3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
+3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`. The cursor stores timestamp values in the form ClickHouse compares against `DateTime` and `DateTime64` (`YYYY-MM-DD HH:MM:SS`, plus fractional digits at the column's precision). A saved cursor whose length differs from the sort key is discarded and the window restarts from the first page.
 4. Read each page out of the datalake in full, buffering its Arrow blocks in memory.
    ClickHouse encodes Arrow `String` columns with 32-bit offsets. So an output block whose text column (e.g. a dense page of `description`/`note` text) exceeds ~2 GiB fails the read with error code 1002. `max_block_size` bounds the rows per output block, so a small enough block keeps every column under the cap.
    The happy path pays nothing for this. On a 1002 overflow the extract retry (`Pipeline::extract_batch`) drops `max_block_size` straight to the floor block size and re-reads the page. This re-read is idempotent from the page's start cursor (point 7), so no single block can exceed the cap.

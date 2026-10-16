@@ -21,7 +21,7 @@ git -C "$repo" -c user.name=smoke -c user.email=smoke@example.com commit -qm ini
 "$orbit" version
 "$orbit" index "$repo"
 grep_output=$(cd "$repo" && "$orbit" grep helper)
-grep -q 'app\.helper' <<<"$grep_output"
+grep -q 'Function helper — app\.py:1-2' <<<"$grep_output"
 context_output=$(cd "$repo" && "$orbit" context app.py)
 grep -q 'app\.helper' <<<"$context_output"
 

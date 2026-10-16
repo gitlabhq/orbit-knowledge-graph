@@ -32,6 +32,10 @@ const MOVED_ROW_PREDICATE: &str = "\
 AND length({current_paths:Array(String)}) > 0 \
 AND traversal_path NOT IN {current_paths:Array(String)}";
 
+#[expect(
+    clippy::expect_used,
+    reason = "`edge_tables()` only returns keys present in the edge table configs"
+)]
 fn build_statements(
     ontology: &ontology::Ontology,
     extra_predicate: Option<&str>,

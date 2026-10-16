@@ -5,7 +5,7 @@ use compiler::input::{
     Direction, RelationshipColumn, RelationshipColumnKind, group_by_output_names,
 };
 use compiler::{QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column};
-use orbit_utils::arrow::ColumnValue;
+use orbit_arrow::ColumnValue;
 use orbit_utils::strings::quote_escaped;
 use serde_json::{Map, Value};
 use shared::{PaginationMeta, PipelineOutput};

@@ -1,4 +1,5 @@
 name: "C#: imported-symbol fallback matrix"
+
 fixtures:
   - path: JsonRunner.cs
     content: |

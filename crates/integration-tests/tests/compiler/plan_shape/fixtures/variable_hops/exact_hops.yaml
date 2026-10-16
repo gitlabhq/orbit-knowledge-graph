@@ -1,4 +1,5 @@
 name: Exact hop depth excludes shorter arms
+
 query:
   json: |
     {
@@ -11,9 +12,11 @@ query:
     }
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition) RETURN a.id, b.id
+
 logical:
   expect:
     - (EdgeScan CALLS a->b AS e0 HOPS 2..2)
+
 physical:
   clickhouse:
     planned:
@@ -29,7 +32,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Project 2 AS depth, ... (_)))
+        - (Union ALL AS e0 (Project 2 AS depth, ... (_)))
       reject:
         - (Project 1 AS depth, ... (_))
         - (Project 3 AS depth, ... (_))

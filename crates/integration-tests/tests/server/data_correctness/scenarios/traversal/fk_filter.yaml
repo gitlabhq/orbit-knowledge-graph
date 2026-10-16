@@ -1,10 +1,12 @@
 description: Pinned FK target retains additional filters
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"v","entity":"User","node_ids":[2],"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"u","entity":"User","node_ids":[1],"filters":{"username":"nonexistent"},"columns":["id"]}],"relationships":[{"type":"APPROVED","from":"v","to":"mr"},{"type":"AUTHORED","from":"u","to":"mr"}]}
   gql: |
     MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1, username: 'nonexistent'})
     RETURN v.id, mr.id, u.id
+
 expect:
   node_count: 0
   nodes:

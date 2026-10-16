@@ -1,4 +1,5 @@
 name: Relationship filters survive both frontends and physical emission
+
 query:
   json: |
     {
@@ -12,9 +13,11 @@ query:
   gql: |
     MATCH (caller:Definition {id: 1})-[:CALLS {target_id: 2}]->(callee:Definition)
     RETURN caller.id, callee.id
+
 logical:
   expect:
     - (Filter e0.target_id = 2 (EdgeScan CALLS caller->callee AS e0))
+
 physical:
   clickhouse:
     planned:
@@ -26,5 +29,5 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON callee.id = _orbit_edge_0.target_id (_) (Bind callee (_)))
-        - (Filter _orbit_edge_0.target_id = 2, ... (_))
+        - (Join ON callee.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS callee)))
+        - (Filter e0.target_id = 2, ... (_))

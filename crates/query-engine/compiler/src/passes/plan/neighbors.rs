@@ -46,48 +46,62 @@ where
     } else {
         config.rel_types.iter().map(String::as_str).collect()
     };
+    let touches = |relationship: &str, source: bool| {
+        model
+            .relationship_routes(relationship)
+            .into_iter()
+            .any(|route| match source {
+                true => route.has_source(center_entity_id),
+                false => route.has_target(center_entity_id),
+            })
+    };
     let relationship_ids = |source: bool| {
         relationships
             .iter()
-            .filter_map(|relationship| {
-                let route = model.relationship_route(relationship)?;
-                let relationship_id = model.graph().relationship_id(relationship)?;
-                match source {
-                    true if route.has_source(center_entity_id) => Some(relationship_id),
-                    false if route.has_target(center_entity_id) => Some(relationship_id),
-                    _ => None,
-                }
-            })
+            .filter(|relationship| touches(relationship, source))
+            .filter_map(|relationship| model.graph().relationship_id(relationship))
             .collect::<Vec<_>>()
+    };
+    let arm_kinds = |source: bool| {
+        let kinds: Vec<String> = config
+            .rel_types
+            .iter()
+            .filter(|kind| touches(kind, source))
+            .cloned()
+            .collect();
+        match kinds.is_empty() {
+            true => config.rel_types.clone(),
+            false => kinds,
+        }
     };
     let outgoing_relationships = relationship_ids(true);
     let incoming_relationships = relationship_ids(false);
     let incoming_kinds: Vec<_> = relationships
         .iter()
-        .filter(|relationship| {
-            model
-                .relationship_route(relationship)
-                .is_some_and(|route| route.has_target(center_entity_id))
-        })
+        .filter(|relationship| touches(relationship, false))
         .copied()
         .collect();
     let incoming_scope_preserving: Vec<_> = incoming_kinds
         .iter()
         .filter(|relationship| {
-            model.relationship_route(relationship).is_some_and(|route| {
-                route
+            let mut found = false;
+            let mut scope_preserving = true;
+            for route in model.relationship_routes(relationship) {
+                for variant in route
                     .variants()
                     .filter(|variant| variant.target == center_entity_id)
-                    .all(|variant| {
-                        model
-                            .variant_scope(
-                                relationship,
-                                &model.graph().entity(variant.source).name,
-                                &model.graph().entity(variant.target).name,
-                            )
-                            .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
-                    })
-            })
+                {
+                    found = true;
+                    scope_preserving &= model
+                        .variant_scope(
+                            relationship,
+                            &model.graph().entity(variant.source).name,
+                            &model.graph().entity(variant.target).name,
+                        )
+                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving);
+                }
+            }
+            found && scope_preserving
         })
         .map(|relationship| relationship.to_string())
         .collect();
@@ -108,10 +122,11 @@ where
                 .is_some_and(|facts| {
                     relationships.iter().all(|relationship| {
                         model
-                            .relationship_route(
+                            .relationship_routes(
                                 model.graph().relationship(*relationship).name.as_str(),
                             )
-                            .is_some_and(|route| {
+                            .into_iter()
+                            .any(|route| {
                                 route.source_entities().any(|source| {
                                     route.target_entities().any(|target| {
                                         facts.variants.contains(&(*relationship, source, target))
@@ -142,7 +157,7 @@ where
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = relationships
                 .iter()
-                .filter_map(|relationship| model.relationship_route(relationship))
+                .flat_map(|relationship| model.relationship_routes(relationship))
                 .filter(|route| match source {
                     true => route.has_source(center_entity_id),
                     false => route.has_target(center_entity_id),
@@ -183,6 +198,8 @@ where
         edge,
         has_non_denorm,
         fused_table,
+        outgoing_kinds: arm_kinds(true),
+        incoming_kinds: arm_kinds(false),
         incoming_scope_preserving,
         incoming_cross_scope,
     }))

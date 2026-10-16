@@ -1,4 +1,5 @@
 name: "Rust: module system (mod, pub use, re-exports)"
+
 fixtures:
   - path: lib.rs
     content: |

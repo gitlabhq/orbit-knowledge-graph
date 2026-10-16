@@ -53,7 +53,6 @@ pub(in crate::modules::sdlc) fn build_plans(
     ontology: &Ontology,
     sizing: Sizing<'_>,
 ) -> Result<Plans, PlanError> {
-    ontology.validate_single_table_edge_routes()?;
     let mut plans = PlanSet::default();
 
     for node in ontology.nodes() {
@@ -90,7 +89,7 @@ fn build_node_plan(
     let transform_declaration =
         TransformDeclaration::from_node_entity_and_edge_mappings(node, pipeline.transform.edges());
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -128,7 +127,7 @@ fn build_edge_plan(
 
     let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
     let spec = compile_extract_spec(&extract_declaration)?;
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -157,7 +156,7 @@ fn build_derived_plan(
     let spec = compile_extract_spec(&extract_declaration)?;
 
     let transform_declaration = TransformDeclaration::Rust(name.clone());
-    let transform = transform::compile_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
     Ok(assemble(
         pipeline,
@@ -232,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_split_relationship_routes() {
+    fn accepts_split_relationship_routes() {
         let ontology = Ontology::load_embedded_with_overlay(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/seeds/overlays/variant_routes"
@@ -246,10 +245,7 @@ mod tests {
                 overrides: &HashMap::new(),
             },
         );
-        assert!(
-            matches!(result, Err(PlanError::Ontology(ontology::OntologyError::Validation(message)))
-            if message.contains("relationship 'CALLS' has split table routes"))
-        );
+        assert!(result.is_ok());
     }
 
     fn plans(ontology: &Ontology, batch_size: u64) -> Plans {

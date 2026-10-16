@@ -118,6 +118,7 @@ pub mod test_utils {
         ProjectInfo {
             project_id,
             default_branch: default_branch.to_string(),
+            repository_storage: None,
         }
     }
 
@@ -129,11 +130,11 @@ pub mod test_utils {
         let mut tar_builder = tar::Builder::new(Vec::new());
         for (path, content) in files {
             let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
             header.set_size(content.len() as u64);
             header.set_mode(0o644);
-            header.set_cksum();
-            tar_builder.append(&header, &content[..]).unwrap();
+            tar_builder
+                .append_data(&mut header, path, &content[..])
+                .unwrap();
         }
         let tar_bytes = tar_builder.into_inner().unwrap();
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
@@ -146,6 +147,7 @@ pub mod test_utils {
         archives: Mutex<HashMap<i64, Vec<u8>>>,
         download_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
         project_info_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
+        storages: Mutex<HashMap<i64, String>>,
     }
 
     impl MockRepositoryService {
@@ -163,6 +165,7 @@ pub mod test_utils {
                 archives: Mutex::new(HashMap::new()),
                 download_errors: Mutex::new(HashMap::new()),
                 project_info_errors: Mutex::new(HashMap::new()),
+                storages: Mutex::new(HashMap::new()),
             })
         }
 
@@ -172,6 +175,10 @@ pub mod test_utils {
 
         pub fn set_download_error(&self, project_id: i64, error: RepositoryServiceError) {
             self.download_errors.lock().insert(project_id, error);
+        }
+
+        pub fn set_repository_storage(&self, project_id: i64, storage: &str) {
+            self.storages.lock().insert(project_id, storage.to_string());
         }
 
         pub fn set_project_info_error(&self, project_id: i64, error: RepositoryServiceError) {
@@ -200,7 +207,9 @@ pub mod test_utils {
                     ))
                 })?;
 
-            Ok(make_project_info(project_id, &default_branch))
+            let mut info = make_project_info(project_id, &default_branch);
+            info.repository_storage = self.storages.lock().get(&project_id).cloned();
+            Ok(info)
         }
 
         async fn download_archive(

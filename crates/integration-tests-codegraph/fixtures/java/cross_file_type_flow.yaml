@@ -1,4 +1,5 @@
 name: "Java: cross-file type-flow resolution"
+
 fixtures:
   - path: com/example/UserService.java
     content: |

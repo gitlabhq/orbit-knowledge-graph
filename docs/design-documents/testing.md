@@ -88,7 +88,7 @@ Unit tests live in `#[cfg(test)]` modules next to the code they test. They need 
 
 Repository-consistency checks, such as named queries, the migration ledger, and bundled ontology archives, run as unit tests, so `mise test:fast` catches drift.
 
-`mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
+`mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and the integration test targets of `code-graph-incremental`, and skips the crates that have their own jobs.
 
 In CI the same script uses the `ci` profile in [`.config/nextest.toml`](../../.config/nextest.toml). This profile runs every test even after a failure and retries a failed test. It also flags slow tests and publishes JUnit results.
 
@@ -171,6 +171,14 @@ CI splits the container tests into lanes that run in parallel. One lane runs mos
 Query scenarios are the main test surface for query correctness. They live in [`data_correctness/scenarios`](../../crates/integration-tests/tests/server/data_correctness/scenarios), in one directory for each category, such as security, search, and traversal.
 
 Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
+
+The runner validates response schemas and cursor metadata. Repeated queries must
+preserve node order within each entity type, properties, edges, and aggregation rows. Pagination
+scenarios can compare their combined results with an unpaginated query.
+
+Four [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
+cover cursor encoding, excerpt length, raw path rows, and constructed compiler ASTs.
+The remaining query correctness cases use YAML.
 
 The format reference is in the [`integration-testkit` README](../../crates/integration-testkit/README.md).
 

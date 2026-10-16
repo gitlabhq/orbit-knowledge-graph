@@ -1,4 +1,5 @@
 description: Variable-hop traversal joins consecutive edges when both ID and entity kind match
+
 config:
   security: { paths: ["1/100/1000/"] }
   extra_seed:
@@ -9,10 +10,12 @@ config:
     gl_code_edge:
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99010, source_kind: Definition, relationship_kind: CALLS, target_id: 99011, target_kind: Definition }
       - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99011, source_kind: Definition, relationship_kind: CALLS, target_id: 99012, target_kind: Definition }
+
 query:
   gql: |
     MATCH (a:Definition {id: 99010})-[:CALLS*2]->(b:Definition {id: 99012})
     RETURN a.id, b.id
+
 expect:
   node_count: 2
   nodes:

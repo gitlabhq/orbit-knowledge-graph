@@ -1,14 +1,17 @@
 name: Incoming neighbors keep path narrowing for scope-preserving relationships
+
 query:
   json: |
     {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]}}
   gql: |
     MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
+
 logical:
   expect:
     - (Input neighbors (...))
+
 physical:
   clickhouse:
     emitted:
       expect:
-        - (SemiJoin e.traversal_path IN subquery (_) (Project _tpd.traversal_path AS traversal_path (Filter _tpd.id = 1000, _tpd._deleted = false (Deduplicate Final (Scan Table(gl_project) AS _tpd)))))
+        - (SemiJoin _e.traversal_path IN subquery (_) (Project _tpd.traversal_path AS traversal_path (Filter _tpd.id = 1000, _tpd._deleted = false (Deduplicate Final (Scan Table(gl_project) AS _tpd)))))

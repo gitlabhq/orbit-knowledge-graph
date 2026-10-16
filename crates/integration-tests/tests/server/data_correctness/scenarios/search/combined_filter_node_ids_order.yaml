@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_combined_filter_node_ids_order_by
 description: Filter, node_ids, and order_by combine correctly
 
 query:

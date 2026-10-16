@@ -82,6 +82,7 @@ pub struct Usage {
     pub spilled: u64,
     pub deduped_bytes: u64,
     pub duplicate_paths: usize,
+    pub dropped_listed: usize,
 }
 
 type Bytes = Arc<[u8]>;

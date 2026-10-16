@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::locking::{LockError, LockRevision, LockService};
+use crate::locking::{LockError, LockHeld, LockRevision, LockService};
 use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
@@ -208,6 +208,10 @@ impl Handler for MockHandler {
         self.requires_worker_pool
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "the mock panics on purpose to exercise handler panic isolation"
+    )]
     async fn handle(
         &self,
         _context: HandlerContext,
@@ -239,6 +243,10 @@ impl Handler for MockHandler {
                 }
                 HandlerError::Processing(msg) => Err(HandlerError::Processing(msg.clone())),
                 HandlerError::Backpressure(msg) => Err(HandlerError::Backpressure(msg.clone())),
+                HandlerError::Deferred { reason, delay } => Err(HandlerError::Deferred {
+                    reason: reason.clone(),
+                    delay: *delay,
+                }),
             };
         }
 
@@ -249,6 +257,7 @@ impl Handler for MockHandler {
 #[derive(Clone, Default)]
 pub struct MockLockService {
     held: Arc<Mutex<HashMap<String, LockRevision>>>,
+    expires_at: Arc<Mutex<HashMap<String, tokio::time::Instant>>>,
     next_revision: Arc<AtomicU64>,
     leases_stolen: Arc<AtomicBool>,
     renew_backend_errors: Arc<AtomicBool>,
@@ -263,6 +272,13 @@ impl MockLockService {
     pub fn set_lock(&self, key: &str) {
         let revision = self.bump_revision();
         self.held.lock().insert(key.to_string(), revision);
+    }
+
+    pub fn set_lock_for(&self, key: &str, ttl: Duration) {
+        self.set_lock(key);
+        self.expires_at
+            .lock()
+            .insert(key.to_string(), tokio::time::Instant::now() + ttl);
     }
 
     pub fn is_held(&self, key: &str) -> bool {
@@ -289,21 +305,26 @@ impl MockLockService {
 #[async_trait]
 impl LockService for MockLockService {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
-        Ok(self.try_acquire_renewable(key, ttl).await?.is_some())
+        Ok(self.try_acquire_renewable(key, ttl).await?.is_ok())
     }
 
     async fn try_acquire_renewable(
         &self,
         key: &str,
         _ttl: Duration,
-    ) -> Result<Option<LockRevision>, LockError> {
+    ) -> Result<Result<LockRevision, LockHeld>, LockError> {
         let mut held = self.held.lock();
-        if held.contains_key(key) {
-            Ok(None)
+        let mut expires_at = self.expires_at.lock();
+        let time_left = expires_at
+            .get(key)
+            .map(|at| at.saturating_duration_since(tokio::time::Instant::now()));
+        if held.contains_key(key) && time_left != Some(Duration::ZERO) {
+            Ok(Err(LockHeld { time_left }))
         } else {
+            expires_at.remove(key);
             let revision = self.bump_revision();
             held.insert(key.to_string(), revision);
-            Ok(Some(revision))
+            Ok(Ok(revision))
         }
     }
 

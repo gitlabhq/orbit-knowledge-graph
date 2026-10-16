@@ -1,4 +1,5 @@
 name: "Java v1 parity — imported symbol resolution"
+
 fixtures:
   - path: com/example/app/Main.java
     content: |
@@ -11,10 +12,12 @@ fixtures:
               var list2 = List.of("a", "b", "c");
           }
       }
+
   - path: com/example/app/Application.java
     content: |
       package com.example.app;
       public class Application { public void run() {} }
+
   - path: com/example/app/Traceable.java
     content: |
       package com.example.app;
@@ -27,7 +30,7 @@ tests:
   # ── J2: test_java_reference_resolution_to_imported_symbol ──
 
   - name: "Main.main -> ArrayList (imported symbol)"
-    
+
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -38,7 +41,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Main.main -> List (imported symbol)"
-    
+
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'

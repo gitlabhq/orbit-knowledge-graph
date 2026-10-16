@@ -59,6 +59,8 @@ dispatcher:
   enabled: true
 healthCheck:
   enabled: false
+analytics:
+  enabled: false
 
 # Keeps the metrics port open; the chart's PodMonitors are not used here.
 metrics:

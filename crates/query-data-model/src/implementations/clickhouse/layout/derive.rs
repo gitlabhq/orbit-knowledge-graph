@@ -246,7 +246,17 @@ impl crate::Relational<ClickHouse> {
                 source: declaration.source.clone(),
             });
         }
-        let relationship_tables: BTreeMap<_, BTreeSet<_>> = ontology
+        let edge_routes = ontology
+            .edges()
+            .map(|edge| EdgeRoute {
+                relationship: edge.relationship_kind.clone(),
+                source: edge.source_kind.clone(),
+                target: edge.target_kind.clone(),
+                table: edge.destination_table.clone(),
+                foreign_key: edge.fk_column.clone(),
+            })
+            .collect();
+        let relationship_tables = ontology
             .edge_names()
             .map(|kind| {
                 (
@@ -259,41 +269,7 @@ impl crate::Relational<ClickHouse> {
                 )
             })
             .collect();
-        let edge_routes = ontology
-            .edges()
-            .map(|edge| EdgeRoute {
-                relationship: edge.relationship_kind.clone(),
-                source: edge.source_kind.clone(),
-                target: edge.target_kind.clone(),
-                table: edge.destination_table.clone(),
-                foreign_key: edge.fk_column.clone(),
-            })
-            .collect();
-        let mut writers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for node in ontology.nodes() {
-            writers
-                .entry(node.destination_table.clone())
-                .or_default()
-                .insert(node.name.clone());
-        }
-        for entity in ontology
-            .node_names()
-            .chain(
-                ontology
-                    .derived_entities()
-                    .map(|entity| entity.name.as_str()),
-            )
-            .chain(ontology.edge_names())
-        {
-            for kind in ontology.relationship_kinds_emitted_by(entity) {
-                for table in relationship_tables.get(&kind).into_iter().flatten() {
-                    writers
-                        .entry(table.clone())
-                        .or_default()
-                        .insert(entity.to_string());
-                }
-            }
-        }
+        let writers = ontology.table_writers();
         Ok(Self {
             tables,
             metadata: Metadata {

@@ -1,4 +1,5 @@
 name: "Rust: cfg-gated resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -36,7 +37,7 @@ tests:
       WHERE d.name IN ['unix_only', 'call_unix']
       RETURN d.name AS name
     assert:
-      - { column_values: { field: name, values: ['call_unix', 'unix_only'] } }
+      - { column_values: { field: name, values: ["call_unix", "unix_only"] } }
 
   - name: "target_os cfg items are included in the shell-free server profile"
     query: |
@@ -44,7 +45,7 @@ tests:
       WHERE d.name IN ['linux_only', 'call_linux']
       RETURN d.name AS name
     assert:
-      - { column_values: { field: name, values: ['call_linux', 'linux_only'] } }
+      - { column_values: { field: name, values: ["call_linux", "linux_only"] } }
 
   - name: "unix cfg call resolves"
     query: |
@@ -53,7 +54,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'unix_only::helper' } }
+      - { row: { fqn: "unix_only::helper" } }
 
   - name: "target_os cfg call resolves"
     query: |
@@ -62,4 +63,4 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'linux_only::helper' } }
+      - { row: { fqn: "linux_only::helper" } }

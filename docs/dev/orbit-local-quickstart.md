@@ -1,6 +1,6 @@
 # Orbit Local development quickstart
 
-Build and test the `orbit` CLI and related crates without GDK, NATS, Siphon,
+Build and test the `orbit` CLI and related crates without a Caproni cluster, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
 page: language parser additions, `orbit-cli` changes, docs, unit
 tests, and the code-graph integration tests.
@@ -98,13 +98,13 @@ mise run lint:docs                    # markdownlint + Vale + lychee
 For every test layer and where to add a test, see
 [Testing](../design-documents/testing.md).
 
-## What needs GDK
+## What needs the full stack
 
-The container tests run without GDK. They cover SDLC indexing with indexer
+The container tests run without a cluster. They cover SDLC indexing with indexer
 scenarios on a ClickHouse testcontainer. On macOS, start Docker with
 `colima start gkg --memory 12`, then run `mise run test:integration`.
 
-Only these parts need GDK or the [e2e harness](e2e-testing.md):
+Only these parts need the Caproni cluster or the [e2e harness](e2e-testing.md):
 
 - Live Siphon CDC from PostgreSQL.
 - Rails authorization and the Rails query API.

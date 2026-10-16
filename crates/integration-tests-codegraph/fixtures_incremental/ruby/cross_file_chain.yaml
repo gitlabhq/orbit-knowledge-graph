@@ -1,0 +1,51 @@
+name: "Ruby: modules loaded through require_relative call each other"
+
+fixtures:
+  - path: lib/a.rb
+    content: |
+      module Util
+        def self.helper
+        end
+      end
+
+  - path: lib/b.rb
+    content: |
+      require_relative "a"
+
+      module Mid
+        def self.go
+          Util.helper
+        end
+      end
+
+  - path: lib/c.rb
+    content: |
+      require_relative "b"
+
+      class Start
+        def run
+          Mid.go
+        end
+      end
+
+tests:
+  - name: "each file defines its method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['helper', 'go', 'run']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { row: { name: helper, file: lib/a.rb } }
+      - { row: { name: go, file: lib/b.rb } }
+      - { row: { name: run, file: lib/c.rb } }
+
+  - name: "calls on required modules link across files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['run', 'go'] AND callee.name IN ['go', 'helper']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, callee: go, file: lib/b.rb } }
+      - { row: { caller: go, callee: helper, file: lib/a.rb } }

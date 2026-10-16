@@ -1,4 +1,5 @@
 name: "Go: lexical binding ownership"
+
 fixtures:
   - path: shadow/main.go
     content: |
@@ -18,6 +19,7 @@ fixtures:
           }
           f.ping()
       }
+
   - path: control/main.go
     content: |
       package main
@@ -29,6 +31,7 @@ fixtures:
           f := First{}
           f.ping()
       }
+
   - path: short_declaration/main.go
     content: |
       package main
@@ -44,6 +47,7 @@ fixtures:
           }
           f()
       }
+
 tests:
   - name: "Short declarations preserve outer callable and receiver bindings"
     query: |

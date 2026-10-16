@@ -223,7 +223,7 @@ q7_path_finding_user_to_project:
   desc: "Path finding User to Project"
   category: path_finding
   suite: general
-  expect: empty  # random $sample pair + wide BFS OOMs at gitlab-org scope
+  expect: empty # random $sample pair + wide BFS OOMs at gitlab-org scope
   query: |
     {
       "query_type": "path_finding",
@@ -538,7 +538,7 @@ q15_neighbors_many_rel_types:
   desc: "Neighbors many rel_types"
   category: neighbors
   suite: general
-  expect: empty  # User is global; random $sample picks user with no scoped edges
+  expect: empty # User is global; random $sample picks user with no scoped edges
   query: |
     {
       "query_type": "neighbors",
@@ -614,7 +614,7 @@ q17_path_finding_user_to_user:
   desc: "Path finding User to User"
   category: path_finding
   suite: general
-  expect: empty  # random user pair rarely connects via 2 hops in scope
+  expect: empty # random user pair rarely connects via 2 hops in scope
   query: |
     {
       "query_type": "path_finding",
@@ -816,7 +816,7 @@ q23_path_finding_with_filters:
   desc: "Path finding with filters"
   category: path_finding
   suite: general
-  expect: empty  # filtered path-finding frontier OOMs at gitlab-org scope
+  expect: empty # filtered path-finding frontier OOMs at gitlab-org scope
   query: |
     {
       "query_type": "path_finding",
@@ -1606,7 +1606,7 @@ d1_4_hop_user_mr_pipeline_job:
   desc: "4-hop User MR Pipeline Job"
   category: traversal
   suite: general
-  expect: empty  # 4-hop User->MR->Pipeline->Job exceeds the time/memory cap at gitlab-org scope
+  expect: empty # 4-hop User->MR->Pipeline->Job exceeds the time/memory cap at gitlab-org scope
   query: |
     {
       "query_type": "traversal",
@@ -1713,7 +1713,7 @@ d3_mr_pipeline_job_runner:
   desc: "MR Pipeline Job Runner"
   category: traversal
   suite: general
-  expect: empty  # 4-hop MR->Pipeline->Job->Runner exceeds the time/memory cap at gitlab-org scope
+  expect: empty # 4-hop MR->Pipeline->Job->Runner exceeds the time/memory cap at gitlab-org scope
   query: |
     {
       "query_type": "traversal",
@@ -2089,7 +2089,7 @@ h1_path_finding_group_to_group:
   desc: "Path finding Group to Group"
   category: path_finding
   suite: general
-  expect: empty  # random group pair rarely connects via CONTAINS at depth 2
+  expect: empty # random group pair rarely connects via CONTAINS at depth 2
   query: |
     {
       "query_type": "path_finding",
@@ -2119,7 +2119,7 @@ h3_pipeline_child_of_pipeline:
   desc: "Pipeline CHILD_OF Pipeline"
   category: traversal
   suite: general
-  expect: empty  # gitlab-org has zero CHILD_OF (downstream pipeline) edges in v56
+  expect: empty # gitlab-org has zero CHILD_OF (downstream pipeline) edges in v56
   query: |
     {
       "query_type": "traversal",
@@ -2774,4 +2774,3 @@ i12_project_and_vulnerability_severity:
       "aggregation_sort": "-vuln_count",
       "limit": 20
     }
-

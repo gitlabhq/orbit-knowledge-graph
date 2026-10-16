@@ -17,36 +17,42 @@ variants:
 
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Project, id: id }
+    table: gl_ci_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Pipeline belongs to project."
 
   - from_node: { type: Stage, id: id }
     to_node: { type: Project, id: id }
+    table: gl_ci_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Stage belongs to project."
 
   - from_node: { type: Job, id: id }
     to_node: { type: Project, id: id }
+    table: gl_ci_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Job belongs to project."
 
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: Project, id: id }
+    table: gl_sec_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Vulnerability found in project."
 
   - from_node: { type: Finding, id: id }
     to_node: { type: Project, id: id }
+    table: gl_sec_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Finding detected in project."
 
   - from_node: { type: VulnerabilityIdentifier, id: id }
     to_node: { type: Project, id: id }
+    table: gl_sec_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Vulnerability identifier found in project."
@@ -71,48 +77,56 @@ variants:
 
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Project, id: id }
+    table: gl_sec_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Security scan belongs to project."
 
   - from_node: { type: Branch, id: id }
     to_node: { type: Project, id: id }
+    table: gl_code_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Branch belongs to project."
 
   - from_node: { type: Deployment, id: id }
     to_node: { type: Project, id: id }
+    table: gl_ci_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Deployment belongs to project."
 
   - from_node: { type: Environment, id: id }
     to_node: { type: Project, id: id }
+    table: gl_ci_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Environment belongs to project."
 
   - from_node: { type: MergeRequestDiff, id: id }
     to_node: { type: Project, id: id }
+    table: gl_diff_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Merge request diff belongs to project."
 
   - from_node: { type: MergeRequestDiffFile, id: id }
     to_node: { type: Project, id: id }
+    table: gl_diff_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Merge request diff file belongs to project."
 
   - from_node: { type: VulnerabilityScanner, id: id }
     to_node: { type: Project, id: id }
+    table: gl_sec_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Vulnerability scanner belongs to project."
 
   - from_node: { type: VulnerabilityOccurrence, id: id }
     to_node: { type: Project, id: id }
+    table: gl_sec_edge
     fk_column: project_id
     scope: namespace_anchor
     description: "Vulnerability occurrence belongs to project."
@@ -140,3 +154,9 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "Dependency belongs to project."
+
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "Agent session belongs to project."

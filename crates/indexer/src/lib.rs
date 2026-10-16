@@ -29,7 +29,6 @@ pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
 pub mod engine;
-pub mod health;
 pub mod locking;
 pub mod modules;
 pub mod nats;
@@ -57,7 +56,6 @@ use std::time::Duration;
 use clickhouse::{ClickHouseClients, ClickHouseWriter};
 use engine::EngineBuilder;
 use engine::handler::HandlerRegistry;
-use health::run_health_server;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
@@ -81,6 +79,7 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
+    sql_transform: modules::sdlc::SqlTransformFactory,
 ) -> Result<(), IndexerError> {
     let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
@@ -107,19 +106,6 @@ pub async fn run(
     broker
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
-
-    // Start the health server before waiting for schema readiness so that the
-    // Kubernetes liveness probe is answered during the (potentially long) schema
-    // wait phase. Readiness stays `503` until the gate clears (`serving`).
-    let health_serving = serving.clone();
-    let health_shutdown = shutdown.clone();
-    let health_bind_address = config.health_bind_address;
-    let health_task = tokio::spawn(async move {
-        tokio::select! {
-            result = run_health_server(health_bind_address, health_serving) => result,
-            _ = health_shutdown.cancelled() => Ok(()),
-        }
-    });
 
     let schema_version = *schema::version::SCHEMA_VERSION;
     info!(
@@ -162,6 +148,7 @@ pub async fn run(
             writer.clone(),
             analytics.clone(),
             modules::sdlc::PARTITION_MIN_ROWS,
+            sql_transform,
         )
         .await?;
     } else {
@@ -178,6 +165,7 @@ pub async fn run(
             writer.clone(),
             analytics.clone(),
             &resources,
+            shutdown.clone(),
         )
         .await?;
     } else {
@@ -214,22 +202,7 @@ pub async fn run(
 
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
     info!("indexer started");
-    let health_abort = health_task.abort_handle();
-    let result = tokio::select! {
-        result = engine.run(&config.engine) => {
-            health_abort.abort();
-            result.map_err(IndexerError::from)
-        }
-        result = health_task => {
-            let error = result
-                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
-                .err()
-                .unwrap_or_else(|| std::io::Error::other(
-                    "health server exited unexpectedly",
-                ));
-            Err(IndexerError::Health(error))
-        }
-    };
+    let result = engine.run(&config.engine).await.map_err(IndexerError::from);
 
     shutdown_task.abort();
     analytics.shutdown().await;
@@ -274,19 +247,6 @@ pub async fn run_dispatcher(
     let datalake = clients.datalake.clone();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-
-    // Start the health server before migration so that the Kubernetes liveness
-    // probe is answered during the (potentially long) DDL phase. Readiness stays
-    // `503` until migration completes (`serving`).
-    let health_serving = serving.clone();
-    let health_shutdown = shutdown.clone();
-    let health_bind_address = config.health_bind_address;
-    let health_task = tokio::spawn(async move {
-        tokio::select! {
-            result = run_health_server(health_bind_address, health_serving) => result,
-            _ = health_shutdown.cancelled() => Ok(()),
-        }
-    });
 
     let campaign = Arc::new(campaign::CampaignState::new());
 
@@ -451,21 +411,7 @@ pub async fn run_dispatcher(
         Box::new(max_deliveries_reconciler),
     ];
 
-    let health_abort = health_task.abort_handle();
-    tokio::select! {
-        result = orchestrator::launch(triggers, shutdown.clone()) => {
-            health_abort.abort();
-            result.map_err(DispatcherError::from)
-        }
-        result = health_task => {
-            shutdown.cancel();
-            let error = result
-                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
-                .err()
-                .unwrap_or_else(|| std::io::Error::other(
-                    "dispatcher health server exited unexpectedly",
-                ));
-            Err(DispatcherError::Health(error))
-        }
-    }
+    orchestrator::launch(triggers, shutdown)
+        .await
+        .map_err(DispatcherError::from)
 }

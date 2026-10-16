@@ -117,14 +117,10 @@ impl ColumnResolver for MockColumnResolver {
         lookup: &str,
         rows: &[&query_engine::shared::content::PropertyRow],
         _ctx: &query_engine::shared::content::ResolverContext,
-    ) -> Result<Vec<Option<orbit_utils::arrow::ColumnValue>>, PipelineError> {
+    ) -> Result<Vec<Option<orbit_arrow::ColumnValue>>, PipelineError> {
         Ok(rows
             .iter()
-            .map(|_| {
-                Some(orbit_utils::arrow::ColumnValue::String(format!(
-                    "mock:{lookup}"
-                )))
-            })
+            .map(|_| Some(orbit_arrow::ColumnValue::String(format!("mock:{lookup}"))))
             .collect())
     }
 }

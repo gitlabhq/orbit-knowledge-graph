@@ -1,5 +1,4 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_datetime_columns_serialize_as_strings
-description: DateTime columns serialize as strings containing the date components
+description: DateTime columns serialize as the expected ISO 8601 UTC strings
 
 query:
   json: |
@@ -18,4 +17,6 @@ expect:
   nodes:
     Note:
       ids: [3000, 3001]
-      prop_present: [created_at]
+      rows:
+        - { id: 3000, created_at: "2024-01-15T10:30:00Z" }
+        - { id: 3001, created_at: "2024-02-20T14:45:00Z" }

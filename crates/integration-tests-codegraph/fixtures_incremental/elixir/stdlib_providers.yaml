@@ -1,4 +1,5 @@
 name: Elixir imported provider and implicit Kernel names
+
 fixtures:
   - path: main.ex
     content: |
@@ -7,6 +8,7 @@ fixtures:
         def run(), do: band(1, 2)
         def implicit_call(), do: length([])
       end
+
 tests:
   - name: Standard calls avoid wildcard fallback
     query: |

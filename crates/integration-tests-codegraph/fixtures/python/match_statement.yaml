@@ -1,4 +1,5 @@
 name: "Python: match statement"
+
 fixtures:
   - path: main.py
     content: |

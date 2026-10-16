@@ -21,13 +21,21 @@ pub(in crate::modules::code) fn run(
     tables: Arc<CodeTableNames>,
     on_batch: Arc<OnBatch>,
 ) -> Result<IndexingReport, SinkError> {
-    use code_graph::v2::error::{
-        AbortPhase, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile,
-    };
+    use code_graph::v2::error::{CodeGraphError, FaultedFile, FileFault};
     use code_graph::v2::pipeline::{PhaseTimings, PipelineStats};
     let started = std::time::Instant::now();
+    let dropped = repository.usage().dropped_listed;
+    if dropped > 0 {
+        tracing::warn!(
+            project_id = envelope.project_id,
+            branch = %envelope.branch,
+            dropped,
+            reason = "file_limit",
+            "listed-only files past the repository file limit have no File row"
+        );
+    }
     let stats = PipelineStats {
-        files_discovered: repository.usage().files,
+        files_discovered: repository.usage().files + dropped,
         bytes_discovered: repository.usage().bytes,
         files_parsed: code_graph_incremental::pipeline::candidates(
             &repository,
@@ -37,7 +45,8 @@ pub(in crate::modules::code) fn run(
         files_skipped: repository
             .files()
             .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
-            .count(),
+            .count()
+            + dropped,
         files_indexed: 0,
         directories_indexed: 0,
         definitions_count: 0,
@@ -82,6 +91,10 @@ pub(in crate::modules::code) fn run(
         |batches| -> Result<(), SinkError> {
             for batches in output.convert(batches)? {
                 {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                    )]
                     let mut stats = indexed.lock().expect("stats lock");
                     stats.files_indexed += batches.files.num_rows();
                     stats.directories_indexed += batches.directories.num_rows();
@@ -101,6 +114,10 @@ pub(in crate::modules::code) fn run(
             Ok(())
         },
     );
+    #[expect(
+        clippy::expect_used,
+        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+    )]
     let mut stats = indexed.into_inner().expect("stats lock");
     let report = match report {
         Ok(report) => report,
@@ -136,6 +153,7 @@ pub(in crate::modules::code) fn run(
                 stats,
                 errors,
                 skipped: Vec::new(),
+                limited: Vec::new(),
                 faults: Vec::new(),
             });
         }
@@ -148,23 +166,8 @@ pub(in crate::modules::code) fn run(
     Ok(IndexingReport {
         stats,
         errors: Vec::new(),
-        skipped: report
-            .skipped
-            .into_iter()
-            .map(|killed| {
-                let phase = match killed.label {
-                    "tree-sitter" => AbortPhase::Parse,
-                    "rewrite" => AbortPhase::Walk,
-                    "link" => AbortPhase::Ssa,
-                    _ => AbortPhase::Sentinel,
-                };
-                SkippedFile {
-                    detail: killed.to_string(),
-                    path: killed.path,
-                    kind: FileSkip::Timeout(phase),
-                }
-            })
-            .collect(),
+        skipped: report.skipped.into_iter().map(skipped_file).collect(),
+        limited: report.limited.into_iter().map(skipped_file).collect(),
         faults: report
             .unread_files
             .into_iter()
@@ -175,6 +178,30 @@ pub(in crate::modules::code) fn run(
             })
             .collect(),
     })
+}
+
+fn skipped_file(killed: code_graph_incremental::Killed) -> code_graph::v2::error::SkippedFile {
+    use code_graph::v2::error::{AbortPhase, FileSkip};
+    let kind = match killed.label.as_ref() {
+        "resolve" if killed.path.is_empty() => FileSkip::CrossFileTimeout,
+        "resolve" => FileSkip::ResolveTimeout,
+        "names" => FileSkip::TooManyNames,
+        "tree-sitter" => FileSkip::Timeout(AbortPhase::Parse),
+        "depth" => FileSkip::DeeplyNested,
+        "stack" => FileSkip::StackLimit,
+        "rewrite" => FileSkip::Timeout(AbortPhase::Walk),
+        "link" => FileSkip::Timeout(AbortPhase::Ssa),
+        "edges" => FileSkip::TooManyEdges,
+        "manifests" => FileSkip::TooManyManifestBytes,
+        "fqn" => FileSkip::FqnTruncated,
+        _ => FileSkip::Timeout(AbortPhase::Sentinel),
+    };
+    code_graph::v2::error::SkippedFile {
+        detail: killed.to_string(),
+        family: killed.family.map(|lang| lang.family().to_string()),
+        path: killed.path,
+        kind,
+    }
 }
 
 const SLOWEST_FILES: usize = 100;

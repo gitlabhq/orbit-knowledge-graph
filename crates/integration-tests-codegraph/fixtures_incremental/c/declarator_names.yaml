@@ -12,6 +12,7 @@ fixtures:
       int (/*c*/ commented)(int a) { return a; }
       int attributed(int a) [[deprecated]] { return a; }
       void (__cdecl mscall)(int a) { }
+
   - path: types.c
     content: |
       typedef int *ptr_typedef;

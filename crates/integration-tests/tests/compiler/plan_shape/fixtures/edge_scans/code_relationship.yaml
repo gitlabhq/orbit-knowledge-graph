@@ -1,4 +1,5 @@
 name: Code relationships retain endpoint filtering on both backends
+
 query:
   json: |
     {
@@ -12,10 +13,12 @@ query:
   gql: |
     MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
     RETURN caller.id, callee.id
+
 logical:
   expect:
     - (Filter caller.id IN [1] (NodeScan Definition AS caller))
     - (EdgeScan CALLS caller->callee AS e0)
+
 physical:
   clickhouse:
     planned:
@@ -25,6 +28,6 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON callee.id = _orbit_edge_0.target_id (_) (Bind callee (_)))
-        - (Join ON caller.id = _orbit_edge_0.source_id (_) (Bind caller (_)))
-        - (Scan Table(gl_edge) AS _orbit_edge_0)
+        - (Join ON callee.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS callee)))
+        - (Join ON caller.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS caller)))
+        - (Scan Table(gl_edge) AS e0)

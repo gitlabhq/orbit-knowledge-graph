@@ -39,6 +39,10 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Ge, column(value), Expr::int(*start)),
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
+        Predicate::ColumnsEqual { left, right } => Expr::eq(
+            Expr::col(&left.source, &left.name),
+            Expr::col(&right.source, &right.name),
+        ),
         Predicate::Live { alias } => sql::deleted_false(alias),
         Predicate::EntityKind {
             column: value,

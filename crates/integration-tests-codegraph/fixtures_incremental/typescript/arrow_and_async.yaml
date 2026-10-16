@@ -1,5 +1,6 @@
 name: "TypeScript: arrow functions, async/await, const bindings"
 pipeline: js
+
 fixtures:
   - path: main.ts
     content: |

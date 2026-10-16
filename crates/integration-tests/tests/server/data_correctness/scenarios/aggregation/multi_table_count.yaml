@@ -1,4 +1,5 @@
 description: Single-hop count reads every physical edge table
+
 config:
   redaction:
     allow:
@@ -8,14 +9,15 @@ config:
       - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, auto_canceled_by_id: 99002 }
       - { id: 99001, traversal_path: "1/100/1000/", project_id: 1000 }
       - { id: 99002, traversal_path: "1/100/1000/", project_id: 1000 }
-    gl_edge:
-      - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 99001, target_kind: Pipeline }
     gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 99001, target_kind: Pipeline }
       - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: Pipeline, relationship_kind: AUTO_CANCELED_BY, target_id: 99002, target_kind: Pipeline }
+
 query:
   gql: |
     MATCH (a:Pipeline {id: 99000})-[:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
     RETURN count(b) AS n
+
 expect:
   skip_requirements: [node_ids]
   row_count: 1

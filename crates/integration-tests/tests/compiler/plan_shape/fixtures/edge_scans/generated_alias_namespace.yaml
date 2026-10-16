@@ -1,13 +1,17 @@
 name: Generated edge aliases cannot collide with user node aliases
+
 missing_frontends:
   json: The JSON query form is already normalized and does not expose GQL node aliases.
+
 query:
   gql: |
     MATCH (e0:Definition {id: 12000})-[:CALLS]->(b:Definition)
     RETURN e0.name, b.name
+
 logical:
   expect:
     - (EdgeScan CALLS e0->b AS e0)
+
 physical:
   clickhouse:
     planned:

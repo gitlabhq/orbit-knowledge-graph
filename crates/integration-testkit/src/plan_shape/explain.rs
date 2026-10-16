@@ -589,6 +589,10 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} >= {start}", planned_column(column)),
             format!("{} <= {end}", planned_column(column)),
         ],
+        Predicate::ColumnsEqual { left, right } => vec![format!(
+            "{}.{} = {}.{}",
+            left.source, left.name, right.source, right.name
+        )],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
         Predicate::EntityKind { column, entity } => vec![format!(
             "{} = {}",
