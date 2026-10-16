@@ -69,6 +69,10 @@ fixtures:
           def t0(self):
               pass
 
+          @reg.hook
+          def t1(self, reg):
+              pass
+
 
       class Prop:
           @property
@@ -144,7 +148,7 @@ tests:
       RETURN caller.start_line AS setter, callee.start_line AS getter
     assert:
       - { row_count: 1 }
-      - { row: { setter: 74, getter: 70 } }
+      - { row: { setter: 78, getter: 74 } }
 
   - name: a lambda parameter in a default value does not shadow the module function in the body
     # Known gap: the lambda parameter binds in the def until a lambda is a node of its own,
@@ -162,6 +166,15 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main.T.t0'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Reg.hook" } }
+
+  - name: a member decorator whose root is also a parameter still names the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.T.t1'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
