@@ -7,8 +7,8 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use futures::StreamExt;
 use ontology::{PathResolution, ReindexSource};
+use orbit_log_fields::{error, warn};
 use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
-use tracing::{error, warn};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
@@ -94,7 +94,7 @@ impl DatalakeChangeDetector {
         combined_err: &ClickHouseError,
     ) -> Result<Vec<RecordBatch>, TaskError> {
         warn!(
-            error = %combined_err,
+            expanded(ERROR_MESSAGE) = %combined_err,
             "combined change detection query failed; retrying one branch per source table"
         );
 
@@ -120,9 +120,9 @@ impl DatalakeChangeDetector {
                     self.metrics
                         .record_error(super::TASK_NAME, "detection_branch");
                     error!(
-                        table = %branch.table,
-                        entity = %branch.target,
-                        error = %err,
+                        safe(TABLE) = branch.table.as_str(),
+                        safe(ENTITY) = branch.target.as_str(),
+                        expanded(ERROR_MESSAGE) = %err,
                         "change detection branch failed; skipping it until the next full sweep"
                     );
                 }

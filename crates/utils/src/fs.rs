@@ -18,6 +18,15 @@ pub enum RemovedSymlinkReason {
     Dangling,
 }
 
+impl RemovedSymlinkReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EscapesRoot => "escapes_root",
+            Self::Dangling => "dangling",
+        }
+    }
+}
+
 /// Canonicalize `path` and return it only if the real target lives
 /// inside `root`. The path-traversal guard every subsystem that turns
 /// a user-supplied specifier into a filesystem read should route
@@ -142,10 +151,10 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
             if meta.is_symlink() {
                 match check_symlink(&path, root) {
                     Ok(Some(removed)) => {
-                        tracing::warn!(
-                            relative_path = %removed.relative_path.display(),
-                            symlink_target = %removed.target.display(),
-                            reason = ?removed.reason,
+                        orbit_log_fields::warn!(
+                            expanded(FILE_PATH) = %removed.relative_path.display(),
+                            expanded(SYMLINK_TARGET) = %removed.target.display(),
+                            safe(REASON) = removed.reason.as_str(),
                             "removing symlink"
                         );
                         removed_symlinks.push(removed);

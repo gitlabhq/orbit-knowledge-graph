@@ -1,13 +1,13 @@
 use std::time::Duration;
 
+use orbit_log_fields::warn;
 use reqwest::StatusCode;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
-use tracing::warn;
 
 use super::key::CdotRequest;
-use crate::constants::{APP_ID, CDOT_QUOTA_PATH};
+use crate::constants::{APP_ID, CDOT_QUOTA_PATH, normalize_realm};
 
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
@@ -36,7 +36,8 @@ pub(crate) enum QuotaOutcome {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum FailureReason {
     Unreachable,
     Unauthorized,
@@ -100,10 +101,10 @@ impl QuotaClient {
                 .and_then(|c| HeaderValue::from_str(c.expose_secret()).ok())
             else {
                 warn!(
-                    user_id = %request.key.user_id,
-                    instance_id = %request.key.instance_id,
-                    unique_instance_id = %request.key.unique_instance_id,
-                    feature_qualified_name = %request.key.feature_qualified_name,
+                    safe(INSTANCE_ID) = request.key.instance_id.as_str(),
+                    safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
+                    safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
+                    safe(CORRELATION_ID) = request.correlation_id.as_str(),
                     "license_checksum claim is missing or not a valid header value; failing closed"
                 );
                 return QuotaOutcome::Failed {
@@ -119,14 +120,12 @@ impl QuotaClient {
             Ok(r) => r,
             Err(e) => {
                 warn!(
-                    error = %e,
-                    user_id = %request.key.user_id,
-                    realm = %request.key.realm,
-                    root_namespace_id = %request.key.root_namespace_id,
-                    global_user_id = %request.global_user_id,
-                    instance_id = %request.key.instance_id,
-                    unique_instance_id = %request.key.unique_instance_id,
-                    feature_qualified_name = %request.key.feature_qualified_name,
+                    expanded(ERROR_MESSAGE) = %e,
+                    safe(REALM) = normalize_realm(&request.key.realm),
+                    safe(INSTANCE_ID) = request.key.instance_id.as_str(),
+                    safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
+                    safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
+                    safe(CORRELATION_ID) = request.correlation_id.as_str(),
                     "quota check request failed; failing closed"
                 );
                 return QuotaOutcome::Failed {
@@ -155,15 +154,13 @@ impl QuotaClient {
         }
 
         warn!(
-            status = %status,
-            block_reason = block_reason.as_deref().unwrap_or("none"),
-            user_id = %request.key.user_id,
-            realm = %request.key.realm,
-            root_namespace_id = %request.key.root_namespace_id,
-            global_user_id = %request.global_user_id,
-            instance_id = %request.key.instance_id,
-            unique_instance_id = %request.key.unique_instance_id,
-            feature_qualified_name = %request.key.feature_qualified_name,
+            safe(HTTP_STATUS_CODE) = status.as_u16(),
+            expanded(BLOCK_REASON) = block_reason.as_deref().unwrap_or("none"),
+            safe(REALM) = normalize_realm(&request.key.realm),
+            safe(INSTANCE_ID) = request.key.instance_id.as_str(),
+            safe(UNIQUE_INSTANCE_ID) = request.key.unique_instance_id.as_str(),
+            safe(FEATURE_QUALIFIED_NAME) = request.key.feature_qualified_name.as_str(),
+            safe(CORRELATION_ID) = request.correlation_id.as_str(),
             "unexpected quota check response; failing closed"
         );
         let reason = if status == StatusCode::UNAUTHORIZED {

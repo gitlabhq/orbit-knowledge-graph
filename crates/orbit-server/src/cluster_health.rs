@@ -6,10 +6,10 @@ use chrono::Utc;
 use clickhouse_client::ArrowClickHouseClient;
 use gitlab_client::{GitlabClient, GitlabClientError};
 use health_check::HealthStatus;
+use orbit_log_fields::warn;
 use orbit_migrations::version::read_migrating_version;
 use tokio::time::timeout;
 use toon_format::{EncodeOptions, encode};
-use tracing::warn;
 
 use crate::health_client::InfrastructureHealthClient;
 use crate::proto::{
@@ -93,7 +93,7 @@ impl ClusterHealthChecker {
             Ok(Some(version)) => apply_migration_status(structured, version),
             Ok(None) => {}
             Err(error) => warn!(
-                %error,
+                expanded(ERROR_MESSAGE) = %error,
                 "failed to read migrating schema version; leaving cluster health unhealthy"
             ),
         }
@@ -115,7 +115,11 @@ impl ClusterHealthChecker {
                 apply_gitlab_status(structured, ClusterStatus::Healthy, None);
             }
             Ok(Err(error)) => {
-                warn!(%error, "GitLab health check failed");
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    "GitLab health check failed"
+                );
                 apply_gitlab_status(
                     structured,
                     ClusterStatus::Unhealthy,
@@ -124,7 +128,7 @@ impl ClusterHealthChecker {
             }
             Err(_) => {
                 warn!(
-                    timeout_seconds = GITLAB_HEALTH_CHECK_TIMEOUT.as_secs(),
+                    safe(TIMEOUT_S) = GITLAB_HEALTH_CHECK_TIMEOUT.as_secs_f64(),
                     "GitLab health check timed out"
                 );
                 apply_gitlab_status(
@@ -287,7 +291,10 @@ impl ClusterHealthChecker {
 
         let options = EncodeOptions::default();
         encode(&toon, &options).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "Failed to encode health as TOON, falling back");
+            orbit_log_fields::warn!(
+                expanded(ERROR_MESSAGE) = %e,
+                "Failed to encode health as TOON, falling back"
+            );
             format!("status:{}", toon.status)
         })
     }

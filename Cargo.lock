@@ -1286,6 +1286,7 @@ dependencies = [
  "circuit-breaker",
  "clickhouse",
  "futures",
+ "orbit-log-fields",
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
@@ -1371,6 +1372,7 @@ dependencies = [
  "jsonschema",
  "memchr",
  "orbit-arrow",
+ "orbit-log-fields",
  "orbit-utils",
  "oxc",
  "oxc_linter",
@@ -3342,6 +3344,7 @@ dependencies = [
  "circuit-breaker",
  "futures",
  "jsonwebtoken",
+ "orbit-log-fields",
  "orbit-observability",
  "orbit-server-config",
  "rand 0.10.2",
@@ -3349,9 +3352,9 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3567,12 +3570,12 @@ dependencies = [
  "kube",
  "labkit",
  "nats-client",
+ "orbit-log-fields",
  "orbit-server-config",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3954,6 +3957,7 @@ dependencies = [
  "opentelemetry",
  "orbit-analytics",
  "orbit-arrow",
+ "orbit-log-fields",
  "orbit-migrations",
  "orbit-observability",
  "orbit-server-config",
@@ -5102,13 +5106,13 @@ dependencies = [
  "bytes",
  "circuit-breaker",
  "futures",
+ "orbit-log-fields",
  "orbit-server-config",
  "parking_lot",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -5569,6 +5573,7 @@ name = "orbit-analytics"
 version = "0.1.0"
 dependencies = [
  "labkit-events",
+ "orbit-log-fields",
  "orbit-server-config",
  "orbit-versions",
  "parking_lot",
@@ -5578,7 +5583,6 @@ dependencies = [
  "serde_json",
  "syn 2.0.118",
  "tokio",
- "tracing",
  "typify",
 ]
 
@@ -5604,6 +5608,7 @@ dependencies = [
  "labkit-events",
  "moka",
  "opentelemetry",
+ "orbit-log-fields",
  "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
@@ -5614,11 +5619,11 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tonic",
  "tonic-types",
- "tracing",
  "uuid",
 ]
 
@@ -5645,6 +5650,7 @@ dependencies = [
  "mimalloc",
  "ontology",
  "orbit-analytics",
+ "orbit-log-fields",
  "orbit-prompts",
  "orbit-search",
  "orbit-utils",
@@ -5700,13 +5706,13 @@ dependencies = [
  "nats-client",
  "ontology",
  "orbit-arrow",
+ "orbit-log-fields",
  "orbit-utils",
  "orbit-versions",
  "query-data-model",
  "regex",
  "serde",
  "thiserror 2.0.18",
- "tracing",
  "uuid",
 ]
 
@@ -5727,8 +5733,8 @@ version = "0.1.0"
 dependencies = [
  "circuit-breaker",
  "opentelemetry",
+ "orbit-log-fields",
  "serde",
- "tracing",
 ]
 
 [[package]]
@@ -5823,6 +5829,7 @@ dependencies = [
  "chrono",
  "config",
  "croner",
+ "orbit-log-fields",
  "orbit-utils",
  "schemars 1.2.1",
  "serde",
@@ -5831,7 +5838,6 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -5844,6 +5850,7 @@ dependencies = [
  "libc",
  "lz4_flex 0.11.6",
  "memchr",
+ "orbit-log-fields",
  "rayon",
  "regex",
  "rustc-hash 2.1.3",
@@ -5856,7 +5863,6 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.18",
- "tracing",
  "typed-path",
 ]
 
@@ -7121,6 +7127,7 @@ dependencies = [
  "formatters",
  "labkit",
  "ontology",
+ "orbit-log-fields",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",
@@ -10418,11 +10425,11 @@ name = "treesitter-visit"
 version = "0.1.0"
 dependencies = [
  "cpu-time",
+ "orbit-log-fields",
  "serde",
  "smallvec",
  "stacker",
  "thiserror 2.0.18",
- "tracing",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c",
@@ -11451,6 +11458,7 @@ dependencies = [
  "futures",
  "jsonwebtoken",
  "ontology",
+ "orbit-log-fields",
  "orbit-migrations",
  "orbit-observability",
  "orbit-server",
@@ -11470,7 +11478,6 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tonic",
- "tracing",
  "tracing-subscriber",
 ]
 

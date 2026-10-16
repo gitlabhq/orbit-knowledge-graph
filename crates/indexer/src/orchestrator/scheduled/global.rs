@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use tracing::info;
+use orbit_log_fields::info;
 use uuid::Uuid;
 
 use crate::campaign::CampaignState;

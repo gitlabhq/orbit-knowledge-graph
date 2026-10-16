@@ -23,9 +23,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use orbit_log_fields::{debug, info, warn};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
@@ -103,7 +103,7 @@ pub async fn run_loop(
     let mut panicked = 0usize;
     while let Some(result) = handles.join_next().await {
         if let Err(error) = result {
-            warn!(%error, "task loop panicked");
+            warn!(expanded(ERROR_MESSAGE) = %error, "task loop panicked");
             panicked += 1;
         }
     }
@@ -121,7 +121,7 @@ async fn run_task_loop(
     shutdown: CancellationToken,
 ) {
     let task_name = task.name().to_owned();
-    info!(task = task_name, "task loop started");
+    info!(safe(TASK) = task_name.as_str(), "task loop started");
 
     loop {
         let delay = task.schedule().next_delay(Utc::now());
@@ -136,26 +136,34 @@ async fn run_task_loop(
         match lock_service.try_acquire(&cadence_key, ttl).await {
             Ok(true) => {}
             Ok(false) => {
-                info!(task = task_name, "skipping, within interval");
+                info!(safe(TASK) = task_name.as_str(), "skipping, within interval");
                 continue;
             }
             Err(error) => {
-                warn!(task = task_name, %error, "cadence lock check failed");
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "cadence lock check failed"
+                );
                 continue;
             }
         }
 
         match task.run().await {
             Ok(()) => {
-                debug!(task = task_name, "task completed");
+                debug!(safe(TASK) = task_name.as_str(), "task completed");
             }
             Err(error) => {
-                warn!(task = task_name, %error, "task failed");
+                warn!(
+                    safe(TASK) = task_name.as_str(),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "task failed"
+                );
             }
         }
     }
 
-    info!(task = task_name, "task loop stopped");
+    info!(safe(TASK) = task_name.as_str(), "task loop stopped");
 }
 
 /// Trigger A: the cron-driven scheduler. Wraps [`run_loop`] over a fixed set of

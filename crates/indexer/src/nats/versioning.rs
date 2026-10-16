@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::DeleteStreamErrorKind;
 use futures::TryStreamExt;
-use tracing::{debug, info, warn};
+use orbit_log_fields::{debug, info, warn};
 
 use crate::dead_letter::DEAD_LETTER_STREAM;
 use crate::locking::INDEXING_LOCKS_BUCKET;
@@ -137,7 +137,10 @@ pub async fn gc_idle_release_streams(
         if alive.contains(release) {
             continue;
         }
-        info!(release, "release GC: deleting idle release streams");
+        info!(
+            safe(RELEASE) = release.as_str(),
+            "release GC: deleting idle release streams"
+        );
         if let Err(CleanupError(mut stream_errors)) = delete_streams(client, names, release).await {
             errors.append(&mut stream_errors);
         }
@@ -191,7 +194,11 @@ async fn delete_streams(
 
     for name in names {
         match jetstream.delete_stream(name).await {
-            Ok(_) => info!(context, stream = %name, "deleted versioned stream"),
+            Ok(_) => info!(
+                safe(RELEASE) = context,
+                safe(NATS_STREAM) = name.as_str(),
+                "deleted versioned stream"
+            ),
             Err(e)
                 if matches!(
                     e.kind(),
@@ -199,10 +206,19 @@ async fn delete_streams(
                         if js_err.kind() == ErrorCode::STREAM_NOT_FOUND
                 ) =>
             {
-                debug!(context, stream = %name, "versioned stream already deleted, skipping");
+                debug!(
+                    safe(RELEASE) = context,
+                    safe(NATS_STREAM) = name.as_str(),
+                    "versioned stream already deleted, skipping"
+                );
             }
             Err(e) => {
-                warn!(context, stream = %name, error = %e, "failed to delete versioned stream");
+                warn!(
+                    safe(RELEASE) = context,
+                    safe(NATS_STREAM) = name.as_str(),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to delete versioned stream"
+                );
                 errors.push(format!("stream {name}: {e}"));
             }
         }

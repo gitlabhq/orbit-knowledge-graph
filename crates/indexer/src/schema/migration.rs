@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use orbit_log_fields::{info, warn};
 use orbit_migrations::execute::{self, MigrationError};
 use orbit_migrations::schema::{DictionaryCredentials, GraphSchema};
 use thiserror::Error;
-use tracing::{info, warn};
 
 use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
@@ -53,7 +53,7 @@ pub async fn run_if_needed(
     match active {
         None => {
             info!(
-                schema_version = *SCHEMA_VERSION,
+                safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
                 "fresh install — creating tables from ontology and recording initial schema version"
             );
             let prefix = table_prefix(*SCHEMA_VERSION);
@@ -64,7 +64,7 @@ pub async fn run_if_needed(
         }
         Some(version) if version == *SCHEMA_VERSION => {
             info!(
-                schema_version = *SCHEMA_VERSION,
+                safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
                 "schema version matches — no migration needed"
             );
             metrics.record("complete", "skipped");
@@ -73,8 +73,8 @@ pub async fn run_if_needed(
             let guard = acquire_migration_lock(lock_service, metrics).await?;
             let result = if active_version > *SCHEMA_VERSION {
                 warn!(
-                    active_version,
-                    embedded_version = *SCHEMA_VERSION,
+                    safe(ACTIVE_SCHEMA_VERSION) = active_version,
+                    safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
                     "active schema version is newer than this binary — rolling back to the embedded version"
                 );
                 run_rollback(
@@ -89,8 +89,8 @@ pub async fn run_if_needed(
                 .await
             } else {
                 info!(
-                    active_version,
-                    target_version = *SCHEMA_VERSION,
+                    safe(ACTIVE_SCHEMA_VERSION) = active_version,
+                    safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
                     "schema version mismatch detected — starting migration"
                 );
                 run_forward_migration(
@@ -123,7 +123,7 @@ async fn run_forward_migration(
 ) -> Result<(), DispatcherMigrationError> {
     if read_active_version(graph).await? == Some(*SCHEMA_VERSION) {
         info!(
-            schema_version = *SCHEMA_VERSION,
+            safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
             "migration already completed by another pod — releasing lock"
         );
         metrics.record("complete", "skipped");
@@ -133,7 +133,12 @@ async fn run_forward_migration(
 
     let ledger = MigrationLedger::load_embedded().map_err(MigrationError::Ledger)?;
     let requested_scope = ledger.resolve_scope_between(active_version, *SCHEMA_VERSION);
-    info!(schema_version = *SCHEMA_VERSION, %requested_scope, "preparing tables for schema migration");
+    info!(
+        safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
+        safe(REQUESTED_MIGRATION_SCOPE) = requested_scope.as_str(),
+        safe(ENTITIES) = requested_scope.sdlc_entities(),
+        "preparing tables for schema migration"
+    );
     execute::create_tables_with_selective_cloning(
         graph,
         ontology,
@@ -147,7 +152,7 @@ async fn run_forward_migration(
     metrics.record("create_tables", "success");
 
     info!(
-        schema_version = *SCHEMA_VERSION,
+        safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
         "marking schema version as migrating"
     );
     mark_version_migrating(graph, *SCHEMA_VERSION).await?;
@@ -156,9 +161,9 @@ async fn run_forward_migration(
     campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
     metrics.record("complete", "success");
     info!(
-        active_version,
-        target_version = *SCHEMA_VERSION,
-        new_prefix = %table_prefix(*SCHEMA_VERSION),
+        safe(ACTIVE_SCHEMA_VERSION) = active_version,
+        safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
+        safe(TABLE_PREFIX) = table_prefix(*SCHEMA_VERSION),
         "migration complete — indexer will write to new-prefix tables; \
          dispatcher backfill will repopulate via normal namespace poll cycle"
     );
@@ -177,7 +182,7 @@ async fn run_rollback(
 ) -> Result<(), DispatcherMigrationError> {
     if read_active_version(graph).await? == Some(*SCHEMA_VERSION) {
         info!(
-            schema_version = *SCHEMA_VERSION,
+            safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
             "rollback already completed by another pod — releasing lock"
         );
         metrics.record("complete", "skipped");
@@ -188,23 +193,24 @@ async fn run_rollback(
 
     if version_tables_complete(graph, *SCHEMA_VERSION, &expected_names).await? {
         info!(
-            active_version,
-            target_version = *SCHEMA_VERSION,
+            safe(ACTIVE_SCHEMA_VERSION) = active_version,
+            safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
             "embedded version's table set is complete — rolling back via direct re-activation"
         );
         let retired_versions = promote_version(graph, *SCHEMA_VERSION).await?;
         metrics.record("complete", "rollback_reactivated");
+        let retired: Vec<String> = retired_versions.iter().map(u32::to_string).collect();
         info!(
-            schema_version = *SCHEMA_VERSION,
-            ?retired_versions,
+            safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
+            safe(RETIRED_SCHEMA_VERSIONS) = retired.join(","),
             "rollback complete — resuming on existing tables"
         );
         return Ok(());
     }
 
     info!(
-        active_version,
-        target_version = *SCHEMA_VERSION,
+        safe(ACTIVE_SCHEMA_VERSION) = active_version,
+        safe(SCHEMA_VERSION) = *SCHEMA_VERSION,
         "embedded version's table set is incomplete — rolling back via rebuild"
     );
     execute::drop_all_version_entities(graph, *SCHEMA_VERSION).await?;

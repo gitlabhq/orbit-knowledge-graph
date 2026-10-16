@@ -38,9 +38,10 @@ impl SnowplowBillingTracker {
             .token_source(source)
             .on_success(Arc::new(|event_ids: &[Uuid]| {
                 METRICS.delivered.add(event_ids.len() as u64, &[]);
-                tracing::info!(
-                    events = event_ids.len(),
-                    event_ids = ?event_ids,
+                let ids: Vec<String> = event_ids.iter().map(Uuid::to_string).collect();
+                orbit_log_fields::info!(
+                    safe(COUNT) = event_ids.len(),
+                    safe(EVENT_IDS) = ids.join(","),
                     "billing event delivery: success"
                 );
             }))
@@ -61,11 +62,12 @@ impl SnowplowBillingTracker {
                     event_ids.len() as u64,
                     &[KeyValue::new(spec::labels::REASON, reason_label)],
                 );
-                tracing::warn!(
-                    events = event_ids.len(),
-                    event_ids = ?event_ids,
-                    reason = reason_label,
-                    status = ?status,
+                let ids: Vec<String> = event_ids.iter().map(Uuid::to_string).collect();
+                orbit_log_fields::warn!(
+                    safe(COUNT) = event_ids.len(),
+                    safe(EVENT_IDS) = ids.join(","),
+                    safe(REASON) = reason_label,
+                    safe(HTTP_STATUS_CODE) = status,
                     "billing event delivery: failed"
                 );
             }))
@@ -77,9 +79,9 @@ impl SnowplowBillingTracker {
     }
 
     pub async fn shutdown(&self) {
-        tracing::info!("billing tracker shutdown: draining queued events");
+        orbit_log_fields::info!("billing tracker shutdown: draining queued events");
         self.tracker.shutdown().await;
-        tracing::info!("billing tracker shutdown: complete");
+        orbit_log_fields::info!("billing tracker shutdown: complete");
     }
 
     fn token_source(
