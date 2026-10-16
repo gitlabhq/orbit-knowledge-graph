@@ -13,7 +13,7 @@ serde_json = { workspace = true }
 strum = { workspace = true }
 sysinfo = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 
 [dev-dependencies]
 orbit-utils = { path = "../utils" }

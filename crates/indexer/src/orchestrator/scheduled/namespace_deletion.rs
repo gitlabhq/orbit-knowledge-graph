@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use tracing::{Instrument, debug, info, info_span, warn};
+use orbit_log_fields::{debug, info, info_span, warn};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
@@ -89,8 +90,8 @@ impl NamespaceDeletionScheduler {
         for root in &roots {
             let span = info_span!(
                 "reconcile_namespace",
-                gl_root_namespace_id = root.top_level_namespace_id(),
-                traversal_path = root.as_str(),
+                safe(GL_ROOT_NAMESPACE_ID) = root.top_level_namespace_id(),
+                safe(TRAVERSAL_PATH) = root.as_str(),
             );
             let reconcile = async {
                 if !root.is_valid() {
@@ -102,8 +103,8 @@ impl NamespaceDeletionScheduler {
                 for outcome in &outcomes {
                     if let Some(error) = &outcome.error {
                         warn!(
-                            table = %outcome.table,
-                            error,
+                            safe(TABLE) = outcome.table.as_str(),
+                            expanded(ERROR_MESSAGE) = error.as_str(),
                             "failed to reconcile moved entities for table"
                         );
                     }
@@ -114,7 +115,7 @@ impl NamespaceDeletionScheduler {
         }
 
         info!(
-            reconciled,
+            safe(COUNT) = reconciled,
             "reconciled moved entities for enabled namespaces"
         );
         Ok(())
@@ -175,7 +176,7 @@ impl NamespaceDeletionScheduler {
             .map_err(TaskError::new)?;
 
         info!(
-            recorded,
+            safe(COUNT) = recorded,
             "recorded newly deleted namespaces for scheduled deletion"
         );
         Ok(())
@@ -194,8 +195,8 @@ impl NamespaceDeletionScheduler {
         for entry in &entries {
             let span = info_span!(
                 "dispatch_namespace_deletion",
-                gl_root_namespace_id = entry.namespace_id,
-                traversal_path = entry.traversal_path.as_str(),
+                safe(GL_ROOT_NAMESPACE_ID) = entry.namespace_id,
+                safe(TRAVERSAL_PATH) = entry.traversal_path.as_str(),
             );
             let dispatch = async {
                 let request = NamespaceDeletionRequest {
@@ -233,7 +234,11 @@ impl NamespaceDeletionScheduler {
             .record_requests_published(self.name(), dispatched);
         self.metrics.record_requests_skipped(self.name(), skipped);
 
-        info!(dispatched, skipped, "dispatched due namespace deletions");
+        info!(
+            safe(DISPATCHED_COUNT) = dispatched,
+            safe(SKIPPED_COUNT) = skipped,
+            "dispatched due namespace deletions"
+        );
         Ok(())
     }
 }

@@ -4,7 +4,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use tracing::{Instrument, debug, warn};
+use orbit_log_fields::{debug, warn};
+use tracing::Instrument;
 
 use crate::nats::{KvPutOptions, KvPutResult};
 
@@ -134,7 +135,11 @@ impl Drop for LockGuard {
             let key = std::mem::take(&mut self.key);
             let release = async move {
                 if let Err(e) = service.release(&key).await {
-                    warn!(key = %key, error = %e, "lock release on guard drop failed");
+                    warn!(
+                        expanded(KV_KEY) = key.as_str(),
+                        expanded(ERROR_MESSAGE) = %e,
+                        "lock release on guard drop failed"
+                    );
                 }
             };
             tokio::spawn(release.in_current_span());
@@ -195,7 +200,7 @@ impl LockService for NatsLockService {
             .map_err(|e| LockError::Backend(e.to_string()))?
         {
             KvPutResult::Success(revision) => {
-                debug!(key, "lock acquired");
+                debug!(expanded(KV_KEY) = key, "lock acquired");
                 return Ok(Ok(revision));
             }
             KvPutResult::RevisionMismatch => return Ok(Err(unknown)),
@@ -213,7 +218,11 @@ impl LockService for NatsLockService {
 
         match decode_expiration(&entry.value) {
             Some(at) if Utc::now() < at => {
-                debug!(key, expires_at = %at, "lock contention, still valid");
+                debug!(
+                    expanded(KV_KEY) = key,
+                    safe(EXPIRES_AT) = at.timestamp(),
+                    "lock contention, still valid"
+                );
                 Ok(Err(LockHeld {
                     time_left: (at - Utc::now()).to_std().ok(),
                 }))
@@ -231,7 +240,7 @@ impl LockService for NatsLockService {
                     .map_err(|e| LockError::Backend(e.to_string()))?
                 {
                     KvPutResult::Success(revision) => {
-                        debug!(key, "lock acquired after expiry");
+                        debug!(expanded(KV_KEY) = key, "lock acquired after expiry");
                         Ok(Ok(revision))
                     }
                     KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(Err(unknown)),
@@ -272,7 +281,7 @@ impl LockService for NatsLockService {
             .kv_delete(INDEXING_LOCKS_BUCKET, key)
             .await
             .map_err(|e| LockError::Backend(e.to_string()));
-        debug!(key, "lock released");
+        debug!(expanded(KV_KEY) = key, "lock released");
         result
     }
 }

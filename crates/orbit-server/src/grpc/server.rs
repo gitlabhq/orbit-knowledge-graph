@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::info;
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::{ServerTlsConfig, TcpIncoming};
-use tracing::info;
 
 use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
@@ -72,7 +72,7 @@ impl GrpcServer {
 
     pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
         let tls_enabled = self.tls_config.is_some();
-        info!(tls = tls_enabled, "Starting gRPC server");
+        info!(safe(TLS_ENABLED) = tls_enabled, "Starting gRPC server");
 
         let service = Arc::new(self.service);
         let gc = &self.grpc_config;

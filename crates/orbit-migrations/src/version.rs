@@ -229,11 +229,13 @@ pub async fn version_tables_complete(
         .collect();
 
     if !missing.is_empty() {
-        tracing::warn!(
-            schema_version = version,
-            ?missing,
-            "version table set is incomplete"
-        );
+        for table in &missing {
+            orbit_log_fields::warn!(
+                safe(SCHEMA_VERSION) = version,
+                safe(TABLE) = table.as_str(),
+                "version table set is incomplete"
+            );
+        }
         return Ok(false);
     }
 

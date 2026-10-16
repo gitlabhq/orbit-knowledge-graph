@@ -40,9 +40,10 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use opentelemetry::KeyValue;
+use orbit_log_fields::{debug, error, info, warn};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, error, info, warn};
+use tracing::Instrument;
 
 use crate::locking::{LockService, NatsLockService};
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
@@ -194,7 +195,11 @@ impl Engine {
         max_inflight: usize,
     ) -> Result<(), EngineError> {
         let topic_name = format!("{}.{}", subscription.stream, subscription.subject);
-        info!(topic = %topic_name, max_inflight, "topic listener starting");
+        info!(
+            safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+            safe(CONCURRENCY) = max_inflight,
+            "topic listener starting"
+        );
 
         let mut messages = self
             .broker
@@ -216,13 +221,13 @@ impl Engine {
                     let redelivered_on_failure = subscription
                         .retry_policy()
                         .is_some_and(|policy| policy.should_redeliver(message.envelope.attempt));
-                    let span = tracing::info_span!(
+                    let span = orbit_log_fields::info_span!(
                         "process_message",
-                        correlation_id = %message.envelope.id.0,
-                        topic = %topic_name,
-                        attempt = message.envelope.attempt,
-                        gl_root_namespace_id = tracing::field::Empty,
-                        traversal_path = tracing::field::Empty,
+                        safe(CORRELATION_ID) = &*message.envelope.id.0,
+                        safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+                        safe(ATTEMPT) = message.envelope.attempt,
+                        safe(GL_ROOT_NAMESPACE_ID) = tracing::field::Empty,
+                        safe(TRAVERSAL_PATH) = tracing::field::Empty,
                     );
                     inflight.spawn(process_message(
                         message,
@@ -238,7 +243,11 @@ impl Engine {
                 }
                 Some(result) = inflight.join_next() => {
                     if let Err(error) = result {
-                        warn!(%error, topic = %topic_name, "message processing task panicked");
+                        warn!(
+                            safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+                            expanded(ERROR_MESSAGE) = %error,
+                            "message processing task panicked"
+                        );
                     }
                 }
             }
@@ -247,13 +256,17 @@ impl Engine {
         let pending_at_shutdown = inflight.len();
         while let Some(result) = inflight.join_next().await {
             if let Err(error) = result {
-                warn!(%error, topic = %topic_name, "message processing task panicked");
+                warn!(
+                    safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "message processing task panicked"
+                );
             }
         }
 
         info!(
-            topic = %topic_name,
-            pending_at_shutdown,
+            safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+            safe(PENDING_TASK_COUNT) = pending_at_shutdown,
             "topic listener stopped"
         );
         Ok(())
@@ -318,12 +331,10 @@ async fn process_message(
     let topic_label = KeyValue::new("topic", topic_name.clone());
     let subject = message.envelope.subject.clone();
     let handler_count = handlers.len();
-    let attempt = message.envelope.attempt;
 
     debug!(
-        %subject,
-        handlers = handler_count,
-        attempt,
+        expanded(NATS_SUBJECT) = %subject,
+        safe(HANDLER_COUNT) = handler_count,
         "message received"
     );
 
@@ -340,7 +351,7 @@ async fn process_message(
     let outcome_label = match outcome {
         HandlersOutcome::Success => {
             if let Err(error) = message.ack().await {
-                warn!(%error, "failed to ack message");
+                warn!(expanded(ERROR_MESSAGE) = %error, "failed to ack message");
             }
             "ack"
         }
@@ -351,14 +362,20 @@ async fn process_message(
                 None => message.nack().await,
             };
             if let Err(error) = nack_result {
-                warn!(%error, "failed to nack message");
+                warn!(expanded(ERROR_MESSAGE) = %error, "failed to nack message");
             }
             "nack"
         }
         HandlersOutcome::Dropped { error } => {
-            warn!(%error, "permanent failure, message dropped");
+            warn!(
+                expanded(ERROR_MESSAGE) = %error,
+                "permanent failure, message dropped"
+            );
             if let Err(term_error) = message.term_ack().await {
-                warn!(%term_error, "failed to term-ack dropped message");
+                warn!(
+                    expanded(ERROR_MESSAGE) = %term_error,
+                    "failed to term-ack dropped message"
+                );
             }
             "term"
         }
@@ -370,7 +387,10 @@ async fn process_message(
                 }
             } else {
                 if let Err(term_error) = message.term_ack().await {
-                    warn!(%term_error, "failed to term-ack exhausted message");
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %term_error,
+                        "failed to term-ack exhausted message"
+                    );
                 }
                 "term"
             }
@@ -386,11 +406,10 @@ async fn process_message(
         .record_message_duration(&topic_label, elapsed.as_secs_f64());
 
     info!(
-        %subject,
-        outcome = outcome_label,
-        duration_ms = elapsed.as_millis() as u64,
-        handlers = handler_count,
-        attempt,
+        expanded(NATS_SUBJECT) = %subject,
+        safe(OUTCOME) = outcome_label,
+        safe(DURATION_S) = elapsed.as_secs_f64(),
+        safe(HANDLER_COUNT) = handler_count,
         "message processed"
     );
 }
@@ -426,7 +445,7 @@ async fn run_handlers(
                     Some(permit) => Some(permit),
                     None => {
                         warn!(
-                            handler = handler.name(),
+                            safe(HANDLER) = handler.name(),
                             "worker pool semaphore closed, skipping handler"
                         );
                         return HandlerTaskOutcome::RetryRequested;
@@ -458,9 +477,10 @@ async fn run_handlers(
             };
             if let Some(retry_delay) = retry_delay {
                 info!(
-                    handler = handler.name(),
-                    subject = %envelope.subject,
-                    %error,
+                    safe(HANDLER) = handler.name(),
+                    safe(ERROR_TYPE) = error.error_kind(),
+                    expanded(NATS_SUBJECT) = %envelope.subject,
+                    expanded(ERROR_MESSAGE) = %error,
                     "redelivering without counting an attempt"
                 );
                 return HandlerTaskOutcome::Backpressure(retry_delay);
@@ -473,9 +493,10 @@ async fn run_handlers(
             };
             if let Some(action) = permanent_action {
                 warn!(
-                    handler = handler.name(),
-                    subject = %envelope.subject,
-                    %error,
+                    safe(HANDLER) = handler.name(),
+                    safe(ERROR_TYPE) = error.error_kind(),
+                    expanded(NATS_SUBJECT) = %envelope.subject,
+                    expanded(ERROR_MESSAGE) = %error,
                     "permanent failure, skipping retries"
                 );
                 let error = error.to_string();
@@ -485,7 +506,12 @@ async fn run_handlers(
                 };
             }
 
-            error!(handler = handler.name(), %error, "handler failed");
+            error!(
+                safe(HANDLER) = handler.name(),
+                safe(ERROR_TYPE) = error.error_kind(),
+                expanded(ERROR_MESSAGE) = %error,
+                "handler failed"
+            );
             HandlerTaskOutcome::TransientError(error.to_string())
         };
         tasks.spawn(task.in_current_span());
@@ -518,7 +544,7 @@ async fn run_handlers(
                 dropped_error.get_or_insert(error);
             }
             Err(join_error) => {
-                warn!(%join_error, "handler task panicked");
+                warn!(expanded(ERROR_MESSAGE) = %join_error, "handler task panicked");
                 exhausted_error.get_or_insert_with(|| format!("handler panicked: {join_error}"));
             }
         }
@@ -547,8 +573,8 @@ async fn run_handlers(
             None => HandlersOutcome::Success,
             Some(policy) if !policy.should_redeliver(envelope.attempt) => {
                 warn!(
-                    attempt = envelope.attempt,
-                    max_attempts = policy.max_attempts,
+                    safe(ATTEMPT) = envelope.attempt,
+                    safe(MAX_ATTEMPTS) = policy.max_attempts,
                     "retry attempts exhausted"
                 );
                 HandlersOutcome::Exhausted {

@@ -53,12 +53,12 @@ pub async fn create_all_versioned_tables(
     version_prefix: &str,
 ) -> Result<(), MigrationError> {
     for table in &schema.tables {
-        tracing::info!(table = %table.name, "creating table");
+        orbit_log_fields::info!(safe(TABLE) = table.name.as_str(), "creating table");
         run_ddl(graph, &table.name, table.to_create_sql(version_prefix)).await?;
     }
-    tracing::info!(
-        count = schema.tables.len(),
-        prefix = %version_prefix,
+    orbit_log_fields::info!(
+        safe(COUNT) = schema.tables.len(),
+        safe(TABLE_PREFIX) = version_prefix,
         "new-prefix tables created"
     );
     create_dictionaries_and_views(graph, schema, credentials, version_prefix).await
@@ -75,8 +75,10 @@ pub async fn create_tables_with_selective_cloning(
 ) -> Result<(), MigrationError> {
     let scope = widen_scope_for_shared_table_writers(ontology, &schema.storage, requested_scope);
     if &scope != requested_scope {
-        tracing::warn!(
-            %requested_scope, %scope,
+        orbit_log_fields::warn!(
+            safe(REQUESTED_MIGRATION_SCOPE) = requested_scope.as_str(),
+            safe(MIGRATION_SCOPE) = scope.as_str(),
+            safe(ENTITIES) = scope.sdlc_entities(),
             "migration scope widened because a changed table has writers outside the requested scope"
         );
     }
@@ -110,16 +112,16 @@ pub async fn create_tables_with_selective_cloning(
             clone_from_active(graph, &active_name, &target_name, &target_entities).await?;
             cloned += 1;
         } else {
-            tracing::info!(table = %target_name, "rebuilding table empty");
+            orbit_log_fields::info!(safe(TABLE) = target_name.as_str(), "rebuilding table empty");
             run_ddl(graph, &target_name, table.to_create_sql(&target_prefix)).await?;
             rebuilt += 1;
         }
     }
-    tracing::info!(
-        cloned,
-        rebuilt,
-        seeded,
-        prefix = %target_prefix,
+    orbit_log_fields::info!(
+        safe(CLONED_TABLE_COUNT) = cloned,
+        safe(REBUILT_TABLE_COUNT) = rebuilt,
+        safe(SEEDED_TABLE_COUNT) = seeded,
+        safe(TABLE_PREFIX) = target_prefix.as_str(),
         "clone-based migration tables prepared"
     );
 
@@ -304,7 +306,10 @@ async fn clone_from_active(
         if !is_interrupted_shell {
             return Ok(());
         }
-        tracing::warn!(table = %target_name, "re-cloning empty shell left by interrupted migration");
+        orbit_log_fields::warn!(
+            safe(TABLE) = target_name,
+            "re-cloning empty shell left by interrupted migration"
+        );
         run_ddl(
             graph,
             target_name,
@@ -313,7 +318,11 @@ async fn clone_from_active(
         .await?;
     }
 
-    tracing::info!(from = %source_name, to = %target_name, "cloning table from active version");
+    orbit_log_fields::info!(
+        safe(SOURCE_TABLE) = source_name,
+        safe(TABLE) = target_name,
+        "cloning table from active version"
+    );
     run_ddl(
         graph,
         target_name,
@@ -352,10 +361,10 @@ async fn seed_checkpoint(
     active_name: &str,
     target_name: &str,
 ) -> Result<(), MigrationError> {
-    tracing::info!(
-        from = %active_name,
-        to = %target_name,
-        excluded_key_prefix = seed.excluded_key_prefix,
+    orbit_log_fields::info!(
+        safe(SOURCE_TABLE) = active_name,
+        safe(TABLE) = target_name,
+        expanded(KV_KEY) = seed.excluded_key_prefix,
         "seeding checkpoint from active version"
     );
     run_parameterized_query(
@@ -381,7 +390,11 @@ async fn create_dictionaries_and_views(
         let prefixed = dictionary
             .clone()
             .with_schema_version_prefix(version_prefix);
-        tracing::info!(dictionary = %prefixed.name, source = %prefixed.source_table, "creating dictionary");
+        orbit_log_fields::info!(
+            safe(TABLE) = prefixed.name.as_str(),
+            safe(SOURCE_TABLE) = prefixed.source_table.as_str(),
+            "creating dictionary"
+        );
         run_ddl(graph, &prefixed.name, prefixed.to_create_sql(credentials)).await?;
     }
 
@@ -394,10 +407,16 @@ async fn create_dictionaries_and_views(
         let prefixed = view
             .clone()
             .with_schema_version_prefix(version_prefix, &all_table_names);
-        tracing::info!(view = %prefixed.name, "creating materialized view");
+        orbit_log_fields::info!(
+            safe(TABLE) = prefixed.name.as_str(),
+            "creating materialized view"
+        );
         run_ddl(graph, &prefixed.name, prefixed.to_create_sql()?).await?;
     }
-    tracing::info!(prefix = %version_prefix, "dictionaries and materialized views created");
+    orbit_log_fields::info!(
+        safe(TABLE_PREFIX) = version_prefix,
+        "dictionaries and materialized views created"
+    );
 
     Ok(())
 }

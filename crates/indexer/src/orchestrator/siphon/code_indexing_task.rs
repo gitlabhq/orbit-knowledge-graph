@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use orbit_log_fields::{debug, info_span, warn};
 use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
-use tracing::{Instrument, debug, info_span, warn};
+use tracing::Instrument;
 
 use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -50,19 +51,34 @@ impl CodeIndexingTaskRoute {
                     continue;
                 };
                 let Some(project_id) = extractor.get_i64(event, "project_id") else {
-                    warn!("failed to extract project_id, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        "failed to extract project_id, skipping"
+                    );
                     continue;
                 };
                 let Some(ref_name) = extractor.get_string(event, "ref") else {
-                    warn!(task_id, "failed to extract ref, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        safe(GL_PROJECT_ID) = project_id,
+                        "failed to extract ref, skipping"
+                    );
                     continue;
                 };
                 let Some(commit_sha) = extractor.get_string(event, "commit_sha") else {
-                    warn!(task_id, "failed to extract commit_sha, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        safe(GL_PROJECT_ID) = project_id,
+                        "failed to extract commit_sha, skipping"
+                    );
                     continue;
                 };
                 let Some(traversal_path) = extractor.get_string(event, "traversal_path") else {
-                    warn!(task_id, "failed to extract traversal_path, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        safe(GL_PROJECT_ID) = project_id,
+                        "failed to extract traversal_path, skipping"
+                    );
                     continue;
                 };
 
@@ -114,10 +130,10 @@ impl Route for CodeIndexingTaskRoute {
         for request in requests.into_values() {
             let span = info_span!(
                 "dispatch_code_indexing_task",
-                task_id = request.task_id,
-                gl_project_id = request.project_id,
-                gl_root_namespace_id = request.traversal_path.top_level_namespace_id(),
-                traversal_path = request.traversal_path.as_str(),
+                safe(TASK_ID) = request.task_id,
+                safe(GL_PROJECT_ID) = request.project_id,
+                safe(GL_ROOT_NAMESPACE_ID) = request.traversal_path.top_level_namespace_id(),
+                safe(TRAVERSAL_PATH) = request.traversal_path.as_str(),
             );
             let dispatch = async {
                 let envelope = Envelope::new(&request).map_err(|error| {

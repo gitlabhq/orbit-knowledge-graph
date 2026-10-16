@@ -360,7 +360,6 @@ rust-toolchain-sync-check:
   script:
     - mise run toolchain:check
 
-# Advisory until every log call uses the orbit_log_fields macros.
 log-safety-check:
   stage: lint
   extends:
@@ -368,7 +367,6 @@ log-safety-check:
     - .mr-and-main-rules
     - .no-cargo-home-cache
   needs: []
-  allow_failure: true
   script:
     - mise run lint:logs
 

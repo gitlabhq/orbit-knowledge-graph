@@ -6,7 +6,10 @@ pub async fn check_clickhouse_health(client: &ArrowClickHouseClient) -> Result<(
 
     match result {
         Ok(version) => {
-            tracing::debug!("ClickHouse version: {}", version);
+            orbit_log_fields::debug!(
+                safe(CLICKHOUSE_VERSION) = version.as_str(),
+                "ClickHouse version"
+            );
             Ok(())
         }
         Err(e) => {

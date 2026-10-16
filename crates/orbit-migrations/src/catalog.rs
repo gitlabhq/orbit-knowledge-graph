@@ -104,8 +104,8 @@ impl OntologyCatalog {
                 let archive =
                     OntologyArchive::bundled(version)?.ok_or(CatalogError::Missing(version))?;
                 self.publish(&archive).await?;
-                tracing::info!(
-                    schema_version = version,
+                orbit_log_fields::info!(
+                    safe(SCHEMA_VERSION) = version,
                     "bootstrapped missing ontology archive from release bundle"
                 );
                 Ok(())

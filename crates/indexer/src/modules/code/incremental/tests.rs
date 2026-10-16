@@ -877,7 +877,7 @@ async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
     assert_eq!(report.stats.files_skipped, 10);
     let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(logs.contains("WARN"), "{logs}");
-    assert!(logs.contains("dropped=7"), "{logs}");
+    assert!(logs.contains("skipped_count=7"), "{logs}");
 }
 
 #[derive(Clone, Default)]

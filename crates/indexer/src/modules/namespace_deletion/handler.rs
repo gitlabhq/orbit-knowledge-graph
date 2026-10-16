@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use tracing::{error, info, warn};
+use orbit_log_fields::{error, info, safe, warn};
 
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;
@@ -50,11 +50,11 @@ impl Handler for NamespaceDeletionHandler {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
         let message_span = tracing::Span::current();
-        message_span.record("gl_root_namespace_id", payload.namespace_id);
+        message_span.record(safe::GL_ROOT_NAMESPACE_ID, payload.namespace_id);
 
         if !payload.traversal_path.is_valid() {
             error!(
-                traversal_path = %payload.traversal_path,
+                expanded(ADDITIONAL_DETAILS) = payload.traversal_path.as_str(),
                 "invalid traversal_path: must match <org_id>/<namespace_id>/"
             );
             return Err(HandlerError::Processing(format!(
@@ -62,7 +62,7 @@ impl Handler for NamespaceDeletionHandler {
                 payload.traversal_path
             )));
         }
-        message_span.record("traversal_path", payload.traversal_path.as_str());
+        message_span.record(safe::TRAVERSAL_PATH, payload.traversal_path.as_str());
 
         let still_deleted = self
             .store
@@ -82,7 +82,11 @@ impl Handler for NamespaceDeletionHandler {
         }
 
         let started_at = Instant::now();
-        info!(dispatch_id = %payload.dispatch_id, "starting namespace deletion");
+        let dispatch_id = payload.dispatch_id.to_string();
+        info!(
+            safe(DISPATCH_ID) = dispatch_id.as_str(),
+            "starting namespace deletion"
+        );
 
         let outcomes = self
             .store
@@ -94,16 +98,16 @@ impl Handler for NamespaceDeletionHandler {
             if let Some(ref error) = outcome.error {
                 self.metrics.record_table_error();
                 warn!(
-                    table = %outcome.table,
-                    error,
+                    safe(TABLE) = outcome.table.as_str(),
+                    expanded(ERROR_MESSAGE) = error.as_str(),
                     "failed to delete namespace data from table"
                 );
                 failed_tables.push(outcome.table.as_str());
             } else {
                 self.metrics.record_table_deleted(outcome.duration_seconds);
                 info!(
-                    table = %outcome.table,
-                    duration_ms = (outcome.duration_seconds * 1000.0) as u64,
+                    safe(TABLE) = outcome.table.as_str(),
+                    safe(DURATION_S) = outcome.duration_seconds,
                     "namespace data deleted from table"
                 );
             }
@@ -128,9 +132,8 @@ impl Handler for NamespaceDeletionHandler {
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
-        let elapsed = started_at.elapsed();
         info!(
-            duration_ms = elapsed.as_millis() as u64,
+            safe(DURATION_S) = started_at.elapsed().as_secs_f64(),
             "namespace deletion completed"
         );
 

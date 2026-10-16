@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tracing::{Instrument, debug, info_span, warn};
+use orbit_log_fields::{debug, info_span, warn};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -40,8 +41,8 @@ impl NamespaceIndexingDispatch {
             let traversal_path = &namespace.traversal_path;
             let span = info_span!(
                 "dispatch_namespace",
-                gl_root_namespace_id = namespace.namespace_id,
-                traversal_path = traversal_path.as_str(),
+                safe(GL_ROOT_NAMESPACE_ID) = namespace.namespace_id,
+                safe(TRAVERSAL_PATH) = traversal_path.as_str(),
             );
             let dispatch = async {
                 if !traversal_path.is_valid() {

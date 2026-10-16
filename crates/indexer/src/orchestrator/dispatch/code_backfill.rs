@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
+use orbit_log_fields::{debug, info, info_span};
 use rand::seq::SliceRandom;
-use tracing::{Instrument, debug, info, info_span};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -122,8 +123,8 @@ impl CodeBackfill {
             let (namespace_id, traversal_path) = &namespaces[index];
             let span = info_span!(
                 "code_backfill_namespace",
-                gl_root_namespace_id = *namespace_id,
-                traversal_path = traversal_path.as_str(),
+                safe(GL_ROOT_NAMESPACE_ID) = *namespace_id,
+                safe(TRAVERSAL_PATH) = traversal_path.as_str(),
             );
             let pending = self
                 .fetch_pending_for_namespace(traversal_path, share)
@@ -144,8 +145,8 @@ impl CodeBackfill {
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             info!(
-                dispatched = outcome.dispatched,
-                skipped = outcome.skipped,
+                safe(DISPATCHED_COUNT) = outcome.dispatched,
+                safe(SKIPPED_COUNT) = outcome.skipped,
                 "dispatched code backfill requests"
             );
         }
@@ -216,13 +217,17 @@ impl CodeBackfill {
             .await?;
 
         if projects.is_empty() {
-            debug!(already_checkpointed, "no pending projects in namespace");
+            debug!(
+                safe(SKIPPED_COUNT) = already_checkpointed,
+                "no pending projects in namespace"
+            );
             return Ok(Vec::new());
         }
 
         debug!(
-            count = projects.len(),
-            already_checkpointed, "fetched pending projects for code backfill"
+            safe(COUNT) = projects.len(),
+            safe(SKIPPED_COUNT) = already_checkpointed,
+            "fetched pending projects for code backfill"
         );
 
         Ok(projects)

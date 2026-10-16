@@ -38,7 +38,7 @@ rand = { workspace = true }
 parquet = { workspace = true }
 sqlformat = { workspace = true }
 tabled = { workspace = true }
-tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 tracing-subscriber = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }

@@ -120,21 +120,22 @@ impl<L: LanguageExt> StrDoc<L> {
                 let mut progress = |state: &tree_sitter::ParseState| {
                     // Bail before the native parse overflows the stack; that fault is an uncatchable SIGSEGV.
                     if stacker::remaining_stack().is_some_and(|r| r < PARSE_STACK_RED_ZONE) {
-                        tracing::warn!("tree-sitter parse aborted: stack near exhaustion");
+                        orbit_log_fields::warn!("tree-sitter parse aborted: stack near exhaustion");
                         return ControlFlow::Break(());
                     }
                     if let Some(budget) = budget
                         && budget.expired()
                     {
-                        tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
+                        orbit_log_fields::warn!("tree-sitter parse aborted: CPU budget exceeded");
                         return ControlFlow::Break(());
                     }
                     let offset = state.current_byte_offset() as u64;
                     if offset == last_offset.load(Ordering::Relaxed) {
                         if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
-                            tracing::warn!(
-                                "tree-sitter parse aborted: stalled at byte offset {offset} \
-                                 (>{max_stall} iterations without progress)"
+                            orbit_log_fields::warn!(
+                                safe(BYTE_OFFSET) = offset,
+                                safe(LIMIT) = max_stall,
+                                "tree-sitter parse aborted: stalled without progress"
                             );
                             return ControlFlow::Break(());
                         }

@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use code_graph::v2::CancellationToken;
 use gitlab_client::{GitlabClientError, ProjectInfo};
-use tracing::{Instrument, debug, info, warn};
+use orbit_log_fields::{debug, expanded, info, safe, warn};
+use tracing::Instrument;
 
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::metrics::CodeMetrics;
@@ -66,11 +67,17 @@ async fn run_with_heartbeat<T>(
                 match guard.renew(lock_ttl).await {
                     Ok(()) => {}
                     Err(error @ LockError::Lost) => {
-                        warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
+                        warn!(
+                            expanded(ERROR_MESSAGE) = %error,
+                            "project lock lost mid-index; cancelling to avoid a double-write"
+                        );
                         cancel.cancel();
                     }
                     Err(error) => {
-                        warn!(%error, "lock renewal failed transiently; retrying on the next heartbeat tick");
+                        warn!(
+                            expanded(ERROR_MESSAGE) = %error,
+                            "lock renewal failed transiently; retrying on the next heartbeat tick"
+                        );
                     }
                 }
             }
@@ -137,19 +144,20 @@ impl Handler for CodeIndexingTaskHandler {
             })?;
         let message_span = tracing::Span::current();
         message_span.record(
-            "gl_root_namespace_id",
+            safe::GL_ROOT_NAMESPACE_ID,
             request.traversal_path.top_level_namespace_id(),
         );
-        message_span.record("traversal_path", request.traversal_path.as_str());
+        message_span.record(safe::TRAVERSAL_PATH, request.traversal_path.as_str());
 
-        let span = tracing::info_span!(
+        let dispatch_id = request.dispatch_id.to_string();
+        let span = orbit_log_fields::info_span!(
             "code_indexing_project",
-            gl_project_id = request.project_id,
-            task_id = request.task_id,
-            commit_sha = request.commit_sha.as_deref(),
-            dispatch_id = %request.dispatch_id,
-            campaign_id = request.campaign_id.as_deref(),
-            branch = request.branch.as_deref(),
+            safe(GL_PROJECT_ID) = request.project_id,
+            safe(TASK_ID) = request.task_id,
+            safe(COMMIT_SHA) = request.commit_sha.as_deref(),
+            safe(DISPATCH_ID) = dispatch_id.as_str(),
+            safe(CAMPAIGN_ID) = request.campaign_id.as_deref(),
+            expanded(BRANCH) = request.branch.as_deref(),
         );
         span.in_scope(|| debug!("received code indexing task"));
 
@@ -214,7 +222,7 @@ impl CodeIndexingTaskHandler {
             checkpoint.complete_empty_repository(request.task_id);
             if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
                 warn!(
-                    error = %e,
+                    expanded(ERROR_MESSAGE) = %e,
                     "failed to write deleted-project checkpoint; dispatcher may republish"
                 );
             }
@@ -224,7 +232,7 @@ impl CodeIndexingTaskHandler {
             self.metrics.record_handler_duration(started_at);
             return Ok(());
         };
-        tracing::Span::current().record("branch", branch.as_str());
+        tracing::Span::current().record(expanded::BRANCH, branch.as_str());
 
         let checkpoint = self
             .checkpoint_store
@@ -241,7 +249,10 @@ impl CodeIndexingTaskHandler {
         }
         let mode = checkpoint.indexing_mode();
 
-        info!(indexing_mode = ?mode, "starting code indexing");
+        info!(
+            safe(INDEXING_MODE) = mode.as_str(),
+            "starting code indexing"
+        );
 
         let mut observers: Vec<Box<dyn IndexingObserver>> =
             vec![Box::new(CodeOtelObserver::new(self.metrics.clone()))];
@@ -293,7 +304,10 @@ impl CodeIndexingTaskHandler {
         match self.repository_service.project_info(project_id).await {
             Ok(info) => info.repository_storage,
             Err(error) => {
-                warn!(%error, "repository storage lookup failed; using the tenant-wide archive budget");
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "repository storage lookup failed; using the tenant-wide archive budget"
+                );
                 None
             }
         }
@@ -302,7 +316,10 @@ impl CodeIndexingTaskHandler {
     async fn refund_attempt(&self, checkpoint: &mut CodeCheckpoint) {
         checkpoint.refund_attempt();
         if let Err(e) = self.checkpoint_store.save(checkpoint).await {
-            warn!(error = %e, "failed to refund the attempt");
+            warn!(
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to refund the attempt"
+            );
         }
     }
 
@@ -320,7 +337,11 @@ impl CodeIndexingTaskHandler {
             Err(held) => held,
         };
         let delay = held.time_left.unwrap_or(self.lock_ttl) + heartbeat_interval;
-        warn!(lock_key = %key, ?delay, "code indexing deferred: lock held by another indexer");
+        warn!(
+            expanded(KV_KEY) = key,
+            safe(RETRY_DELAY_S) = delay.as_secs_f64(),
+            "code indexing deferred: lock held by another indexer"
+        );
         Err(HandlerError::Deferred {
             reason: format!("lock {key} held by another indexer"),
             delay,
@@ -395,7 +416,7 @@ impl CodeIndexingTaskHandler {
             Ok(outcome) => Ok(outcome),
             Err(IndexError::BudgetExceeded { budget }) => {
                 warn!(
-                    budget_secs = budget.as_secs(),
+                    safe(TIMEOUT_S) = budget.as_secs_f64(),
                     "code indexing job exceeded its work budget"
                 );
                 Err(JOB_TIMEOUT_RETRY.global_failure(
@@ -422,7 +443,11 @@ impl CodeIndexingTaskHandler {
         let result = result.map(|outcome| outcome.metric_label());
 
         if let Err(e) = &result {
-            warn!(error = %e, "failed to index code");
+            warn!(
+                safe(ERROR_TYPE) = e.error_kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to index code"
+            );
         }
         let redelivered = match &result {
             Err(HandlerError::Backpressure(_)) => true,
@@ -435,12 +460,12 @@ impl CodeIndexingTaskHandler {
             match guard.renew(self.lock_ttl).await {
                 Ok(()) => self.refund_attempt(&mut checkpoint).await,
                 Err(error @ LockError::Lost) => warn!(
-                    %error,
+                    expanded(ERROR_MESSAGE) = %error,
                     "lock not held at the end of the run; the attempt stays counted"
                 ),
                 Err(error) => {
                     warn!(
-                        %error,
+                        expanded(ERROR_MESSAGE) = %error,
                         "lock renew failed transiently at the end of the run; refunding the attempt"
                     );
                     self.refund_attempt(&mut checkpoint).await;
