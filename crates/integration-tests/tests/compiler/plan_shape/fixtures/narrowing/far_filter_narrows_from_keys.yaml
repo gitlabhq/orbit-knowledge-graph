@@ -62,3 +62,51 @@ cases:
             - (Bind n (Filter n.resolved_at IS NOT NULL, n._deleted = false (Deduplicate LimitBy ... (Filter n.id IN _narrow_n.id (Scan Table(gl_note) AS n)))))
           reject:
             - (CTE _filter_n (_))
+
+  - name: A variable-length first hop keeps the filter-only keys and never narrows the node
+
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition","filters":{"start_line":{"ne":0}},"columns":["id"]},{"id":"c","entity":"Definition","filters":{"name":"compile"}}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]},{"type":"CALLS","from":"b","to":"c"}]}
+      gql: |
+        MATCH (a:Definition {definition_type: 'function'})-[:CALLS*1..2]->(b:Definition)-[:CALLS]->(c:Definition {name: 'compile'})
+        WHERE b.start_line <> 0 RETURN b.id
+
+    logical:
+      expect:
+        - (Filter b.start_line != 0 (_))
+
+    physical:
+      clickhouse:
+        planned:
+          ctes:
+            exact_order: [_filter_b, _filter_c]
+          expect:
+            - (Filter _orbit_edge_0.target_id IN _filter_b.id, ... (Union ALL AS _orbit_edge_0 (_) (_)))
+          reject:
+            - (CTE _narrow_b (_))
+            - (Scan Table(gl_definition) AS b)
+
+  - name: Only the first hop decides, so later selective keys do not narrow a filter-only node
+
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"User","filters":{"state":"active"}},{"id":"mr","entity":"MergeRequest","filters":{"merged_at":{"is_not_null":true}},"columns":["id"]},{"id":"n","entity":"Note","filters":{"discussion_id":"x"}}],"relationships":[{"type":"AUTHORED","from":"a","to":"mr"},{"type":"HAS_NOTE","from":"mr","to":"n"}]}
+      gql: |
+        MATCH (a:User {state: 'active'})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_NOTE]->(n:Note {discussion_id: 'x'})
+        WHERE mr.merged_at IS NOT NULL RETURN mr.id
+
+    logical:
+      expect:
+        - (Filter mr.merged_at IS NOT NULL (_))
+
+    physical:
+      clickhouse:
+        planned:
+          ctes:
+            exact_order: [_filter_a, _filter_mr, _filter_n]
+          expect:
+            - (Filter _orbit_edge_0.source_id IN _filter_a.id, _orbit_edge_0.target_id IN _filter_mr.id, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+          reject:
+            - (CTE _narrow_mr (_))
+            - (Deduplicate LimitBy ... (Filter mr.id IN _narrow_mr.id (_)))

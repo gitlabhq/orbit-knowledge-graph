@@ -853,12 +853,29 @@ fn resolve_node_flags(
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
-    let narrows =
-        |alias: &String| has_filter_only || input.has_negation() && predicate_joins.contains(alias);
+    let mut first_hop: HashMap<&str, &Hop> = HashMap::new();
     let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
     for hop in hops {
+        for alias in [&hop.from_node, &hop.to_node] {
+            first_hop.entry(alias.as_str()).or_insert(hop);
+        }
         *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
     }
+    let partner_has_keys = |alias: &str| {
+        first_hop.get(alias).is_some_and(|hop| {
+            let partner = if hop.from_node == alias {
+                &hop.to_node
+            } else {
+                &hop.from_node
+            };
+            hop.max_hops == 1
+                && nodes
+                    .get(partner)
+                    .is_some_and(NodePlan::has_selective_filters)
+        })
+    };
+    let narrows =
+        |alias: &String| has_filter_only || input.has_negation() && predicate_joins.contains(alias);
     let edge_narrowable = |np: &NodePlan| {
         np.node_ids.is_empty()
             && np.id_range.is_none()
@@ -868,43 +885,29 @@ fn resolve_node_flags(
                 .unwrap_or(0)
                 < 2
     };
-
-    if nodes.keys().any(narrows) {
-        let needs: Vec<String> = nodes
-            .values()
-            .filter(|np| {
-                narrows(&np.alias)
-                    && np.hydration == HydrationStrategy::Join
-                    && !np.has_selective_filters()
-                    && edge_narrowable(np)
-            })
-            .map(|np| np.alias.clone())
-            .collect();
-        for alias in needs {
-            nodes.get_mut(&alias).unwrap().use_narrowing = true;
-        }
-    }
-
-    let narrowed_from_partner: Vec<String> = hops
-        .iter()
-        .filter(|hop| hop.max_hops == 1)
-        .flat_map(|hop| {
-            [
-                (&hop.from_node, &hop.to_node),
-                (&hop.to_node, &hop.from_node),
-            ]
+    let needs: Vec<String> = nodes
+        .values()
+        .filter(|np| {
+            narrows(&np.alias)
+                && np.hydration == HydrationStrategy::Join
+                && !np.has_selective_filters()
+                && edge_narrowable(np)
         })
-        .filter(|(alias, partner)| {
-            nodes.get(*alias).is_some_and(|np| {
-                np.hydration == HydrationStrategy::FilterOnly
-                    && !np.has_selective_filters()
-                    && edge_narrowable(np)
-            }) && nodes
-                .get(*partner)
-                .is_some_and(NodePlan::has_selective_filters)
-        })
-        .map(|(alias, _)| alias.clone())
+        .map(|np| np.alias.clone())
         .collect();
+    let narrowed_from_partner: Vec<String> = nodes
+        .values()
+        .filter(|np| {
+            np.hydration == HydrationStrategy::FilterOnly
+                && !np.has_selective_filters()
+                && edge_narrowable(np)
+                && partner_has_keys(&np.alias)
+        })
+        .map(|np| np.alias.clone())
+        .collect();
+    for alias in needs {
+        nodes.get_mut(&alias).unwrap().use_narrowing = true;
+    }
     for alias in narrowed_from_partner {
         let np = nodes.get_mut(&alias).unwrap();
         np.hydration = HydrationStrategy::Join;
