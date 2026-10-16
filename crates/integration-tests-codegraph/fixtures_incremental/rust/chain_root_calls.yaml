@@ -104,6 +104,16 @@ tests:
     assert:
       - { row_count: 1 }
 
+  - name: "the method after a question mark resolves through the inner type"
+    # Known gap: the receiver takes the return type Result<Items, ()>, the wrapper, not its argument, so count has no edge; the same gap as the let row in !2891.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "chain_through_try" AND callee.name = "count"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
   - name: "a bare glob-export call keeps its edge when the chain in the same def is no longer a glob referrer"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
