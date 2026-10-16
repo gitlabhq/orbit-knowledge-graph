@@ -1839,14 +1839,13 @@ fn member_targets<'a>(
     if implementations.next().is_some() {
         return Vec::new();
     }
-    let callable = ctx.tags.callable;
-    find_method_in(implementation, member.sym(), role, callable)
-        .or_else(|| {
-            find_method_in(contract, member.sym(), role, callable)
+    let find = |role| {
+        find_method_in(implementation, member.sym(), role, ctx.tags.callable).or_else(|| {
+            find_method_in(contract, member.sym(), role, ctx.tags.callable)
                 .filter(|method| !method.has(C::Declaration))
         })
-        .into_iter()
-        .collect()
+    };
+    find(role).or_else(|| find(Role::Any)).into_iter().collect()
 }
 
 fn extension_members<'a>(
@@ -1886,27 +1885,20 @@ fn declared_member<'a>(
 ) -> Option<Cursor<'a>> {
     let parts = partial_key(cls, ctx.packages).and_then(|k| ctx.partials.get(&k));
     let parts = parts.into_iter().flatten().map(|l| cls.jump(l.fi, l.node));
-    let owners = std::iter::once(cls)
+    let owners: Vec<_> = std::iter::once(cls)
         .chain(impl_blocks_of(ctx, cls))
-        .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())));
-    let mut fallback = None;
-    for owner in owners {
-        let found = if owner.is(C::Def) {
-            members_of(ctx, owner)
-                .get(&name)
-                .map(|slots| owner.jump(owner.fi(), slots.pick(role)))
-        } else {
-            find_method_in(owner, name, role, ctx.tags.callable)
-        };
-        match found {
-            Some(member) if member.fills_role(role, ctx.tags.callable) => return Some(member),
-            Some(member) => {
-                fallback.get_or_insert(member);
-            }
-            None => {}
-        }
-    }
-    fallback
+        .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
+        .collect();
+    let find = |role| {
+        owners.iter().find_map(|&owner| match owner.is(C::Def) {
+            true => members_of(ctx, owner)
+                .get(&name)?
+                .get(role)
+                .map(|node| owner.jump(owner.fi(), node)),
+            false => find_method_in(owner, name, role, ctx.tags.callable),
+        })
+    };
+    find(role).or_else(|| find(Role::Any))
 }
 
 /// Cross-file edges for one file that the import pass cannot produce:

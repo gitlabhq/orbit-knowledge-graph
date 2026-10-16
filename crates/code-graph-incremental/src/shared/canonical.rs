@@ -1,6 +1,6 @@
 use strum::EnumProperty;
 
-use crate::tree::Cursor;
+use crate::tree::{Cursor, Role};
 
 pub const CANONICAL_BASE: u16 = 0xE000;
 
@@ -248,6 +248,13 @@ impl Canonical {
     }
     pub fn is_value(self) -> bool {
         self.get_str("value") == Some("true")
+    }
+    pub fn fills(self, role: Role) -> bool {
+        match role {
+            Role::Any => true,
+            Role::Value => self.is_value(),
+            Role::Callable => self.is_callable(),
+        }
     }
     pub fn is_scoped(self) -> bool {
         self.get_str("scoped") == Some("true")

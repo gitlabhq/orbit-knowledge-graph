@@ -68,21 +68,9 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_dispatch_contract(self) -> bool {
         self.has(C::Trait) || self.has(C::Interface)
     }
-    pub fn def_kind(self) -> Option<C> {
-        crate::canonical::def_type_of(self)
-    }
-    pub fn has_role(self, role: Role) -> bool {
-        self.def_kind().is_some_and(|kind| match role {
-            Role::Value => kind.is_value(),
-            Role::Callable => kind.is_callable(),
-        })
-    }
-    pub fn binds_ivar(self) -> bool {
-        self.child(C::Binding)
-            .is_some_and(|binding| binding.has(C::Ivar))
-    }
-    pub fn fills_role(self, role: Role, callable: u32) -> bool {
-        self.has_role(role) || (role == Role::Callable && self.has_tag(callable))
+    pub fn fills(self, role: Role, callable: u32) -> bool {
+        crate::canonical::def_type_of(self).is_some_and(|kind| kind.fills(role))
+            || (role == Role::Callable && self.has_tag(callable))
     }
     pub fn role(self) -> Role {
         let call = match self.is(C::Callee) {
@@ -95,20 +83,18 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         }
     }
     pub fn is_member_of(self, owner: Self) -> bool {
+        let mut header = self.child(C::Binding).is_some_and(|b| b.has(C::Ivar));
         let mut node = self;
-        loop {
-            let Some(up) = node.ancestors().find(|up| up.is(C::Def) || up.is(C::Scope)) else {
-                return false;
-            };
+        while let Some(up) = node.ancestors().find(|up| up.is(C::Def) || up.is(C::Scope)) {
             if up.index() == owner.index() {
                 return true;
             }
-            let header = node.index() == self.index() && self.binds_ivar();
-            if up.is(C::Scope) || !(up.has(C::ImplBlock) || header) {
+            if up.is(C::Scope) || !(up.has(C::ImplBlock) || std::mem::take(&mut header)) {
                 return false;
             }
             node = up;
         }
+        false
     }
     pub fn reference(self) -> Self {
         self.child(C::Call)
@@ -226,38 +212,28 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
 pub enum Role {
     Value,
     Callable,
+    Any,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Slots {
     first: u32,
-    value: Option<(u32, bool)>,
-    callable: Option<(u32, bool)>,
+    exact: [Option<(u32, bool)>; 2],
 }
 
 impl Slots {
-    fn new(first: u32) -> Self {
-        Self {
-            first,
-            value: None,
-            callable: None,
-        }
-    }
-    pub fn slot(self, role: Role) -> Option<u32> {
+    pub fn get(self, role: Role) -> Option<u32> {
         match role {
-            Role::Value => self.value,
-            Role::Callable => self.callable,
+            Role::Any => Some(self.first),
+            role => self.exact[role as usize].map(|(def, _)| def),
         }
-        .map(|(def, _)| def)
     }
     pub fn pick(self, role: Role) -> u32 {
-        self.slot(role).unwrap_or(self.first)
+        self.get(role).unwrap_or(self.first)
     }
-    fn fill(&mut self, def: u32, kind: Option<C>) {
-        let value = kind.is_some_and(C::is_value);
-        let callable = kind.is_some_and(C::is_callable);
-        let exact = value != callable;
-        for (slot, has) in [(&mut self.value, value), (&mut self.callable, callable)] {
+    fn fill(&mut self, def: u32, fills: [bool; 2]) {
+        let exact = fills[0] != fills[1];
+        for (slot, has) in self.exact.iter_mut().zip(fills) {
             if has && slot.is_none_or(|(_, was_exact)| exact && !was_exact) {
                 *slot = Some((def, exact));
             }
@@ -277,22 +253,20 @@ pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberInde
         let Some(name) = def.child_sym(C::DefName) else {
             continue;
         };
-        let slots = index.entry(name).or_insert_with(|| Slots::new(def.index()));
-        if def.is_member_of(owner) {
-            slots.fill(def.index(), def.def_kind());
+        let slots = index.entry(name).or_insert_with(|| Slots {
+            first: def.index(),
+            ..Slots::default()
+        });
+        if def.is_member_of(owner)
+            && let Some(kind) = crate::canonical::def_type_of(def)
+        {
+            slots.fill(
+                def.index(),
+                [Role::Value, Role::Callable].map(|role| kind.fills(role)),
+            );
         }
     }
     index
-}
-
-pub fn by_role<T: Copy>(candidates: Vec<T>, has_role: impl Fn(T) -> bool) -> Vec<T> {
-    match candidates.iter().any(|&node| has_role(node)) {
-        true => candidates
-            .into_iter()
-            .filter(|&node| has_role(node))
-            .collect(),
-        false => candidates,
-    }
 }
 
 pub fn find_method_in<'a, S: Storage<Node = Node>>(
@@ -301,24 +275,19 @@ pub fn find_method_in<'a, S: Storage<Node = Node>>(
     role: Role,
     callable: u32,
 ) -> Option<Cursor<'a, S>> {
-    let mut fallback = None;
-    class
-        .descend(|node| {
-            if node.is(C::Def)
-                && node.index() != class.index()
-                && node.child_sym(C::DefName) == Some(name)
-            {
-                if node.fills_role(role, callable) {
-                    return Step::Out(node);
-                }
-                fallback.get_or_insert(node);
-            }
-            if node.is_class() && !node.has(C::ImplBlock) {
-                return Step::Over;
-            }
-            Step::Into
-        })
-        .or(fallback)
+    class.descend(|node| {
+        if node.is(C::Def)
+            && node.index() != class.index()
+            && node.child_sym(C::DefName) == Some(name)
+            && node.fills(role, callable)
+        {
+            return Step::Out(node);
+        }
+        if node.is_class() && !node.has(C::ImplBlock) {
+            return Step::Over;
+        }
+        Step::Into
+    })
 }
 
 pub fn members_by_level<N, I, T>(
