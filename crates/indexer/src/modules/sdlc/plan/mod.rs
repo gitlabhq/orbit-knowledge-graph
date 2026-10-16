@@ -9,6 +9,8 @@ pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec
 
 pub const SOURCE_DATA_TABLE: &str = "source_data";
 
+use std::borrow::Cow;
+
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
@@ -179,6 +181,18 @@ impl KeyComparison {
     }
 }
 
+/// Cursor timestamps arrive as `...Z` (JSON format, also persisted in older checkpoints), which
+/// ClickHouse rejects against `DateTime64`; rewrite them to its comparable `TIMESTAMP_FORMAT`.
+fn clickhouse_literal(value: &str) -> Cow<'_, str> {
+    if !value.ends_with('Z') {
+        return Cow::Borrowed(value);
+    }
+    match DateTime::parse_from_rfc3339(value) {
+        Ok(timestamp) => Cow::Owned(timestamp.format(TIMESTAMP_FORMAT).to_string()),
+        Err(_) => Cow::Borrowed(value),
+    }
+}
+
 /// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prunes this; a packed tuple compare full-scans.
 fn sort_key_prefix_compare(
     columns: &[String],
@@ -190,12 +204,13 @@ fn sort_key_prefix_compare(
             let mut clauses: Vec<String> = columns[..pivot]
                 .iter()
                 .zip(values)
-                .map(|(column, value)| format!("({column} = '{value}')"))
+                .map(|(column, value)| format!("({column} = '{}')", clickhouse_literal(value)))
                 .collect();
             let operator = comparison.operator(pivot == columns.len() - 1);
             clauses.push(format!(
                 "({} {operator} '{}')",
-                columns[pivot], values[pivot]
+                columns[pivot],
+                clickhouse_literal(&values[pivot])
             ));
             format!("({})", clauses.join(" AND "))
         })
@@ -410,6 +425,42 @@ mod tests {
             batch_size,
             transform: TransformSpec::DataFusion(vec![]),
         }
+    }
+
+    #[test]
+    fn cursor_filter_rewrites_rfc3339_timestamps_for_datetime64_comparison() {
+        let sort_key = vec![
+            "traversal_path".to_string(),
+            "session_started_at".to_string(),
+            "id".to_string(),
+        ];
+        let values = vec![
+            "1/100/".to_string(),
+            "2024-01-01T00:00:00.123456Z".to_string(),
+            "7".to_string(),
+        ];
+        let sql = CursorFilter {
+            sort_key: &sort_key,
+            values: &values,
+        }
+        .condition();
+
+        assert!(sql.contains("(session_started_at = '2024-01-01 00:00:00.123456')"));
+        assert!(sql.contains("(session_started_at > '2024-01-01 00:00:00.123456')"));
+        assert!(!sql.contains('T'), "sql: {sql}");
+    }
+
+    #[test]
+    fn cursor_filter_leaves_non_timestamp_values_untouched() {
+        let sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let values = vec!["1/100/Z".to_string(), "7".to_string()];
+        let sql = CursorFilter {
+            sort_key: &sort_key,
+            values: &values,
+        }
+        .condition();
+
+        assert!(sql.contains("'1/100/Z'"), "sql: {sql}");
     }
 
     #[test]
