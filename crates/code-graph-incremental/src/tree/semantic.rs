@@ -68,6 +68,41 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_dispatch_contract(self) -> bool {
         self.has(C::Trait) || self.has(C::Interface)
     }
+    pub fn is_field(self) -> bool {
+        self.has(C::FieldDef) || self.has(C::Property)
+    }
+    pub fn has_role(self, role: Role) -> bool {
+        match role {
+            Role::Value => self.is_field(),
+            Role::Callable => !self.is_field(),
+        }
+    }
+    pub fn fills_role(self, role: Role, callable: u32) -> bool {
+        self.has_role(role) || (role == Role::Callable && self.has_tag(callable))
+    }
+    pub fn role(self) -> Role {
+        let call = match self.is(C::Callee) {
+            true => self.parent(),
+            false => Some(self).filter(|node| node.is(C::Call)),
+        };
+        match call {
+            Some(call) if !call.has(C::Property) => Role::Callable,
+            _ => Role::Value,
+        }
+    }
+    pub fn is_member_of(self, owner: Self) -> bool {
+        let mut def = self.ancestors().find(|node| node.is(C::Def));
+        while let Some(node) = def {
+            if node.index() == owner.index() {
+                return true;
+            }
+            if !node.has(C::ImplBlock) {
+                return false;
+            }
+            def = node.ancestors().find(|outer| outer.is(C::Def));
+        }
+        false
+    }
     pub fn reference(self) -> Self {
         self.child(C::Call)
             .filter(|call| call.has(C::Property))
@@ -180,22 +215,93 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Value,
+    Callable,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Slots {
+    first: u32,
+    value: Option<u32>,
+    callable: Option<u32>,
+}
+
+impl Slots {
+    pub fn slot(self, role: Role) -> Option<u32> {
+        match role {
+            Role::Value => self.value,
+            Role::Callable => self.callable,
+        }
+    }
+    pub fn pick(self, role: Role) -> u32 {
+        self.slot(role).unwrap_or(self.first)
+    }
+}
+
+pub type MemberIndex = rustc_hash::FxHashMap<u32, Slots>;
+
+pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberIndex {
+    let nested = |node: Cursor<'_, S>| node.is_class() && !node.has(C::ImplBlock);
+    let mut index = MemberIndex::default();
+    for def in owner
+        .descendants_pruned(nested)
+        .filter(|node| node.is(C::Def))
+    {
+        let Some(name) = def.child_sym(C::DefName) else {
+            continue;
+        };
+        let slots = index.entry(name).or_insert(Slots {
+            first: def.index(),
+            value: None,
+            callable: None,
+        });
+        if def.is_member_of(owner) {
+            let slot = match def.is_field() {
+                true => &mut slots.value,
+                false => &mut slots.callable,
+            };
+            slot.get_or_insert(def.index());
+        }
+    }
+    index
+}
+
+pub fn by_role<T: Copy>(candidates: Vec<T>, has_role: impl Fn(T) -> bool) -> Vec<T> {
+    match candidates.iter().any(|&node| has_role(node)) {
+        true => candidates
+            .into_iter()
+            .filter(|&node| has_role(node))
+            .collect(),
+        false => candidates,
+    }
+}
+
 pub fn find_method_in<'a, S: Storage<Node = Node>>(
     class: Cursor<'a, S>,
     name: u32,
+    role: Role,
+    callable: u32,
 ) -> Option<Cursor<'a, S>> {
-    class.descend(|node| {
-        if node.is(C::Def)
-            && node.index() != class.index()
-            && node.child_sym(C::DefName) == Some(name)
-        {
-            return Step::Out(node);
-        }
-        if node.is_class() && !node.has(C::ImplBlock) {
-            return Step::Over;
-        }
-        Step::Into
-    })
+    let mut fallback = None;
+    class
+        .descend(|node| {
+            if node.is(C::Def)
+                && node.index() != class.index()
+                && node.child_sym(C::DefName) == Some(name)
+            {
+                if node.fills_role(role, callable) {
+                    return Step::Out(node);
+                }
+                fallback.get_or_insert(node);
+            }
+            if node.is_class() && !node.has(C::ImplBlock) {
+                return Step::Over;
+            }
+            Step::Into
+        })
+        .or(fallback)
 }
 
 pub fn members_by_level<N, I, T>(

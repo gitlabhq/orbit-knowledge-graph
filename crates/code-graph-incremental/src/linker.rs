@@ -13,7 +13,9 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
+use crate::tree::{
+    Compact, Edge, EdgeKind, MemberIndex, Role, Slots, by_role, member_index, members_by_level,
+};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
@@ -83,7 +85,7 @@ struct Fold<'t> {
     defs: Vec<u32>,
     defs_by_name: FxHashMap<u32, Vec<u32>>,
     /// Per class: member name to first def, and ivar name to its typed binding.
-    members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
+    members: RefCell<FxHashMap<u32, MemberIndex>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
     wildcards: WildcardImports,
@@ -641,20 +643,20 @@ impl<'t> Fold<'t> {
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
-                self.resolve_obj(obj, m.sym(), from);
+                self.resolve_obj(obj, m.sym(), from, c.role());
                 if obj.child(C::Member).is_some() {
                     self.flow_chain_root(obj, from);
                 }
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
             if let Some(cls) = self.enclosing_class(from) {
-                self.push_calls(from, self.find_method_in(cls, iv.sym()));
+                self.push_calls(from, self.find_method_in(cls, iv.sym(), c.role()));
             }
         } else if let Some(sym) = callee.sym_opt() {
             if c.has_tag(self.tags.implicit_self) {
-                self.resolve_implicit(sym, from);
+                self.resolve_implicit(sym, from, c);
             } else {
-                self.resolve_name(sym, from, Wildcards::All);
+                self.resolve_name(sym, from, c, Wildcards::All);
             }
         }
         for edge in &mut self.edges[first..] {
@@ -668,7 +670,7 @@ impl<'t> Fold<'t> {
         }
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
-            self.resolve_obj(obj, c.sym(), self.enclosing());
+            self.resolve_obj(obj, c.sym(), self.enclosing(), Role::Value);
             for edge in &mut self.edges[first..] {
                 edge.call_resolution = crate::tree::CallResolution::Reference;
             }
@@ -1145,30 +1147,30 @@ impl<'t> Fold<'t> {
             .any(|r| matches!(r, Value::LocalDef(n) if self.tree.cursor(*n).is_class()))
     }
 
-    fn resolve_obj(&mut self, obj: Cursor, method: u32, from: u32) {
+    fn resolve_obj(&mut self, obj: Cursor, method: u32, from: u32, role: Role) {
         // step = step() types the binding by a call whose receiver is the binding.
         if !self.obj_seen.insert(obj.index()) {
             return;
         }
         stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-            self.resolve_obj_inner(obj, method, from)
+            self.resolve_obj_inner(obj, method, from, role)
         });
         self.obj_seen.remove(&obj.index());
     }
 
-    fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32) {
+    fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32, role: Role) {
         for r in self.lookup_chain(obj) {
             match r {
-                Value::Type(node) => self.push_calls(from, self.find_method_in(node, method)),
+                Value::Type(node) => self.push_calls(from, self.find_method_in(node, method, role)),
                 Value::LocalDef(node) => {
-                    let members = self.find_method_in(node, method);
+                    let members = self.find_method_in(node, method, role);
                     if members.is_empty() && obj.is(C::Object) {
                         self.emit(&Value::LocalDef(node), from);
                     }
                     self.push_calls(from, members);
                 }
                 Value::Call(n) if let Some(ty) = self.binding_type(n) => {
-                    self.resolve_obj(ty, method, from);
+                    self.resolve_obj(ty, method, from, role);
                     if obj.is(C::Object) {
                         self.emit(&r, from);
                     }
@@ -1179,30 +1181,35 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn resolve_implicit(&mut self, sym: u32, from: u32) {
+    fn resolve_implicit(&mut self, sym: u32, from: u32, site: Cursor<'t>) {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
                 bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
                 for r in &bound {
-                    self.emit(r, from);
+                    let member = self.member_value(r, site);
+                    self.emit(&member, from);
                 }
                 return;
             }
         }
         let members = self
             .enclosing_class(from)
-            .map(|cls| self.find_method_in(cls, sym))
+            .map(|cls| self.find_method_in(cls, sym, site.role()))
             .unwrap_or_default();
         if !members.is_empty() {
             self.push_calls(from, members);
             return;
         }
-        self.resolve_name(sym, from, Wildcards::Callable);
+        self.resolve_name(sym, from, site, Wildcards::Callable);
     }
 
-    fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) {
-        let mut targets = self.lookup(sym);
+    fn resolve_name(&mut self, sym: u32, from: u32, site: Cursor<'t>, fallback: Wildcards) {
+        let mut targets: Vec<Value> = self
+            .lookup(sym)
+            .iter()
+            .map(|r| self.member_value(r, site))
+            .collect();
         if targets.is_empty() {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
@@ -1222,8 +1229,9 @@ impl<'t> Fold<'t> {
             match r {
                 Value::Type(target) => {
                     let callable = self.tree.cursor(*target).child_sym(C::Callable);
-                    let targets =
-                        callable.map_or(vec![*target], |name| self.find_method_in(*target, name));
+                    let targets = callable.map_or(vec![*target], |name| {
+                        self.find_method_in(*target, name, Role::Callable)
+                    });
                     self.push_calls(from, targets);
                 }
                 _ => self.emit(r, from),
@@ -1290,21 +1298,37 @@ impl<'t> Fold<'t> {
         index.get(&attr).map(|&n| self.tree.cursor(n))
     }
 
-    /// `find_method_in` for one container, indexed on first use.
-    fn member_of(&self, container: u32, name: u32) -> Option<u32> {
+    fn slots(&self, container: u32, name: u32) -> Option<Slots> {
         let mut members = self.members.borrow_mut();
-        let index = members.entry(container).or_insert_with(|| {
-            let class = self.tree.cursor(container);
-            let mut m = FxHashMap::default();
-            let nested = |n: Cursor| n.index() != container && n.is_class() && !n.has(C::ImplBlock);
-            for n in class.descendants_pruned(nested).filter(|n| n.is(C::Def)) {
-                if let Some(dn) = n.child_sym(C::DefName) {
-                    m.entry(dn).or_insert(n.index());
-                }
-            }
-            m
-        });
+        let index = members
+            .entry(container)
+            .or_insert_with(|| member_index(self.tree.cursor(container)));
         index.get(&name).copied()
+    }
+
+    fn member_for(&self, def: u32, site: Cursor<'t>) -> u32 {
+        let target = self.tree.cursor(def);
+        let role = site.role();
+        if target.has_role(role) {
+            return def;
+        }
+        let Some(class) = target.ancestors().find(|node| node.is_class()) else {
+            return def;
+        };
+        if !target.is_member_of(class) && shadows(target, site) {
+            return def;
+        }
+        target
+            .child_sym(C::DefName)
+            .and_then(|name| self.slots(class.index(), name)?.slot(role))
+            .unwrap_or(def)
+    }
+
+    fn member_value(&self, value: &Value, site: Cursor<'t>) -> Value {
+        match value {
+            Value::LocalDef(def) => Value::LocalDef(self.member_for(*def, site)),
+            _ => value.clone(),
+        }
     }
 
     fn chain_is_class(&mut self, c: Cursor) -> bool {
@@ -1350,7 +1374,10 @@ impl<'t> Fold<'t> {
             return bound
                 .into_iter()
                 .map(|r| match r {
-                    Value::LocalDef(d) => self.field_value(d).unwrap_or(r),
+                    Value::LocalDef(d) => {
+                        let d = self.member_for(d, c);
+                        self.field_value(d).unwrap_or(Value::LocalDef(d))
+                    }
                     _ => r,
                 })
                 .collect();
@@ -1397,7 +1424,7 @@ impl<'t> Fold<'t> {
             .into_iter()
             .flat_map(|r| match r {
                 Value::LocalDef(d) => self
-                    .find_method_in(d, m.sym())
+                    .find_method_in(d, m.sym(), c.role())
                     .into_iter()
                     .map(Value::LocalDef)
                     .collect(),
@@ -1418,7 +1445,7 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn find_method_in(&self, container: u32, name: u32) -> Vec<u32> {
+    fn find_method_in(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
         let wrappers = |dn: u32| {
             let c = self.tree.cursor(dn);
             let same_name = c
@@ -1434,8 +1461,11 @@ impl<'t> Fold<'t> {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(wrappers).collect::<Vec<_>>()
         };
-        let found = |dn| self.member_of(dn, name);
-        members_by_level(wrappers(container), supers, found)
+        let found = |dn| Some(self.slots(dn, name)?.pick(role));
+        let members = members_by_level(wrappers(container), supers, found);
+        by_role(members, |def| {
+            self.tree.cursor(def).fills_role(role, self.tags.callable)
+        })
     }
 }
 
@@ -1566,7 +1596,29 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
             edge.call_resolution = crate::tree::CallResolution::Reference;
         }
     }
+    let mut seen = FxHashSet::default();
+    f.edges
+        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
     Ok((f.edges, f.limited))
+}
+
+fn shadows<'t>(target: Cursor<'t>, site: Cursor<'t>) -> bool {
+    let within = |node: Cursor<'t>| site.ancestors().any(|up| up.index() == node.index());
+    let Some(scope) = target.ancestors().find(|node| node.is(C::Def)) else {
+        return false;
+    };
+    if !within(scope) || within(target) {
+        return false;
+    }
+    let name = target.child_sym(C::DefName);
+    let declares = |node: &Cursor<'t>| {
+        node.is(C::Binding) && node.has(C::Declaration) && node.sym_opt() == name
+    };
+    let siblings = target
+        .parent()
+        .into_iter()
+        .flat_map(|parent| parent.children());
+    !siblings.filter(declares).any(within)
 }
 
 fn is_name(value: &Value) -> bool {
