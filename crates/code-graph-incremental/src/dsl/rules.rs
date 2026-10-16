@@ -90,6 +90,10 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
+    /// The root package clauses of a file nest, so its package joins them
+    /// all and an inner clause's names shadow an outer clause's. True for
+    /// Scala, where `package a` then `package b` means `a.b`.
+    pub nested_packages: bool,
     /// The order in which names claim a file's scope; a later entry never
     /// replaces an earlier one, and an entry outside the list replaces
     /// nothing. Empty means `[own_def, nested_def]`: a def always wins over
@@ -144,6 +148,7 @@ impl ResolveConfig {
             }
         }
         self.merge_same_named_types |= other.merge_same_named_types;
+        self.nested_packages |= other.nested_packages;
         if self.precedence.is_empty() {
             self.precedence = other.precedence.clone();
         }
@@ -181,6 +186,8 @@ struct ResolveSettingsSection {
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+    #[serde(default)]
+    nested_packages: bool,
     #[serde(default)]
     precedence: Vec<ExportVia>,
 }
@@ -328,6 +335,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .map(parse_file)
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
+        nested_packages: r.nested_packages,
         precedence: r.precedence.clone(),
     };
     Ok(Config { link, resolve })

@@ -1,0 +1,111 @@
+name: "Scala: package object members belong to the package"
+
+fixtures:
+  - path: src/main/scala/acme/shapes/package.scala
+    content: |
+      package acme
+
+      package object shapes extends ShapeSyntax {
+        object circle extends CircleOps
+
+        object Builder {
+          def make(): Int = 0
+        }
+      }
+
+  - path: src/main/scala/acme/shapes/CircleOps.scala
+    content: |
+      package acme
+      package shapes
+
+      trait CircleOps {
+        def area(): Int = 0
+      }
+
+  - path: src/main/scala/acme/shapes/ShapeSyntax.scala
+    content: |
+      package acme.shapes
+
+      trait ShapeSyntax
+
+  - path: src/main/scala/acme/shapes/Use.scala
+    content: |
+      package acme.shapes
+
+      object Use {
+        def run(): Int = Builder.make()
+      }
+
+  - path: src/main/scala/tools/package.scala
+    content: |
+      package object tools {
+        val Items = Seq
+      }
+
+  - path: src/main/scala/tools/names/Names.scala
+    content: |
+      package tools
+      package names
+
+      trait Names {
+        def make(s: Int): Int = s
+      }
+
+  - path: src/main/scala/tools/names/Std.scala
+    content: |
+      package tools
+      package names
+
+      trait Std {
+        self: Names =>
+        def seg(n: Int): Int = {
+          def mk(s: Int): Int = make(s)
+          tools.Items(mk(n)).size
+        }
+      }
+
+tests:
+  - name: "a member extends a trait of its package"
+    query: |
+      MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+      WHERE a.name = 'circle'
+      RETURN b.name AS parent, b.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: CircleOps, file: src/main/scala/acme/shapes/CircleOps.scala } }
+
+  - name: "the package object keeps its parent"
+    query: |
+      MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+      WHERE a.name = 'package' AND a.file_path = 'src/main/scala/acme/shapes/package.scala'
+      RETURN a.fqn AS fqn, b.name AS parent, b.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: acme.shapes.package, parent: ShapeSyntax, file: src/main/scala/acme/shapes/ShapeSyntax.scala } }
+
+  - name: "a file of the package reaches a member"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'make'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/main/scala/acme/shapes/package.scala } }
+
+  - name: "a member carries the package fqn"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'circle'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: acme.shapes.circle } }
+
+  - name: "a package object does not hide the name of its package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'seg' AND callee.name = 'make'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/main/scala/tools/names/Names.scala } }

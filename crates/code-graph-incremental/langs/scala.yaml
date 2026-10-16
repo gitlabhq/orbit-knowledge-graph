@@ -16,6 +16,7 @@ config:
   resolve:
     lookup_from:
       - __source_root
+    nested_packages: true
 
 stages:
   - name: import-aliases
@@ -42,12 +43,19 @@ stages:
         replace: '(__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.[^.]+$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|replace(".", "/")) (__name @$ROOT|split_last(".")))'
         tag: { import_type: Import }
 
+  - name: packages
+    rules:
+      - match: '(package_clause name: $N:package_identifier)'
+        replace: '(__package @$N)'
+      - match: '(package_object name: $N:identifier $E?:extends_clause $B?:template_body)'
+        replace: '(sc_pkgobj (__package @$N) (object_definition name: (identifier "package") $E) $B)'
+
   - name: normalize
     rules:
       - match: '(compilation_unit $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
-      - match: '(package_clause name: $N:package_identifier)'
-        replace: '(sc_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+      - match: '(__package)'
+        replace: '(sc_pkg (__package @$ROOT) (__module_export (__import (__source @$ROOT|join_preceding("__package", ".")) (__source_path @$ROOT|join_preceding("__package", ".")|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
         tag: { import_type: Import }
         tag_on: __import
       - match: '(return_expression $$$V)'
@@ -199,7 +207,7 @@ display:
       - match: '$M:__source_file'
         tag:
           entity: File
-          fqn: '@$M|child_sym("__package")'
+          fqn: '@$M|join_children("__package", ".")'
           file_path: '@$M'
           language: '@$M|split_last(".")|map("scala:scala", "sc:scala")'
       - match: '(__def !(__impl))'

@@ -753,3 +753,50 @@ fn java_two_root_tree_resolves_once_and_stays_resolved() {
         calls(&[own_copy, later])
     );
 }
+
+/// Chained Scala package clauses form one package: a file sees its own and
+/// each outer package, the inner one shadows the outer, and a package
+/// object's members belong to the package.
+#[test]
+fn scala_chained_packages_resolve_once_and_stay_resolved() {
+    let repo = tempfile::tempdir().unwrap();
+    write_tree(
+        repo.path(),
+        &[
+            (
+                "src/acme/core/Naming.scala",
+                "package acme.core\n\ntrait Naming {\n  def outer(): Int = 0\n}\n",
+            ),
+            (
+                "src/acme/core/impl/Naming.scala",
+                "package acme.core\npackage impl\n\ntrait Naming {\n  def inner(): Int = 0\n}\n",
+            ),
+            (
+                "src/acme/core/impl/package.scala",
+                "package acme.core\n\npackage object impl {\n  object Builder {\n    def make(): Int = 0\n  }\n}\n",
+            ),
+            (
+                "src/acme/core/impl/Main.scala",
+                "package acme\npackage core\npackage impl\n\nclass Main extends Naming {\n  def run(): Int = Builder.make()\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Scala, Limits::UNLIMITED).unwrap();
+    let (resolved, skipped) = resolve_repo(&env, repo.path());
+    assert!(skipped.is_empty());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [pair(
+            "src/acme/core/impl/Main.scala:run",
+            "src/acme/core/impl/package.scala:make"
+        )]
+    );
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Extends),
+        [pair(
+            "src/acme/core/impl/Main.scala:Main",
+            "src/acme/core/impl/Naming.scala:Naming"
+        )]
+    );
+    noop_reindex(&env, &resolved.state, SupportLang::Scala);
+}

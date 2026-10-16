@@ -1263,20 +1263,25 @@ struct Scope<'a> {
     owners: &'a [FxHashMap<u32, u32>],
 }
 
-/// How strongly an export claims a name: a nearer source root beats a
-/// farther one.
+/// How strongly an export claims a name: an inner package clause beats an
+/// outer one, then a nearer source root beats a farther one.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Claim {
+    level: u32,
     distance: Distance,
 }
 
 impl Claim {
     /// Whether this claim beats `other`; `None` when neither does.
     fn beats(self, other: Claim) -> Option<bool> {
-        match self.distance.cmp(&other.distance) {
-            std::cmp::Ordering::Less => Some(true),
-            std::cmp::Ordering::Greater => Some(false),
-            std::cmp::Ordering::Equal => None,
+        match (self.level > 0, other.level > 0) {
+            (true, true) if self.level != other.level => Some(self.level > other.level),
+            (true, false) | (false, true) => None,
+            _ => match self.distance.cmp(&other.distance) {
+                std::cmp::Ordering::Less => Some(true),
+                std::cmp::Ordering::Greater => Some(false),
+                std::cmp::Ordering::Equal => None,
+            },
         }
     }
 }
@@ -1343,6 +1348,15 @@ fn propagate_reexports(
     let (via, packages) = package_imports(trees, reqs, wildcard_sym);
     let import_of = |req: &ImportReq| trees[req.fi as usize].cursor(req.node);
     let file_level = |import: Cursor| import.enclosing(|p| p.is(C::Def)).is_none();
+    let level = |req: &ImportReq| {
+        let import = import_of(req);
+        let chained = config(req.fi as usize).nested_packages
+            && import.ancestors().any(|node| node.is(C::ModuleExport));
+        match chained {
+            true => req.node,
+            false => 0,
+        }
+    };
     'propagate: loop {
         if run.check().is_err() {
             break;
@@ -1354,7 +1368,7 @@ fn propagate_reexports(
             rustc_hash::FxBuildHasher,
         > = Default::default();
         let added = std::cell::Cell::new(0);
-        let mut export = |fi: usize, name, loc: Loc, via: Option<ExportVia>| {
+        let mut export = |fi: usize, name, loc: Loc, via: Option<ExportVia>, level: u32| {
             if let Some(&held) = visible[fi].get(&name) {
                 let held_via = match held.fi as usize == fi {
                     true if trees[fi]
@@ -1376,6 +1390,7 @@ fn propagate_reexports(
                 }
             }
             let claim = Claim {
+                level,
                 distance: scope.roots.distance(fi as u32, loc.fi),
             };
             match new_exports.entry((fi, name)) {
@@ -1417,9 +1432,10 @@ fn propagate_reexports(
                 Via::Package(package) => {
                     let union = unions[package]
                         .get_or_insert_with(|| package_exports(&packages[package], visible));
+                    let level = level(req);
                     for (&name, locs) in union.iter() {
                         for &loc in locs {
-                            export(req.fi as usize, name, loc, claim(ExportVia::Glob));
+                            export(req.fi as usize, name, loc, claim(ExportVia::Glob), level);
                         }
                     }
                     continue;
@@ -1438,11 +1454,13 @@ fn propagate_reexports(
                             alias,
                             Loc::new(req.target_fi as usize, req.anchor),
                             None,
+                            0,
                         );
                         continue;
                     }
+                    let level = level(req);
                     for (&ds, &loc) in exports.iter() {
-                        export(req.fi as usize, ds, loc, claim(ExportVia::Glob));
+                        export(req.fi as usize, ds, loc, claim(ExportVia::Glob), level);
                     }
                 } else if let Some(&loc) = exports.get(&ns) {
                     export(
@@ -1450,6 +1468,7 @@ fn propagate_reexports(
                         c.child_sym(C::Alias).unwrap_or(ns),
                         loc,
                         claim(ExportVia::NamedImport),
+                        0,
                     );
                 }
             }
@@ -1464,7 +1483,7 @@ fn propagate_reexports(
             {
                 let source_fi = loc.fi as usize;
                 for (&ds, &dloc) in &visible[source_fi] {
-                    export(fi, ds, dloc, None);
+                    export(fi, ds, dloc, None, 0);
                 }
             }
         }
@@ -1473,7 +1492,7 @@ fn propagate_reexports(
             for &n in &declared[req.target_fi as usize] {
                 let own = visible[req.fi as usize].get(&n).filter(|l| l.fi == req.fi);
                 if let Some(&loc) = own {
-                    export(req.target_fi as usize, n, loc, None);
+                    export(req.target_fi as usize, n, loc, None, 0);
                 }
             }
         }
@@ -2529,9 +2548,18 @@ fn build_file_index(trees: &[Tree], env: &Env, index_names: &[String]) -> FileIn
             }
         }
         let root = tree.root();
-        let pkg = root.child_sym(C::Package).map_or(String::new(), |s| {
-            lang.syms.resolve(s).replace(sep, PATH_SEP) + PATH_SEP
-        });
+        let mut clauses = root
+            .children()
+            .filter(|c| c.is(C::Package))
+            .filter_map(|c| c.sym_opt())
+            .map(|s| lang.syms.resolve(s));
+        let pkg = match env.rules_for(path).config.resolve.nested_packages {
+            false => clauses.next().map(str::to_owned),
+            true => Some(clauses.collect::<Vec<_>>())
+                .filter(|c| !c.is_empty())
+                .map(|c| c.join(sep)),
+        }
+        .map_or(String::new(), |pkg| pkg.replace(sep, PATH_SEP) + PATH_SEP);
         let defs = root.children().filter(|d| d.is(C::Def));
         for (name, d) in defs.filter_map(|d| Some((d.child_sym(C::DefName)?, d))) {
             let name = lang.syms.resolve(name).replace(sep, PATH_SEP);

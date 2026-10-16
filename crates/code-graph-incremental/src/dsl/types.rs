@@ -18,6 +18,8 @@ pub enum Tf {
     Field(u16),
     Const(&'static str),
     Child(u16),
+    JoinChildren(u16, Box<str>),
+    JoinPreceding(u16, Box<str>),
     FieldChild(u16, u16),
     StripLeading(char),
     SplitLast(Box<str>),
@@ -60,6 +62,8 @@ impl Tf {
             self,
             Tf::Field(_)
                 | Tf::Child(_)
+                | Tf::JoinChildren(_, _)
+                | Tf::JoinPreceding(_, _)
                 | Tf::FieldChild(_, _)
                 | Tf::Const(_)
                 | Tf::ParentSym(_)

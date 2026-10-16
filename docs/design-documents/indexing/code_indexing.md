@@ -338,8 +338,9 @@ overlap or cycle.
 A name enters a file's scope by precedence. A def of the file comes before an
 import, unless the language's `resolve.precedence` list says otherwise. Rust
 puts a module-level `use` before an item nested in an inline module. Among
-imports, a nearer source root beats a farther one. Equal claims make the name
-ambiguous.
+imports, an inner package clause beats an outer one where the language nests
+root package clauses (`resolve.nested_packages`, as Scala does). A nearer
+source root beats a farther one. Equal claims make the name ambiguous.
 
 An empty `__declaration` marker introduces a binding after its initializer.
 A named marker selects a matching scope label. The linker registers these names

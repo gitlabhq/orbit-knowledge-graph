@@ -87,6 +87,12 @@ impl Tf {
             ),
             "field" => Tf::Field(need_ctx(name, &mut ctx)?.intern_field(arg(0)?)),
             "child_sym" => Tf::Child(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?)),
+            "join_children" => {
+                Tf::JoinChildren(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?), s(1)?)
+            }
+            "join_preceding" => {
+                Tf::JoinPreceding(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?), s(1)?)
+            }
             "parent_sym" => Tf::ParentSym(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?)),
             "regex_replace" => Tf::Regex(re(0)?, s(1)?),
             "regex_first" => Tf::RegexFirst(re(0)?, s(1)?),
@@ -264,6 +270,46 @@ impl Tf {
             }
             Tf::Const(s) => lang.syms.intern(s),
             Tf::Child(k) => child_sym(t, lang, id, |n| n.kind == *k),
+            Tf::JoinChildren(k, sep) => {
+                let parts: Vec<&str> = t
+                    .cursor(id)
+                    .children()
+                    .filter(|c| t.storage.node(c.index()).kind == *k)
+                    .map(|c| lang.syms.resolve(t.sym_at(c.index(), lang)))
+                    .filter(|part| !part.is_empty())
+                    .collect();
+                match parts.is_empty() {
+                    true => 0,
+                    false => lang.syms.intern(&parts.join(sep)),
+                }
+            }
+            Tf::JoinPreceding(k, sep) => {
+                let mut levels = Vec::new();
+                let mut cur = t.cursor(id);
+                while let Some(parent) = cur.parent() {
+                    let level: Vec<&str> = parent
+                        .children()
+                        .take_while(|c| c.index() != cur.index())
+                        .filter(|c| t.storage.node(c.index()).kind == *k)
+                        .map(|c| lang.syms.resolve(t.sym_at(c.index(), lang)))
+                        .collect();
+                    levels.push(level);
+                    cur = parent;
+                }
+                let own =
+                    (t.storage.node(id).kind == *k).then(|| lang.syms.resolve(t.sym_at(id, lang)));
+                let parts: Vec<&str> = levels
+                    .into_iter()
+                    .rev()
+                    .flatten()
+                    .chain(own)
+                    .filter(|part| !part.is_empty())
+                    .collect();
+                match parts.is_empty() {
+                    true => 0,
+                    false => lang.syms.intern(&parts.join(sep)),
+                }
+            }
             Tf::FieldChild(f, k) => {
                 let (f, k) = (*f, *k);
                 t.cursor(id)

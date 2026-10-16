@@ -1,0 +1,121 @@
+name: "Scala: chained package clauses form one package"
+
+fixtures:
+  - path: src/compiler/scala/tools/nsc/Global.scala
+    content: |
+      package scala
+      package tools
+      package nsc
+
+      class Global extends Naming with Tracing {
+        def compile(): Int = 0
+        def check(s: Settings): Int = s.level()
+        def share(h: Shared): Int = h.value()
+      }
+
+  - path: src/compiler/scala/tools/nsc/Settings.scala
+    content: |
+      package scala.tools.nsc
+
+      class Settings {
+        def level(): Int = 0
+      }
+
+  - path: src/compiler/scala/tools/nsc/Naming.scala
+    content: |
+      package scala.tools
+      package nsc
+
+      trait Naming
+
+  - path: src/compiler/scala/tools/nsc/Tracing.scala
+    content: |
+      package scala.tools
+      package nsc
+
+      trait Tracing
+
+  - path: src/compiler/scala/tools/Naming.scala
+    content: |
+      package scala.tools
+
+      trait Naming
+
+  - path: src/compiler/scala/tools/Shared.scala
+    content: |
+      package scala.tools
+
+      class Shared {
+        def value(): Int = 0
+      }
+
+  - path: src/interactive/scala/tools/nsc/interactive/Global.scala
+    content: |
+      package scala.tools.nsc
+      package interactive
+
+      class Global {
+        def ask(): Int = 0
+      }
+
+  - path: src/repl/scala/tools/repl/Main.scala
+    content: |
+      package scala.tools.repl
+
+      import scala.tools.nsc.Global
+
+      object Main {
+        def run(g: Global): Int = g.compile()
+      }
+
+tests:
+  - name: "the import reaches the compiler Global"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Global, file: src/compiler/scala/tools/nsc/Global.scala } }
+      - { row: { callee: compile, file: src/compiler/scala/tools/nsc/Global.scala } }
+
+  - name: "each Global carries its full package"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Global'
+      RETURN d.fqn AS fqn
+      ORDER BY fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: scala.tools.nsc.Global } }
+      - { row: { fqn: scala.tools.nsc.interactive.Global } }
+
+  - name: "a chained file sees its own package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'check' AND callee.name = 'level'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/compiler/scala/tools/nsc/Settings.scala } }
+
+  - name: "a chained file sees an outer package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'share' AND callee.name = 'value'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/compiler/scala/tools/Shared.scala } }
+
+  - name: "an inner package shadows an outer one"
+    query: |
+      MATCH (a:Definition)-[:EXTENDS]->(b:Definition)
+      WHERE a.name = 'Global' AND a.file_path = 'src/compiler/scala/tools/nsc/Global.scala'
+      RETURN b.name AS parent, b.file_path AS file
+      ORDER BY parent
+    assert:
+      - { row_count: 2 }
+      - { row: { parent: Naming, file: src/compiler/scala/tools/nsc/Naming.scala } }
+      - { row: { parent: Tracing, file: src/compiler/scala/tools/nsc/Tracing.scala } }
