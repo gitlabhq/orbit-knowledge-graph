@@ -128,6 +128,8 @@ pub struct Neighbors {
     pub edge: EdgeTableConfig,
     pub has_non_denorm: bool,
     pub fused_table: Option<String>,
+    pub outgoing_kinds: Vec<String>,
+    pub incoming_kinds: Vec<String>,
     pub incoming_scope_preserving: Vec<String>,
     pub incoming_cross_scope: Vec<String>,
 }

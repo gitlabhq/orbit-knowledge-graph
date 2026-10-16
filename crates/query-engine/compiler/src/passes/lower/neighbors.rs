@@ -23,6 +23,8 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         edge,
         has_non_denorm,
         fused_table,
+        outgoing_kinds,
+        incoming_kinds,
         incoming_scope_preserving,
         incoming_cross_scope,
     } = &plan.operation;
@@ -104,24 +106,26 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
     };
 
     let build_arm = |dir: Direction| -> Query {
-        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
-        {
-            Direction::Outgoing => (
-                SOURCE_ID_COLUMN,
-                SOURCE_KIND_COLUMN,
-                TARGET_ID_COLUMN,
-                TARGET_KIND_COLUMN,
-                1i64,
-            ),
-            Direction::Incoming => (
-                TARGET_ID_COLUMN,
-                TARGET_KIND_COLUMN,
-                SOURCE_ID_COLUMN,
-                SOURCE_KIND_COLUMN,
-                0i64,
-            ),
-            Direction::Both => unreachable!(),
-        };
+        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arm_kinds) =
+            match dir {
+                Direction::Outgoing => (
+                    SOURCE_ID_COLUMN,
+                    SOURCE_KIND_COLUMN,
+                    TARGET_ID_COLUMN,
+                    TARGET_KIND_COLUMN,
+                    1i64,
+                    outgoing_kinds,
+                ),
+                Direction::Incoming => (
+                    TARGET_ID_COLUMN,
+                    TARGET_KIND_COLUMN,
+                    SOURCE_ID_COLUMN,
+                    SOURCE_KIND_COLUMN,
+                    0i64,
+                    incoming_kinds,
+                ),
+                Direction::Both => unreachable!(),
+            };
 
         let denorm_direction = if dir == Direction::Outgoing {
             query_data_model::DenormalizedDirection::Source
@@ -137,9 +141,7 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             if !center_node_ids.is_empty() {
                 wp.push(id_list_predicate(a, center_edge_col, &center_node_ids));
             }
-            if let Some(ref types) = edge.rel_type_filter
-                && let Some(f) = rel_kind_filter(a, types)
-            {
+            if let Some(f) = rel_kind_filter(a, arm_kinds) {
                 wp.push(f);
             }
             if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
