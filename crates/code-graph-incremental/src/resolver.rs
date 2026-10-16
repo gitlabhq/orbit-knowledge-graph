@@ -864,6 +864,7 @@ fn gather_imports_for(
         .filter(|prefix| declared_roots.contains(prefix.as_str()))
         .cloned()
         .collect();
+    let root_of = |tree| source_root(tree, lang, root_relative);
     let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
@@ -903,11 +904,7 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let own_root = tree
-                        .root()
-                        .tag(root_relative)
-                        .and_then(|rel| tree.label.strip_suffix(lang.syms.resolve(rel)))
-                        .map(|root| root.trim_end_matches(PATH_SEP));
+                    let own_root = root_of(tree);
                     let mut target_path = match mapped {
                         Some(ref path) => path.clone(),
                         None if raw_path == "." => own_root.unwrap_or_default().to_owned(),
@@ -918,9 +915,12 @@ fn gather_imports_for(
                     if let Some(root) = own_root.filter(|root| mapped.is_none() && !root.is_empty())
                         && !direct.is_empty()
                         && direct.iter().all(|loc| {
-                            !trees[loc.fi as usize]
-                                .label
-                                .starts_with(&format!("{root}{PATH_SEP}"))
+                            let hit = &trees[loc.fi as usize];
+                            !hit.label.starts_with(&format!("{root}{PATH_SEP}"))
+                                && root_of(hit).is_some_and(|hit_root| {
+                                    !hit_root.is_empty()
+                                        && !root.starts_with(&format!("{hit_root}{PATH_SEP}"))
+                                })
                         })
                     {
                         let local = format!("{root}{PATH_SEP}{target_path}");
@@ -2178,6 +2178,13 @@ fn build_file_index(
         idx.keys.entry(key).or_insert(loc);
     }
     idx
+}
+
+fn source_root<'t>(tree: &'t Tree, lang: &Lang, root_relative: u32) -> Option<&'t str> {
+    tree.root()
+        .tag(root_relative)
+        .and_then(|rel| tree.label.strip_suffix(lang.syms.resolve(rel)))
+        .map(|root| root.trim_end_matches(PATH_SEP))
 }
 
 fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> {
