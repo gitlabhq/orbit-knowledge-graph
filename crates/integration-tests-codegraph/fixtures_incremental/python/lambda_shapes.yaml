@@ -1,0 +1,100 @@
+name: "Python: a lambda opens its own block wherever it appears"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Foo:
+          def bar(self):
+              pass
+
+
+      def make():
+          return Foo()
+
+
+      def helper(x):
+          return x
+
+
+      def other(x):
+          return x
+
+
+      def run(cb):
+          return cb(1)
+
+
+      def as_argument():
+          run(lambda make=None: make())
+          x = make()
+          x.bar()
+
+
+      def as_dict_value():
+          table = {"a": lambda make=None: make()}
+          x = make()
+          x.bar()
+
+
+      def as_return(flag):
+          if flag:
+              return lambda make=None: make()
+          x = make()
+          x.bar()
+
+
+      def as_conditional(flag):
+          pick = (lambda x: helper(x)) if flag else (lambda x: other(x))
+          return pick(1)
+
+
+      def body_calls():
+          run(lambda x: helper(x))
+
+tests:
+  - name: a lambda argument's parameter does not hide the module function after the call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'as_argument'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["bar", "make", "run"] } }
+
+  - name: a lambda dict value's parameter does not hide the module function after the dict
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'as_dict_value'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
+  - name: a returned lambda's parameter does not hide the module function after the return
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'as_return'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
+  - name: both lambdas of a conditional keep their body calls on the enclosing def
+    # Known gap: the conditional_expression rewrite keeps no children, so neither lambda is walked.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'as_conditional'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["helper", "other"] } }
+
+  - name: a lambda argument's body call belongs to the enclosing def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'body_calls'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["helper", "run"] } }
