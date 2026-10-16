@@ -1,0 +1,35 @@
+name: "Java: an import of a nested class reaches its members"
+
+fixtures:
+  - path: pkg/Outer.java
+    content: |
+      package pkg;
+
+      public class Outer {
+          public static class Inner {
+              public static int make() {
+                  return 1;
+              }
+          }
+      }
+
+  - path: pkg/Use.java
+    content: |
+      package pkg;
+
+      import pkg.Outer.Inner;
+
+      public class Use {
+          int run() {
+              return Inner.make();
+          }
+      }
+
+tests:
+  - name: a call through the imported nested class reaches its method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "pkg.Outer.Inner.make" } }

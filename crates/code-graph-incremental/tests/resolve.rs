@@ -438,3 +438,87 @@ fn file_stats_keep_files_killed_by_the_resolve_budget() {
     assert!(skipped.iter().all(|killed| killed.label == "resolve"));
     assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
+
+#[test]
+fn an_import_path_through_a_type_survives_a_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir(repo.path().join("src")).unwrap();
+    write_all(
+        repo.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"nested\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            (
+                "src/lib.rs",
+                "pub mod errors;\n\nuse crate::errors::Error::MigrationError;\n\npub fn plain(e: String) -> errors::Error {\n    crate::errors::Error::MigrationError(e)\n}\n\npub fn imported(e: String) -> errors::Error {\n    MigrationError(e)\n}\n",
+            ),
+            (
+                "src/errors.rs",
+                "pub enum Error {\n    MigrationError(String),\n    Other,\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [
+            pair("src/lib.rs:imported", "src/errors.rs:MigrationError"),
+            pair("src/lib.rs:plain", "src/errors.rs:MigrationError"),
+        ]
+    );
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        resolved.state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+}
+
+#[test]
+fn a_nested_class_import_resolves_and_survives_a_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir(repo.path().join("pkg")).unwrap();
+    write_all(
+        repo.path(),
+        &[
+            (
+                "pkg/Outer.java",
+                "package pkg;\n\npublic class Outer {\n    public static class Inner {\n        public static int make() {\n            return 1;\n        }\n    }\n}\n",
+            ),
+            (
+                "pkg/Use.java",
+                "package pkg;\n\nimport pkg.Outer.Inner;\n\npublic class Use {\n    int run() {\n        return Inner.make();\n    }\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Java, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [
+            pair("pkg/Use.java:run", "pkg/Outer.java:Inner"),
+            pair("pkg/Use.java:run", "pkg/Outer.java:make"),
+        ]
+    );
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        resolved.state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+}

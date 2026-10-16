@@ -74,6 +74,11 @@ fixtures:
           Error::MigrationError(e)
       }
 
+      pub fn via_self(e: String) -> Error {
+          use self::Error::MigrationError;
+          MigrationError(e)
+      }
+
 tests:
   - name: a path call reaches the enum variant from every argument position
     query: |
@@ -93,6 +98,17 @@ tests:
     assert:
       - { row: { caller: "method_argument", callee: "List::push" } }
       - { row: { caller: "tuple_struct", callee: "Wrapper" } }
+
+  - name: a same-file path through a type reaches the variant
+    # Known gap: `use self::Error::Kind` stays in the importing file, where the linker
+    # walks a path as defs of this file and does not map the relative module path.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_self'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "errors::Error::MigrationError" } }
 
   - name: a path call through a module function keeps its edge
     query: |

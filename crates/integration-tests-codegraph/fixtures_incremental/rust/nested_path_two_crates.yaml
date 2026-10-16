@@ -1,0 +1,62 @@
+name: "Rust: a path call through a type resolves in the importing crate, not in a sibling crate"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["alpha", "beta"]
+
+  - path: alpha/Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: alpha/src/lib.rs
+    content: |
+      pub mod errors;
+
+  - path: alpha/src/errors.rs
+    content: |
+      pub enum Error {
+          Kind(String),
+      }
+
+  - path: beta/Cargo.toml
+    content: |
+      [package]
+      name = "beta"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: beta/src/lib.rs
+    content: |
+      pub mod errors;
+
+      pub fn fail(e: String) -> errors::Error {
+          crate::errors::Error::Kind(e)
+      }
+
+      pub fn imported(e: String) -> errors::Error {
+          use crate::errors::Error::Kind;
+          Kind(e)
+      }
+
+  - path: beta/src/errors.rs
+    content: |
+      pub enum Error {
+          Kind(String),
+      }
+
+tests:
+  - name: the variant comes from the importing crate
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['fail', 'imported'] AND callee.name = 'Kind'
+      RETURN caller.name AS caller, callee.file_path AS file
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "fail", file: "beta/src/errors.rs" } }
+      - { row: { caller: "imported", file: "beta/src/errors.rs" } }

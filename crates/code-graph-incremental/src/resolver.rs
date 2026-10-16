@@ -197,9 +197,31 @@ impl Resolver {
             .reqs
             .iter()
             .filter(|req| {
+                let tree = &trees[req.fi as usize];
+                let root_relative = env.lang.syms.lookup("source_root_rel");
+                let own_root =
+                    source_root(tree, &env.lang, root_relative).filter(|root| !root.is_empty());
+                let own_prefix = own_root.map(|root| format!("{root}{PATH_SEP}"));
+                let origin = ImportOrigin {
+                    fi: req.fi,
+                    own: own_root.zip(own_prefix.as_deref()),
+                    imported: tree
+                        .cursor(req.node)
+                        .names()
+                        .exactly_one()
+                        .ok()
+                        .map(|name| name.sym()),
+                };
                 self.lookup != *lookup
-                    || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
-                        .contains(&Loc::new(req.target_fi as usize, req.anchor))
+                    || !request_targets(
+                        trees,
+                        &env.lang,
+                        &self.file_index,
+                        &lookup.prefixes,
+                        &origin,
+                        &req.target_path,
+                    )
+                    .contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
             .chain(dirty_fis.iter().copied())
@@ -900,36 +922,21 @@ fn gather_imports_for(
                     } else {
                         &lookup.prefixes
                     };
-                    let mut target_path = match mapped {
+                    let target_path = match mapped {
                         Some(ref path) => path.clone(),
                         None if raw_path == ROOT_PATH => own_root.unwrap_or_default().to_owned(),
                         None => raw_path.to_owned(),
                     };
-                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
-                    direct.retain(|loc| loc.fi != fi);
-                    if let Some((root, prefix)) = own_prefix.as_ref().filter(|_| mapped.is_none())
-                        && !direct.is_empty()
-                    {
-                        let inside =
-                            |loc: &Loc| trees[loc.fi as usize].label.starts_with(prefix.as_str());
-                        let sibling = |loc: &Loc| {
-                            root_of(&trees[loc.fi as usize]).is_some_and(|hit_root| {
-                                !hit_root.is_empty()
-                                    && root
-                                        .strip_prefix(hit_root)
-                                        .is_none_or(|rest| !rest.starts_with(PATH_SEP))
-                            })
-                        };
-                        if !direct.iter().any(inside) && direct.iter().all(sibling) {
-                            let local = format!("{prefix}{target_path}");
-                            let mut found = resolve_glob(&local, file_index, prefixes);
-                            found.retain(|loc| loc.fi != fi);
-                            if !found.is_empty() {
-                                direct = found;
-                                target_path = local;
-                            }
-                        }
-                    }
+                    let origin = ImportOrigin {
+                        fi,
+                        own: own_prefix
+                            .as_ref()
+                            .filter(|_| mapped.is_none())
+                            .map(|(root, prefix)| (*root, prefix.as_str())),
+                        imported: cur.names().exactly_one().ok().map(|name| name.sym()),
+                    };
+                    let (direct, target_path) =
+                        direct_targets(trees, lang, file_index, prefixes, &origin, &target_path);
                     if direct.is_empty() && stdlib {
                         return;
                     }
@@ -952,10 +959,11 @@ fn gather_imports_for(
                             .collect(),
                     };
                     if candidates.is_empty() {
-                        candidates = defs_on_path(trees, lang, file_index, prefixes, &target_path)
-                            .into_iter()
-                            .map(|(loc, path)| (loc, path, false))
-                            .collect();
+                        candidates =
+                            defs_on_path(trees, lang, file_index, prefixes, &origin, &target_path)
+                                .into_iter()
+                                .map(|(loc, path)| (loc, path, false))
+                                .collect();
                     }
                     for (loc, path, is_sub) in candidates.into_iter().filter(|c| c.0.fi != fi) {
                         if is_sub {
@@ -981,38 +989,109 @@ fn gather_imports_for(
     (all_reqs, all_edges)
 }
 
-/// A path whose tail names defs inside a file, `use crate::errors::Error::Kind`
-/// with `enum Error { Kind }` in `errors.rs`: the longest prefix that is a file
-/// or an inline module, then one def per remaining segment.
+struct ImportOrigin<'a> {
+    fi: u32,
+    own: Option<(&'a str, &'a str)>,
+    imported: Option<u32>,
+}
+
+fn direct_targets(
+    trees: &[Tree],
+    lang: &Lang,
+    file_index: &FileIndex,
+    prefixes: &[String],
+    origin: &ImportOrigin,
+    target_path: &str,
+) -> (Vec<Loc>, String) {
+    let fi = origin.fi;
+    let root_relative = lang.syms.lookup("source_root_rel");
+    let mut direct = resolve_glob(target_path, file_index, prefixes);
+    direct.retain(|loc| loc.fi != fi);
+    let Some((root, prefix)) = origin.own.filter(|_| !direct.is_empty()) else {
+        return (direct, target_path.to_owned());
+    };
+    let inside = |loc: &Loc| trees[loc.fi as usize].label.starts_with(prefix);
+    let sibling = |loc: &Loc| {
+        source_root(&trees[loc.fi as usize], lang, root_relative).is_some_and(|hit_root| {
+            !hit_root.is_empty()
+                && root
+                    .strip_prefix(hit_root)
+                    .is_none_or(|rest| !rest.starts_with(PATH_SEP))
+        })
+    };
+    if !direct.iter().any(inside) && direct.iter().all(sibling) {
+        let local = format!("{prefix}{target_path}");
+        let mut found = resolve_glob(&local, file_index, prefixes);
+        found.retain(|loc| loc.fi != fi);
+        if !found.is_empty() {
+            return (found, local);
+        }
+    }
+    (direct, target_path.to_owned())
+}
+
 fn defs_on_path(
     trees: &[Tree],
     lang: &Lang,
     file_index: &FileIndex,
     prefixes: &[String],
+    origin: &ImportOrigin,
     target_path: &str,
 ) -> Vec<(Loc, String)> {
     let mut prefix = target_path;
     let mut tail = Vec::new();
     while let Some((head, last)) = prefix.rsplit_once(PATH_SEP) {
         tail.push(lang.syms.lookup(last));
-        let found = resolve_glob(head, file_index, prefixes);
+        let (found, head_path) = direct_targets(trees, lang, file_index, prefixes, origin, head);
         if !found.is_empty() {
+            let rest = &target_path[head.len()..];
             return found
                 .into_iter()
                 .filter_map(|loc| {
                     let mut node = trees[loc.fi as usize].cursor(loc.node);
                     for &name in tail.iter().rev() {
+                        let named =
+                            |d: &Cursor| d.is(C::Def) && d.child_sym(C::DefName) == Some(name);
                         node = node
                             .children()
-                            .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))?;
+                            .find(named)
+                            .or_else(|| node.descendants().find(named))?;
                     }
-                    Some((Loc::new(loc.fi as usize, node.index()), head.to_owned()))
+                    if origin
+                        .imported
+                        .is_some_and(|name| tail.first() == Some(&name))
+                        && let Some(parent) = node.parent().filter(|parent| parent.is(C::Def))
+                    {
+                        node = parent;
+                    }
+                    Some((
+                        Loc::new(loc.fi as usize, node.index()),
+                        format!("{head_path}{rest}"),
+                    ))
                 })
                 .collect();
         }
         prefix = head;
     }
     Vec::new()
+}
+
+fn request_targets(
+    trees: &[Tree],
+    lang: &Lang,
+    file_index: &FileIndex,
+    prefixes: &[String],
+    origin: &ImportOrigin,
+    target_path: &str,
+) -> Vec<Loc> {
+    let (direct, _) = direct_targets(trees, lang, file_index, prefixes, origin, target_path);
+    if !direct.is_empty() {
+        return direct;
+    }
+    defs_on_path(trees, lang, file_index, prefixes, origin, target_path)
+        .into_iter()
+        .map(|(loc, _)| loc)
+        .collect()
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
