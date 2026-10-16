@@ -66,7 +66,7 @@ impl PipelineError {
             Self::NoEnabledNamespaces | Self::Streaming(_) => true,
             Self::Execution(message) => matches!(
                 ClickHouseLimit::from_message(message),
-                Some(ClickHouseLimit::TypeMismatch | ClickHouseLimit::BadQueryParameter)
+                Some(ClickHouseLimit::BadQueryParameter)
             ),
             _ => false,
         }
@@ -254,9 +254,6 @@ mod tests {
             clickhouse_error(
                 "Code: 457. DB::Exception: Value garbage cannot be parsed. (BAD_QUERY_PARAMETER)",
             ),
-            clickhouse_error(
-                "Code: 53. DB::Exception: Cannot convert string 'abc' to type UInt64. (TYPE_MISMATCH)",
-            ),
         ];
         for error in caller {
             assert_eq!(error.outcome(), "caller_error", "{error}");
@@ -266,6 +263,9 @@ mod tests {
     #[test]
     fn server_errors_include_resource_limits_and_internal_failures() {
         let server = [
+            clickhouse_error(
+                "Code: 53. DB::Exception: Cannot convert string 'abc' to type UInt64. (TYPE_MISMATCH)",
+            ),
             clickhouse_error(
                 "Code: 159. DB::Exception: Timeout exceeded: elapsed 30001 ms. (TIMEOUT_EXCEEDED)",
             ),

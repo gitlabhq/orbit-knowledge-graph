@@ -17,7 +17,10 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::OrbitServiceImpl;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
-use orbit_server::proto::{ExecuteQueryError, ExecuteQueryRequest};
+use orbit_server::proto::{
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, RedactionExchange,
+    RedactionResponse, redaction_exchange,
+};
 use orbit_server_config::AppConfig;
 use orbit_server_config::query::{QueryConfig, QuerySettings};
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -44,6 +47,7 @@ async fn successful_query_is_a_success() {
 async fn unparsable_datetime_filter_is_a_caller_error() {
     let mut server = Server::start().await;
 
+    // ClickHouse rejects the first value with code 41 and the second with code 457.
     for value in ["garbage", "2026-09-30T00:00:00+00:00"] {
         let filters = json!({"created_at": {"gte": value}});
         let error = server.run(project_query(filters)).await.unwrap_err();
@@ -168,6 +172,33 @@ async fn closing_the_request_stream_during_redaction_is_a_caller_error() {
     assert_eq!(error.code, "streaming_error");
     server
         .assert_recorded("streaming_error", "caller_error", Some("streaming"))
+        .await;
+}
+
+#[tokio::test]
+async fn oversized_redaction_response_is_a_server_error() {
+    let mut server = Server::start().await;
+    let mut query = server.open(project_query(json!({}))).await;
+    query.await_authorization_request().await;
+
+    let oversized = RedactionResponse {
+        result_id: "x".repeat(5 * 1024 * 1024),
+        authorizations: Vec::new(),
+    };
+    query
+        .sender
+        .send(ExecuteQueryMessage {
+            content: Some(Content::Redaction(RedactionExchange {
+                content: Some(redaction_exchange::Content::Response(oversized)),
+            })),
+        })
+        .await
+        .unwrap();
+    let error = query.finish().await.unwrap_err();
+
+    assert_eq!(error.code, "authorization_error");
+    server
+        .assert_recorded("authorization_error", "server_error", Some("redaction"))
         .await;
 }
 
@@ -335,8 +366,12 @@ impl Server {
             ),
             [[status, outcome]]
         );
-        // Compile rejections are counted on the compiler metric instead.
-        let failed = failure_reason.filter(|_| status != "compile_error");
+        // Compile rejections are counted on the compiler metric instead, and the metric
+        // names a redaction failure `authorization`.
+        let failed = match failure_reason {
+            Some("redaction") => Some("authorization"),
+            reason => reason.filter(|_| status != "compile_error"),
+        };
         assert_eq!(
             metric_labels(&metrics, "gkg.query.pipeline.failed", &["failure_reason"]),
             failed.map(|reason| [reason]).as_slice()
