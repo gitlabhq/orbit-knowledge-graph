@@ -124,7 +124,7 @@ description = "Build the CLI"
 [tasks.test]
 alias = "test:fast"
 run = "./scripts/dev/run-unit-tests.sh"
-description = "Run unit tests (--lib, plus the xtask and orbit binaries; no integration targets, no Docker)"
+description = "Run unit tests (--lib, the xtask and orbit binaries, and the code-graph-incremental integration targets; no Docker)"
 
 [tasks."test:local"]
 run = "cargo nextest run --test local"
