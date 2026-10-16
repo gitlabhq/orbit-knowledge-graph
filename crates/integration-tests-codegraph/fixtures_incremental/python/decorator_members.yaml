@@ -170,6 +170,15 @@ fixtures:
       def foo():
           pass
 
+
+      def bar():
+          pass
+
+
+      @deco(lambda: bar())
+      def bar():
+          pass
+
 tests:
   - name: a member decorator on an instance names the method, not the class
     query: |
@@ -296,3 +305,16 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "arg_refs.deco" } }
+
+  - name: a lazy call in a decorator lambda names the decorated def, which is bound when the lambda runs
+    # Known gap: the lambda body under a decorator argument is walked inline, so the own-def retarget
+    # sends `bar()` to the earlier `bar`. Python looks `bar` up when the lambda runs, after the
+    # decorated def is bound.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.bar' AND callee.fqn = 'main.bar'
+      RETURN caller.start_line AS from, callee.start_line AS to
+    assert:
+      - { row_count: 1 }
+      - { row: { from: 100, to: 100 } }
