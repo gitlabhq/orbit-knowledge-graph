@@ -2381,6 +2381,15 @@ mod tests {
     }
 
     #[test]
+    fn multi_id_neighbors_center_keeps_one_fused_scan() {
+        let sql = compile_gql_sql(
+            "MATCH (g:Group)-[r:MEMBER_OF|CONTAINS]-(m) WHERE g.id IN [1, 2] RETURN g, r, m LIMIT 30",
+        );
+
+        assert!(sql.contains("_orbit_fused"), "{sql}");
+    }
+
+    #[test]
     fn pinned_neighbors_center_scans_each_arm_by_its_own_id() {
         let sql = compile_gql_sql(
             "MATCH (w:WorkItem)-[r:RELATED_TO|HAS_LABEL]-(m) WHERE w.id = 7 RETURN w, r, m LIMIT 30",
