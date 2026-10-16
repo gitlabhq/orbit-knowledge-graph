@@ -1,0 +1,81 @@
+name: "Python: decorators, annotations and defaults are evaluated in the enclosing scope"
+
+fixtures:
+  - path: main.py
+    content: |
+      def patch(target):
+          return target
+
+
+      class Node:
+          def m(self):
+              pass
+
+
+      def helper():
+          pass
+
+
+      class Tests:
+          @patch("x")
+          def test_x(self, patch):
+              patch.assert_called()
+
+
+      def make(Node) -> Node:
+          return Node
+
+
+      def use():
+          n = make(1)
+          n.m()
+
+
+      def make_plain(x) -> Node:
+          return x
+
+
+      def use_plain():
+          n = make_plain(1)
+          n.m()
+
+
+      def f(helper=helper):
+          helper()
+
+tests:
+  - name: a call decorator names the top-level function, not the parameter of the same name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'test_x'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.patch" } }
+
+  - name: a return annotation names the class, not the parameter of the same name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Node.m" } }
+
+  - name: a default value names the top-level function, not the parameter it initializes
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a return annotation resolves when no parameter shares its name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_plain' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Node.m" } }
