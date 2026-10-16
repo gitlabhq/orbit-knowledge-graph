@@ -69,7 +69,9 @@ pub struct ResolveResult {
 
 #[derive(Default)]
 pub struct FileIndex {
-    /// A file, or a top-level def in one when the key is the def's name.
+    /// A file, or a top-level def in one when the key is the def's name,
+    /// or, in a file with no package, the file's module path and the name
+    /// when no file has that path.
     keys: FxHashMap<String, Loc>,
     dirs: FxHashMap<String, Vec<u32>>,
 }
@@ -2134,6 +2136,7 @@ fn build_file_index(
     index_names: &[String],
 ) -> FileIndex {
     let mut idx = FileIndex::default();
+    let mut module_defs = Vec::new();
     let sep = support_lang.fqn_separator();
     for (fi, (tree, path)) in trees.iter().map(|t| (t, t.label.as_str())).enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
@@ -2141,6 +2144,7 @@ fn build_file_index(
         let file = Loc::new(fi, 0);
         idx.insert(path.to_string(), file);
         idx.insert(stem.to_string(), file);
+        let mut module = stem;
         for name in index_names {
             if let Some(pkg) = stem
                 .strip_suffix(name.as_str())
@@ -2149,8 +2153,10 @@ fn build_file_index(
                 if !pkg.is_empty() {
                     idx.insert(pkg.to_string(), file);
                 }
+                module = pkg;
             } else if stem == name.as_str() {
                 idx.insert(String::new(), file);
+                module = "";
             }
         }
         let root = tree.root();
@@ -2159,9 +2165,15 @@ fn build_file_index(
         });
         let defs = root.children().filter(|d| d.is(C::Def));
         for (name, d) in defs.filter_map(|d| Some((d.child_sym(C::DefName)?, d))) {
-            let key = format!("{pkg}{}", lang.syms.resolve(name).replace(sep, PATH_SEP));
-            idx.insert(key, Loc::new(fi, d.index()));
+            let name = lang.syms.resolve(name).replace(sep, PATH_SEP);
+            if pkg.is_empty() && !module.is_empty() {
+                module_defs.push((format!("{module}{PATH_SEP}{name}"), Loc::new(fi, d.index())));
+            }
+            idx.insert(format!("{pkg}{name}"), Loc::new(fi, d.index()));
         }
+    }
+    for (key, loc) in module_defs {
+        idx.keys.entry(key).or_insert(loc);
     }
     idx
 }
