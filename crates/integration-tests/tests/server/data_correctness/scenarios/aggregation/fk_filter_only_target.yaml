@@ -18,7 +18,7 @@ query:
 
 expect:
   row_count: 1
-  row_values: [{c: 4}]
-  sql_contains: ["_orbit_subplan_1", "_orbit_edge_0.target_id IN"]
+  row_values: [{ c: 4 }]
+  sql_contains: ["_orbit_relation_1", "_orbit_edge_0.target_id IN"]
   sql_not_contains: ["gl_edge"]
   skip_requirements: ["filter:name"]

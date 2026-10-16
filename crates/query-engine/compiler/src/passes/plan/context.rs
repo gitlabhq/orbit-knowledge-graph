@@ -5,7 +5,7 @@ use query_data_model::OrbitQueryModel;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, InputNode, QueryType};
 
-use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
+use super::physical::{BindingSource, ExecutionPlan, RelationGraph};
 use super::{DenormalizedKey, DenormalizedProperty, EdgeRelation, NodePlan, Plan};
 
 pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
@@ -40,10 +40,25 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             .values()
             .next()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        let root = PhysicalPlan::single_node(node)?;
+        let mut graph = RelationGraph::default();
+        let table = node
+            .table
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
+        let read = graph.read(table, &node.alias, true, None);
+        let owned = graph.owned(
+            read,
+            super::physical::ReadOwner::Node(node.alias.clone()),
+            &node.alias,
+        );
+        let root = graph
+            .from(owned)
+            .filter(super::requirements::node_predicates(node))
+            .project(super::requirements::node_outputs(node))
+            .finish();
         Ok(ExecutionPlan {
-            source: root.into_source(),
-            subplans: vec![],
+            graph,
+            root,
             outputs: super::requirements::node_outputs(node),
             bindings: vec![BindingSource::table(&node.alias)],
         })

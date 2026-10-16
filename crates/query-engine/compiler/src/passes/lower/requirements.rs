@@ -58,13 +58,14 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
         } => sql::tag_membership(&value.source, &value.name, values),
         Predicate::Membership {
             column: value,
-            definition,
+            relation,
             key,
         } => Expr::InSubquery {
             expr: Box::new(column(value)),
-            cte_name: definition.clone(),
+            cte_name: super::physical::relation_name(*relation),
             column: key.clone(),
         },
+        Predicate::Scope { alias, proof } => crate::scope::scope_predicate(proof, alias),
     }
 }
 

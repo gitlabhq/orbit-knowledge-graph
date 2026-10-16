@@ -13,8 +13,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (CTE _orbit_subplan_0 (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
-            - (Filter _orbit_edge_0.target_id IN _orbit_subplan_0.id, ... (_))
+            - (CTE _orbit_relation_0 (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+            - (Filter _orbit_edge_0.target_id IN _orbit_relation_0.id, ... (_))
 
   - name: Endpoint IDs and ranges remain visible on the edge relation
     query:

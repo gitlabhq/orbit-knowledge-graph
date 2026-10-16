@@ -206,7 +206,6 @@ pub(super) fn assign_node_access(
     relations: &[EdgeRelation],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     condition_nodes: &HashSet<String>,
-    table_scans: &HashSet<String>,
     nodes: &mut HashMap<String, NodePlan>,
 ) {
     for node in nodes.values_mut() {
@@ -237,15 +236,13 @@ pub(super) fn assign_node_access(
             && !group_target
             && !metric_target
             && !ordered
-            && !local_predicate
-            && !table_scans.contains(&node.alias);
+            && !local_predicate;
         node.joined = input.relationships.is_empty()
             || !model.supports_deferred_node_loading()
             || group_target
             || metric_target
             || ordered
             || local_predicate
-            || table_scans.contains(&node.alias)
             || uncovered_filter && !filter_only;
     }
 }

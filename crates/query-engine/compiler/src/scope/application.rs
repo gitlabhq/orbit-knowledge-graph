@@ -1,57 +1,32 @@
-use query_data_model::OrbitQueryModel;
+use super::QueryScope;
+use crate::passes::plan::QueryPlan;
+use crate::passes::plan::physical::{ReadOwner, RelationNode};
 
-use super::{QueryScope, resolved_scope_guard, scope_predicate};
-use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Node, TableRef};
-use crate::error::Result;
-
-pub fn apply(
-    node: &mut Node,
-    scope: &QueryScope,
-    model: &(impl OrbitQueryModel + ?Sized),
-) -> Result<()> {
-    let Node::Query(query) = node else {
-        return Ok(());
+pub fn apply_plan(plan: &mut QueryPlan, scope: &QueryScope) {
+    let execution = match plan {
+        QueryPlan::Traversal(plan) => &mut plan.operation.execution,
+        QueryPlan::Aggregation(plan) => &mut plan.operation.execution,
+        _ => return,
     };
-    visit_queries_mut(query, &mut |query| {
-        apply_scan_predicates(&query.from, &mut query.where_clause, scope, model);
-        Ok(())
-    })?;
-    for requirement in &scope.requirements {
-        append_predicate(&mut query.where_clause, resolved_scope_guard(requirement));
-    }
-    Ok(())
-}
-
-fn apply_scan_predicates(
-    table: &TableRef,
-    target: &mut Option<Expr>,
-    scope: &QueryScope,
-    model: &(impl OrbitQueryModel + ?Sized),
-) {
-    visit_relations(table, &mut |relation| {
-        if let TableRef::Scan {
-            table,
-            alias,
-            relationship,
-            ..
-        } = relation
-        {
-            let proof = match relationship {
-                Some(index) => scope.relationships.get(*index).and_then(Option::as_ref),
-                None if model.table_path_scopable(table) => scope.nodes.get(alias),
-                None => None,
+    let filters: Vec<_> = execution
+        .graph
+        .iter()
+        .filter_map(|(id, node)| {
+            let RelationNode::Owned { owner, alias, .. } = node else {
+                return None;
             };
-            if let Some(proof) = proof {
-                append_predicate(target, scope_predicate(proof, alias));
-            }
-        }
-    });
-}
-
-fn append_predicate(target: &mut Option<Expr>, predicate: Expr) {
-    *target = Some(match target.take() {
-        Some(existing) => Expr::and(existing, predicate),
-        None => predicate,
-    });
+            let proof = match owner {
+                ReadOwner::Node(node) => scope.node(node),
+                ReadOwner::Relationship(index) => scope.relationship(*index),
+            }?;
+            Some((id, alias.clone(), proof.clone()))
+        })
+        .collect();
+    for (id, alias, proof) in filters {
+        execution.graph.filter_uses(
+            &mut execution.root,
+            id,
+            vec![crate::passes::plan::requirements::Predicate::Scope { alias, proof }],
+        );
+    }
 }

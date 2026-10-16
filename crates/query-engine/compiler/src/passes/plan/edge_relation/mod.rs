@@ -10,12 +10,10 @@ mod expansion;
 use super::BoundFilter;
 use super::context::PlanningContext;
 use super::helpers::{FilterOwner, ordered_filters};
-use super::physical::{
-    BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, Subplan, SubplanId,
-};
+use super::physical::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
 use super::requirements::{
-    Column, OutputValue, Predicate, Projection, id_list, live, property_filter, relationship_kinds,
-    tag_filter,
+    Column, OutputValue, Predicate, Projection, id_list, live, node_outputs, node_predicates,
+    property_filter, relationship_kinds, tag_filter,
 };
 use crate::constants::*;
 use crate::error::{QueryError, Result};
@@ -156,10 +154,7 @@ pub(super) struct PlannedRelations<'a, M: OrbitQueryModel + ?Sized> {
     pub execution: ExecutionPlan,
 }
 
-pub(super) fn plan<'a, M>(
-    mut context: PlanningContext<'a, M>,
-    table_scans: &HashSet<String>,
-) -> Result<PlannedRelations<'a, M>>
+pub(super) fn plan<'a, M>(mut context: PlanningContext<'a, M>) -> Result<PlannedRelations<'a, M>>
 where
     M: OrbitQueryModel + ?Sized,
 {
@@ -183,7 +178,6 @@ where
         &relations,
         &denormalized,
         &placement.joined_nodes,
-        table_scans,
         &mut nodes,
     );
     linearize_relations(&mut relations)?;
@@ -215,7 +209,11 @@ where
             )
         })
         .collect::<Result<_>>()?;
-    execution.source = execution.source.filter(conditions);
+    execution.root = execution
+        .graph
+        .from(execution.root)
+        .filter(conditions)
+        .finish();
     context.node_edge_mappings = execution
         .bindings
         .iter()
@@ -232,25 +230,27 @@ where
 
 struct RelationBuilder<'a, M: OrbitQueryModel + ?Sized> {
     facts: &'a PlanningContext<'a, M>,
-    source: Option<PhysicalSource>,
+    root: Option<RelationId>,
     outputs: Vec<Projection>,
-    bindings: Vec<BindingSource>,
-    subplans: Vec<Subplan>,
-    frontiers: HashMap<String, (SubplanId, String)>,
-    exact_keys: HashMap<String, (SubplanId, String)>,
+    nodes: HashMap<String, PlannedNode>,
+    graph: RelationGraph,
     tagged: HashSet<(String, String, usize)>,
+}
+
+#[derive(Default)]
+struct PlannedNode {
+    binding: Option<BindingSource>,
+    ids: Option<(RelationId, String)>,
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     fn new(facts: &'a PlanningContext<'a, M>) -> Self {
         Self {
             facts,
-            source: None,
+            root: None,
             outputs: Vec::new(),
-            bindings: Vec::new(),
-            subplans: Vec::new(),
-            frontiers: HashMap::new(),
-            exact_keys: HashMap::new(),
+            nodes: HashMap::new(),
+            graph: RelationGraph::default(),
             tagged: HashSet::new(),
         }
     }
@@ -263,22 +263,25 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             self.add_edge(index, relation)?;
         }
         self.attach_nodes()?;
+        let bindings = self
+            .facts
+            .input
+            .nodes
+            .iter()
+            .filter_map(|node| self.nodes.get(&node.id)?.binding.clone())
+            .collect();
         Ok(ExecutionPlan {
-            source: self
-                .source
+            root: self
+                .root
                 .ok_or_else(|| QueryError::Lowering("traversal has no physical source".into()))?,
-            subplans: self.subplans,
+            graph: self.graph,
             outputs: self.outputs,
-            bindings: self.bindings,
+            bindings,
         })
     }
 
     fn attach_nodes(&mut self) -> Result<()> {
-        let aliases: Vec<_> = self
-            .bindings
-            .iter()
-            .map(|binding| binding.node.clone())
-            .collect();
+        let aliases: Vec<_> = self.nodes.keys().cloned().collect();
         for alias in aliases {
             if self.facts.nodes[&alias].joined {
                 self.ensure_node(&alias)?;
@@ -288,7 +291,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     }
 
     fn binding(&self, node: &str) -> Option<&BindingSource> {
-        self.bindings.iter().find(|binding| binding.node == node)
+        self.nodes.get(node)?.binding.as_ref()
+    }
+
+    fn ids(&self, node: &str) -> Option<&(RelationId, String)> {
+        self.nodes.get(node)?.ids.as_ref()
+    }
+
+    fn set_ids(&mut self, node: &str, ids: (RelationId, String)) {
+        self.nodes.entry(node.to_string()).or_default().ids = Some(ids);
     }
 
     fn set_binding(
@@ -299,17 +310,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         property_source: Option<&str>,
         traversal_path: Option<Column>,
     ) {
-        if let Some(binding) = self
-            .bindings
-            .iter_mut()
-            .find(|binding| binding.node == node)
-        {
+        let planned = self.nodes.entry(node.to_string()).or_default();
+        if let Some(binding) = &mut planned.binding {
             binding.alias = alias.to_string();
             binding.column = column.to_string();
             binding.property_source = property_source.map(str::to_string);
             binding.traversal_path = traversal_path;
         } else {
-            self.bindings.push(BindingSource {
+            planned.binding = Some(BindingSource {
                 node: node.to_string(),
                 alias: alias.to_string(),
                 column: column.to_string(),
@@ -325,16 +333,11 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
         let alias = &relation.alias;
         let mut physical_relation = relation.clone();
-        let frontiers: Vec<_> = [&relation.from_node, &relation.to_node]
+        let endpoint_ids: Vec<_> = [&relation.from_node, &relation.to_node]
             .into_iter()
-            .filter_map(|node| {
-                self.frontiers
-                    .get(node)
-                    .cloned()
-                    .map(|frontier| (node.clone(), frontier))
-            })
+            .filter_map(|node| self.ids(node).cloned().map(|ids| (node.clone(), ids)))
             .collect();
-        let frontier_columns: Vec<_> = frontiers
+        let narrowed_columns: Vec<_> = endpoint_ids
             .iter()
             .filter_map(|(node, _)| relation.endpoint_column(node))
             .collect();
@@ -342,7 +345,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             select_edge_layouts(
                 self.facts.model,
                 &mut physical_relation.edge_tables,
-                &frontier_columns,
+                &narrowed_columns,
             );
         }
         let mut predicates = edge_predicates(self.facts, alias, &physical_relation, false);
@@ -360,11 +363,11 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             &mut self.tagged,
         );
         predicates.extend(node_id_predicates(self.facts, alias, relation));
-        for (node, (frontier, key)) in &frontiers {
+        for (node, (ids, key)) in &endpoint_ids {
             if let Some(column) = relation.endpoint_column(node) {
                 predicates.push(Predicate::Membership {
                     column: Column::new(alias, column),
-                    definition: format!("_orbit_subplan_{}", frontier.0),
+                    relation: *ids,
                     key: key.clone(),
                 });
             }
@@ -380,68 +383,50 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             {
                 continue;
             }
-            let keys = self.exact_node_keys(node)?;
+            let ids = self.node_ids(node)?;
             let column = relation.endpoint_column(node).expect("relation endpoint");
             predicates.push(Predicate::Membership {
                 column: Column::new(alias, column),
-                definition: format!("_orbit_subplan_{}", keys.0.0),
-                key: keys.1,
+                relation: ids.0,
+                key: ids.1,
             });
         }
 
         let mut source = if relation.max_hops > 1 {
-            multi_hop(self.facts, &physical_relation, alias).filter(predicates)
-        } else if self.facts.aggregate() && self.facts.relations.len() == 1 {
-            if let Some(table) = physical_relation.single_edge_table() {
-                PhysicalSource::Latest {
-                    sort_key: self.facts.latest_row_key(table)?.to_vec(),
-                    alias: alias.clone(),
-                    aggregate_condition: predicates,
-                    input: Box::new(PhysicalSource::edge(&physical_relation, alias, false)),
+            let expansion = multi_hop(&mut self.graph, self.facts, &physical_relation, alias);
+            self.graph.from(expansion).filter(predicates).finish()
+        } else {
+            let edge = self.edge_read(
+                &physical_relation,
+                alias,
+                !(self.facts.aggregate() && self.facts.relations.len() == 1),
+            )?;
+            if self.facts.aggregate() && self.facts.relations.len() == 1 {
+                if let Some(table) = physical_relation.single_edge_table() {
+                    self.graph
+                        .from(edge)
+                        .latest(
+                            alias,
+                            self.facts.latest_row_key(table)?.to_vec(),
+                            predicates,
+                        )
+                        .finish()
+                } else {
+                    self.graph.from(edge).filter(predicates).finish()
                 }
             } else {
-                PhysicalSource::edge(&physical_relation, alias, true).filter(predicates)
+                self.graph.from(edge).filter(predicates).finish()
             }
-        } else {
-            PhysicalSource::edge(&physical_relation, alias, true).filter(predicates)
         };
-        let needs_new_frontier = [&relation.from_node, &relation.to_node]
-            .into_iter()
-            .any(|node| {
-                !self.frontiers.contains_key(node)
-                    && self.facts.relations[index + 1..]
-                        .iter()
-                        .any(|next| next.endpoint_column(node).is_some())
-            });
-        let should_reuse = relation.max_hops == 1
-            && needs_new_frontier
-            && (!frontiers.is_empty()
-                || self.source.is_none() && relation_is_selective(self.facts, relation));
-        if should_reuse {
-            let id = SubplanId(self.subplans.len());
-            self.subplans.push(Subplan {
-                id,
-                plan: PhysicalPlan::Project {
-                    source,
-                    outputs: edge_relation_outputs(alias),
-                },
-                materialized: true,
-            });
-            source = PhysicalSource::Use {
-                id,
-                alias: alias.clone(),
-            };
-            self.add_relation_frontiers(index, relation, id);
+        if relation.max_hops == 1 {
+            self.bind_relation_ids(index, relation, source);
         }
         if self.facts.relations.len() > 1 && relation.max_hops == 1 {
-            source = PhysicalSource::Scope {
-                alias: alias.clone(),
-                input: Box::new(source),
-            };
+            source = self.graph.from(source).bind(alias).finish();
         }
         let (start, end) = relation.direction.edge_columns();
         let endpoints = [(&relation.from_node, start), (&relation.to_node, end)];
-        if let Some(previous) = self.source.take() {
+        if let Some(previous) = self.root.take() {
             let (node, column, binding) = endpoints
                 .iter()
                 .find_map(|(node, column)| {
@@ -462,17 +447,21 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                     });
                 }
             }
-            self.source = Some(PhysicalSource::Join {
-                endpoints: (
-                    Column::new(&binding.alias, &binding.column),
-                    Column::new(alias, column),
-                ),
-                predicates: join_predicates,
-                left: Box::new(previous),
-                right: Box::new(source),
-            });
+            self.root = Some(
+                self.graph
+                    .from(previous)
+                    .join(
+                        source.alias(alias),
+                        (
+                            Column::new(&binding.alias, &binding.column),
+                            Column::new(alias, column),
+                        ),
+                        join_predicates,
+                    )
+                    .finish(),
+            );
         } else {
-            self.source = Some(source);
+            self.root = Some(source);
         }
         for (node, column) in endpoints {
             if self.binding(node).is_none() {
@@ -523,17 +512,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 self.facts.model,
             )
         {
-            let keys = self.exact_node_keys(endpoint)?;
+            let ids = self.node_ids(endpoint)?;
             predicates.push(Predicate::Membership {
                 column: endpoint_column.clone(),
-                definition: format!("_orbit_subplan_{}", keys.0.0),
-                key: keys.1,
+                relation: ids.0,
+                key: ids.1,
             });
         }
-        if let Some((frontier, key)) = self.frontiers.get(endpoint) {
+        if let Some((ids, key)) = self.ids(endpoint) {
             predicates.push(Predicate::Membership {
                 column: endpoint_column.clone(),
-                definition: format!("_orbit_subplan_{}", frontier.0),
+                relation: *ids,
                 key: key.clone(),
             });
         }
@@ -547,7 +536,9 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         } else {
             self.set_binding(endpoint, alias, &node_source.column, None, None);
         }
-        self.source = self.source.take().map(|source| source.filter(predicates));
+        if let Some(root) = self.root.take() {
+            self.root = Some(self.graph.from(root).filter(predicates).finish());
+        }
         self.push_node_relation_outputs(index, relation, node_source, alias);
         Ok(())
     }
@@ -564,27 +555,28 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             return Ok(false);
         }
         let node = &self.facts.nodes[&node_source.node];
-        let scan = PhysicalPlan::node_scan(node)?;
-        let outputs = scan.outputs().to_vec();
-        let mut scan = scan.into_source();
-        if let Some((frontier, key)) = self.frontiers.get(&node_source.node) {
-            scan = scan.filter(vec![Predicate::Membership {
-                column: Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
-                definition: format!("_orbit_subplan_{}", frontier.0),
-                key: key.clone(),
-            }]);
+        let outputs = node_outputs(node);
+        let mut scan = self.node_read(node)?;
+        if let Some((ids, key)) = self.ids(&node_source.node).cloned() {
+            scan = self
+                .graph
+                .from(scan)
+                .semi_join(Column::new(&node.alias, DEFAULT_PRIMARY_KEY), ids, key)
+                .finish();
         }
         let mut joined_through_endpoint = false;
-        self.source = Some(
-            match (self.source.take(), self.binding(&node_source.node).cloned()) {
-                (Some(source), Some(binding)) => source.inner_join(
-                    scan,
+        self.root = Some(
+            match (self.root.take(), self.binding(&node_source.node).cloned()) {
+                (Some(root), Some(binding)) => self.graph.join(
+                    root,
+                    scan.alias(&node.alias),
                     (
                         Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
                         Column::new(&binding.alias, &binding.column),
                     ),
+                    vec![],
                 ),
-                (Some(source), None) => {
+                (Some(root), None) => {
                     let endpoint = [&relation.from_node, &relation.to_node]
                         .into_iter()
                         .find(|endpoint| **endpoint != node_source.node)
@@ -594,12 +586,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                             QueryError::Lowering("node relation is disconnected".into())
                         })?;
                     joined_through_endpoint = true;
-                    source.inner_join(
-                        scan,
+                    self.graph.join(
+                        root,
+                        scan.alias(&node.alias),
                         (
                             Column::new(&node.alias, &node_source.column),
                             Column::new(&endpoint.alias, &endpoint.column),
                         ),
+                        vec![],
                     )
                 }
                 (None, _) => scan,
@@ -667,37 +661,29 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         ]);
     }
 
-    fn exact_node_keys(&mut self, alias: &str) -> Result<(SubplanId, String)> {
-        if let Some(keys) = self.exact_keys.get(alias) {
-            return Ok(keys.clone());
+    fn node_ids(&mut self, alias: &str) -> Result<(RelationId, String)> {
+        if let Some(ids) = self.ids(alias) {
+            return Ok(ids.clone());
         }
         let node = &self.facts.nodes[alias];
-        let candidate = if let Some(plan) = PhysicalPlan::candidate_keys(node)? {
-            let id = SubplanId(self.subplans.len());
-            self.subplans.push(Subplan {
-                id,
-                plan,
-                materialized: true,
-            });
-            Some((id, DEFAULT_PRIMARY_KEY.to_string()))
-        } else {
-            None
-        };
-        let id = SubplanId(self.subplans.len());
+        let source = self.node_read(node)?;
+        let filtered = self.graph.filter(source, node_predicates(node));
+        let id = self.graph.project(
+            filtered,
+            vec![Projection::new(
+                OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
+                DEFAULT_PRIMARY_KEY,
+            )],
+        );
         let key = DEFAULT_PRIMARY_KEY.to_string();
-        self.subplans.push(Subplan {
-            id,
-            plan: PhysicalPlan::node_keys(node, candidate)?,
-            materialized: true,
-        });
-        self.exact_keys.insert(alias.to_string(), (id, key.clone()));
+        self.set_ids(alias, (id, key.clone()));
         Ok((id, key))
     }
 
-    fn add_relation_frontiers(&mut self, index: usize, relation: &EdgeRelation, source: SubplanId) {
+    fn bind_relation_ids(&mut self, index: usize, relation: &EdgeRelation, source: RelationId) {
         let (start, end) = relation.direction.edge_columns();
         for (node, column) in [(&relation.from_node, start), (&relation.to_node, end)] {
-            if self.frontiers.contains_key(node) {
+            if self.ids(node).is_some() {
                 continue;
             }
             let used_later = self.facts.relations[index + 1..]
@@ -706,23 +692,18 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             if !used_later {
                 continue;
             }
-            let id = SubplanId(self.subplans.len());
             let key = "id".to_string();
-            self.subplans.push(Subplan {
-                id,
-                plan: PhysicalPlan::Distinct {
-                    source: PhysicalSource::Use {
-                        id: source,
-                        alias: "_frontier_source".into(),
-                    },
-                    outputs: vec![Projection::new(
-                        OutputValue::Column(Column::new("_frontier_source", column)),
-                        &key,
-                    )],
-                },
-                materialized: false,
-            });
-            self.frontiers.insert(node.clone(), (id, key));
+            let id = self
+                .graph
+                .from(source)
+                .bind("_id_source")
+                .project(vec![Projection::new(
+                    OutputValue::Column(Column::new("_id_source", column)),
+                    &key,
+                )])
+                .distinct()
+                .finish();
+            self.set_ids(node, (id, key));
         }
     }
 
@@ -744,16 +725,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 self.facts.model,
             )
         });
-        let scan = PhysicalPlan::node_scan(&node)?;
-        let outputs = scan.outputs().to_vec();
-        let scan = scan.into_source();
-        self.source = Some(match (self.source.take(), self.binding(alias).cloned()) {
-            (Some(source), Some(binding)) => source.inner_join(
-                scan,
+        let outputs = node_outputs(&node);
+        let scan = self.node_read(&node)?;
+        self.root = Some(match (self.root.take(), self.binding(alias).cloned()) {
+            (Some(root), Some(binding)) => self.graph.join(
+                root,
+                scan.alias(alias),
                 (
                     Column::new(alias, DEFAULT_PRIMARY_KEY),
                     Column::new(&binding.alias, &binding.column),
                 ),
+                vec![],
             ),
             (Some(_), None) => {
                 return Err(QueryError::Lowering(format!(
@@ -801,6 +783,58 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 format!("{prefix}{PATH_NODES_COLUMN}"),
             ));
         }
+    }
+
+    fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {
+        let table = node
+            .table
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
+        let read = self.graph.read(table, &node.alias, true, None);
+        let owned = self.graph.owned(
+            read,
+            super::physical::ReadOwner::Node(node.alias.clone()),
+            &node.alias,
+        );
+        Ok(self
+            .graph
+            .from(owned)
+            .filter(node_predicates(node))
+            .finish())
+    }
+
+    fn edge_read(
+        &mut self,
+        relation: &EdgeRelation,
+        alias: &str,
+        final_: bool,
+    ) -> Result<RelationId> {
+        if let Some(table) = relation.single_edge_table() {
+            let read = self.graph.shared_read(table, alias, final_);
+            return Ok(self.graph.owned(
+                read,
+                super::physical::ReadOwner::Relationship(relation.input_index),
+                alias,
+            ));
+        }
+        let mut routes = Vec::new();
+        for table in &relation.edge_tables {
+            let route_alias = format!("_{alias}");
+            let read = self.graph.shared_read(table, &route_alias, final_);
+            let owned = self.graph.owned(
+                read,
+                super::physical::ReadOwner::Relationship(relation.input_index),
+                &route_alias,
+            );
+            let outputs = EDGE_RESERVED_COLUMNS
+                .iter()
+                .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
+                .chain([&DELETED_COLUMN])
+                .map(|column| Projection::col(&route_alias, column))
+                .collect();
+            routes.push(self.graph.from(owned).project(outputs).finish().into());
+        }
+        Ok(self.graph.union_all(routes, alias))
     }
 }
 
@@ -856,27 +890,6 @@ fn edge_predicates<M: OrbitQueryModel + ?Sized>(
         }
     }
     predicates
-}
-
-fn edge_relation_outputs(alias: &str) -> Vec<Projection> {
-    EDGE_RESERVED_COLUMNS
-        .iter()
-        .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
-        .chain([&DELETED_COLUMN])
-        .map(|column| Projection::col(alias, column))
-        .collect()
-}
-
-fn relation_is_selective<M: OrbitQueryModel + ?Sized>(
-    facts: &PlanningContext<'_, M>,
-    relation: &EdgeRelation,
-) -> bool {
-    [&relation.from_node, &relation.to_node]
-        .into_iter()
-        .any(|alias| {
-            let node = &facts.nodes[alias];
-            !node.node_ids.is_empty() || node.id_range.is_some() || !node.filters.is_empty()
-        })
 }
 
 fn node_id_predicates<M: OrbitQueryModel + ?Sized>(

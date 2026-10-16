@@ -4,16 +4,17 @@ use query_data_model::OrbitQueryModel;
 use super::{EdgeRelation, PlanningContext};
 use crate::constants::*;
 use crate::input::Direction;
-use crate::passes::plan::physical::{PhysicalPlan, PhysicalSource};
+use crate::passes::plan::physical::{RelationGraph, RelationId};
 use crate::passes::plan::requirements::{
     Column, OutputValue, Predicate, Projection, live, relationship_kinds,
 };
 
 pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
+    graph: &mut RelationGraph,
     facts: &PlanningContext<'_, M>,
     relation: &EdgeRelation,
     alias: &str,
-) -> PhysicalSource {
+) -> RelationId {
     let edge_columns = relation
         .single_edge_table()
         .and_then(|table| facts.model.table_columns(table));
@@ -28,9 +29,40 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
             }
         }
     }
-    let arms = (relation.min_hops.max(1)..=relation.max_hops)
-        .map(|depth| depth_arm(relation, depth, &required_columns))
-        .collect();
+
+    let first = edge_read(graph, relation, "e1");
+    let mut previous = first;
+    let mut depths = Vec::new();
+    for depth in 1..=relation.max_hops {
+        if depth > 1 {
+            let current_alias = format!("e{depth}");
+            let current = edge_read(graph, relation, &current_alias);
+            let previous_alias = format!("e{}", depth - 1);
+            let (start, end) = relation.direction.edge_columns();
+            let (end_kind, start_kind) = match relation.direction {
+                Direction::Outgoing | Direction::Both => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+                Direction::Incoming => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
+            };
+            previous = graph
+                .from(previous)
+                .join(
+                    current.alias(current_alias.clone()),
+                    (
+                        Column::new(&previous_alias, end),
+                        Column::new(&current_alias, start),
+                    ),
+                    vec![Predicate::ColumnEq {
+                        left: Column::new(&previous_alias, end_kind),
+                        right: Column::new(&current_alias, start_kind),
+                    }],
+                )
+                .finish();
+        }
+        if depth >= relation.min_hops.max(1) {
+            depths.push(project_depth(graph, relation, previous, depth, &required_columns).into());
+        }
+    }
+    let union = graph.union_all(depths, alias);
     let (from_kind, to_kind) = match relation.direction {
         Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
         Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
@@ -48,50 +80,54 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
         }
     }
     predicates.push(live(alias));
-    PhysicalSource::Filter {
-        predicates,
-        input: Box::new(PhysicalSource::Union {
-            alias: alias.into(),
-            arms,
-            relationship: relation.input_index,
-        }),
-    }
+    graph.from(union).filter(predicates).finish()
 }
 
-fn depth_arm(relation: &EdgeRelation, depth: u32, required_columns: &[String]) -> PhysicalPlan {
+fn edge_read(graph: &mut RelationGraph, relation: &EdgeRelation, alias: &str) -> RelationId {
+    let edge = if let Some(table) = relation.single_edge_table() {
+        let read = graph.shared_read(table, alias, true);
+        graph.owned(
+            read,
+            crate::passes::plan::physical::ReadOwner::Relationship(relation.input_index),
+            alias,
+        )
+    } else {
+        let routes = relation
+            .edge_tables
+            .iter()
+            .map(|table| {
+                let read = graph.shared_read(table, alias, true);
+                graph
+                    .owned(
+                        read,
+                        crate::passes::plan::physical::ReadOwner::Relationship(
+                            relation.input_index,
+                        ),
+                        alias,
+                    )
+                    .into()
+            })
+            .collect();
+        graph.union_all(routes, alias)
+    };
+    let predicates = relationship_kinds(alias, &relation.rel_types)
+        .into_iter()
+        .collect();
+    graph.from(edge).filter(predicates).finish()
+}
+
+fn project_depth(
+    graph: &mut RelationGraph,
+    relation: &EdgeRelation,
+    input: RelationId,
+    depth: u32,
+    required_columns: &[String],
+) -> RelationId {
     let (start, end) = relation.direction.edge_columns();
     let end_kind = match relation.direction {
         Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
-    let scan = |alias: &str| PhysicalSource::edge(relation, alias, true);
-    let mut root_predicates = relationship_kinds("e1", &relation.rel_types)
-        .into_iter()
-        .collect();
-    let mut source = scan("e1");
-    for index in 2..=depth {
-        let previous = format!("e{}", index - 1);
-        let current = format!("e{index}");
-        let mut predicates: Vec<_> = relationship_kinds(&current, &relation.rel_types)
-            .into_iter()
-            .collect();
-        predicates.push(Predicate::ColumnEq {
-            left: Column::new(&previous, end_kind),
-            right: Column::new(
-                &current,
-                match relation.direction {
-                    Direction::Outgoing | Direction::Both => SOURCE_KIND_COLUMN,
-                    Direction::Incoming => TARGET_KIND_COLUMN,
-                },
-            ),
-        });
-        source = PhysicalSource::Join {
-            endpoints: (Column::new(&previous, end), Column::new(&current, start)),
-            predicates,
-            left: Box::new(source),
-            right: Box::new(scan(&current)),
-        };
-    }
     let last = format!("e{depth}");
     let (source_alias, target_alias, kind_alias) = match relation.direction {
         Direction::Outgoing | Direction::Both => ("e1", last.as_str(), "e1"),
@@ -125,11 +161,5 @@ fn depth_arm(relation: &EdgeRelation, depth: u32, required_columns: &[String]) -
             .iter()
             .map(|column| Projection::col("e1", column)),
     );
-    PhysicalPlan::Project {
-        source: PhysicalSource::Filter {
-            predicates: std::mem::take(&mut root_predicates),
-            input: Box::new(source),
-        },
-        outputs,
-    }
+    graph.from(input).project(outputs).finish()
 }

@@ -11,13 +11,13 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (CTE _orbit_subplan_0 (_))
-            - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
-            - (CTE _orbit_subplan_2 (_))
-            - (CTE _orbit_subplan_3 (Distinct (Project _frontier_source.target_id AS id (_))))
-            - (CTE _orbit_subplan_4 (_))
-            - (Filter _orbit_edge_1.source_id IN _orbit_subplan_1.id, ... (_))
-            - (Filter _orbit_edge_2.source_id IN _orbit_subplan_3.id, ... (_))
+            - (CTE _orbit_relation_0 (_))
+            - (CTE _orbit_relation_1 (Distinct (Project _frontier_source.target_id AS id (_))))
+            - (CTE _orbit_relation_2 (_))
+            - (CTE _orbit_relation_3 (Distinct (Project _frontier_source.target_id AS id (_))))
+            - (CTE _orbit_relation_4 (_))
+            - (Filter _orbit_edge_1.source_id IN _orbit_relation_1.id, ... (_))
+            - (Filter _orbit_edge_2.source_id IN _orbit_relation_3.id, ... (_))
 
   - name: One shared frontier narrows every branch arm
     query:
@@ -33,8 +33,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
-            - (Filter mr.id IN _orbit_subplan_1.id, ... (_))
+            - (CTE _orbit_relation_1 (Distinct (Project _frontier_source.target_id AS id (_))))
+            - (Filter mr.id IN _orbit_relation_1.id, ... (_))
           occurrences:
             - pattern: (Scan Table(gl_merge_request) AS mr)
               count: 1
@@ -52,6 +52,6 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (CTE _orbit_subplan_0 (Project u.id AS id (Filter u.username = 'alice' (_))))
-            - (CTE _orbit_subplan_1 (Project u.id AS id (Filter u.id IN _orbit_subplan_0.id, u.username = 'alice', u._deleted = false (_))))
-            - (Filter _orbit_edge_0.source_id IN _orbit_subplan_1.id, ... (_))
+            - (CTE _orbit_relation_0 (Project u.id AS id (Filter u.username = 'alice' (_))))
+            - (CTE _orbit_relation_1 (Project u.id AS id (Filter u.id IN _orbit_relation_0.id, u.username = 'alice', u._deleted = false (_))))
+            - (Filter _orbit_edge_0.source_id IN _orbit_relation_1.id, ... (_))

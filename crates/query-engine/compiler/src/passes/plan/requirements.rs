@@ -1,6 +1,7 @@
 use ontology::constants::*;
 
 use super::helpers::{denorm_tag_values, requested_columns};
+use super::physical::RelationId;
 use super::{BoundFilter, NodePlan};
 use crate::input::InputFilter;
 
@@ -62,8 +63,12 @@ pub enum Predicate {
     },
     Membership {
         column: Column,
-        definition: String,
+        relation: RelationId,
         key: String,
+    },
+    Scope {
+        alias: String,
+        proof: crate::scope::ScopeProof,
     },
 }
 

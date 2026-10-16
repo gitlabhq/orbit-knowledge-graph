@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::OrbitQueryModel;
 
@@ -9,7 +7,7 @@ use crate::input::{
 };
 
 use super::context::PlanningContext;
-use super::physical::{ExecutionPlan, PhysicalSource};
+use super::physical::{ExecutionPlan, RelationNode};
 use super::requirements::{Column, Predicate};
 use super::{Aggregation, QueryPlan, edge_relation};
 
@@ -33,14 +31,11 @@ pub struct AggregationPlan {
     pub order: Option<InputAggSort>,
 }
 
-pub(super) fn plan<M>(
-    context: PlanningContext<'_, M>,
-    table_scans: &HashSet<String>,
-) -> crate::error::Result<QueryPlan>
+pub(super) fn plan<M>(context: PlanningContext<'_, M>) -> crate::error::Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let planned = edge_relation::plan(context, table_scans)?;
+    let planned = edge_relation::plan(context)?;
     let result = planned.context.aggregation(&planned.execution);
     Ok(QueryPlan::Aggregation(planned.context.finish(
         Aggregation {
@@ -53,19 +48,19 @@ where
 impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
-        let mut source = &execution.source;
+        let mut source = execution.root;
         let condition = loop {
-            match source {
-                PhysicalSource::Latest {
-                    aggregate_condition,
-                    ..
-                } => break aggregate_condition.clone(),
-                PhysicalSource::Join { left, .. } => source = left,
-                PhysicalSource::Filter { input, .. }
-                | PhysicalSource::Project { input, .. }
-                | PhysicalSource::Scope { input, .. } => source = input,
-                PhysicalSource::Scan { .. } | PhysicalSource::Union { .. } => break vec![],
-                PhysicalSource::Use { .. } => break vec![],
+            match execution.graph.get(source) {
+                RelationNode::Latest { condition, .. } => break condition.clone(),
+                RelationNode::Join { left, .. } => source = left.id,
+                RelationNode::Filter { input, .. }
+                | RelationNode::Project { input, .. }
+                | RelationNode::Distinct { input, .. }
+                | RelationNode::Bind { input, .. }
+                | RelationNode::Sort { input, .. }
+                | RelationNode::Limit { input, .. } => source = input.id,
+                RelationNode::Owned { input, .. } => source = input.id,
+                RelationNode::Read { .. } | RelationNode::UnionAll { .. } => break vec![],
             }
         };
         let mut plan = AggregationPlan {

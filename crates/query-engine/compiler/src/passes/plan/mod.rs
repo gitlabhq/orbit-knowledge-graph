@@ -9,7 +9,7 @@ pub mod physical;
 pub mod requirements;
 pub mod traversal;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -36,12 +36,6 @@ impl BoundFilter {
             data_type: self.data_type,
             in_sort_key: self.in_sort_key,
         }
-    }
-
-    pub fn is_candidate(&self) -> bool {
-        self.selectivity == ontology::FieldSelectivity::High
-            && self.filter.rhs_column.is_none()
-            && matches!(self.filter.op, None | Some(FilterOp::Eq | FilterOp::In))
     }
 }
 
@@ -210,25 +204,22 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, table_scans)
+    plan(input, model, hydration_options)
 }
 
 pub fn plan_duckdb(
     input: &Input,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, table_scans)
+    plan(input, model, hydration_options)
 }
 
 fn plan<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
@@ -242,8 +233,8 @@ where
         node_edge_mappings: HashMap::new(),
     };
     match input.query_type {
-        QueryType::Traversal => traversal::plan(context, table_scans),
-        QueryType::Aggregation => aggregation::plan(context, table_scans),
+        QueryType::Traversal => traversal::plan(context),
+        QueryType::Aggregation => aggregation::plan(context),
         QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
         QueryType::PathFinding => {
             pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)

@@ -1,7 +1,9 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
-use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
+use compiler::passes::plan::physical::{
+    ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
+};
 use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
 use query_engine::compiler;
 use std::collections::HashMap;
@@ -265,7 +267,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             let tree = Tree::node(
                 Operator::Aggregate,
                 items,
-                vec![execution_source(&plan.operation.execution)],
+                vec![execution_tree(&plan.operation.execution)],
             );
             sort(
                 tree,
@@ -434,29 +436,32 @@ fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
 }
 
 fn execution_tree(execution: &ExecutionPlan) -> Tree {
-    execution_source(execution)
-}
-
-fn execution_source(execution: &ExecutionPlan) -> Tree {
+    let usage = execution.graph.usage(execution.root);
+    let materialized: std::collections::HashSet<_> = usage.materialized().collect();
     let source = Tree::node(
         Operator::Project,
         planned_projections(&execution.outputs),
-        vec![physical_source(&execution.source)],
+        vec![relation_node(
+            execution.root,
+            &execution.graph,
+            &materialized,
+            None,
+        )],
     );
-    if execution.subplans.is_empty() {
+    let relations: Vec<_> = materialized.iter().copied().collect();
+    if relations.is_empty() {
         source
     } else {
         Tree::node(
             Operator::With,
             "",
-            execution
-                .subplans
-                .iter()
-                .map(|subplan| {
+            relations
+                .into_iter()
+                .map(|id| {
                     Tree::node(
                         Operator::Cte,
-                        format!("_orbit_subplan_{}", subplan.id.0),
-                        vec![physical_tree(&subplan.plan)],
+                        format!("_orbit_relation_{}", id.0),
+                        vec![relation_node(id, &execution.graph, &materialized, Some(id))],
                     )
                 })
                 .chain([source])
@@ -465,58 +470,85 @@ fn execution_source(execution: &ExecutionPlan) -> Tree {
     }
 }
 
-fn physical_tree(plan: &PhysicalPlan) -> Tree {
-    match plan {
-        PhysicalPlan::Project { source, outputs } => Tree::node(
-            Operator::Project,
-            planned_projections(outputs),
-            vec![physical_source(source)],
-        ),
-        PhysicalPlan::Distinct { source, outputs } => Tree::node(
-            Operator::Distinct,
-            "",
-            vec![Tree::node(
-                Operator::Project,
-                planned_projections(outputs),
-                vec![physical_source(source)],
-            )],
-        ),
+fn relation_ref(
+    reference: &RelationRef,
+    graph: &RelationGraph,
+    materialized: &std::collections::HashSet<RelationId>,
+    current: Option<RelationId>,
+) -> Tree {
+    if materialized.contains(&reference.id) && current != Some(reference.id) {
+        return leaf(
+            Operator::Scan,
+            format!(
+                "Relation({}) AS {}",
+                reference.id.0,
+                reference.alias.as_deref().unwrap_or("_orbit_relation")
+            ),
+        );
+    }
+    let tree = relation_node(reference.id, graph, materialized, current);
+    match (reference.alias.as_ref(), graph.get(reference.id)) {
+        (Some(alias), RelationNode::Read { alias: source, .. }) if alias == source => tree,
+        (Some(alias), RelationNode::Owned { alias: source, .. }) if alias == source => tree,
+        (Some(alias), _) => Tree::node(Operator::Bind, alias, vec![tree]),
+        (None, _) => tree,
     }
 }
 
-fn physical_source(plan: &PhysicalSource) -> Tree {
-    match plan {
-        PhysicalSource::Union { alias, arms, .. } => Tree::node(
+fn relation_node(
+    id: RelationId,
+    graph: &RelationGraph,
+    materialized: &std::collections::HashSet<RelationId>,
+    current: Option<RelationId>,
+) -> Tree {
+    match graph.get(id) {
+        RelationNode::UnionAll { alias, inputs, .. } => Tree::node(
             Operator::Union,
             format!("ALL AS {alias}"),
-            arms.iter().map(physical_tree).collect(),
+            inputs
+                .iter()
+                .map(|input| relation_ref(input, graph, materialized, current))
+                .collect(),
         ),
-        PhysicalSource::Scan {
+        RelationNode::Read {
             table,
             alias,
             final_,
-            ..
         } => scan(table, alias, *final_),
-        PhysicalSource::Use { id, alias } => {
-            leaf(Operator::Scan, format!("Subplan({}) AS {alias}", id.0))
-        }
-        PhysicalSource::Filter { predicates, input } => filter(
+        RelationNode::Owned { input, alias, .. } => match graph.get(input.id) {
+            RelationNode::Read { alias: source, .. } if source == alias => {
+                relation_node(input.id, graph, materialized, current)
+            }
+            _ => Tree::node(
+                Operator::Bind,
+                alias,
+                vec![relation_ref(input, graph, materialized, current)],
+            ),
+        },
+        RelationNode::Filter { predicates, input } => filter(
             predicates.iter().flat_map(planned_predicate).collect(),
-            physical_source(input),
+            relation_ref(input, graph, materialized, current),
         ),
-        PhysicalSource::Project { outputs, input, .. } => Tree::node(
+        RelationNode::Project { outputs, input } => Tree::node(
             Operator::Project,
             planned_projections(outputs),
-            vec![physical_source(input)],
+            vec![relation_ref(input, graph, materialized, current)],
         ),
-        PhysicalSource::Scope { alias, input } => {
-            Tree::node(Operator::Bind, alias, vec![physical_source(input)])
-        }
-        PhysicalSource::Latest {
+        RelationNode::Distinct { input } => Tree::node(
+            Operator::Distinct,
+            "",
+            vec![relation_ref(input, graph, materialized, current)],
+        ),
+        RelationNode::Bind { alias, input } => Tree::node(
+            Operator::Bind,
+            alias,
+            vec![relation_ref(input, graph, materialized, current)],
+        ),
+        RelationNode::Latest {
             alias,
             sort_key,
             input,
-            aggregate_condition,
+            condition,
         } => Tree::node(
             Operator::Deduplicate,
             format!(
@@ -528,14 +560,11 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
                     .join(", ")
             ),
             vec![filter(
-                aggregate_condition
-                    .iter()
-                    .flat_map(planned_predicate)
-                    .collect(),
-                physical_source(input),
+                condition.iter().flat_map(planned_predicate).collect(),
+                relation_ref(input, graph, materialized, current),
             )],
         ),
-        PhysicalSource::Join {
+        RelationNode::Join {
             endpoints,
             predicates,
             left,
@@ -543,7 +572,20 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
         } => Tree::node(
             Operator::Join,
             planned_join(endpoints, predicates),
-            vec![physical_source(left), physical_source(right)],
+            vec![
+                relation_ref(left, graph, materialized, current),
+                relation_ref(right, graph, materialized, current),
+            ],
+        ),
+        RelationNode::Sort { input, keys } => sort(
+            relation_ref(input, graph, materialized, current),
+            keys.iter()
+                .map(|(column, desc)| (planned_column(column), *desc)),
+        ),
+        RelationNode::Limit { input, rows } => Tree::node(
+            Operator::Limit,
+            rows.to_string(),
+            vec![relation_ref(input, graph, materialized, current)],
         ),
     }
 }
@@ -619,9 +661,14 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
         )],
         Predicate::Membership {
             column,
-            definition,
+            relation,
             key,
-        } => vec![format!("{} IN {definition}.{key}", planned_column(column))],
+        } => vec![format!(
+            "{} IN _orbit_relation_{}.{key}",
+            planned_column(column),
+            relation.0
+        )],
+        Predicate::Scope { alias, .. } => vec![format!("scope({alias})")],
     }
 }
 
@@ -928,24 +975,17 @@ fn exact_assertions_preserve_nested_filter_order() {
             values: vec![2],
         },
     ];
-    let source = predicates.iter().fold(
-        PhysicalSource::Scan {
-            table: "gl_project".into(),
-            alias: "p".into(),
-            final_: false,
-            relationship: None,
-        },
-        |input, predicate| PhysicalSource::Filter {
-            predicates: vec![predicate.clone()],
-            input: Box::new(input),
-        },
-    );
+    let mut graph = RelationGraph::default();
+    let read = graph.read("gl_project", "p", false, None);
+    let source = predicates.iter().fold(read, |input, predicate| {
+        graph.filter(input, vec![predicate.clone()])
+    });
     let assertions: super::Assertions = orbit_utils::yaml::from_str(
         "exact: (Filter p.id = 1, p.star_count = 2 (Scan Table(gl_project) AS p))",
     )
     .unwrap();
     assertions
-        .check(&physical_source(&source), "planned")
+        .check(&relation_node(source, &graph), "planned")
         .unwrap();
     let emitted = query_filter(
         &Expr::conjoin(vec![

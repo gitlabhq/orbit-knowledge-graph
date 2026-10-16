@@ -4,7 +4,7 @@ mod pattern;
 mod terms;
 
 use query_engine::compiler;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -338,10 +338,10 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => check(&scenario, remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, remote, options, &HashSet::new())
+                    plan::plan_clickhouse(input, remote, options)
                 }),
                 "duckdb" => check(&scenario, local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, local, options, &HashSet::new())
+                    plan::plan_duckdb(input, local, options)
                 }),
                 _ => panic!("unknown backend {backend}"),
             }
@@ -679,7 +679,6 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
-            &HashSet::new(),
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {
