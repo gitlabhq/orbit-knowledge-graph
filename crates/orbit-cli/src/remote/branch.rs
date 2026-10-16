@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
 
-const MAX_CANDIDATES: usize = 20;
+const MAX_CANDIDATES: usize = 10;
 const MAX_SEARCH_WORDS: usize = 3;
 const MAX_FAILED_JOBS: usize = 5;
 const TRACED_JOBS: usize = 3;
@@ -38,7 +38,7 @@ pub(crate) fn current(dir: &Path) -> Result<String, RemoteError> {
     let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     match output.status.success() && !name.is_empty() {
         true => Ok(name),
-        false => Err(error("no current branch; pass --branch NAME")),
+        false => Err(error("no current branch; pass a Branch:<name> target")),
     }
 }
 
@@ -66,48 +66,132 @@ fn words(text: &str) -> Vec<String> {
         .filter(|word| word.len() >= 2)
         .map(str::to_lowercase)
         .collect();
+    words.sort();
     words.dedup();
     words
 }
 
-pub(crate) fn pick(wanted: &str, candidates: &[String]) -> Result<String, String> {
+pub(crate) fn rank(wanted: &str, candidates: &[String]) -> Vec<String> {
     let wanted_words = words(wanted);
     let score = |name: &String| {
         let lower = name.to_lowercase();
-        wanted_words
+        let exact = usize::from(lower == wanted.to_lowercase());
+        let matched = wanted_words
             .iter()
             .filter(|word| lower.contains(word.as_str()))
-            .count()
+            .count();
+        (exact, matched)
     };
-    let best = candidates.iter().map(score).max().unwrap_or(0);
-    let top: Vec<&String> = candidates
+    let mut ranked: Vec<(usize, usize, &String)> = candidates
         .iter()
-        .filter(|name| best > 0 && score(name) == best)
+        .map(|name| {
+            let (exact, matched) = score(name);
+            (exact, matched, name)
+        })
+        .filter(|(exact, matched, _)| exact + matched > 0)
         .collect();
-    match top.as_slice() {
-        [only] => Ok((*only).clone()),
-        [] => Err(format!("no branch matches {wanted:?}")),
-        many => Err(format!(
-            "branches matching {wanted:?}: {}; pass one with --branch",
-            many.iter()
-                .take(MAX_CANDIDATES)
-                .map(|name| name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
+    ranked.sort_by(|a, b| (b.0, b.1).cmp(&(a.0, a.1)).then(a.2.cmp(b.2)));
+    ranked
+        .into_iter()
+        .map(|(_, _, name)| name.clone())
+        .collect()
 }
 
-async fn branch_named(
+fn encode(project: &str) -> String {
+    project.replace('/', "%2F")
+}
+
+async fn branch_exists(
     client: &OrbitClient,
     project: &str,
-    wanted: &str,
-) -> Result<String, RemoteError> {
+    name: &str,
+) -> Result<bool, RemoteError> {
     let path = format!("projects/{project}/repository/branches");
-    let exact = get_json(client, &path, &[("search", format!("^{wanted}$"))]).await?;
-    if names(&exact).iter().any(|name| name == wanted) {
-        return Ok(wanted.to_string());
+    let exact = get_json(client, &path, &[("search", format!("^{name}$"))]).await?;
+    Ok(names(&exact).iter().any(|found| found == name))
+}
+
+async fn merge_request(
+    client: &OrbitClient,
+    project: &str,
+    branch: &str,
+) -> Result<Option<(i64, String)>, RemoteError> {
+    let merge_requests = get_json(
+        client,
+        &format!("projects/{project}/merge_requests"),
+        &[
+            ("source_branch", branch.to_string()),
+            ("state", "all".into()),
+            ("order_by", "updated_at".into()),
+            ("per_page", "20".into()),
+        ],
+    )
+    .await?;
+    let list = merge_requests.as_array().cloned().unwrap_or_default();
+    let chosen = list
+        .iter()
+        .find(|mr| mr["state"] == "opened")
+        .or(list.first());
+    Ok(chosen.and_then(|mr| {
+        let id = mr["id"].as_i64()?;
+        Some((id, mr["state"].as_str().unwrap_or_default().to_string()))
+    }))
+}
+
+async fn latest_pipeline(
+    client: &OrbitClient,
+    project: &str,
+    branch: &str,
+) -> Result<Option<Value>, RemoteError> {
+    let pipelines = get_json(
+        client,
+        &format!("projects/{project}/pipelines"),
+        &[("ref", branch.to_string()), ("per_page", "1".into())],
+    )
+    .await?;
+    Ok(pipelines.as_array().and_then(|list| list.first()).cloned())
+}
+
+pub(crate) async fn resolve(
+    client: &OrbitClient,
+    project: &str,
+    branch: &str,
+) -> Result<Found, RemoteError> {
+    let project = encode(project);
+    if let Some((id, _)) = merge_request(client, &project, branch).await? {
+        return Ok(Found::MergeRequest {
+            branch: branch.to_string(),
+            token: format!("MergeRequest[{id}]"),
+        });
     }
+    if let Some(pipeline) = latest_pipeline(client, &project, branch).await? {
+        let text = failed_pipeline(client, &project, branch, &pipeline).await?;
+        return Ok(Found::Pipeline {
+            branch: branch.to_string(),
+            text,
+        });
+    }
+    let text = match branch_exists(client, &project, branch).await? {
+        true => format!("branch {branch}: no merge request or pipeline\n"),
+        false => format!(
+            "branch {branch}: not found; find one with `{} grep 'words' --kind Branch`\n",
+            crate::commands::setup::spec::launcher()
+        ),
+    };
+    Ok(Found::Pipeline {
+        branch: branch.to_string(),
+        text,
+    })
+}
+
+pub(crate) async fn search_text(
+    client: &OrbitClient,
+    shown: &str,
+    project: &str,
+    wanted: &str,
+) -> Result<Option<String>, RemoteError> {
+    let encoded = encode(project);
+    let path = format!("projects/{encoded}/repository/branches");
     let mut by_length = words(wanted);
     by_length.sort_by_key(|word| std::cmp::Reverse(word.len()));
     let mut candidates: Vec<String> = Vec::new();
@@ -124,56 +208,62 @@ async fn branch_named(
             }
         }
     }
-    pick(wanted, &candidates).map_err(error)
-}
-
-pub(crate) async fn resolve(
-    client: &OrbitClient,
-    project: &str,
-    wanted: &str,
-) -> Result<Found, RemoteError> {
-    let project = project.replace('/', "%2F");
-    let branch = branch_named(client, &project, wanted).await?;
-    let merge_requests = get_json(
-        client,
-        &format!("projects/{project}/merge_requests"),
-        &[
-            ("source_branch", branch.clone()),
-            ("state", "all".into()),
-            ("order_by", "updated_at".into()),
-            ("per_page", "20".into()),
-        ],
-    )
-    .await?;
-    let list = merge_requests.as_array().cloned().unwrap_or_default();
-    let chosen = list
-        .iter()
-        .find(|mr| mr["state"] == "opened")
-        .or(list.first());
-    if let Some(id) = chosen.and_then(|mr| mr["id"].as_i64()) {
-        return Ok(Found::MergeRequest {
-            branch,
-            token: format!("MergeRequest[{id}]"),
-        });
+    let ranked = rank(wanted, &candidates);
+    if ranked.is_empty() {
+        return Ok(None);
     }
-    let text = pipeline(client, &project, &branch).await?;
-    Ok(Found::Pipeline { branch, text })
+    let tasks: Vec<_> = ranked
+        .iter()
+        .take(MAX_CANDIDATES)
+        .map(|name| {
+            let (client, project, name) = (client.clone(), encoded.clone(), name.clone());
+            tokio::spawn(async move {
+                let mr = merge_request(&client, &project, &name).await;
+                let pipeline = latest_pipeline(&client, &project, &name).await;
+                (name, mr, pipeline)
+            })
+        })
+        .collect();
+    let mut out = format!("GitLab branches matching {wanted:?} in {shown}:\n");
+    for task in tasks {
+        let Ok((name, mr, pipeline)) = task.await else {
+            continue;
+        };
+        let mut row = name;
+        match mr {
+            Ok(Some((id, state))) => {
+                let _ = write!(row, "  MergeRequest[{id}] {state}");
+            }
+            Ok(None) => row.push_str("  no merge request"),
+            Err(_) => {}
+        }
+        if let Ok(Some(pipeline)) = pipeline {
+            let _ = write!(
+                row,
+                "  pipeline {}",
+                pipeline["status"].as_str().unwrap_or("unknown")
+            );
+        }
+        let _ = writeln!(out, "{row}");
+    }
+    if ranked.len() > MAX_CANDIDATES {
+        let _ = writeln!(out, "+{} more", ranked.len() - MAX_CANDIDATES);
+    }
+    let _ = writeln!(
+        out,
+        "next: {} context Branch:{}",
+        crate::commands::setup::spec::launcher(),
+        ranked[0]
+    );
+    Ok(Some(out))
 }
 
-async fn pipeline(
+async fn failed_pipeline(
     client: &OrbitClient,
     project: &str,
     branch: &str,
+    pipeline: &Value,
 ) -> Result<String, RemoteError> {
-    let pipelines = get_json(
-        client,
-        &format!("projects/{project}/pipelines"),
-        &[("ref", branch.to_string()), ("per_page", "1".into())],
-    )
-    .await?;
-    let Some(pipeline) = pipelines.as_array().and_then(|list| list.first()) else {
-        return Ok(format!("branch {branch}: no merge request or pipeline\n"));
-    };
     let id = pipeline["id"].as_i64().unwrap_or_default();
     let mut out = format!("branch {branch}: no merge request\n");
     let _ = writeln!(
@@ -266,20 +356,14 @@ mod tests {
     }
 
     #[test]
-    fn a_description_picks_the_branch_with_the_most_words() {
-        let candidates = names(&["aa/show-approval-rules", "fix-approvals", "main"]);
+    fn branches_rank_by_exact_name_then_matched_words() {
+        let candidates = names(&["fix-approvals", "aa/show-approval-rules", "main", "rules"]);
         assert_eq!(
-            pick("the approval rules branch", &candidates),
-            Ok("aa/show-approval-rules".to_string())
+            rank("approval rules", &candidates),
+            vec!["aa/show-approval-rules", "fix-approvals", "rules"]
         );
-    }
-
-    #[test]
-    fn ties_list_the_candidates() {
-        let candidates = names(&["approval-a", "approval-b"]);
-        let listed = pick("approval", &candidates).unwrap_err();
-        assert!(listed.contains("approval-a, approval-b"), "{listed}");
-        assert!(pick("deploy", &candidates).is_err());
+        assert_eq!(rank("rules", &candidates)[0], "rules");
+        assert!(rank("deploy", &candidates).is_empty());
     }
 
     #[test]

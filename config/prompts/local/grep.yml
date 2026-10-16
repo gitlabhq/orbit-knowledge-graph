@@ -24,4 +24,5 @@ description: >-
   group, URL, `Project[id]`, or `Group[id]` as a path to search it instead,
   including its code when it has no local checkout. An indexed checkout of that
   project is searched locally.
-  `--kind MergeRequest,WorkItem` searches only GitLab.
+  `--kind MergeRequest,WorkItem` searches only GitLab. `--kind Branch` finds
+  branches by words from their names, with their merge requests and pipelines.

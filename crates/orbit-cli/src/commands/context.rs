@@ -51,16 +51,19 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let mut client = None;
     let mut origin = None;
     let mut branch_notes = String::new();
-    let wanted = match (&args.branch, args.target.is_empty()) {
-        (Some(name), _) => Some(name.clone()),
-        (None, true) => Some(String::new()),
-        (None, false) => None,
-    };
-    if let Some(wanted) = wanted {
+    let mut branches: Vec<String> = args
+        .target
+        .iter()
+        .filter_map(|target| branch_target(target))
+        .collect();
+    if args.target.is_empty() {
+        branches.push(crate::remote::branch::current(&dir)?);
+    }
+    for name in branches {
         let (host, project) = origin
             .get_or_insert_with(|| crate::remote::origin::project(&dir))
             .clone()
-            .context("--branch needs a GitLab `origin` remote")?;
+            .context("Branch targets need a GitLab `origin` remote")?;
         let found_client = match &client {
             Some(client) => client,
             None => client.insert(crate::remote::client::OrbitClient::from_env_in(&dir)?),
@@ -70,19 +73,20 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             host == api_host,
             "`origin` is {project} on {host}, but Orbit uses {api_host}"
         );
-        let wanted = match wanted.is_empty() {
-            true => crate::remote::branch::current(&dir)?,
-            false => wanted,
-        };
-        match crate::remote::branch::resolve(found_client, &project, &wanted).await? {
+        match crate::remote::branch::resolve(found_client, &project, &name).await? {
             crate::remote::branch::Found::MergeRequest { branch, token } => {
-                branch_notes = format!("branch {branch}: {token}\n");
-                remote.push(token);
+                branch_notes.push_str(&format!("branch {branch}: {token}\n"));
+                if !remote.contains(&token) {
+                    remote.push(token);
+                }
             }
-            crate::remote::branch::Found::Pipeline { text, .. } => branch_notes = text,
+            crate::remote::branch::Found::Pipeline { text, .. } => branch_notes.push_str(&text),
         }
     }
     for target in &args.target {
+        if branch_target(target).is_some() {
+            continue;
+        }
         let token = match route(target, &nodes) {
             Route::Local(target) => {
                 local.push(target);
@@ -174,6 +178,11 @@ enum Route {
 }
 
 const LOCAL_NODES: &[&str] = &["Definition", "File"];
+
+fn branch_target(target: &str) -> Option<String> {
+    let (kind, name) = target.split_once(':')?;
+    (kind.eq_ignore_ascii_case("branch") && !name.is_empty()).then(|| name.to_string())
+}
 
 fn route(target: &str, nodes: &[&str]) -> Route {
     use crate::remote::token;
