@@ -47,15 +47,14 @@ async fn main() -> anyhow::Result<()> {
     orbit_server_config::query::init(config.query.clone());
     orbit_server_config::features::init(config.features.clone());
 
-    let mut builder = labkit::Builder::new(args.mode.service_name()).propagate_correlation(true);
-    if let Some(level) = config
-        .metrics
-        .log_level
-        .as_deref()
-        .filter(|s| !s.is_empty())
-    {
-        builder = builder.log_level(level);
-    }
+    let mut builder = labkit::Builder::new(args.mode.service_name())
+        .propagate_correlation(true)
+        .expanded_logs(orbit_server::expanded_logs::policy(
+            &config.metrics.expanded_logs,
+        ))
+        .log_level(orbit_server::expanded_logs::log_directive(
+            config.metrics.log_level.as_deref(),
+        ));
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
@@ -72,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
     }
     builder = builder.probe_tls(internal_tls.clone());
     let mut guard = builder.init().expect("labkit init");
+    orbit_server::expanded_logs::install_panic_hook();
 
     if config.metrics.prometheus.port.is_some() {
         warn!("metrics.prometheus.port is deprecated, use probe_server.bind_address");
@@ -125,9 +125,17 @@ async fn main() -> anyhow::Result<()> {
     };
 
     signal_task.abort();
+    if let Err(error) = &result {
+        tracing::error!(
+            error_message = %format_args!("{error:#}"),
+            "server stopped with an error"
+        );
+    }
     guard.shutdown().await;
-
-    result
+    if result.is_err() {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 async fn run_webserver(

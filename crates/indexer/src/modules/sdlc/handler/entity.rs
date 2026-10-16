@@ -401,7 +401,7 @@ impl Handler for EntityHandler {
         if !request.indexing_requested(&self.plan.target) {
             debug!(
                 entity = %self.plan.name,
-                target = %self.plan.target,
+                plan_target = %self.plan.target,
                 targets = ?request.targets,
                 "skipping request: target not selected"
             );

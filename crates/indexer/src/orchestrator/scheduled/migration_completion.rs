@@ -156,7 +156,7 @@ impl MigrationCompletionChecker {
         }
 
         info!(
-            version = migrating_version,
+            schema_version = migrating_version,
             "checking migration completion for migrating version"
         );
 
@@ -169,7 +169,7 @@ impl MigrationCompletionChecker {
 
         if !complete {
             info!(
-                version = migrating_version,
+                schema_version = migrating_version,
                 "migration not yet complete — namespaces still being indexed"
             );
             return Ok(());
@@ -209,7 +209,7 @@ impl MigrationCompletionChecker {
         })?;
 
         info!(
-            version = migrating_version,
+            schema_version = migrating_version,
             "marking migrating version as active — schema migration complete"
         );
         let retired_versions = promote_version(&self.graph, migrating_version)
@@ -217,7 +217,7 @@ impl MigrationCompletionChecker {
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
         info!(
-            version = migrating_version,
+            schema_version = migrating_version,
             ?retired_versions,
             "promoted schema version, retired previously active versions"
         );
@@ -230,7 +230,7 @@ impl MigrationCompletionChecker {
             )
             .await
             {
-                warn!(version, %error, "failed to drop refreshable views for retired schema");
+                warn!(schema_version = version, %error, "failed to drop refreshable views for retired schema");
             }
         }
         self.campaign.clear();
@@ -238,7 +238,7 @@ impl MigrationCompletionChecker {
         self.metrics.record_migration_completed();
 
         info!(
-            version = migrating_version,
+            schema_version = migrating_version,
             "schema migration to v{migrating_version} complete"
         );
 
@@ -261,7 +261,7 @@ impl MigrationCompletionChecker {
         {
             Ok(coverage) => Some(coverage),
             Err(error) => {
-                warn!(version, %error, "code coverage telemetry unavailable this tick");
+                warn!(schema_version = version, %error, "code coverage telemetry unavailable this tick");
                 None
             }
         };
@@ -278,7 +278,7 @@ impl MigrationCompletionChecker {
         .map_err(|error| format!("check SDLC reindex progress: {error}"))?;
 
         info!(
-            version,
+            schema_version = version,
             sdlc_indexed_namespaces = sdlc_progress.completed_namespaces,
             enabled_namespaces = enabled_count,
             code_indexed_projects = code_coverage.map(|(_, indexed, _)| indexed),
@@ -432,14 +432,14 @@ impl MigrationCompletionChecker {
             .await
             {
                 let e = e.to_string();
-                warn!(version, error = %e, "GC: NATS cleanup failed, skipping mark_version_dropped");
+                warn!(schema_version = version, error = %e, "GC: NATS cleanup failed, skipping mark_version_dropped");
                 self.metrics.record_cleanup(version, current, "failure");
                 continue;
             }
             if let Err(e) =
                 orbit_migrations::version::mark_version_dropped(&self.graph, version).await
             {
-                warn!(version, error = %e, "GC: failed to mark dropped");
+                warn!(schema_version = version, error = %e, "GC: failed to mark dropped");
             }
             self.metrics.record_cleanup(version, current, "success");
         }

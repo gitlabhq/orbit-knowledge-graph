@@ -103,6 +103,12 @@ impl GrpcServer {
             ))
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
+            .layer(labkit::grpc::GrpcVerboseLogsLayer::new(
+                crate::expanded_logs::VERBOSE_LOGS.clone(),
+            ))
+            .layer(tower::util::MapFutureLayer::new(|future| {
+                tracing::Instrument::instrument(future, crate::auth::request_span())
+            }))
             .add_service(OrbitServiceServer::from_arc(Arc::clone(&service)))
             .add_service(super::legacy::LegacyGkgService::new(
                 OrbitServiceServer::from_arc(service),

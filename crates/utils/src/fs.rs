@@ -144,7 +144,7 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
                     Ok(Some(removed)) => {
                         tracing::warn!(
                             relative_path = %removed.relative_path.display(),
-                            target = %removed.target.display(),
+                            symlink_target = %removed.target.display(),
                             reason = ?removed.reason,
                             "removing symlink"
                         );
