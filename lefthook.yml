@@ -34,6 +34,11 @@ pre-commit:
     - name: narration
       run: ./scripts/linting/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
+    # Blocking. Skip with COMMENTS_CHECK=0 or LEFTHOOK_EXCLUDE=comments; the
+    # script itself fails open on internal errors.
+    - name: comments
+      run: mise exec -- uv run --quiet scripts/linting/comment_check.py --staged
+      glob: "**/*.{rs,yaml,yml,toml,sh,py,js,mjs,ts,rb,css}"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:
