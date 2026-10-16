@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use query_engine::pipeline::PipelineError;
 use tokio::sync::mpsc;
-use tonic::{Code, Status, Streaming};
+use tonic::{Status, Streaming};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -22,13 +22,10 @@ pub enum RedactionExchangeError {
 }
 
 impl RedactionExchangeError {
-    /// A closed, cancelled or reset request stream means the caller left mid-exchange.
+    /// A closed or broken request stream is on the caller's side of the exchange.
     pub fn into_pipeline_error(self) -> PipelineError {
         match self {
-            Self::StreamClosed => PipelineError::Streaming(format!("{self:?}")),
-            Self::ReceiveFailed(ref status)
-                if matches!(status.code(), Code::Cancelled | Code::Unknown) =>
-            {
+            Self::StreamClosed | Self::ReceiveFailed(_) => {
                 PipelineError::Streaming(format!("{self:?}"))
             }
             other => PipelineError::Authorization(format!("{other:?}")),
@@ -197,19 +194,19 @@ mod tests {
     }
 
     #[test]
-    fn caller_disconnects_are_caller_errors() {
+    fn caller_stream_failures_are_caller_errors() {
         let disconnects = [
             RedactionExchangeError::StreamClosed,
             RedactionExchangeError::ReceiveFailed(Status::unknown(
                 "h2 protocol error: error reading a body from connection",
             )),
+            RedactionExchangeError::ReceiveFailed(Status::out_of_range("message too large")),
         ];
         for err in disconnects {
             assert!(err.into_pipeline_error().is_caller_error());
         }
 
         let failures = [
-            RedactionExchangeError::ReceiveFailed(Status::out_of_range("message too large")),
             RedactionExchangeError::InvalidMessage("test"),
             RedactionExchangeError::ResultIdMismatch {
                 expected: "a".to_string(),
