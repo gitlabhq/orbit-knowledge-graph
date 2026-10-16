@@ -188,7 +188,7 @@ where
     tables.dedup();
     let fused_table = (config.direction == Direction::Both
         && !has_non_denorm
-        && center_np.node_ids.is_empty()
+        && center_np.node_ids.len() != 1
         && center_np.uses_default_pk()
         && tables.len() == 1)
         .then(|| tables.remove(0));
