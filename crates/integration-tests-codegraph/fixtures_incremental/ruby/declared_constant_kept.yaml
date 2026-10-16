@@ -1,0 +1,31 @@
+name: "Ruby: a file-level reference does not replace the constant its file declares"
+
+fixtures:
+  - path: app/models/concerns/kits/base/kit.rb
+    content: |
+      module Kits
+        module Base
+          module Kit
+            def kit_name
+            end
+          end
+        end
+      end
+
+      Kit.prepend_mod_with('Kits::Base::Kit')
+
+  - path: app/models/kit.rb
+    content: |
+      class Kit
+        include Kits::Base::Kit
+      end
+
+tests:
+  - name: "the include imports the concern module"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'app/models/kit.rb' AND d.name = 'Kit'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: app/models/concerns/kits/base/kit.rb } }

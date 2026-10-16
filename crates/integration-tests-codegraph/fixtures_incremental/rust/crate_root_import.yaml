@@ -1,0 +1,65 @@
+name: "Rust: use crate::X names an item of the importing crate's root"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["alpha", "beta"]
+
+  - path: alpha/Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: alpha/src/lib.rs
+    content: |
+      pub mod q;
+
+      pub fn load() {}
+
+      pub fn other() {}
+
+  - path: alpha/src/q/mod.rs
+    content: |
+      use crate::load;
+      use crate::{other};
+
+      pub fn single() {
+          load();
+      }
+
+      pub fn grouped() {
+          other();
+      }
+
+      pub fn inline() {
+          crate::load();
+      }
+
+  - path: beta/Cargo.toml
+    content: |
+      [package]
+      name = "beta"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: beta/src/lib.rs
+    content: |
+      pub fn load() {}
+
+      pub fn other() {}
+
+tests:
+  - name: "each import form calls the item in alpha's crate root"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['single', 'grouped', 'inline']
+      RETURN caller.name AS caller, callee.name AS callee, callee.file_path AS file
+      ORDER BY caller
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: grouped, callee: other, file: alpha/src/lib.rs } }
+      - { row: { caller: inline, callee: load, file: alpha/src/lib.rs } }
+      - { row: { caller: single, callee: load, file: alpha/src/lib.rs } }

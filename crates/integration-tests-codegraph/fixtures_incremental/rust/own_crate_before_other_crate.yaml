@@ -1,0 +1,73 @@
+name: "Rust: a use path resolves in the importing crate before a same-named item of another crate"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["alpha", "beta"]
+
+  - path: alpha/Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: alpha/src/lib.rs
+    content: |
+      pub mod link;
+      pub mod store;
+
+  - path: alpha/src/link/mod.rs
+    content: |
+      pub trait Plain {
+          fn run(&self);
+      }
+
+      pub fn open() {}
+
+  - path: alpha/src/store.rs
+    content: |
+      use crate::link::*;
+
+      pub struct Disk;
+
+      impl Plain for Disk {
+          fn run(&self) {}
+      }
+
+      pub fn start() {
+          open();
+      }
+
+  - path: beta/Cargo.toml
+    content: |
+      [package]
+      name = "beta"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: beta/src/lib.rs
+    content: |
+      pub fn link() {
+          let open = 1;
+      }
+
+tests:
+  - name: "the glob import reaches the trait in alpha's link module"
+    query: |
+      MATCH (d:Definition)-[:EXTENDS]->(t:Definition)
+      WHERE d.name = 'Disk'
+      RETURN t.name AS name, t.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Plain, file: alpha/src/link/mod.rs } }
+
+  - name: "the glob import reaches the function in alpha's link module"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'start'
+      RETURN callee.name AS name, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: open, file: alpha/src/link/mod.rs } }

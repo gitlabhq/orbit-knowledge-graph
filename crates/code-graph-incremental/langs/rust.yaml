@@ -76,6 +76,8 @@ stages:
         replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$N)))'
       - match: '(field_initializer_list $$$F:__field)'
         replace: '(__obj $$$F)'
+      - match: '(field_expression value: $O:call_expression field: $F)'
+        replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O:__ivar field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F)'
@@ -116,7 +118,7 @@ stages:
         replace: '(__call (__callee @$N) $A)'
       # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
-        replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
+        replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$N)) (__callee @$N) $A)'
       - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
@@ -153,65 +155,65 @@ stages:
 
       # use a::b::*;  and  pub use a::b::*;
       - match: '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
-        tag: { import_type: ReExportGlob }
+        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name "*"))'
+        tag: { import_type: ReExportGlob, shadows_nested: "true" }
       - match: '(use_declaration argument: (use_wildcard $P))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
-        tag: { import_type: GlobUse }
+        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name "*"))'
+        tag: { import_type: GlobUse, shadows_nested: "true" }
 
       # use a::b as c;  pub(crate) stays private
       - match: '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))'
-        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
-        tag: { import_type: ReExportAliased }
+        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        tag: { import_type: ReExportAliased, shadows_nested: "true" }
       - match: '(use_declaration argument: (use_as_clause path: $P alias: $A))'
-        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
-        tag: { import_type: AliasedUse }
+        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        tag: { import_type: AliasedUse, shadows_nested: "true" }
 
       # use a::{b, c as d, self};  one import per entry, built in the next stage
       - match: '(use_declaration (__visibility !(crate)) argument: (scoped_use_list path: $P list: (use_list $$$E)))'
-        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->pub_use_entry)'
+        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) $$$E:_*_named->pub_use_entry)'
       - match: '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$E)))'
-        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->use_entry)'
+        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) $$$E:_*_named->use_entry)'
 
       # use crate::foo::Bar;
       - match: '(use_declaration (__visibility !(crate)) argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
-        tag: { import_type: PubUse }
+        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$A|field("name")))'
+        tag: { import_type: PubUse, shadows_nested: "true" }
       - match: '(use_declaration argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
-        tag: { import_type: Use }
+        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$A|field("name")))'
+        tag: { import_type: Use, shadows_nested: "true" }
 
       # use foo;
       - match: '(use_declaration argument: $A:identifier)'
         replace: '(__import (__source @$A) (__source_path "") (__name @$A))'
-        tag: { import_type: Use }
+        tag: { import_type: Use, shadows_nested: "true" }
 
   - name: import-entries
     rules:
       - match: '(use_entry path: (self) alias: $A)'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::") (__alias @$A)))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry path: (self) alias: $A)'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::") (__alias @$A)))'
-        tag: { import_type: PubUseGroup }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry "self")'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry "self")'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
-        tag: { import_type: PubUseGroup }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry path: $N alias: $A)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry path: $N alias: $A)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
-        tag: { import_type: PubUseGroup }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "id")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$ROOT))'
-        tag: { import_type: UseGroup }
+        tag: { import_type: UseGroup, shadows_nested: "true" }
       - match: '(pub_use_entry)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "id")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$ROOT))'
-        tag: { import_type: PubUseGroup }
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_group $$$I:__import)'
         replace: '$$$I'
 
@@ -322,6 +324,8 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$TP $$$P $B)'
 
       # Fields: named ones by name, tuple ones by position
+      - match: '(field_declaration name: $N type: $T:type_identifier)'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
       - match: '(field_declaration name: $N)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(ordered_field_declaration_list $$$T:primitive_type|type_identifier|generic_type|reference_type|scoped_type_identifier|tuple_type|array_type|pointer_type|dynamic_type|function_type|unit_type)'
@@ -377,7 +381,7 @@ stages:
       # `impl zoo::traits::Audible for X` / `trait Bark: crate::traits::Audible`:
       # a path in supertype position is a scoped import of its last segment
       - match: '(__supertype "/::/")'
-        replace: '(__supertype @$ROOT|split_last("::") (__import (__source @$ROOT|regex_replace("::[^:]*$","")) (__source_path @$ROOT|regex_replace("::[^:]*$","")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$ROOT|split_last("::"))))'
+        replace: '(__supertype @$ROOT|split_last("::") (__import (__source @$ROOT|regex_replace("::[^:]*$","")) (__source_path @$ROOT|regex_replace("::[^:]*$","")|replace("::","/")|regex_replace("^crate$",".")|regex_replace("^crate/","")) (__name @$ROOT|split_last("::"))))'
 
   - name: tuple-fields
     rules:

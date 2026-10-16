@@ -1,0 +1,32 @@
+name: "Kotlin: a member function shadows an explicit import of the same name"
+
+fixtures:
+  - path: a/A.kt
+    content: |
+      package a
+
+      import b.helper
+
+      class A {
+          fun helper() {}
+
+          fun run() {
+              helper()
+          }
+      }
+
+  - path: b/B.kt
+    content: |
+      package b
+
+      fun helper() {}
+
+tests:
+  - name: "run calls the member helper"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: a/A.kt } }

@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::smallvec;
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, ROOT_PATH, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
@@ -449,7 +449,9 @@ impl<'t> Fold<'t> {
             return None;
         }
         let path = self.syms.resolve(import.child_sym(C::SourcePath)?);
-        let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
+        let mut segments = path
+            .split(PATH_SEP)
+            .filter(|s| !s.is_empty() && *s != ROOT_PATH);
         let Some(first) = segments.next() else {
             return Some(self.tree.root());
         };
