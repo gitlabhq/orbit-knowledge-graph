@@ -20,14 +20,14 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             filter,
             data_type,
             in_sort_key,
-            use_text_index,
+            text_indexed,
         } => sql::filter_expression(
             &value.source,
             &value.name,
             filter,
             data_type.as_ref(),
             *in_sort_key,
-            *use_text_index,
+            *text_indexed,
         ),
         Predicate::Ids {
             column: value,

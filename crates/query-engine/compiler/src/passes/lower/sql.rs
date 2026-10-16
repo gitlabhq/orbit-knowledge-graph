@@ -26,7 +26,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
         &bound.filter,
         bound.data_type.as_ref(),
         bound.in_sort_key,
-        bound.use_text_index,
+        bound.text_indexed,
     )
 }
 
@@ -36,7 +36,7 @@ pub(crate) fn filter_expression(
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
     in_sort_key: bool,
-    use_text_index: bool,
+    text_indexed: bool,
 ) -> Expr {
     let col = Expr::col(alias, prop);
 
@@ -49,14 +49,8 @@ pub(crate) fn filter_expression(
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
-    match filter.op.unwrap_or(FilterOp::Eq) {
-        FilterOp::Eq if use_text_index && !in_sort_key => Expr::and(
-            comparison(col.clone(), FilterOp::Eq, typed(val())).expect("comparison operator"),
-            Expr::eq(
-                Expr::func(Function::Lower, vec![col]),
-                Expr::func(Function::Lower, vec![typed(val())]),
-            ),
-        ),
+    let op = filter.op.unwrap_or(FilterOp::Eq);
+    let expression = match op {
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
@@ -105,6 +99,35 @@ pub(crate) fn filter_expression(
                 query: Box::new(needle),
             }
         }
+    };
+    if text_indexed && matches!(op, FilterOp::Eq | FilterOp::In) {
+        let values = match val() {
+            serde_json::Value::Array(values) => values,
+            value => vec![value],
+        };
+        Expr::and(
+            expression,
+            lowered_match(Expr::col(alias, prop), values, parameter_type(data_type)),
+        )
+    } else {
+        expression
+    }
+}
+
+fn lowered_match(column: Expr, values: Vec<serde_json::Value>, data_type: SqlType) -> Expr {
+    let lower = |expr| Expr::func(Function::Lower, vec![expr]);
+    let mut candidates: Vec<_> = values
+        .into_iter()
+        .map(|value| lower(Expr::param(data_type, value)))
+        .collect();
+    if candidates.len() == 1 {
+        Expr::eq(lower(column), candidates.remove(0))
+    } else {
+        Expr::binary(
+            Op::In,
+            lower(column),
+            Expr::func(Function::Tuple, candidates),
+        )
     }
 }
 

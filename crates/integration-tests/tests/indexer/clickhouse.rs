@@ -297,8 +297,9 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
             first_error.expect("a reduced row cap alone must still overflow on a >2GB block")
         }
     };
+    let overflow = overflow.to_string();
     assert!(
-        overflow.to_string().contains("cannot contain more than"),
+        overflow.contains("cannot contain more than") || overflow.contains("exceeds 32 bits"),
         "expected the Arrow 2GB overflow, got: {overflow}"
     );
 

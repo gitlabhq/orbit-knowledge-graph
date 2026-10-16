@@ -34,7 +34,7 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
-    pub use_text_index: bool,
+    pub text_indexed: bool,
 }
 
 impl BoundFilter {
@@ -44,7 +44,7 @@ impl BoundFilter {
             filter: self.filter.clone(),
             data_type: self.data_type,
             in_sort_key: self.in_sort_key,
-            use_text_index: self.use_text_index,
+            text_indexed: self.text_indexed,
         }
     }
 }

@@ -36,7 +36,7 @@ pub fn ordered_filters(
     });
     if key_narrowed {
         for (_, filter) in &mut bound {
-            filter.use_text_index = false;
+            filter.text_indexed = false;
         }
     }
     bound
@@ -83,7 +83,7 @@ pub fn bind_filter(
             .map(|property| model.property_selectivity(property))
             .unwrap_or_default(),
         in_sort_key,
-        use_text_index: property_id.is_some_and(|property| model.has_text_index(property)),
+        text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
     }
 }
 
