@@ -226,7 +226,7 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the Orb
 | `OrbitPipelinePostCompileErrorRateHigh` | `gkg_query_pipeline_queries_total{status!~"ok\|compile_error"}` / `gkg_query_pipeline_queries_total{status!="compile_error"}` | > 1% | warning | 5m | Post-compile failure rate isolates server-side reliability from client-input quality. Mirrors the "Pipeline success rate (1h), post-compile" gauge. |
 | `OrbitValidationFailedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"parse\|schema\|reference\|pagination"}` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
 | `OrbitAllowlistRejectedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"ontology\|ontology_internal"}` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
-| `OrbitExecutionFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="execution"}` | > 1/min | warning | 5m | ClickHouse query execution is failing |
+| `OrbitExecutionFailureRate` | `gkg_query_pipeline_failed_total{failure_reason=~"execution\|too_slow\|memory_limit\|total_memory_limit\|too_many_rows\|too_many_bytes\|set_size_limit"}` | > 1/min | warning | 5m | ClickHouse query execution is failing |
 | `OrbitAuthorizationFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="authorization"}` | > 1/min | warning | 5m | Rails authorization exchange is failing |
 | `OrbitPipelineLatencyP95High` | `gkg_query_pipeline_duration_seconds` (histogram) | > 5s | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
 

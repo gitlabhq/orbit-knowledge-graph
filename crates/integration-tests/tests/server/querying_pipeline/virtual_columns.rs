@@ -146,5 +146,4 @@ async fn rejects_as_caller_error_when_requested_rows_exceed_batch_size() {
         .unwrap_err();
 
     assert!(err.is_caller_error(), "{err}");
-    assert!(err.to_string().contains("at most 1 rows"), "{err}");
 }

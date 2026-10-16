@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use query_engine::pipeline::PipelineError;
 use tokio::sync::mpsc;
-use tonic::{Status, Streaming};
+use tonic::{Code, Status, Streaming};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -22,10 +22,13 @@ pub enum RedactionExchangeError {
 }
 
 impl RedactionExchangeError {
-    /// A closed or broken request stream means the caller left mid-exchange.
+    /// A closed, cancelled or reset request stream means the caller left mid-exchange.
     pub fn into_pipeline_error(self) -> PipelineError {
         match self {
-            Self::StreamClosed | Self::ReceiveFailed(_) => {
+            Self::StreamClosed => PipelineError::Streaming(format!("{self:?}")),
+            Self::ReceiveFailed(ref status)
+                if matches!(status.code(), Code::Cancelled | Code::Unknown) =>
+            {
                 PipelineError::Streaming(format!("{self:?}"))
             }
             other => PipelineError::Authorization(format!("{other:?}")),
@@ -206,6 +209,7 @@ mod tests {
         }
 
         let failures = [
+            RedactionExchangeError::ReceiveFailed(Status::out_of_range("message too large")),
             RedactionExchangeError::InvalidMessage("test"),
             RedactionExchangeError::ResultIdMismatch {
                 expected: "a".to_string(),

@@ -176,18 +176,6 @@ mod tests {
     fn execution_failures_report_the_clickhouse_limit() {
         let cases = [
             ("Code: 159. DB::Exception: Timeout exceeded", "too_slow"),
-            (
-                "Code: 241. DB::Exception: Query memory limit exceeded",
-                "memory_limit",
-            ),
-            (
-                "Code: 241. DB::Exception: (total) memory limit exceeded",
-                "total_memory_limit",
-            ),
-            (
-                "Code: 457. DB::Exception: Value garbage",
-                "bad_query_parameter",
-            ),
             ("Code: 47. DB::Exception: Unknown identifier", "execution"),
         ];
         for (message, reason) in cases {

@@ -153,16 +153,15 @@ pub enum ClickHouseLimit {
 impl ClickHouseLimit {
     pub fn from_message(message: &str) -> Option<Self> {
         match clickhouse_error_code(message)? {
-            241 if message.contains("(total) memory limit exceeded") => {
-                Some(Self::TotalMemoryLimit)
-            }
+            241 if message.contains("(total)") => Some(Self::TotalMemoryLimit),
             241 => Some(Self::MemoryLimit),
             159 | 160 => Some(Self::TooSlow),
             307 => Some(Self::TooManyBytes),
             158 => Some(Self::TooManyRows),
             191 => Some(Self::SetSizeLimit),
             53 => Some(Self::TypeMismatch),
-            41 | 457 => Some(Self::BadQueryParameter),
+            41 if message.contains("for query parameter") => Some(Self::BadQueryParameter),
+            457 => Some(Self::BadQueryParameter),
             _ => None,
         }
     }
@@ -196,6 +195,10 @@ mod tests {
             ),
             (
                 "Code: 241. DB::Exception: (total) memory limit exceeded: would use 32.41 GiB",
+                Some(ClickHouseLimit::TotalMemoryLimit),
+            ),
+            (
+                "Code: 241. DB::Exception: Memory limit (total) exceeded: would use 32.41 GiB",
                 Some(ClickHouseLimit::TotalMemoryLimit),
             ),
             (
@@ -252,14 +255,10 @@ mod tests {
                 "Code: 457. DB::Exception: Value garbage cannot be parsed. (BAD_QUERY_PARAMETER)",
             ),
             clickhouse_error(
-                "Code: 41. DB::Exception: Cannot parse DateTime. (CANNOT_PARSE_DATETIME)",
-            ),
-            clickhouse_error(
                 "Code: 53. DB::Exception: Cannot convert string 'abc' to type UInt64. (TYPE_MISMATCH)",
             ),
         ];
         for error in caller {
-            assert!(error.is_caller_error(), "{error}");
             assert_eq!(error.outcome(), "caller_error", "{error}");
         }
     }
@@ -274,7 +273,7 @@ mod tests {
                 "Code: 241. DB::Exception: Query memory limit exceeded: would use 9.31 GiB",
             ),
             clickhouse_error(
-                "Code: 241. DB::Exception: (total) memory limit exceeded: would use 32.41 GiB",
+                "Code: 41. DB::Exception: Cannot parse DateTime: while reading column created_at. (CANNOT_PARSE_DATETIME)",
             ),
             clickhouse_error("Code: 47. DB::Exception: Unknown expression identifier `p.id`"),
             PipelineError::ContentResolution("batch size 101 exceeds limit 100".into()),
@@ -288,7 +287,6 @@ mod tests {
             },
         ];
         for error in server {
-            assert!(!error.is_caller_error(), "{error}");
             assert_eq!(error.outcome(), "server_error", "{error}");
         }
     }

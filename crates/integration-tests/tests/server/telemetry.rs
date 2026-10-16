@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use opentelemetry::global;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, SumDataPoint};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_server::pipeline::OTelPipelineObserver;
-use query_engine::pipeline::PipelineObserver;
+use query_engine::pipeline::{PipelineError, PipelineObserver};
 use tokio::time::sleep;
 
 fn setup_meter_provider() -> (SdkMeterProvider, InMemoryMetricExporter) {
@@ -99,9 +100,6 @@ async fn pipeline_observer_records_ch_resource_metrics() {
 
 #[tokio::test]
 async fn pipeline_observer_labels_queries_with_their_outcome() {
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, SumDataPoint};
-    use query_engine::pipeline::PipelineError;
-
     let (provider, exporter) = setup_meter_provider();
 
     OTelPipelineObserver::start().finish(1, 0);

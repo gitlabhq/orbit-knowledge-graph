@@ -563,14 +563,14 @@ impl Reader {
     }
 }
 
-struct QueryStream {
-    sender: mpsc::Sender<ExecuteQueryMessage>,
-    stream: Streaming<ExecuteQueryMessage>,
+pub(super) struct QueryStream {
+    pub(super) sender: mpsc::Sender<ExecuteQueryMessage>,
+    pub(super) stream: Streaming<ExecuteQueryMessage>,
     authorization_request: Option<RedactionRequired>,
 }
 
 impl QueryStream {
-    async fn open(
+    pub(super) async fn open(
         client: &mut OrbitServiceClient<Channel>,
         request: Option<ExecuteQueryRequest>,
     ) -> Self {
@@ -605,7 +605,7 @@ impl QueryStream {
             .unwrap()
     }
 
-    async fn await_authorization_request(&mut self) {
+    pub(super) async fn await_authorization_request(&mut self) {
         let message = self.next().await;
         let Content::Redaction(RedactionExchange {
             content: Some(redaction_exchange::Content::Required(required)),
@@ -616,7 +616,7 @@ impl QueryStream {
         self.authorization_request = Some(required);
     }
 
-    async fn finish(mut self) -> Result<Value, ExecuteQueryError> {
+    pub(super) async fn finish(mut self) -> Result<Value, ExecuteQueryError> {
         loop {
             if let Some(required) = self.authorization_request.take() {
                 self.authorize_everything(required).await;
@@ -740,7 +740,7 @@ fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
     config
 }
 
-async fn serve_grpc(
+pub(super) async fn serve_grpc(
     service: OrbitServiceImpl,
     shutdown: CancellationToken,
 ) -> OrbitServiceClient<Channel> {
