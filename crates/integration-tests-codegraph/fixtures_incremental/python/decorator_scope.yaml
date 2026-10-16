@@ -43,6 +43,14 @@ fixtures:
       def f(helper=helper):
           helper()
 
+
+      def g(helper, cb=helper):
+          cb()
+
+
+      def h(cb=lambda: helper()):
+          cb()
+
 tests:
   - name: a call decorator names the top-level function, not the parameter of the same name
     query: |
@@ -79,3 +87,24 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "main.Node.m" } }
+
+  - name: a default value names the top-level function when an earlier parameter shadows it
+    # Known gap: the default is walked inside the def, after the parameter `helper` binds.
+    # Python evaluates a default value in the enclosing scope.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'g'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a lambda default value keeps its body, so its call belongs to the def
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'h'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
