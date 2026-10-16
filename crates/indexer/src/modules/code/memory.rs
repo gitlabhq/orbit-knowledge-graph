@@ -18,48 +18,75 @@ pub(super) fn budget() -> Arc<dyn Admission> {
 
 struct InflightBudget {
     budget: u64,
-    used: Mutex<u64>,
+    queue: Mutex<Queue>,
     changed: Condvar,
+}
+
+#[derive(Default)]
+struct Queue {
+    used: u64,
+    next: u64,
+    serving: u64,
 }
 
 impl InflightBudget {
     fn new(budget: u64) -> Self {
         Self {
             budget,
-            used: Mutex::new(0),
+            queue: Mutex::default(),
             changed: Condvar::new(),
         }
     }
 
-    fn used(&self) -> MutexGuard<'_, u64> {
-        self.used.lock().unwrap_or_else(PoisonError::into_inner)
+    fn queue(&self) -> MutexGuard<'_, Queue> {
+        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
 impl Admission for InflightBudget {
     fn admit(&self, bytes: u64, run: &Sentinel) -> Result<(), Killed> {
-        let mut used = self.used();
-        while *used != 0 && *used + bytes > self.budget {
-            run.check()?;
-            used = self
+        let mut queue = self.queue();
+        let ticket = queue.next;
+        queue.next += 1;
+        loop {
+            let killed = run.check().err();
+            if queue.serving == ticket {
+                if let Some(killed) = killed {
+                    queue.serving += 1;
+                    self.changed.notify_all();
+                    return Err(killed);
+                }
+                if queue.used == 0 || queue.used + bytes <= self.budget {
+                    break;
+                }
+            }
+            queue = self
                 .changed
-                .wait(used)
+                .wait(queue)
                 .unwrap_or_else(PoisonError::into_inner);
         }
-        *used += bytes;
+        queue.serving += 1;
+        queue.used += bytes;
+        self.changed.notify_all();
         Ok(())
     }
 
     fn release(&self, bytes: u64) {
-        *self.used() -= bytes;
+        self.queue().used -= bytes;
         self.changed.notify_all();
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemoryKill {
+    pub pressure: MemoryPressure,
+    pub alone: bool,
 }
 
 struct Job {
     bytes: u64,
     cancel: CancellationToken,
-    killed: Arc<OnceLock<MemoryPressure>>,
+    killed: Arc<OnceLock<MemoryKill>>,
 }
 
 pub struct MemoryWatchdog {
@@ -73,11 +100,11 @@ pub struct MemoryWatchdog {
 
 pub struct Registration {
     watchdog: Arc<MemoryWatchdog>,
-    killed: Arc<OnceLock<MemoryPressure>>,
+    killed: Arc<OnceLock<MemoryKill>>,
 }
 
 impl Registration {
-    pub fn exceeded(&self) -> Option<MemoryPressure> {
+    pub fn exceeded(&self) -> Option<MemoryKill> {
         self.killed.get().copied()
     }
 }
@@ -169,7 +196,11 @@ impl MemoryWatchdog {
             return None;
         }
         let victim = jobs.iter().max_by_key(|job| job.bytes)?;
-        let _ = victim.killed.set(pressure);
+        let kill = MemoryKill {
+            pressure,
+            alone: jobs.len() == 1,
+        };
+        let _ = victim.killed.set(kill);
         self.used_at_last_kill
             .store(pressure.used, Ordering::Relaxed);
         victim.cancel.cancel();
@@ -178,6 +209,7 @@ impl MemoryWatchdog {
             used = pressure.used,
             limit = pressure.limit,
             repository_bytes = victim.bytes,
+            alone = kill.alone,
             "cancelling the largest code indexing job under pod memory pressure"
         );
         Some(victim.bytes)
@@ -191,6 +223,7 @@ impl MemoryWatchdog {
 #[cfg(test)]
 mod tests {
     use std::sync::Barrier;
+    use std::time::Instant;
 
     use super::*;
 
@@ -200,16 +233,35 @@ mod tests {
         MemoryPressure { used, limit: 1000 }
     }
 
+    fn kill(used: u64, alone: bool) -> Option<MemoryKill> {
+        Some(MemoryKill {
+            pressure: pressure(used),
+            alone,
+        })
+    }
+
     fn watchdog(kill_at_percent: u64) -> Arc<MemoryWatchdog> {
         MemoryWatchdog::new(Box::new(|| None), CodeMetrics::new(), kill_at_percent)
+    }
+
+    fn admit(budget: &InflightBudget, bytes: u64) {
+        budget
+            .admit(bytes, &Sentinel::disabled())
+            .unwrap_or_else(|e| panic!("{e}"));
+    }
+
+    fn settles(what: &str, condition: impl Fn() -> bool) {
+        let started = Instant::now();
+        while !condition() {
+            assert!(started.elapsed() < Duration::from_secs(10), "{what}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     #[test]
     fn a_waiter_leaves_on_cancel_and_an_oversize_item_runs_alone() {
         let budget = InflightBudget::new(2 * MIB);
-        budget
-            .admit(2 * MIB, &Sentinel::disabled())
-            .unwrap_or_else(|e| panic!("{e}"));
+        admit(&budget, 2 * MIB);
         let cancelled = Sentinel::new("run", "", u64::MAX).with_cancellation(Arc::new(|| true));
         assert!(
             budget
@@ -217,10 +269,8 @@ mod tests {
                 .is_err_and(|killed| killed.cancelled)
         );
         budget.release(2 * MIB);
-        budget
-            .admit(3 * MIB, &Sentinel::disabled())
-            .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(*budget.used(), 3 * MIB);
+        admit(&budget, 3 * MIB);
+        assert_eq!(budget.queue().used, 3 * MIB);
     }
 
     #[test]
@@ -231,9 +281,7 @@ mod tests {
         std::thread::scope(|scope| {
             for _ in 0..8 {
                 scope.spawn(|| {
-                    budget
-                        .admit(MIB, &Sentinel::disabled())
-                        .unwrap_or_else(|e| panic!("{e}"));
+                    admit(&budget, MIB);
                     let now = inflight.fetch_add(MIB, Ordering::Relaxed) + MIB;
                     peak.fetch_max(now, Ordering::Relaxed);
                     pair.wait();
@@ -243,6 +291,41 @@ mod tests {
             }
         });
         assert_eq!(peak.load(Ordering::Relaxed), 2 * MIB);
+    }
+
+    #[test]
+    fn a_waiting_large_item_is_admitted_before_the_small_items_that_arrive_after_it() {
+        let budget = InflightBudget::new(2 * MIB);
+        let order = Mutex::new(Vec::new());
+        admit(&budget, MIB);
+        std::thread::scope(|scope| {
+            let (budget, order) = (&budget, &order);
+            scope.spawn(move || {
+                admit(budget, 3 * MIB);
+                order
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push("big");
+                budget.release(3 * MIB);
+            });
+            settles("big has its ticket", || budget.queue().next == 2);
+            scope.spawn(move || {
+                admit(budget, MIB / 4);
+                order
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push("small");
+                budget.release(MIB / 4);
+            });
+            settles("small has its ticket", || budget.queue().next == 3);
+            std::thread::sleep(Duration::from_millis(20));
+            assert_eq!(budget.queue().used, MIB, "small waits behind big");
+            budget.release(MIB);
+        });
+        assert_eq!(
+            *order.lock().unwrap_or_else(PoisonError::into_inner),
+            ["big", "small"]
+        );
     }
 
     #[tokio::test]
@@ -261,7 +344,7 @@ mod tests {
         assert_eq!(watchdog.tick(pressure(500)), None);
         assert_eq!(watchdog.tick(pressure(900)), Some(50));
         assert!(newest.is_cancelled() && !big.is_cancelled() && !small.is_cancelled());
-        assert_eq!(newest_job.exceeded(), Some(pressure(900)));
+        assert_eq!(newest_job.exceeded(), kill(900, false));
         assert_eq!(
             watchdog.tick(pressure(950)),
             None,
@@ -299,9 +382,10 @@ mod tests {
         assert_eq!(off.tick(pressure(1000)), None);
 
         let clamped = watchdog(150);
-        let _job = clamped.register(7, only.clone());
+        let job = clamped.register(7, only.clone());
         assert_eq!(clamped.tick(pressure(999)), None);
         assert_eq!(clamped.tick(pressure(1000)), Some(7));
         assert!(only.is_cancelled());
+        assert_eq!(job.exceeded(), kill(1000, true));
     }
 }

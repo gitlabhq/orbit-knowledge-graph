@@ -6,14 +6,14 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
 use gitlab_client::GitlabClientError;
-use orbit_server_config::{CodeIndexingPipelineConfig, resources::MemoryPressure};
+use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
-use super::memory::MemoryWatchdog;
+use super::memory::{MemoryKill, MemoryWatchdog};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
 use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
@@ -73,7 +73,7 @@ enum Fetched {
 
 pub enum IndexError {
     BudgetExceeded { budget: Duration },
-    MemoryExceeded(MemoryPressure),
+    MemoryExceeded(MemoryKill),
     Overloaded(GitlabClientError),
     NoLane { waited: Duration },
     Failed(HandlerError),

@@ -410,13 +410,17 @@ impl CodeIndexingTaskHandler {
                     ),
                 ))
             }
-            Err(IndexError::MemoryExceeded(pressure)) => Err(JOB_TIMEOUT_RETRY.global_failure(
-                attempt,
-                format!(
+            Err(IndexError::MemoryExceeded(kill)) => {
+                let message = format!(
                     "code indexing job cancelled under pod memory pressure ({} of {} bytes in use)",
-                    pressure.used, pressure.limit
-                ),
-            )),
+                    kill.pressure.used, kill.pressure.limit
+                );
+                Err(if kill.alone {
+                    JOB_TIMEOUT_RETRY.global_failure(attempt, message)
+                } else {
+                    HandlerError::Backpressure(message)
+                })
+            }
             Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
                 "no indexing lane within {}s",
                 waited.as_secs()

@@ -65,15 +65,6 @@ fn add_project(mock: &MockGitlabServer, project_id: i64, files: &[(String, Strin
     mock.add_project(project_id, BRANCH, &files);
 }
 
-fn big_and_small(mock: &MockGitlabServer, big_files: usize) {
-    add_project(mock, BIG, &big_repository(big_files));
-    mock.add_project(
-        SMALL,
-        BRANCH,
-        &[("src/main.py", "def small():\n    pass\n")],
-    );
-}
-
 fn fake_pressure(used: &Arc<AtomicU64>) -> Arc<MemoryWatchdog> {
     let used = used.clone();
     MemoryWatchdog::new(
@@ -88,8 +79,10 @@ fn fake_pressure(used: &Arc<AtomicU64>) -> Arc<MemoryWatchdog> {
     )
 }
 
-fn without_file_budgets() -> CodeIndexingPipelineConfig {
+fn two_big_lanes() -> CodeIndexingPipelineConfig {
     CodeIndexingPipelineConfig {
+        small_repo_max_files: 0,
+        big_indexing_slots: Some(2),
         per_file_timeout_ms: 0,
         per_file_parse_timeout_ms: 0,
         per_file_walk_timeout_ms: 0,
@@ -110,13 +103,8 @@ fn dead_lettered<T>(result: &Result<T, HandlerError>) -> bool {
     )
 }
 
-async fn assert_only_the_small_job_landed(deps: &CodeIndexingDeps, clickhouse: &TestContext) {
-    deps.code_indexing_task_handler()
-        .flush()
-        .await
-        .expect("flush");
-    assert!(indexed(clickhouse, SMALL).await);
-    assert!(!indexed(clickhouse, BIG).await);
+fn backpressured<T>(result: &Result<T, HandlerError>) -> bool {
+    matches!(result, Err(HandlerError::Backpressure(message)) if message.contains("memory pressure"))
 }
 
 #[tokio::test]
@@ -124,7 +112,12 @@ async fn a_job_killed_under_pressure_is_retried_then_dead_lettered_and_a_small_j
     enable_incremental(&traversal_path(BIG));
     let clickhouse = clickhouse().await;
     let mock = MockGitlabServer::start().await;
-    big_and_small(&mock, 60);
+    add_project(&mock, BIG, &big_repository(60));
+    mock.add_project(
+        SMALL,
+        BRANCH,
+        &[("src/main.py", "def small():\n    pass\n")],
+    );
     let used = Arc::new(AtomicU64::new(950));
     let deps = CodeIndexingDeps::new_with_memory_watchdog(
         &mock,
@@ -146,7 +139,9 @@ async fn a_job_killed_under_pressure_is_retried_then_dead_lettered_and_a_small_j
     used.store(500, Ordering::Relaxed);
     let small = handler.handle(handler_context(), envelope(SMALL, 1)).await;
     assert!(small.is_ok(), "{small:?}");
-    assert_only_the_small_job_landed(&deps, &clickhouse).await;
+    handler.flush().await.expect("flush");
+    assert!(indexed(&clickhouse, SMALL).await);
+    assert!(!indexed(&clickhouse, BIG).await);
 }
 
 #[derive(Default)]
@@ -169,6 +164,27 @@ impl MessageAcker for ProgressAcks {
     }
 }
 
+fn counted_context() -> (Arc<ProgressAcks>, HandlerContext) {
+    let acks = Arc::new(ProgressAcks::default());
+    let context = HandlerContext::new(
+        Arc::new(MockNatsServices::new()),
+        Arc::new(MockLockService::new()),
+        ProgressNotifier::new(acks.clone()),
+    );
+    (acks, context)
+}
+
+async fn wait_for_acks(acks: &ProgressAcks, at_least: usize, what: &str) {
+    let started = std::time::Instant::now();
+    while acks.0.load(Ordering::Relaxed) < at_least {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "{what}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
 #[tokio::test]
 async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
     const PARSING: i64 = 4302;
@@ -184,33 +200,20 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
         &mock,
         &clickhouse,
         CodeIndexingPipelineConfig {
-            small_repo_max_files: 0,
             big_indexing_slots: Some(1),
-            ..without_file_budgets()
+            ..two_big_lanes()
         },
         fake_pressure(&used),
     );
     let first = deps.code_indexing_task_handler();
     let second = deps.code_indexing_task_handler();
-    let acks = Arc::new(ProgressAcks::default());
-    let waiting_context = HandlerContext::new(
-        Arc::new(MockNatsServices::new()),
-        Arc::new(MockLockService::new()),
-        ProgressNotifier::new(acks.clone()),
-    );
+    let (acks, waiting_context) = counted_context();
     let parsing_job =
         tokio::spawn(async move { first.handle(handler_context(), envelope(PARSING, 1)).await });
     let waiting_job =
         tokio::spawn(async move { second.handle(waiting_context, envelope(WAITING, 1)).await });
 
-    let started = std::time::Instant::now();
-    while acks.0.load(Ordering::Relaxed) == 0 {
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(60),
-            "the waiter never reached the lane"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    wait_for_acks(&acks, 1, "the waiter never reached the lane").await;
     assert!(
         !parsing_job.is_finished(),
         "the parsing job must still hold the lane when the pressure rises"
@@ -232,32 +235,49 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
 }
 
 #[tokio::test]
-#[ignore = "needs a 1 GiB cgroup: systemd-run --user --scope -p MemoryMax=1G -- cargo nextest run --all-features -p integration-tests --test containers --retries 0 --run-ignored ignored-only -E 'test(memory_pressure)'"]
-async fn a_job_under_a_real_memory_limit_dead_letters_alone_and_a_small_job_lands() {
-    enable_incremental(&traversal_path(BIG));
+async fn a_kill_while_another_job_is_in_flight_does_not_spend_an_attempt() {
+    const LARGER: i64 = 4304;
+    const OTHER: i64 = 4305;
+    enable_incremental(&traversal_path(LARGER));
     let clickhouse = clickhouse().await;
     let mock = MockGitlabServer::start().await;
-    big_and_small(&mock, 1200);
-    let deps = CodeIndexingDeps::new_with_pipeline_config(
+    add_project(&mock, LARGER, &big_repository(70));
+    add_project(&mock, OTHER, &big_repository(60));
+    let used = Arc::new(AtomicU64::new(500));
+    let deps = CodeIndexingDeps::new_with_memory_watchdog(
         &mock,
         &clickhouse,
-        CodeIndexingPipelineConfig {
-            memory_kill_percent: 90,
-            ..without_file_budgets()
-        },
+        two_big_lanes(),
+        fake_pressure(&used),
     );
-    let handler = deps.code_indexing_task_handler();
+    let larger = deps.code_indexing_task_handler();
+    let other = deps.code_indexing_task_handler();
+    let (larger_acks, larger_context) = counted_context();
+    let (other_acks, other_context) = counted_context();
+    let larger_job =
+        tokio::spawn(async move { larger.handle(larger_context, envelope(LARGER, 2)).await });
+    let other_job =
+        tokio::spawn(async move { other.handle(other_context, envelope(OTHER, 1)).await });
 
-    let (first, small) = tokio::join!(
-        handler.handle(handler_context(), envelope(BIG, 1)),
-        handler.handle(handler_context(), envelope(SMALL, 1)),
-    );
-    assert!(small.is_ok(), "the co-scheduled job lands: {small:?}");
-    assert!(retried(&first), "the first attempt is retried: {first:?}");
-    let second = handler.handle(handler_context(), envelope(BIG, 2)).await;
+    wait_for_acks(&larger_acks, 2, "the larger job never reached its lane").await;
+    wait_for_acks(&other_acks, 2, "the other job never reached its lane").await;
     assert!(
-        dead_lettered(&second),
-        "the second attempt dead-letters: {second:?}"
+        !larger_job.is_finished() && !other_job.is_finished(),
+        "both jobs must be parsing when the pressure rises"
     );
-    assert_only_the_small_job_landed(&deps, &clickhouse).await;
+    used.store(950, Ordering::Relaxed);
+    let killed = larger_job.await.expect("join");
+    used.store(500, Ordering::Relaxed);
+    let survived = other_job.await.expect("join");
+    assert!(
+        backpressured(&killed),
+        "a kill under shared memory is redelivered without spending attempt 2: {killed:?}"
+    );
+    assert!(survived.is_ok(), "{survived:?}");
+    deps.code_indexing_task_handler()
+        .flush()
+        .await
+        .expect("flush");
+    assert!(indexed(&clickhouse, OTHER).await);
+    assert!(!indexed(&clickhouse, LARGER).await);
 }
