@@ -1048,7 +1048,7 @@ fn propagate_reexports(
                         .cursor(old.node)
                         .enclosing(|p| p.is(C::Def))
                         .is_some();
-                if !(named && nested_own && *old != loc) {
+                if !(named && nested_own && *old != loc && !declared[fi].contains(&name)) {
                     return;
                 }
             }
