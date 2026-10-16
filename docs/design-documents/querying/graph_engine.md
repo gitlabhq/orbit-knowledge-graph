@@ -181,12 +181,13 @@ Ungrouped aggregations can still elide targets used only as filters.
 | 7 | `response_policy` | Applies transport-size policy to result projections |
 | 8 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
 | 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
-| 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
-| 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
-| 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
-| 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+| 10 | `id_bounds` | Adds an `id` lower bound to each FINAL scan that filters a `rises_with_id` property with `>=` or `>`. The bound reads live rows without FINAL, so the primary key skips old parts that FINAL would otherwise read again |
+| 11 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
+| 12 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
+| 13 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
+| 14 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
+| 15 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 16 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
 The planner emits ClickHouse SQL similar to these patterns:
 

@@ -2348,4 +2348,36 @@ mod tests {
             "wide page got {wide_page} chars"
         );
     }
+
+    fn compile_gql_sql(query: &str) -> String {
+        compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx())
+            .expect("should compile")
+            .base
+            .render()
+    }
+
+    #[test]
+    fn job_created_at_window_bounds_id_from_live_rows() {
+        let sql = compile_gql_sql(
+            "MATCH (j:Job {project_id: 278964}) WHERE j.created_at >= '2026-10-08' RETURN j.id",
+        );
+
+        let bound = "(j.id >= (SELECT MIN(_id_bound.id) AS id FROM gl_job AS _id_bound \
+            WHERE (startsWith(_id_bound.traversal_path, '1/') \
+            AND ((_id_bound.created_at >= toDateTime64('2026-10-08', 6, 'UTC')) \
+            AND (_id_bound._deleted = false)))))";
+        assert!(sql.contains(bound), "expected {bound}, got:\n{sql}");
+    }
+
+    #[test]
+    fn job_finished_at_window_keeps_id_unbounded() {
+        let sql = compile_gql_sql(
+            "MATCH (j:Job {project_id: 278964}) WHERE j.finished_at >= '2026-10-08' RETURN j.id",
+        );
+
+        assert!(
+            !sql.contains("_id_bound"),
+            "unexpected id bound, got:\n{sql}"
+        );
+    }
 }

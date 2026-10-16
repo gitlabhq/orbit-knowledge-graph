@@ -8,6 +8,7 @@ pub mod enforce;
 mod errors;
 pub mod frontend;
 pub mod hydrate;
+pub mod id_bounds;
 pub mod lower;
 pub mod normalize;
 pub mod plan;

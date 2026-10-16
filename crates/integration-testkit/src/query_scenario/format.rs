@@ -28,6 +28,8 @@ pub struct ScenarioConfig {
     #[serde(default)]
     pub unmerged_seed: bool,
     #[serde(default)]
+    pub seed_parts: Vec<Seed>,
+    #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
@@ -83,6 +85,13 @@ pub struct ExpectedIndex {
     pub index: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedGranules {
+    pub table: String,
+    pub granules: u64,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
@@ -133,6 +142,8 @@ pub struct QueryExpect {
     pub sql_not_contains: Vec<String>,
     #[serde(default)]
     pub indexes_used: Vec<ExpectedIndex>,
+    #[serde(default)]
+    pub granules_read: Vec<ExpectedGranules>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,
@@ -258,6 +269,10 @@ pub struct AllPagesExpect {
 }
 
 impl QueryExpect {
+    pub fn explains_plan(&self) -> bool {
+        !self.indexes_used.is_empty() || !self.granules_read.is_empty()
+    }
+
     pub fn validate_pages_exclusive(&self, scenario: &str) {
         let has_result_fields = self.has_result_assertions();
         assert!(
@@ -266,7 +281,7 @@ impl QueryExpect {
                     || self.repeat_count.is_some()
                     || !self.pages.is_empty()
                     || self.all_pages.is_some()
-                    || !self.indexes_used.is_empty()),
+                    || self.explains_plan()),
             "{scenario}: compile_only cannot be combined with runtime assertions"
         );
         if self.pages.is_empty() {
@@ -291,7 +306,7 @@ impl QueryExpect {
                     && page.hydration.is_none()
                     && page.sql_contains.is_empty()
                     && page.sql_not_contains.is_empty()
-                    && page.indexes_used.is_empty()
+                    && !page.explains_plan()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",

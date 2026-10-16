@@ -164,6 +164,7 @@ properties:
     source: created_at
     nullable: true
     mutable: false
+    rises_with_id: true
     description: "Creation timestamp."
 
   started_at:

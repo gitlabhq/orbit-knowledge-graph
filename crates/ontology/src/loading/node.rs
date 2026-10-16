@@ -201,6 +201,8 @@ struct PropertyYaml {
     #[serde(default)]
     mutable: bool,
     #[serde(default)]
+    rises_with_id: bool,
+    #[serde(default)]
     terminal_values: Option<Vec<String>>,
     #[serde(default)]
     binary: bool,
@@ -392,6 +394,7 @@ impl NodeYaml {
                         }
                     }),
                     mutable: prop_def.mutable,
+                    rises_with_id: prop_def.rises_with_id,
                     terminal_values: prop_def.terminal_values,
                     binary: prop_def.binary,
                 })

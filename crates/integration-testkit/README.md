@@ -332,6 +332,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 |---|---|---|
 | `extra_seed` | `Seed` | Additional rows to insert; triggers a DB fork |
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
+| `seed_parts` | [`Seed`] | Each entry is inserted as one part, with merges stopped as for `unmerged_seed`. Give every row in a part the same columns, because rows with different columns go in separate inserts. Use it to build a merged history part next to a fresh part, such as a tombstone of an old row next to a new row |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
 | `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
@@ -405,6 +406,7 @@ only IDs and the relationship type.
 | `sql_contains` | [string] | Rendered SQL must contain these |
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
 | `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules, with the pruning still in place after the last index step (FINAL's `PrimaryKeyExpand` can select every granule again). Seed non-matching rows with `unmerged_seed` so there are parts to prune |
+| `granules_read` | [{table, granules}] | Granules that the named table's scan reads after the last `EXPLAIN indexes = 1` step, including FINAL's `PrimaryKeyExpand` |
 | `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
 
 **Pagination:**

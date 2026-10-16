@@ -570,6 +570,7 @@ pub struct Field {
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
     pub mutable: bool,
+    pub rises_with_id: bool,
     /// For enum fields, values that once reached never change (absorbing states).
     pub terminal_values: Option<Vec<String>>,
     /// Source column is a Postgres `bytea` that may hold non-UTF8 bytes. Extraction
@@ -594,6 +595,7 @@ impl Default for Field {
             description: None,
             traversal_path_lookup: None,
             mutable: true,
+            rises_with_id: false,
             terminal_values: None,
             binary: false,
         }

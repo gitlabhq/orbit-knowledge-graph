@@ -13,7 +13,7 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
-use format::ExpectedIndex;
+use format::{ExpectedGranules, ExpectedIndex};
 use futures::FutureExt;
 use pagination::{PageCollection, next_page, with_after, without_cursor};
 use query_engine::compiler::{
@@ -173,6 +173,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
 
 async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
     let database = (!scenario.config.extra_seed.is_empty()
+        || !scenario.config.seed_parts.is_empty()
         || scenario.config.ontology_overlay.is_some())
     .then(|| scenario::database_name(name));
     let outcome = AssertUnwindSafe(run_case(ctx, scenario, name, presets, database.as_deref()))
@@ -220,8 +221,13 @@ async fn run_case(
         }
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         let mut settings = Default::default();
-        if cfg.unmerged_seed {
-            for table in cfg.extra_seed.keys() {
+        let unmerged = cfg.unmerged_seed || !cfg.seed_parts.is_empty();
+        if unmerged {
+            for table in cfg
+                .extra_seed
+                .keys()
+                .chain(cfg.seed_parts.iter().flat_map(|part| part.keys()))
+            {
                 let table = crate::scenario::seed::prefix_graph_table(table);
                 assert!(
                     columns.contains_key(&table),
@@ -234,7 +240,10 @@ async fn run_case(
                 serde_json::json!(0),
             )]);
         }
-        if cfg.unmerged_seed {
+        if unmerged {
+            for part in &cfg.seed_parts {
+                crate::scenario::seed::apply_seed(&forked, part, &settings, &columns, name).await;
+            }
             for (table, rows) in &cfg.extra_seed {
                 for row in rows {
                     let seed = Seed::from([(table.clone(), vec![row.clone()])]);
@@ -313,9 +322,9 @@ async fn run_frontend(
         return;
     }
 
-    if !expect.indexes_used.is_empty() {
+    if expect.explains_plan() {
         let plan = ctx.explain_plan(&compiled.base).await;
-        assert_indexes_used(&plan, &expect.indexes_used, label);
+        assert_plan(&plan, expect, label);
     }
 
     if !expect.pages.is_empty() {
@@ -348,9 +357,9 @@ async fn run_frontend(
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
-        if !expect.indexes_used.is_empty() {
+        if expect.explains_plan() {
             let plan = ctx.explain_plan(&compiled.base).await;
-            assert_indexes_used(&plan, &expect.indexes_used, label);
+            assert_plan(&plan, expect, label);
         }
         let output = execute_output(
             ctx,
@@ -364,6 +373,32 @@ async fn run_frontend(
         let rerun = assert_output(&output, frontend, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
     }
+}
+
+fn assert_plan(plan: &serde_json::Value, expect: &QueryExpect, label: &str) {
+    assert_indexes_used(plan, &expect.indexes_used, label);
+    assert_granules_read(plan, &expect.granules_read, label);
+}
+
+fn assert_granules_read(plan: &serde_json::Value, expected: &[ExpectedGranules], label: &str) {
+    for ExpectedGranules { table, granules } in expected {
+        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
+            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
+        });
+        let read = granules_read(scan);
+        assert_eq!(
+            read,
+            Some(*granules),
+            "{label}: scan of {table} reads {read:?} granules after the last index step\nplan: {plan:#}"
+        );
+    }
+}
+
+fn granules_read(scan: &serde_json::Value) -> Option<u64> {
+    scan["Indexes"]
+        .as_array()
+        .and_then(|steps| steps.last())
+        .and_then(|step| step["Selected Granules"].as_u64())
 }
 
 fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
@@ -381,11 +416,7 @@ fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], lab
             "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
         );
 
-        let read = scan["Indexes"]
-            .as_array()
-            .and_then(|steps| steps.last())
-            .and_then(|step| step["Selected Granules"].as_u64())
-            .unwrap_or(selected);
+        let read = granules_read(scan).unwrap_or(selected);
         assert!(
             read < initial,
             "{label}: skip index {index} on {table} selected {selected} of {initial} granules, \

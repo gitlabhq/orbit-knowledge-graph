@@ -182,6 +182,11 @@
               "description": "Whether this field can change after creation. Fields that never change (IDs, paths, timestamps) should be marked false.",
               "default": true
             },
+            "rises_with_id": {
+              "type": "boolean",
+              "description": "Whether values rise with the row id, like a creation time. A lower bound on this field then lets queries skip older ids through the primary key.",
+              "default": false
+            },
             "terminal_values": {
               "type": "array",
               "items": {

@@ -59,6 +59,7 @@ pub struct EntityLayout {
     pub has_traversal_path: bool,
     pub global: bool,
     pub default_properties: Vec<PropertyId>,
+    pub columns_rising_with_id: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -241,6 +242,14 @@ impl RelationalMapping for ClickHouseBindings {
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         self.table(table).map(|layout| layout.sort_key.as_slice())
+    }
+
+    fn columns_rising_with_id(&self, table: &str) -> &[String] {
+        self.table(table)
+            .and_then(|layout| layout.entity)
+            .and_then(|entity| self.entity(entity))
+            .map(|layout| layout.columns_rising_with_id.as_slice())
+            .unwrap_or_default()
     }
 
     fn denormalized(&self) -> &DenormalizedCatalog {

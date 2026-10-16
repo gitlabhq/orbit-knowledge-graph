@@ -140,6 +140,9 @@ pub trait RelationalMapping: Send + Sync {
     ) -> Option<ForeignKey>;
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
+    fn columns_rising_with_id(&self, _table: &str) -> &[String] {
+        &[]
+    }
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn traversal_path_lookup(
         &self,

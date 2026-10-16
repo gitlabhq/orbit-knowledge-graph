@@ -59,6 +59,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 has_traversal_path: node.has_traversal_path,
                 global: node.global,
                 default_properties,
+                columns_rising_with_id: node.columns_rising_with_id.clone(),
             });
             tables.insert(
                 node.table.clone(),

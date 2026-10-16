@@ -103,6 +103,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [scope_proofs]
             mutates: [node]
         }
+        id_bounds {
+            reads_env: [data_model]
+            mutates: [node]
+        }
         response_policy {
             reads_env: [data_model]
             reads_state: [input]
@@ -154,13 +158,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, id_bounds, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, id_bounds, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
@@ -334,6 +338,13 @@ fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     if let Some(scope) = ctx.scope_proofs() {
         crate::scope::apply(&mut node, scope, ctx.data_model())?;
     }
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn id_bounds(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut node = require(ctx.take_node(), "node")?;
+    crate::passes::id_bounds::apply(&mut node, ctx.data_model())?;
     ctx.set_node(node);
     Ok(())
 }

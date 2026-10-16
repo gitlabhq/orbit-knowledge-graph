@@ -156,6 +156,13 @@ pub trait OrbitQueryModel {
             .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
     }
 
+    fn column_rises_with_id(&self, table: &str, column: &str) -> bool {
+        self.query_backend()
+            .columns_rising_with_id(table)
+            .iter()
+            .any(|rising| rising == column)
+    }
+
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.query_backend().has_text_index(property)
     }
