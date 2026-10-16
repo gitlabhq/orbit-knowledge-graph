@@ -678,8 +678,10 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
-            if c.enclosing(|p| p.is(C::Decorator)).is_some() {
-                let owner = self.enclosing();
+            let owner = self.enclosing();
+            if c.enclosing(|p| p.is(C::Decorator)).is_some()
+                && self.edges[first..].iter().any(|edge| edge.to_node == owner)
+            {
                 let previous = self.previous_def_named(owner);
                 let tail = self.edges.split_off(first);
                 self.edges.extend(tail.into_iter().filter_map(|mut edge| {
