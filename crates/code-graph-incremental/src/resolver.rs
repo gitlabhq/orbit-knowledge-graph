@@ -857,6 +857,13 @@ fn gather_imports_for(
         .filter(|prefix| declared_roots.contains(prefix.as_str()))
         .cloned()
         .collect();
+    let bindings = ImportBindings {
+        trees,
+        lang,
+        file_index,
+        resolved_key: resolved_tag_key,
+        root_relative,
+    };
     let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
@@ -929,6 +936,14 @@ fn gather_imports_for(
                                 target_path = local;
                             }
                         }
+                    }
+                    if direct.is_empty()
+                        && mapped.is_none()
+                        && let Some(path) = bindings.follow(&target_path, prefixes, own_root)
+                    {
+                        direct = resolve_glob(&path, file_index, prefixes);
+                        direct.retain(|loc| loc.fi != fi);
+                        target_path = path;
                     }
                     if direct.is_empty() && stdlib {
                         return;
@@ -2201,6 +2216,84 @@ fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> 
         .unique()
         .map(|&fi| Loc { fi, node: 0 })
         .collect()
+}
+
+const IMPORT_BINDING_HOPS: usize = 8;
+
+struct ImportBindings<'a> {
+    trees: &'a [Tree],
+    lang: &'a Lang,
+    file_index: &'a FileIndex,
+    resolved_key: u32,
+    root_relative: u32,
+}
+
+impl ImportBindings<'_> {
+    fn follow(&self, target: &str, prefixes: &[String], own_root: Option<&str>) -> Option<String> {
+        let mut path = target.to_owned();
+        for _ in 0..IMPORT_BINDING_HOPS {
+            let bound = self.bind_once(&path, prefixes, own_root)?;
+            if bound == path {
+                return None;
+            }
+            path = bound;
+            if !resolve_glob(&path, self.file_index, prefixes).is_empty() {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    fn bind_once(&self, path: &str, prefixes: &[String], own_root: Option<&str>) -> Option<String> {
+        let segments: Vec<&str> = path.split(PATH_SEP).collect();
+        (0..segments.len()).rev().find_map(|i| {
+            let segment = segments[i];
+            if segment.is_empty() || segment == WILDCARD {
+                return None;
+            }
+            let name = self.lang.syms.lookup(segment);
+            if name == 0 {
+                return None;
+            }
+            let file = match i {
+                0 => own_root
+                    .map(str::to_owned)
+                    .into_iter()
+                    .chain(prefixes.iter().cloned())
+                    .find_map(|root| self.file_index.get(&root)),
+                _ => resolve_path(&segments[..i].join(PATH_SEP), self.file_index, prefixes),
+            }
+            .filter(|loc| loc.node == 0)?;
+            let tree = &self.trees[file.fi as usize];
+            let (import, original) = tree
+                .root()
+                .descendants()
+                .filter(|c| c.is(C::Import) && c.enclosing(|p| p.is(C::Def)).is_none())
+                .find_map(|import| {
+                    let bound = import
+                        .names()
+                        .find(|n| n.child_sym(C::Alias).unwrap_or(n.sym()) == name)?;
+                    Some((import, bound.sym()))
+                })?;
+            let source = self
+                .lang
+                .syms
+                .resolve(tree.get_tag(import.index(), self.resolved_key)?);
+            let base = match source {
+                ROOT_PATH => source_root(tree, self.lang, self.root_relative).unwrap_or_default(),
+                _ => source,
+            };
+            let mut next = base.to_owned();
+            let rest = segments[i + 1..].iter().copied();
+            for part in std::iter::once(self.lang.syms.resolve(original)).chain(rest) {
+                if !next.is_empty() {
+                    next.push_str(PATH_SEP);
+                }
+                next.push_str(part);
+            }
+            Some(next)
+        })
+    }
 }
 
 fn is_external(source_str: &str, external: &[String]) -> bool {
