@@ -4,21 +4,34 @@ fixtures:
   - path: src/lib.rs
     content: |
       pub mod buf;
+      pub mod ext;
+      pub mod svc;
+      pub mod total;
       pub mod user;
 
   - path: src/buf.rs
     content: |
+      use crate::total::Total;
+
       pub struct Buf {
           pub len: usize,
+          pub cap: usize,
+          pub total: usize,
       }
 
       impl Buf {
           pub fn new() -> Buf {
-              Buf { len: 0 }
+              Buf { len: 0, cap: 0, total: 0 }
           }
 
           pub fn len(&self) -> usize {
               self.len
+          }
+      }
+
+      impl Total for Buf {
+          fn total(&self) -> usize {
+              self.total
           }
       }
 
@@ -30,9 +43,49 @@ fixtures:
           b.len
       }
 
+      pub fn same_file_trait(b: &Buf) -> usize {
+          b.total()
+      }
+
+  - path: src/ext.rs
+    content: |
+      use crate::buf::Buf;
+
+      impl Buf {
+          pub fn cap(&self) -> usize {
+              self.cap
+          }
+      }
+
+  - path: src/total.rs
+    content: |
+      pub trait Total {
+          fn total(&self) -> usize;
+      }
+
+  - path: src/svc.rs
+    content: |
+      pub struct Req;
+
+      pub struct Service<H> {
+          pub handler: H,
+      }
+
+      impl<H: Fn(Req)> Service<H> {
+          pub fn handler(&self) -> &H {
+              &self.handler
+          }
+
+          pub fn call(&self, req: Req) {
+              (self.handler)(req)
+          }
+      }
+
   - path: src/user.rs
     content: |
       use crate::buf::Buf;
+      use crate::svc::{Req, Service};
+      use crate::total::Total;
 
       pub fn cross_file(b: &Buf) -> usize {
           b.len()
@@ -40,6 +93,18 @@ fixtures:
 
       pub fn cross_file_read(b: &Buf) -> usize {
           b.len
+      }
+
+      pub fn cross_file_impl(b: &Buf) -> usize {
+          b.cap()
+      }
+
+      pub fn cross_file_trait(b: &Buf) -> usize {
+          b.total()
+      }
+
+      pub fn cross_file_closure<H: Fn(Req)>(s: &Service<H>, req: Req) {
+          (s.handler)(req)
       }
 
 tests:
@@ -78,6 +143,17 @@ tests:
     assert:
       - { not: true, row: { kind: "Method" } }
 
+  - name: a cross-file field read targets the field
+    # Known gap: a bare field read on a receiver from another file is not linked, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'cross_file_read'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["buf::Buf::len"] } }
+      - { column_values: { field: kind, values: ["Field"] } }
+
   - name: the getter has no self edge
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
@@ -85,3 +161,47 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { empty: true }
+
+  - name: a same-file call of a trait method targets the method, not the field of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'same_file_trait'
+      RETURN t.name AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["total"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a cross-file call of a trait method targets the method, not the field of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'cross_file_trait'
+      RETURN t.name AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["total"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a call of a method from an impl in another file targets the method, not the field of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'cross_file_impl'
+      RETURN t.name AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["cap"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a same-file call of a closure field keeps the field next to the getter of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'svc::Service::call'
+      RETURN t.name AS callee, t.definition_type AS kind
+    assert:
+      - { row: { callee: "handler", kind: "Field" } }
+
+  - name: a cross-file call of a closure field targets the field, not the getter of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'cross_file_closure'
+      RETURN t.name AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["handler"] } }
+      - { column_values: { field: kind, values: ["Field"] } }

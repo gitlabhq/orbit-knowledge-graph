@@ -1,0 +1,37 @@
+name: "Kotlin: a member property and an extension function of one name"
+
+fixtures:
+  - path: Main.kt
+    content: |
+      class Box {
+          val len: () -> Int = { 1 }
+
+          val size: Int = 1
+      }
+
+      fun Box.len(): Int = 2
+
+      fun Box.size(): Int = 3
+
+      fun useLen(b: Box): Int = b.len()
+
+      fun useSize(b: Box): Int = b.size()
+
+tests:
+  - name: a call of a function-typed member property keeps the property next to the extension function of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'useLen'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row: { callee: "Box.len", kind: "Property" } }
+
+  - name: a call of a property that is not of function type targets the extension function of its name
+    # Known gap: the engine keeps the property for every callable-tagged property, so the call also reaches the property.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'useSize'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: kind, values: ["Function"] } }
