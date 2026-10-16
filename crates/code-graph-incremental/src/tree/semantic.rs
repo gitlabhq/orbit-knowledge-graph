@@ -224,19 +224,15 @@ fn same_name_member<'a, S: Storage<Node = Node>>(
 }
 
 pub fn is_member_of<'a, S: Storage<Node = Node>>(def: Cursor<'a, S>, class: Cursor<'a, S>) -> bool {
-    let mut in_scope = false;
-    for node in def.ancestors() {
+    let mut owner = def.ancestors().find(|node| node.is(C::Def));
+    while let Some(node) = owner {
         if node.index() == class.index() {
             return true;
         }
-        if node.is(C::Def) {
-            let of_class = node
-                .ancestors()
-                .find(|outer| outer.is(C::Def))
-                .is_some_and(|outer| outer.index() == class.index());
-            return def.is_field() && !in_scope && of_class;
+        if !node.has(C::ImplBlock) {
+            return false;
         }
-        in_scope |= node.is(C::Scope);
+        owner = node.ancestors().find(|outer| outer.is(C::Def));
     }
     false
 }
