@@ -266,6 +266,8 @@ stages:
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R:__arr)'
         replace: '(__binding $N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
+        replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
         replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R:__call)'
