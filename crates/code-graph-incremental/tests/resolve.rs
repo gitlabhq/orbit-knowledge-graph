@@ -438,3 +438,54 @@ fn file_stats_keep_files_killed_by_the_resolve_budget() {
     assert!(skipped.iter().all(|killed| killed.label == "resolve"));
     assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
+
+#[test]
+fn a_path_through_a_re_export_stays_resolved_on_a_noop_reindex() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join("src/gen")).unwrap();
+    write_all(
+        repo.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            (
+                "src/lib.rs",
+                "mod gen;\npub mod ops;\n\npub use crate::{gen::consts, ops::build};\n",
+            ),
+            ("src/gen/mod.rs", "pub mod consts;\n"),
+            (
+                "src/gen/consts.rs",
+                "pub struct Zero;\n\nimpl Zero {\n    pub fn new() -> Zero {\n        Zero\n    }\n}\n",
+            ),
+            (
+                "src/ops.rs",
+                "pub fn build() {\n    use crate::consts::*;\n    let z = Zero::new();\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    let through_re_export = [pair("src/ops.rs:build", "src/gen/consts.rs:new")];
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        through_re_export
+    );
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        resolved.state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        through_re_export
+    );
+}
