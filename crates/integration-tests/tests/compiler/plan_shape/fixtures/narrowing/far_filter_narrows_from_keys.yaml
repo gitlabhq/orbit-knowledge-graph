@@ -110,3 +110,25 @@ cases:
           reject:
             - (CTE _narrow_mr (_))
             - (Deduplicate LimitBy ... (Filter mr.id IN _narrow_mr.id (_)))
+
+  - name: A pinned partner narrows an ordered endpoint with a non-selective filter
+
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[9460]},{"id":"n","entity":"Note","filters":{"resolved_at":{"is_not_null":true}},"columns":["id"]}],"relationships":[{"type":"HAS_NOTE","from":"mr","to":"n"}],"order_by":"-n.created_at"}
+      gql: |
+        MATCH (mr:MergeRequest {id: 9460})-[:HAS_NOTE]->(n:Note) WHERE n.resolved_at IS NOT NULL
+        RETURN n.id ORDER BY n.created_at DESC
+
+    logical:
+      expect:
+        - (Sort n.created_at DESC (_))
+
+    physical:
+      clickhouse:
+        planned:
+          ctes:
+            exact_order: [_narrow_n]
+          expect:
+            - (CTE _narrow_n (Project _orbit_edge_0n.target_id AS id (Filter _orbit_edge_0n.source_id = 9460, ... (Scan Table(gl_edge) AS _orbit_edge_0n))))
+            - (Bind n (Filter n.resolved_at IS NOT NULL, n._deleted = false (Deduplicate LimitBy ... (Filter n.id IN _narrow_n.id (Scan Table(gl_note) AS n)))))

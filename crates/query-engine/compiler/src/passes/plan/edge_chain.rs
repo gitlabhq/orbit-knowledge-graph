@@ -874,8 +874,11 @@ fn resolve_node_flags(
                     .is_some_and(NodePlan::has_selective_filters)
         })
     };
-    let narrows =
-        |alias: &String| has_filter_only || input.has_negation() && predicate_joins.contains(alias);
+    let narrows = |alias: &String| {
+        has_filter_only
+            || input.has_negation() && predicate_joins.contains(alias)
+            || partner_has_keys(alias)
+    };
     let edge_narrowable = |np: &NodePlan| {
         np.node_ids.is_empty()
             && np.id_range.is_none()
