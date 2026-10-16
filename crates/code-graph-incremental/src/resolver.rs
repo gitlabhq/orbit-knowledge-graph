@@ -2036,7 +2036,7 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
         chain(ctx, c, &|r| {
             resolve_reference(ctx, r)
-                .or_else(|| enclosing_alias(ctx, r))
+                .or_else(|| enclosing_name(ctx, r))
                 .or_else(|| visible_type(ctx, r.fi(), r.sym()).filter(|_| !imported_inline(r)))
         })
     });
@@ -2069,21 +2069,46 @@ fn imported_inline(callee: Cursor) -> bool {
     })
 }
 
-/// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
-/// `T` in `fn f<T: Pinger>(t: T)` is the type parameter bound in it.
-fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>> {
-    let sym = r.sym();
-    r.ancestors().filter(|a| a.is(C::Def)).find_map(|d| {
-        if d.children_of(C::Alias).any(|a| a.sym() == sym) {
-            return Some(d);
-        }
-        let bound = d
-            .children()
-            .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
-            .find_map(|c| c.child(C::SsaTyped))
-            .filter(|bound| bound.sym() != sym)?;
-        resolve_chain(ctx, bound)
+fn enclosing_defs<'a>(r: Cursor<'a>) -> impl Iterator<Item = (Cursor<'a>, bool)> {
+    let mut child = r;
+    r.ancestors().filter_map(move |up| {
+        let via = child;
+        child = up;
+        let header =
+            crate::canonical::is_canonical(via.kind()) && !via.is(C::Def) && !via.is(C::Scope);
+        up.is(C::Def).then_some((up, header))
     })
+}
+
+fn enclosing_name<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>> {
+    let sym = r.sym();
+    enclosing_defs(r).find_map(|(d, header)| {
+        enclosing_alias(ctx, d, sym).or_else(|| match header {
+            true => None,
+            false => enclosing_type(ctx, d, sym),
+        })
+    })
+}
+
+fn enclosing_alias<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
+    if d.children_of(C::Alias).any(|a| a.sym() == sym) {
+        return Some(d);
+    }
+    let bound = d
+        .children()
+        .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
+        .find_map(|c| c.child(C::SsaTyped))
+        .filter(|bound| bound.sym() != sym)?;
+    resolve_chain(ctx, bound)
+}
+
+fn enclosing_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
+    let plain = |node: Cursor<'a>| node.is_class() && !node.has(C::ImplBlock);
+    if plain(d) && d.child_sym(C::DefName) == Some(sym) {
+        return Some(d);
+    }
+    let node = *members_of(ctx, d).get(&sym)?;
+    Some(d.jump(d.fi(), node)).filter(|member| plain(*member))
 }
 
 fn chain<'a>(
