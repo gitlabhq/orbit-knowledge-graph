@@ -557,6 +557,15 @@ impl<'t> Fold<'t> {
         self.defs_by_name.get(&sym).into_iter().flatten().copied()
     }
 
+    fn previous_def_named(&self, dn: u32) -> Option<u32> {
+        let def = self.tree.cursor(dn);
+        let name = def.child_sym(C::DefName)?;
+        let owner = def.parent().map(|p| p.index());
+        self.defs_named(name)
+            .filter(|&d| d < dn && self.tree.cursor(d).parent().map(|p| p.index()) == owner)
+            .max()
+    }
+
     fn register_def(&mut self, node: Cursor<'_>) {
         if self.registered.insert(node.index())
             && let Some(name) = node.child_sym(C::DefName)
@@ -669,6 +678,17 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
+            if c.enclosing(|p| p.is(C::Decorator)).is_some() {
+                let owner = self.enclosing();
+                let previous = self.previous_def_named(owner);
+                let tail = self.edges.split_off(first);
+                self.edges.extend(tail.into_iter().filter_map(|mut edge| {
+                    if edge.to_node == owner {
+                        edge.to_node = previous?;
+                    }
+                    Some(edge)
+                }));
+            }
             for edge in &mut self.edges[first..] {
                 edge.call_resolution = crate::tree::CallResolution::Reference;
             }

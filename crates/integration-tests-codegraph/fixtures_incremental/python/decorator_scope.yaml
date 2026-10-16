@@ -51,6 +51,16 @@ fixtures:
       def h(cb=lambda: helper()):
           cb()
 
+
+      class Prop:
+          @property
+          def x(self):
+              return 1
+
+          @x.setter
+          def x(self, value):
+              pass
+
 tests:
   - name: a call decorator names the top-level function, not the parameter of the same name
     query: |
@@ -108,3 +118,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "main.helper" } }
+
+  - name: a property setter decorator names the getter, never the setter itself
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.Prop.x' AND callee.fqn = 'main.Prop.x'
+      RETURN caller.start_line AS setter, callee.start_line AS getter
+    assert:
+      - { row_count: 1 }
+      - { row: { setter: 56, getter: 52 } }
