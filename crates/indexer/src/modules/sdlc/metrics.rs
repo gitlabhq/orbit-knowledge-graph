@@ -14,6 +14,7 @@ pub struct SdlcMetrics {
     pub(in crate::modules::sdlc) datalake_query_bytes: Counter<u64>,
     pub(in crate::modules::sdlc) transform_duration: Histogram<f64>,
     pub(in crate::modules::sdlc) watermark_lag: Gauge<f64>,
+    change_delay: Histogram<f64>,
 }
 
 impl SdlcMetrics {
@@ -32,6 +33,7 @@ impl SdlcMetrics {
             datalake_query_bytes: sdlc::DATALAKE_QUERY_BYTES.build_counter_u64(meter),
             transform_duration: sdlc::TRANSFORM_DURATION.build_histogram_f64(meter),
             watermark_lag: sdlc::WATERMARK_LAG.build_gauge_f64(meter),
+            change_delay: sdlc::CHANGE_DELAY.build_histogram_f64(meter),
         }
     }
 }
@@ -88,16 +90,23 @@ impl SdlcMetrics {
         entity: &str,
         watermark: &DateTime<Utc>,
     ) {
-        let lag = Utc::now()
-            .signed_duration_since(*watermark)
-            .num_milliseconds()
-            .max(0) as f64
-            / 1000.0;
         self.watermark_lag.record(
-            lag,
+            seconds_since(watermark),
             &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
         );
     }
+
+    pub(in crate::modules::sdlc) fn record_change_delay(&self, dispatched_at: &DateTime<Utc>) {
+        self.change_delay.record(seconds_since(dispatched_at), &[]);
+    }
+}
+
+fn seconds_since(instant: &DateTime<Utc>) -> f64 {
+    Utc::now()
+        .signed_duration_since(*instant)
+        .num_milliseconds()
+        .max(0) as f64
+        / 1000.0
 }
 
 impl Default for SdlcMetrics {
