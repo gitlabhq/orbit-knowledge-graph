@@ -87,7 +87,6 @@ pub async fn send_query_error(
     let reason = failure_reason(&error).unwrap_or_else(|| error.code());
     error!(
         code = error.code(),
-        outcome = error.outcome(),
         failure_reason = reason,
         client_safe,
         error = %error,
