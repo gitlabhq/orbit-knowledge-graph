@@ -89,6 +89,8 @@ stages:
 
   - name: retag-calls
     rules:
+      - match: '(call_expression function: (field_expression argument: $O:__call field: $F:field_identifier) arguments: $A)'
+        replace: '(__call (__callee (__member @$F (__object $O))) $A)'
       - match: '(call_expression function: (field_expression argument: $O field: $F:field_identifier) arguments: $A)'
         replace: '(__call (__callee (__member @$F (__object @$O))) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'

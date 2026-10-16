@@ -1,0 +1,58 @@
+name: "C: the call at the root of a function-pointer chain links"
+
+fixtures:
+  - path: chain.c
+    content: |
+      struct ops {
+          int (*run)(int);
+      };
+
+      int run_impl(int x) { return x; }
+
+      struct ops *get_ops(void) {
+          static struct ops o = { run_impl };
+          return &o;
+      }
+
+      struct ops make_ops(void) {
+          struct ops o = { run_impl };
+          return o;
+      }
+
+      int chain_in_decl(void) {
+          int n = get_ops()->run(1);
+          return n;
+      }
+
+      int chain_as_statement(void) {
+          make_ops().run(2);
+          return 0;
+      }
+
+      int chain_in_loop(void) {
+          for (int i = 0; i < get_ops()->run(3); i++) {
+          }
+          return 0;
+      }
+
+tests:
+  - name: "the call at the root of a function-pointer chain links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chain_in_decl", "chain_as_statement"] AND callee.name IN ["get_ops", "make_ops"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: chain_as_statement, callee: make_ops } }
+      - { row: { caller: chain_in_decl, callee: get_ops } }
+
+  - name: "the call at the root of a chain in a for condition links"
+    # Known gap: the C for rule keeps only the body, so a call in the condition is not walked; the chain root itself is handled.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "chain_in_loop" AND callee.name = "get_ops"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }

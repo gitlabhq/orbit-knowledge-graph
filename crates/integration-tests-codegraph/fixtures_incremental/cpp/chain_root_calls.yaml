@@ -1,0 +1,84 @@
+name: "C++: the call at the root of a method chain links and types the chain"
+
+fixtures:
+  - path: chain.cpp
+    content: |
+      struct Item {
+          void touch() {}
+      };
+
+      struct Items {
+          Item first() { return Item(); }
+          int count() { return 0; }
+      };
+
+      Items make_items() { return Items(); }
+
+      Items* make_items_ptr() { return nullptr; }
+
+      void chain_in_decl() {
+          int n = make_items().count();
+      }
+
+      void chain_as_statement() {
+          make_items().first().touch();
+      }
+
+      void chain_through_pointer() {
+          make_items_ptr()->first().touch();
+      }
+
+      void chain_in_loop() {
+          for (int i = 0; i < make_items().count(); i++) {
+          }
+      }
+
+tests:
+  - name: "the call at the root of a method chain links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chain_in_decl", "chain_as_statement", "chain_through_pointer"]
+        AND callee.name IN ["make_items", "make_items_ptr"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: chain_as_statement, callee: make_items } }
+      - { row: { caller: chain_in_decl, callee: make_items } }
+      - { row: { caller: chain_through_pointer, callee: make_items_ptr } }
+
+  - name: "the methods on the chain resolve through the return type of the root call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chain_in_decl", "chain_as_statement"] AND callee.name IN ["first", "count", "touch"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: chain_as_statement, callee: first } }
+      - { row: { caller: chain_as_statement, callee: touch } }
+      - { row: { caller: chain_in_decl, callee: count } }
+
+  - name: "the methods on a chain through a pointer-returning root call resolve"
+    # Known gap: the return type Items* keeps its pointer, so the receiver of first() has no class; the root call itself links.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "chain_through_pointer" AND callee.name IN ["first", "touch"]
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["first", "touch"] } }
+
+  - name: "the call at the root of a chain in a for condition links"
+    # Known gap: the C++ for rule keeps only the body, so a call in the condition is not walked; the chain root itself is handled.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "chain_in_loop" AND callee.name IN ["make_items", "count"]
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["count", "make_items"] } }

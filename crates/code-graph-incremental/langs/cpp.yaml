@@ -106,6 +106,8 @@ stages:
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression argument: $O:__member field: $F:field_identifier)'
         replace: '(__member @$F (__object $O))'
+      - match: '(field_expression argument: $O:call_expression field: $F:field_identifier)'
+        replace: '(__member @$F (__object $O))'
       - match: '(field_expression argument: $O field: $F:field_identifier)'
         replace: '(__member @$F (__object @$O))'
 
