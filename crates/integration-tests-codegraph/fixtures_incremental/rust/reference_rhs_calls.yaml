@@ -56,6 +56,15 @@ fixtures:
           item.touch();
       }
 
+      pub fn let_mut_reference() {
+          let item = &mut pick();
+          item.touch();
+      }
+
+      pub fn assign_mut_reference(holder: &mut Holder) {
+          holder.shared = &mut pick();
+      }
+
       pub fn reassign_reference(item: &Item) {
           let mut current = item;
           current = &pick();
@@ -92,6 +101,18 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: make } }
+
+  - name: "a call behind a mutable reference links and types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["let_mut_reference", "assign_mut_reference"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: assign_mut_reference, callee: pick } }
+      - { row: { caller: let_mut_reference, callee: pick } }
+      - { row: { caller: let_mut_reference, callee: touch } }
 
   - name: "a call inside a macro on the right-hand side links"
     # Known gap: a macro body is a token tree, so the call inside vec![pick()] has no call node to link.
