@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
@@ -97,7 +97,7 @@ pub async fn run_loop(
     for task in tasks {
         let lock = lock_service.clone();
         let token = shutdown.clone();
-        handles.spawn(run_task_loop(task, lock, token));
+        handles.spawn(run_task_loop(task, lock, token).in_current_span());
     }
 
     let mut panicked = 0usize;
@@ -131,31 +131,38 @@ async fn run_task_loop(
             () = tokio::time::sleep(delay) => {}
         }
 
-        let cadence_key = format!("cadence.{}", task_name);
-        let ttl = task.schedule().interval_hint();
-        match lock_service.try_acquire(&cadence_key, ttl).await {
-            Ok(true) => {}
-            Ok(false) => {
-                info!(task = task_name, "skipping, within interval");
-                continue;
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "cadence lock check failed");
-                continue;
-            }
-        }
-
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
-            }
-        }
+        let span = info_span!("scheduled_task_run", task = task_name.as_str());
+        run_task_iteration(task.as_ref(), lock_service.as_ref())
+            .instrument(span)
+            .await;
     }
 
     info!(task = task_name, "task loop stopped");
+}
+
+async fn run_task_iteration(task: &dyn ScheduledTask, lock_service: &dyn LockService) {
+    let cadence_key = format!("cadence.{}", task.name());
+    let ttl = task.schedule().interval_hint();
+    match lock_service.try_acquire(&cadence_key, ttl).await {
+        Ok(true) => {}
+        Ok(false) => {
+            info!("skipping, within interval");
+            return;
+        }
+        Err(error) => {
+            warn!(%error, "cadence lock check failed");
+            return;
+        }
+    }
+
+    match task.run().await {
+        Ok(()) => {
+            debug!("task completed");
+        }
+        Err(error) => {
+            warn!(%error, "task failed");
+        }
+    }
 }
 
 /// Trigger A: the cron-driven scheduler. Wraps [`run_loop`] over a fixed set of

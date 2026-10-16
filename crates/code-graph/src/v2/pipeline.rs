@@ -818,6 +818,7 @@ impl Pipeline {
             sem_tx.send(()).unwrap();
         }
 
+        let span = tracing::Span::current();
         std::thread::scope(|s| {
             for (family, files) in &files_by_family {
                 sem_rx.recv().unwrap();
@@ -835,7 +836,9 @@ impl Pipeline {
                 let edges_count = &edges_count;
                 let all_errors = &all_errors;
                 let worker_threads = ctx.config.worker_threads;
+                let span = &span;
                 s.spawn(move || {
+                    let _entered = span.enter();
                     if ctx.is_cancelled() {
                         sem_tx.send(()).ok();
                         return;
@@ -884,9 +887,11 @@ impl Pipeline {
                     );
 
                     let result = pool.install(|| {
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            crate::v2::registry::dispatch_family(*family, files, ctx, &btx)
-                        }))
+                        span.in_scope(|| {
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                crate::v2::registry::dispatch_family(*family, files, ctx, &btx)
+                            }))
+                        })
                     });
 
                     drop(pool);
@@ -1216,10 +1221,12 @@ impl FamilyPipeline {
             parse_ms: f64,
         }
 
+        let span = tracing::Span::current();
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
             .map(|(idx, f)| {
+                let _entered = span.enter();
                 if ctx.is_cancelled() {
                     progress.files_advanced(ProgressPhase::Parse, 1);
                     return None;
@@ -1481,6 +1488,7 @@ impl FamilyPipeline {
             .into_par_iter()
             .enumerate()
             .map(|(file_idx, fwr_opt)| -> Phase2Result {
+                let _entered = span.enter();
                 if ctx.is_cancelled() {
                     progress.files_advanced(ProgressPhase::Resolve, 1);
                     return Default::default();
@@ -1632,6 +1640,7 @@ impl FamilyPipeline {
             let phase3_results: Vec<_> = all_failed
                 .into_par_iter()
                 .map(|(info, lang, failed_chains)| {
+                    let _entered = span.enter();
                     let lctx = &member_ctxs[&lang];
                     let guard = sentinel
                         .as_ref()

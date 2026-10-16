@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{Instrument, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::campaign::CampaignState;
@@ -52,7 +52,8 @@ impl Siphon {
     pub async fn drain_once(&self) -> Result<RouteOutcome, TaskError> {
         let mut total = RouteOutcome::default();
         for route in &self.routes {
-            let outcome = self.drain_route(route.as_ref()).await?;
+            let span = info_span!("siphon_route", table = route.source_table());
+            let outcome = self.drain_route(route.as_ref()).instrument(span).await?;
             total.dispatched += outcome.dispatched;
             total.skipped += outcome.skipped;
         }

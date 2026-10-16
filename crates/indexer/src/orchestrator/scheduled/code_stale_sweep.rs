@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::ArrowClickHouseClient;
@@ -78,9 +78,17 @@ impl CodeStaleSweep {
         let attempted = pending.len().min(self.sweeps_per_tick);
         let mut failed = 0usize;
         for path in pending.iter().take(attempted) {
-            if let Err(error) = self.sweep_namespace(path).await {
+            let span = info_span!(
+                "code_stale_sweep_namespace",
+                gl_root_namespace_id = path.top_level_namespace_id(),
+                traversal_path = path.as_str(),
+            );
+            let result = self.sweep_namespace(path).instrument(span.clone()).await;
+            if let Err(error) = result {
                 failed += 1;
-                warn!(%path, %error, "post-backfill stale sweep failed, retrying on a later tick");
+                span.in_scope(
+                    || warn!(%error, "post-backfill stale sweep failed, retrying on a later tick"),
+                );
             }
         }
         if pending.len() > self.sweeps_per_tick {
@@ -112,7 +120,6 @@ impl CodeStaleSweep {
                 })?;
             debug!(
                 table,
-                %traversal_path,
                 duration_ms = statement_start.elapsed().as_millis() as u64,
                 "stale sweep statement complete"
             );
@@ -126,7 +133,7 @@ impl CodeStaleSweep {
             )
             .await
             .map_err(TaskError::new)?;
-        info!(%traversal_path, "post-backfill stale sweep complete");
+        info!("post-backfill stale sweep complete");
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -38,12 +38,13 @@ impl NamespaceIndexingDispatch {
 
         for namespace in namespaces {
             let traversal_path = &namespace.traversal_path;
+            let span = info_span!(
+                "dispatch_namespace",
+                gl_root_namespace_id = namespace.namespace_id,
+                traversal_path = traversal_path.as_str(),
+            );
             if !traversal_path.is_valid() {
-                warn!(
-                    namespace_id = namespace.namespace_id,
-                    %traversal_path,
-                    "skipping namespace with invalid traversal_path"
-                );
+                span.in_scope(|| warn!("skipping namespace with invalid traversal_path"));
                 continue;
             }
 
@@ -58,14 +59,15 @@ impl NamespaceIndexingDispatch {
             let subscription = request.publish_subscription();
             let envelope = Envelope::new(&request).map_err(TaskError::new)?;
 
-            match self.nats.publish(&subscription, &envelope).await {
+            match self
+                .nats
+                .publish(&subscription, &envelope)
+                .instrument(span.clone())
+                .await
+            {
                 Ok(()) => {
                     outcome.dispatched += 1;
-                    debug!(
-                        namespace_id = namespace.namespace_id,
-                        %traversal_path,
-                        "dispatched namespace indexing request"
-                    );
+                    span.in_scope(|| debug!("dispatched namespace indexing request"));
                 }
                 Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
                 Err(error) => return Err(TaskError::new(error)),
