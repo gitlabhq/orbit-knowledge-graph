@@ -41,7 +41,7 @@ local contentGitalyCalls = o.metric('gkg.content.gitaly.calls');
 
 
 // 1. At a glance ----------------------------------------------------------
-// Tiles stay in text color until a threshold is crossed, so only real
+// Tiles summarize the selected time range and stay in text color until a threshold is crossed, so only real
 // trouble is coloured. Thresholds follow the latency (5 s, 25 s) and error
 // (99.5%) objectives.
 local Q = pipelineQueries.prom_name;
@@ -64,7 +64,7 @@ local stepsDown(red, amber) = [
 ];
 
 local tile(title, description, expr, unit, thresholds, decimals=null) =
-  o.stat(title, description, o.target(expr, title, DS), unit, 3, 4) + {
+  o.stat(title, description, o.target(expr, title, DS) + { instant: true, range: false }, unit, 3, 4) + {
     fieldConfig+: {
       defaults+: {
         color: { mode: 'thresholds' },
@@ -116,53 +116,53 @@ local errorBars(title, description, targets, colors) =
   };
 
 local glance = [
-  o.row('At a glance · tiles cover the last hour'),
+  o.row('At a glance'),
   tile(
     'Queries/min',
-    'Valid queries per minute, averaged over the last hour: successful queries and server failures. Excludes rejected client queries and schema calls.',
-    'sum(rate(%s{%s, %s}[1h])) * 60' % [Q, SEL, VALID],
+    'Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes rejected client queries and schema calls.',
+    'sum(rate(%s{%s, %s}[$__range])) * 60' % [Q, SEL, VALID],
     'short', NEUTRAL, 1,
   ),
   tile(
     'Success',
-    'Share of valid queries in the last hour that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.',
-    '1 - (%s) / sum(increase(%s{%s, %s}[1h]))' % [serverErrors('1h'), Q, SEL, VALID],
+    'Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.',
+    '1 - (%s) / sum(increase(%s{%s, %s}[$__range]))' % [serverErrors('$__range'), Q, SEL, VALID],
     'percentunit', stepsDown(0.95, 0.995), 2,
   ),
   tile(
     'Server errors',
-    'Queries that failed because of the service in the last hour: execution, timeout, streaming, content resolution, redaction, and compiler faults. See the chart below for the split by type.',
-    serverErrors('1h'),
-    'short', steps([[5, '#EAB839'], [20, 'red']]), 0,
+    'Queries that failed because of the service in the selected time range: execution, timeout, streaming, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.',
+    serverErrors('$__range'),
+    'short', NEUTRAL, 0,
   ),
   tile(
     'Under 5 s',
-    'Share of successful queries in the last hour that finished in 5 seconds or less.',
-    'sum(increase(%s_bucket{%s, %s, le="5.0"}[1h])) / sum(increase(%s_count{%s, %s}[1h]))' % [DUR, SEL, OK, DUR, SEL, OK],
+    'Share of successful queries in the selected time range that finished in 5 seconds or less.',
+    'sum(increase(%s_bucket{%s, %s, le="5.0"}[$__range])) / sum(increase(%s_count{%s, %s}[$__range]))' % [DUR, SEL, OK, DUR, SEL, OK],
     'percentunit', stepsDown(0.9, 0.95), 1,
   ),
   tile(
     'p50',
-    'Median duration of successful queries in the last hour.',
-    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[1h])))' % [DUR, SEL, OK],
+    'Median duration of successful queries in the selected time range.',
+    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
     's', NEUTRAL,
   ),
   tile(
     'p95',
-    'p95 duration of successful queries in the last hour. Amber from 5 s, red from 25 s.',
-    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[1h])))' % [DUR, SEL, OK],
+    'p95 duration of successful queries in the selected time range. Amber from 5 s, red from 25 s.',
+    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
     's', steps([[5, '#EAB839'], [25, 'red']]), 1,
   ),
   tile(
     'p99',
-    'p99 duration of successful queries in the last hour. Amber from 25 s, the long-tail objective (99% of queries within 25 s).',
-    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[1h])))' % [DUR, SEL, OK],
+    'p99 duration of successful queries in the selected time range. Amber from 25 s, the long-tail objective (99% of queries within 25 s).',
+    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
     's', steps([[25, '#EAB839']]), 1,
   ),
   tile(
     'Rejected',
-    'Share of all queries in the last hour that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.',
-    'sum(increase(%s{%s, status="compile_error"}[1h])) / sum(increase(%s{%s}[1h]))' % [Q, SEL, Q, SEL],
+    'Share of all queries in the selected time range that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.',
+    'sum(increase(%s{%s, status="compile_error"}[$__range])) / sum(increase(%s{%s}[$__range]))' % [Q, SEL, Q, SEL],
     'percentunit', NEUTRAL, 1,
   ),
   percentiles(
@@ -333,13 +333,13 @@ local resources = [
   ),
   o.gaugeStat(
     'OOM events (1h)',
-    'Total OOM-killer events across webserver replicas in the last hour. Any non-zero value warrants a look at the memory panel below.',
+    'Total OOM-killer events across webserver replicas in the selected time range. Any non-zero value warrants a look at the memory panel below.',
     'sum(increase(container_oom_events_total{%s}[1h]))' % [SEL],
     DS, 'short', 6,
   ),
   o.gaugeStat(
     'Restarts (1h)',
-    'Container restarts across webserver replicas in the last hour. Crash-loops show up here before they show up in the app metrics.',
+    'Container restarts across webserver replicas in the selected time range. Crash-loops show up here before they show up in the app metrics.',
     'sum(increase(kube_pod_container_status_restarts_total{%s}[1h]))' % [KUBE_SEL],
     DS, 'short', 6,
   ),

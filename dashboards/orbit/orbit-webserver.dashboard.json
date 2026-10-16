@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "At a glance · tiles cover the last hour",
+      "title": "At a glance",
       "type": "row"
     },
     {
@@ -53,7 +53,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Valid queries per minute, averaged over the last hour: successful queries and server failures. Excludes rejected client queries and schema calls.",
+      "description": "Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes rejected client queries and schema calls.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -102,8 +102,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[1h])) * 60",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range])) * 60",
+          "instant": true,
           "legendFormat": "Queries/min",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -115,7 +117,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of valid queries in the last hour that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.",
+      "description": "Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -172,8 +174,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[1h])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[1h])) or vector(0))) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[1h]))",
+          "expr": "1 - ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range]))",
+          "instant": true,
           "legendFormat": "Success",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -185,7 +189,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Queries that failed because of the service in the last hour: execution, timeout, streaming, content resolution, redaction, and compiler faults. See the chart below for the split by type.",
+      "description": "Queries that failed because of the service in the selected time range: execution, timeout, streaming, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -198,14 +202,6 @@
             "steps": [
               {
                 "color": "text"
-              },
-              {
-                "color": "#EAB839",
-                "value": 5
-              },
-              {
-                "color": "red",
-                "value": 20
               }
             ]
           },
@@ -242,8 +238,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[1h])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[1h])) or vector(0))",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))",
+          "instant": true,
           "legendFormat": "Server errors",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -255,7 +253,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of successful queries in the last hour that finished in 5 seconds or less.",
+      "description": "Share of successful queries in the selected time range that finished in 5 seconds or less.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -312,8 +310,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\", le=\"5.0\"}[1h])) / sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[1h]))",
+          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\", le=\"5.0\"}[$__range])) / sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[$__range]))",
+          "instant": true,
           "legendFormat": "Under 5 s",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -325,7 +325,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Median duration of successful queries in the last hour.",
+      "description": "Median duration of successful queries in the selected time range.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -373,8 +373,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[1h])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "instant": true,
           "legendFormat": "p50",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -386,7 +388,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 duration of successful queries in the last hour. Amber from 5 s, red from 25 s.",
+      "description": "p95 duration of successful queries in the selected time range. Amber from 5 s, red from 25 s.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -443,8 +445,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "instant": true,
           "legendFormat": "p95",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -456,7 +460,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p99 duration of successful queries in the last hour. Amber from 25 s, the long-tail objective (99% of queries within 25 s).",
+      "description": "p99 duration of successful queries in the selected time range. Amber from 25 s, the long-tail objective (99% of queries within 25 s).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -509,8 +513,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[1h])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "instant": true,
           "legendFormat": "p99",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -522,7 +528,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of all queries in the last hour that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.",
+      "description": "Share of all queries in the selected time range that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -571,8 +577,10 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[1h])) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[1h]))",
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[$__range])) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[$__range]))",
+          "instant": true,
           "legendFormat": "Rejected",
+          "range": false,
           "refId": "A"
         }
       ],
@@ -2112,7 +2120,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Total OOM-killer events across webserver replicas in the last hour. Any non-zero value warrants a look at the memory panel below.",
+      "description": "Total OOM-killer events across webserver replicas in the selected time range. Any non-zero value warrants a look at the memory panel below.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -2165,7 +2173,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Container restarts across webserver replicas in the last hour. Crash-loops show up here before they show up in the app metrics.",
+      "description": "Container restarts across webserver replicas in the selected time range. Crash-loops show up here before they show up in the app metrics.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
