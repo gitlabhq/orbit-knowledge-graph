@@ -23,10 +23,15 @@ pub fn apply_plan(plan: &mut QueryPlan, scope: &QueryScope) {
         })
         .collect();
     for (id, alias, proof) in filters {
-        execution.graph.filter_uses(
-            &mut execution.root,
-            id,
-            vec![crate::passes::plan::requirements::Predicate::Scope { alias, proof }],
-        );
+        execution
+            .graph
+            .transform(&mut execution.root, id, |relation| {
+                relation
+                    .filter(vec![crate::passes::plan::requirements::Predicate::Scope {
+                        alias,
+                        proof,
+                    }])
+                    .finish()
+            });
     }
 }

@@ -199,13 +199,13 @@ impl RelationGraph {
         usage
     }
 
-    pub fn filter_uses(
+    pub fn transform(
         &mut self,
         root: &mut RelationId,
         target: RelationId,
-        predicates: Vec<Predicate>,
+        transform: impl FnOnce(Relation<'_>) -> RelationId,
     ) {
-        let replacement = self.filter(target, predicates);
+        let replacement = transform(self.from(target));
         let existing = replacement.0;
         for node in &mut self.nodes[..existing] {
             node.replace_input(target, replacement);
@@ -281,6 +281,18 @@ impl RelationGraph {
         let input = input.into();
         if predicates.is_empty() {
             return input.id;
+        }
+        if input.alias.is_none()
+            && let RelationNode::Project {
+                input: projected,
+                outputs,
+            } = self.get(input.id).clone()
+        {
+            let filtered = self.add(RelationNode::Filter {
+                input: projected,
+                predicates,
+            });
+            return self.project(filtered, outputs);
         }
         self.add(RelationNode::Filter { input, predicates })
     }

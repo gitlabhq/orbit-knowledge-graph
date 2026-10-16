@@ -396,13 +396,10 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             let expansion = multi_hop(&mut self.graph, self.facts, &physical_relation, alias);
             self.graph.from(expansion).filter(predicates).finish()
         } else {
-            let edge = self.edge_read(
-                &physical_relation,
-                alias,
-                !(self.facts.aggregate() && self.facts.relations.len() == 1),
-            )?;
+            let current_rows = !(self.facts.aggregate() && self.facts.relations.len() == 1);
             if self.facts.aggregate() && self.facts.relations.len() == 1 {
                 if let Some(table) = physical_relation.single_edge_table() {
+                    let edge = self.edge_read(&physical_relation, alias, false)?;
                     self.graph
                         .from(edge)
                         .latest(
@@ -412,10 +409,10 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                         )
                         .finish()
                 } else {
-                    self.graph.from(edge).filter(predicates).finish()
+                    self.read_relation(&physical_relation, alias, current_rows, predicates)?
                 }
             } else {
-                self.graph.from(edge).filter(predicates).finish()
+                self.read_relation(&physical_relation, alias, current_rows, predicates)?
             }
         };
         if relation.max_hops == 1 {
@@ -835,6 +832,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             routes.push(self.graph.from(owned).project(outputs).finish().into());
         }
         Ok(self.graph.union_all(routes, alias))
+    }
+
+    fn read_relation(
+        &mut self,
+        relation: &EdgeRelation,
+        alias: &str,
+        final_: bool,
+        predicates: Vec<Predicate>,
+    ) -> Result<RelationId> {
+        let read = self.edge_read(relation, alias, final_)?;
+        Ok(self.graph.from(read).filter(predicates).finish())
     }
 }
 

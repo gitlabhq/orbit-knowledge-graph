@@ -23,8 +23,8 @@ logical:
 physical:
   clickhouse:
     planned:
+      bind:
+        - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate Final (Scan Table(gl_user) AS u)))))
       expect:
-        - (CTE _orbit_relation_0 (Project u.id AS id (Filter u.username = 'alice' (Scan Table(gl_user) AS u))))
-        - (CTE _orbit_relation_1 (Project u.id AS id (Filter u.id IN _orbit_relation_0.id, u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
-        - (Filter mr.author_id IN _orbit_relation_1.id, ... (_))
+        - (Filter mr.author_id IN $users.id, ... (_))
         - (Scan Table(gl_merge_request) AS mr)

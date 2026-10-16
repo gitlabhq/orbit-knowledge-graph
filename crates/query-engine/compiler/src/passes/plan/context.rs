@@ -54,7 +54,6 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
         let root = graph
             .from(owned)
             .filter(super::requirements::node_predicates(node))
-            .project(super::requirements::node_outputs(node))
             .finish();
         Ok(ExecutionPlan {
             graph,
