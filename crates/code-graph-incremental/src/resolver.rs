@@ -1423,7 +1423,7 @@ fn callee_targets<'a>(
         .into_iter()
         .map(|target| {
             let found = callable_target(target);
-            if !found.is_field() {
+            if !found.is_field() || found.has_tag(ctx.tags.callable) {
                 return found;
             }
             found
@@ -1431,7 +1431,11 @@ fn callee_targets<'a>(
                 .find(|node| node.is_class())
                 .into_iter()
                 .flat_map(|class| impl_blocks_of(ctx, class))
-                .find_map(|block| find_method_in(block, found.child_sym(C::DefName)?))
+                .find_map(|block| {
+                    let name = found.child_sym(C::DefName)?;
+                    let node = *members_of(ctx, block).get(&name)?;
+                    Some(block.jump(block.fi(), node))
+                })
                 .filter(|method| !method.is_field())
                 .unwrap_or(found)
         })

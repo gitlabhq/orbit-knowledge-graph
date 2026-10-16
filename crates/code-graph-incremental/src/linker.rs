@@ -687,12 +687,11 @@ impl<'t> Fold<'t> {
         let found = self
             .tree
             .cursor(self.sibling_member(target.index(), false, site));
-        if !found.is_field() {
+        if !found.is_field() || found.has_tag(self.tags.callable) {
             return found.index();
         }
         self.type_parts(found, true)
-            .find_map(|part| self.member_of(part, found.child_sym(C::DefName)?))
-            .filter(|&member| !self.tree.cursor(member).is_field())
+            .find_map(|part| self.member_slot(part, found.child_sym(C::DefName)?, false))
             .unwrap_or(found.index())
     }
 
@@ -704,8 +703,7 @@ impl<'t> Fold<'t> {
             return found.index();
         }
         self.type_parts(found, false)
-            .find_map(|part| self.member_of(part, found.child_sym(C::DefName)?))
-            .filter(|&member| self.tree.cursor(member).is_field())
+            .find_map(|part| self.member_slot(part, found.child_sym(C::DefName)?, true))
             .unwrap_or(found.index())
     }
 
