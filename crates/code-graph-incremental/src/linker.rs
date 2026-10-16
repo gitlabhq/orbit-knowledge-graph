@@ -582,7 +582,9 @@ impl<'t> Fold<'t> {
         let Some(callee) = c.child(C::Callee) else {
             return;
         };
-        let decorator = c.parent().is_some_and(|p| p.is(C::Decorator));
+        let decorator = c
+            .parent()
+            .is_some_and(|p| p.is(C::Decorator) && p.sym_opt().is_none());
         if decorator && callee.is_bare_name() {
             return;
         }
