@@ -161,15 +161,13 @@ impl ArrowClickHouseClient {
             .with_timeouts(self.insert_timeout, self.insert_timeout)
     }
 
-    fn insert_bound_hit(&self, result: Result<(), ClickHouseError>) -> Result<(), ClickHouseError> {
-        match (result, self.insert_timeout) {
-            (Err(ClickHouseError::Insert(clickhouse::error::Error::TimedOut)), Some(after)) => {
-                Err(ClickHouseError::Timeout {
-                    operation: "insert",
-                    after,
-                })
-            }
-            (result, _) => result,
+    fn insert_error(&self, error: clickhouse::error::Error) -> ClickHouseError {
+        match (error, self.insert_timeout) {
+            (clickhouse::error::Error::TimedOut, Some(after)) => ClickHouseError::Timeout {
+                operation: "insert",
+                after,
+            },
+            (error, _) => ClickHouseError::Insert(error),
         }
     }
 
@@ -285,14 +283,11 @@ impl ArrowClickHouseClient {
         self.circuit_breaker
             .call_transient(|| async {
                 let mut insert = self.bounded_insert(&sql);
-                let sent = async {
-                    insert
-                        .send(Bytes::from(buffer))
-                        .await
-                        .map_err(ClickHouseError::Insert)?;
-                    insert.end().await.map_err(ClickHouseError::Insert)
-                };
-                self.insert_bound_hit(sent.await)
+                insert
+                    .send(Bytes::from(buffer))
+                    .await
+                    .map_err(|error| self.insert_error(error))?;
+                insert.end().await.map_err(|error| self.insert_error(error))
             })
             .await
     }
@@ -319,12 +314,10 @@ impl ArrowClickHouseClient {
         self.circuit_breaker
             .call_transient(|| async move {
                 if !self.quorum_writes {
-                    return self.insert_bound_hit(self.stream_insert(table, sql, batches).await);
+                    return self.stream_insert(table, sql, batches).await;
                 }
-                retry_quorum_conflicts(true, || async {
-                    self.insert_bound_hit(self.stream_insert(table, sql, batches.clone()).await)
-                })
-                .await
+                retry_quorum_conflicts(true, || self.stream_insert(table, sql, batches.clone()))
+                    .await
             })
             .await
     }
@@ -348,7 +341,9 @@ impl ArrowClickHouseClient {
 
         let mut insert = self.bounded_insert(sql);
 
-        flush_drain(&mut insert, &drain).await?;
+        flush_drain(&mut insert, &drain)
+            .await
+            .map_err(|error| self.insert_error(error))?;
 
         for (batch_index, batch) in batches.into_iter().enumerate() {
             if batch.schema() != schema {
@@ -356,14 +351,17 @@ impl ArrowClickHouseClient {
             }
             writer.write(&batch).map_err(ClickHouseError::ArrowEncode)?;
             drop(batch);
-            flush_drain(&mut insert, &drain).await?;
+            flush_drain(&mut insert, &drain)
+                .await
+                .map_err(|error| self.insert_error(error))?;
         }
 
         writer.finish().map_err(ClickHouseError::ArrowEncode)?;
-        flush_drain(&mut insert, &drain).await?;
+        flush_drain(&mut insert, &drain)
+            .await
+            .map_err(|error| self.insert_error(error))?;
 
-        insert.end().await.map_err(ClickHouseError::Insert)?;
-        Ok(())
+        insert.end().await.map_err(|error| self.insert_error(error))
     }
 
     pub async fn execute(&self, sql: &str) -> Result<(), ClickHouseError> {
@@ -705,15 +703,12 @@ fn has_quorum_insert_setting(
 }
 
 async fn flush_drain(
-    insert: &mut clickhouse::insert_formatted::InsertFormatted,
+    insert: &mut InsertFormatted,
     drain: &DrainableWriter,
-) -> Result<(), ClickHouseError> {
+) -> Result<(), clickhouse::error::Error> {
     let bytes = drain.take();
     if !bytes.is_empty() {
-        insert
-            .send(Bytes::from(bytes))
-            .await
-            .map_err(ClickHouseError::Insert)?;
+        insert.send(Bytes::from(bytes)).await?;
     }
     Ok(())
 }
