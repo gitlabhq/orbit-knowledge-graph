@@ -294,7 +294,7 @@ pub struct CodeIndexingPipelineConfig {
     pub archive_lease_max_wait_secs: u64,
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending.
     pub write_slice_rows: usize,
-    /// Inserts one code job keeps in flight at ClickHouse.
+    /// Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory.
     pub write_max_concurrent: usize,
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane.
     pub small_repo_max_files: usize,

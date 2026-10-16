@@ -2,6 +2,7 @@
 
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -40,6 +41,7 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
+    pipeline_config: CodeIndexingPipelineConfig,
     cache_dir: tempfile::TempDir,
 }
 
@@ -105,7 +107,7 @@ impl CodeIndexingDeps {
             metrics.clone(),
             table_names,
             Arc::new(ontology),
-            pipeline_config,
+            pipeline_config.clone(),
         ));
 
         Self {
@@ -114,6 +116,7 @@ impl CodeIndexingDeps {
             checkpoint_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
+            pipeline_config,
             cache_dir,
         }
     }
@@ -156,7 +159,6 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
-        let config = indexer::testkit::test_pipeline_configuration();
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,
@@ -165,7 +167,7 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
             table_names,
             Arc::new(ontology),
-            config,
+            self.pipeline_config.clone(),
         ));
         CodeIndexingTaskHandler::new(
             pipeline,
@@ -212,6 +214,7 @@ pub struct GatedClickHouse {
     url: String,
     open: tokio::sync::watch::Sender<bool>,
     arrivals: Arc<tokio::sync::Semaphore>,
+    arrived: Arc<AtomicUsize>,
 }
 
 struct GateState {
@@ -219,22 +222,26 @@ struct GateState {
     client: reqwest::Client,
     open: tokio::sync::watch::Receiver<bool>,
     arrivals: Arc<tokio::sync::Semaphore>,
+    arrived: Arc<AtomicUsize>,
 }
 
 impl GatedClickHouse {
     pub async fn start(upstream: &str) -> Self {
         let (open, opened) = tokio::sync::watch::channel(false);
         let arrivals = Arc::new(tokio::sync::Semaphore::new(0));
+        let arrived = Arc::new(AtomicUsize::new(0));
         let state = Arc::new(GateState {
             upstream: upstream.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
             open: opened,
             arrivals: Arc::clone(&arrivals),
+            arrived: Arc::clone(&arrived),
         });
         Self {
             url: serve(Router::new().fallback(hold_then_forward).with_state(state)).await,
             open,
             arrivals,
+            arrived,
         }
     }
 
@@ -256,6 +263,10 @@ impl GatedClickHouse {
             .forget();
     }
 
+    pub fn arrived(&self) -> usize {
+        self.arrived.load(Ordering::SeqCst)
+    }
+
     pub fn open(&self) {
         self.open.send_replace(true);
     }
@@ -269,6 +280,7 @@ async fn hold_then_forward(
     let body = axum::body::to_bytes(body, usize::MAX)
         .await
         .expect("request body");
+    state.arrived.fetch_add(1, Ordering::SeqCst);
     state.arrivals.add_permits(1);
     let mut open = state.open.clone();
     while !*open.borrow_and_update() {

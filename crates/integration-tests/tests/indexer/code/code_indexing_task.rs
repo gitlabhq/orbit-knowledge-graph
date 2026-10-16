@@ -1146,6 +1146,14 @@ async fn released(slot: &tokio::sync::Semaphore) {
     slot.acquire().await.expect("slot stays open").forget();
 }
 
+/// Lets a whole small job's inserts wait at the gate, so the parse never blocks on a write slot.
+fn wide_write_bound() -> orbit_server_config::CodeIndexingPipelineConfig {
+    orbit_server_config::CodeIndexingPipelineConfig {
+        write_max_concurrent: 64,
+        ..indexer::testkit::test_pipeline_configuration()
+    }
+}
+
 #[tokio::test]
 async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
     let project_id: i64 = 63;
@@ -1168,23 +1176,20 @@ async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
     );
 
     let gate = GatedClickHouse::start(&clickhouse.config.url).await;
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, wide_write_bound());
     let handler = Arc::new(deps.gated_handler(&gate));
     let cache_dir = deps.cache_dir_path().to_path_buf();
 
     let (mut job, slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
     gate.insert_arrived().await;
     released(&slot).await;
-
-    let left: Vec<_> = std::fs::read_dir(&cache_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .collect();
-    assert!(
-        left.is_empty(),
-        "the extraction tree must be gone while the job waits for its rows to land, found: {left:?}"
-    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while std::fs::read_dir(&cache_dir).is_ok_and(|mut d| d.next().is_some()) {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the extraction tree must be gone while the job waits for its rows to land");
     assert!(
         tokio::time::timeout(std::time::Duration::from_secs(1), &mut job)
             .await
@@ -1203,6 +1208,65 @@ async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1)
     );
+}
+
+#[tokio::test]
+async fn a_job_keeps_at_most_write_max_concurrent_inserts_in_flight() {
+    let project_id: i64 = 65;
+    let traversal_path = "1/65/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void a() {} public void b() {} public void c() {} }",
+        )],
+    );
+
+    let gate = GatedClickHouse::start(&clickhouse.config.url).await;
+    let deps = CodeIndexingDeps::new_with_pipeline_config(
+        &mock,
+        &clickhouse,
+        orbit_server_config::CodeIndexingPipelineConfig {
+            write_slice_rows: 1,
+            write_max_concurrent: 2,
+            ..indexer::testkit::test_pipeline_configuration()
+        },
+    );
+    let handler = deps.gated_handler(&gate);
+    let job = tokio::spawn(async move {
+        handler
+            .handle(
+                handler_context(),
+                code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+            )
+            .await
+    });
+
+    gate.insert_arrived().await;
+    gate.insert_arrived().await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    assert_eq!(
+        gate.arrived(),
+        2,
+        "the parse must pause until one of the two in-flight inserts lands"
+    );
+
+    gate.open();
+    job.await.expect("join").expect("indexing succeeds");
+    assert!(
+        gate.arrived() > 2,
+        "one-row slices must have produced more inserts than the bound"
+    );
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
 }
 
 #[tokio::test]
@@ -1243,7 +1307,7 @@ async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
     );
 
     let gate = GatedClickHouse::start(&clickhouse.config.url).await;
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, wide_write_bound());
     let handler = deps.gated_handler(&gate);
     let (engine, configuration) = indexer::testkit::TestEngineBuilder::new(Arc::clone(&broker))
         .with_handler(Box::new(handler))

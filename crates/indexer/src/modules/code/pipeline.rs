@@ -610,8 +610,7 @@ impl CodeIndexer {
                     }
                 };
                 metered_bytes.fetch_add(batch_bytes, Ordering::Relaxed);
-                inserter.spawn_slices(&mut inserts.lock(), table, batch);
-                Ok(())
+                inserter.spawn_slices(&inserts, table, batch)
             }
         });
 
@@ -836,30 +835,32 @@ struct SliceInserter {
 }
 
 impl SliceInserter {
+    /// Blocks the parse thread for a slot, so a job never holds more than `write_max_concurrent` slices.
     fn spawn_slices(
         &self,
-        inserts: &mut InFlightInserts,
+        inserts: &Mutex<InFlightInserts>,
         table: &str,
         batch: arrow::record_batch::RecordBatch,
-    ) {
+    ) -> Result<(), code_graph::v2::SinkError> {
         let mut offset = 0;
         while offset < batch.num_rows() {
             let len = (batch.num_rows() - offset).min(self.max_rows);
             let slice = batch.slice(offset, len);
-            let (writer, slots, table) =
-                (self.writer.clone(), self.slots.clone(), table.to_string());
-            inserts.spawn_on(
+            let slot = self
+                .runtime
+                .block_on(self.slots.clone().acquire_owned())
+                .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
+            let (writer, table) = (self.writer.clone(), table.to_string());
+            inserts.lock().spawn_on(
                 async move {
-                    let _slot = slots
-                        .acquire_owned()
-                        .await
-                        .map_err(|e| WriteError::Write(e.to_string(), None))?;
+                    let _slot = slot;
                     writer.write_durable(&table, slice).await
                 },
                 &self.runtime,
             );
             offset += len;
         }
+        Ok(())
     }
 }
 
