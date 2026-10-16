@@ -1,0 +1,51 @@
+cases:
+  - name: min_file_path_rejected
+    description: MIN rejects a file path
+    query:
+      gql: |
+        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN min(f.path) AS v
+    expect:
+      compile_error: aggregates are restricted to scalars
+
+  - name: max_definition_name_rejected
+    description: MAX rejects a definition name
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.project_id = 1000 RETURN max(d.name) AS v
+    expect:
+      compile_error: aggregates are restricted to scalars
+
+  - name: group_by_file_path_counts
+    description: A free-text group key buckets each file
+    query:
+      gql: |
+        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.path AS path, count(f) AS n ORDER BY path
+    expect:
+      skip_requirements: [node_ids, aggregation_sort]
+      row_values:
+        - { path: README.md, n: 1 }
+        - { path: src/clickhouse.rs, n: 1 }
+        - { path: src/parser.rs, n: 1 }
+
+  - name: group_by_file_language_counts
+    description: A categorical text group key still buckets files
+    query:
+      gql: |
+        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.language AS language, count(f) AS n ORDER BY n DESC
+    expect:
+      skip_requirements: [node_ids, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { language: Rust, n: 2 }
+        - { language: Markdown, n: 1 }
+
+  - name: max_file_id_counts
+    description: MAX still reads an integer property
+    query:
+      gql: |
+        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN max(f.id) AS top
+    expect:
+      skip_requirements: [node_ids]
+      row_count: 1
+      row_values:
+        - { top: 13002 }

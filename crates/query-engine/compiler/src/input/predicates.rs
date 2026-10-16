@@ -121,6 +121,18 @@ impl BooleanExpression<Condition> {
 }
 
 impl FilterOp {
+    pub fn is_like(self) -> bool {
+        matches!(self, Self::Contains | Self::StartsWith | Self::EndsWith)
+    }
+
+    pub fn is_token(self) -> bool {
+        matches!(self, Self::TokenMatch | Self::AllTokens | Self::AnyTokens)
+    }
+
+    pub fn is_ordering(self) -> bool {
+        matches!(self, Self::Gt | Self::Gte | Self::Lt | Self::Lte)
+    }
+
     pub fn complement(self) -> Option<Self> {
         match self {
             Self::Eq => Some(Self::Ne),

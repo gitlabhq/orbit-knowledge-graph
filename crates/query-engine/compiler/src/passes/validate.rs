@@ -215,6 +215,18 @@ fn wide_id_range_hint(wide: bool) -> String {
     }
 }
 
+fn is_aggregate_scalar(data_type: DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Int
+            | DataType::Float
+            | DataType::Bool
+            | DataType::Date
+            | DataType::DateTime
+            | DataType::Enum
+    )
+}
+
 #[derive(Default)]
 pub struct Skip {
     pub selectivity: bool,
@@ -273,6 +285,42 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     fn field_type(&self, entity: &str, property: &str) -> Option<DataType> {
         self.property(entity, property)
             .map(|property| property.data_type)
+    }
+
+    fn check_aggregation_text_filters(&self, input: &Input) -> Result<()> {
+        let model = self.model.get();
+        let row_nodes = input.aggregation_row_nodes(model);
+        let node_filters = input.nodes.iter().flat_map(|node| {
+            node.filters.iter().flat_map(move |(property, filters)| {
+                filters
+                    .iter()
+                    .map(move |filter| (node.id.as_str(), property.as_str(), filter.op))
+            })
+        });
+        let conditions = input.conditions().flat_map(|condition| {
+            condition
+                .node_properties()
+                .map(move |(alias, property)| (alias, property, condition.filter.op))
+        });
+        for (alias, property, op) in node_filters.chain(conditions) {
+            if !op.is_some_and(|op| op.is_like() || op.is_token() || op.is_ordering()) {
+                continue;
+            }
+            let Some(entity) = input.entity_of(alias) else {
+                continue;
+            };
+            if row_nodes.contains(alias)
+                || property == TRAVERSAL_PATH_COLUMN
+                || model.entity_authorized_by_namespace(entity)
+                || !model.property_is_free_text(entity, property)
+            {
+                continue;
+            }
+            return Err(QueryError::Validation(format!(
+                "aggregation filter on {entity}.{property}: text matching and ordering require grouping by \"{alias}\""
+            )));
+        }
+        Ok(())
     }
 
     /// Validate what the JSON schema used to enforce, natively on `Input`, so
@@ -850,15 +898,8 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         }
 
-        let is_like_op = matches!(
-            op,
-            FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith
-        );
-
-        let is_token_op = matches!(
-            op,
-            FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
-        );
+        let is_like_op = op.is_like();
+        let is_token_op = op.is_token();
 
         if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
@@ -1109,19 +1150,30 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     )));
                 }
 
-                if matches!(function, AggFunction::Sum | AggFunction::Avg) {
+                if matches!(
+                    function,
+                    AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max
+                ) {
                     let data_type = self.field_type(entity, prop).ok_or_else(|| {
                         QueryError::AllowlistRejected(format!(
                             "invalid property in aggregation \"{alias}\": {entity}.{prop}"
                         ))
                     })?;
 
-                    if !matches!(data_type, DataType::Int | DataType::Float) {
+                    if matches!(function, AggFunction::Sum | AggFunction::Avg)
+                        && !matches!(data_type, DataType::Int | DataType::Float)
+                    {
                         return Err(QueryError::Validation(format!(
                             "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
                             function.to_string().to_uppercase(),
                             entity,
                             prop
+                        )));
+                    }
+
+                    if !is_aggregate_scalar(data_type) {
+                        return Err(QueryError::Validation(format!(
+                            "aggregation \"{alias}\": aggregates are restricted to scalars, got {entity}.{prop} ({data_type})"
                         )));
                     }
                 }
@@ -1198,6 +1250,8 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 }
             }
         }
+
+        self.check_aggregation_text_filters(input)?;
 
         if let Some(sort) = &input.aggregation.sort {
             let mut output_names: HashSet<String> = group_output_names.into_iter().collect();
@@ -1503,7 +1557,7 @@ mod tests {
                 "Project",
                 [
                     ("name", DataType::String),
-                    ("visibility_level", DataType::String),
+                    ("visibility_level", DataType::Enum),
                 ],
             )
             .with_edge_columns([
@@ -2017,20 +2071,6 @@ mod tests {
                 }]
             }"#,
             "requires a numeric property",
-        );
-    }
-
-    #[test]
-    fn accepts_min_on_string_property() {
-        assert_ok(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "aggregations": [{
-                    "min": "u.username",
-                    "as": "first_username"
-                }]
-            }"#,
         );
     }
 
