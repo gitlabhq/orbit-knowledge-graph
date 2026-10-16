@@ -133,6 +133,8 @@ pub struct SnapshotNode {
     pub end_col: u32,
     pub synth: bool,
     pub named: bool,
+    pub lifted: bool,
+    pub labelled: bool,
     pub parent: u32,
 }
 
@@ -162,6 +164,8 @@ impl From<&Tree<Compact>> for TreeSnapshot {
                 end_col: n.end_col,
                 synth: n.synth,
                 named: n.named,
+                lifted: n.lifted,
+                labelled: n.labelled,
                 parent,
             });
         }
@@ -208,6 +212,8 @@ impl From<TreeSnapshot> for Tree<Compact> {
                     end_col: sn.end_col,
                     synth: sn.synth,
                     named: sn.named,
+                    lifted: sn.lifted,
+                    labelled: sn.labelled,
                 },
                 sn.parent,
             );
@@ -273,7 +279,7 @@ struct Header {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 15;
+pub const SNAPSHOT_VERSION: u32 = 16;
 
 type Error = rkyv::rancor::BoxedError;
 

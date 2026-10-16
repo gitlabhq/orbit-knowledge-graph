@@ -1,0 +1,139 @@
+name: "Rust: a for loop keeps its iterable and binds its pattern"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "for_iterable"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub struct Item;
+
+      impl Item {
+          pub fn touch(&self) {}
+      }
+
+      pub struct Other;
+
+      impl Other {
+          pub fn touch(&self) {}
+      }
+
+      pub fn make_items() -> Vec<Item> {
+          Vec::new()
+      }
+
+      pub fn pick() -> Item {
+          Item
+      }
+
+      pub fn pick_other() -> Other {
+          Other
+      }
+
+      pub fn make_pairs() -> Vec<(usize, Item)> {
+          Vec::new()
+      }
+
+      pub fn keep(item: &Item) -> bool {
+          true
+      }
+
+      pub fn loop_over_call() {
+          for item in make_items() {
+              item.touch();
+          }
+      }
+
+      pub fn loop_over_reference() {
+          for item in &make_items() {
+              item.touch();
+          }
+      }
+
+      pub fn loop_over_pair() {
+          for (index, item) in make_pairs() {
+              item.touch();
+          }
+      }
+
+      pub fn loop_over_closure(items: &[Item]) {
+          for item in items.iter().filter(|item| keep(item)) {
+              item.touch();
+          }
+      }
+
+      pub fn loop_shadows_outer(item: &Other, items: Vec<Item>) {
+          for item in items {
+              item.touch();
+          }
+          item.touch();
+      }
+
+      pub fn loop_mut_shadows_outer(item: &Other, items: Vec<Item>) {
+          for mut item in items {
+              item.touch();
+          }
+      }
+
+      pub fn loop_over_constructors() {
+          for item in [pick(), pick_other()] {
+              item.touch();
+          }
+      }
+
+tests:
+  - name: "a call in the iterable links from the function that loops"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["loop_over_call", "loop_over_reference", "loop_over_pair", "loop_over_closure"]
+        AND callee.name IN ["make_items", "make_pairs", "keep"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: loop_over_call, callee: make_items } }
+      - { row: { caller: loop_over_closure, callee: keep } }
+      - { row: { caller: loop_over_pair, callee: make_pairs } }
+      - { row: { caller: loop_over_reference, callee: make_items } }
+
+  - name: "calls in an array iterable link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "loop_over_constructors" AND callee.name <> "touch"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["pick", "pick_other"] } }
+
+  - name: "the loop variable does not leak past the loop"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "loop_shadows_outer" AND callee.name = "touch"
+      RETURN owner.name AS owner
+    assert:
+      - { row_count: 1 }
+      - { row: { owner: Other } }
+
+  - name: "a mutable loop variable shadows the outer binding"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "loop_mut_shadows_outer" AND callee.name = "touch"
+      RETURN owner.name AS owner
+    assert:
+      - { empty: true }
+      - { not: true, row: { owner: Other } }
+
+  - name: "array elements type the loop variable"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "loop_over_constructors" AND callee.name = "touch"
+      RETURN owner.name AS owner
+      ORDER BY owner
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: owner, values: ["Item", "Other"] } }
