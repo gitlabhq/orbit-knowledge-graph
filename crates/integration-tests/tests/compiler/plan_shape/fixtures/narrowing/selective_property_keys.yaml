@@ -18,4 +18,4 @@ physical:
     emitted:
       ctes:
         exact_order: [_filter_a]
-      expect: ["(Filter _orbit_edge_0.source_id IN _filter_a.id, ... (_))", "(Bind a (Project * (Filter a.name = 'compile', a._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS a)))))"]
+      expect: ["(Filter _orbit_edge_0.source_id IN _filter_a.id, ... (_))", "(Bind a (Project * (Filter a.name = 'compile', Lower(a.name) = Lower('compile'), a._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS a)))))"]
