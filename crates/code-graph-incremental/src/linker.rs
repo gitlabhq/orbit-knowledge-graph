@@ -82,10 +82,9 @@ struct Fold<'t> {
     ssa: SsaEngine,
     cur: BlockId,
     registered: FxHashSet<u32>,
-    defs: Vec<u32>,
     defs_by_name: FxHashMap<u32, Vec<u32>>,
-    /// Per class: member name to first def, and ivar name to its typed binding.
-    members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
+    /// Per class: member name to its defs, and ivar name to its typed binding.
+    members: RefCell<FxHashMap<u32, FxHashMap<u32, Vec<u32>>>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
     wildcards: WildcardImports,
@@ -112,7 +111,6 @@ struct Fold<'t> {
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
     loop_receivers: Vec<LoopReceiver>,
-    header_values: FxHashMap<u32, Vec<Value>>,
     shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
@@ -587,57 +585,38 @@ impl<'t> Fold<'t> {
         let first = self.edges.len();
         self.def_stack.push(c.index());
         for decorator in c.children().filter(|node| node.is(C::Decorator)) {
-            self.handle_inline_imports(decorator);
             let head = decorator.chain_member();
             if decorator.sym_opt().is_some() || head.is_some() {
-                let before = self.edges.len();
                 for target in self.lookup_chain(decorator) {
+                    let before = self.edges.len();
                     match target {
-                        Value::LocalDef(node) => {
-                            self.edges
-                                .push(Edge::local(c.index(), node, EdgeKind::Calls))
-                        }
-                        other => self.emit(&other, c.index()),
+                        Value::LocalDef(node) => self.push_calls(c.index(), vec![node]),
+                        Value::ImportRef(_) => self.emit(&target, c.index()),
+                        _ => {}
                     }
-                }
-                for edge in &mut self.edges[before..] {
-                    if edge.kind == EdgeKind::Imports && edge.site.is_none() {
-                        edge.site = Some(decorator.index());
+                    for edge in &mut self.edges[before..] {
+                        edge.site.get_or_insert(decorator.index());
                     }
                 }
             }
-            let mut stack = Vec::new();
-            stack.extend(
+            let head = head.map(|h| h.index());
+            self.run(
                 decorator
                     .children_rev()
-                    .filter(|node| Some(node.index()) != head.map(|h| h.index()))
-                    .map(|node| WorkItem::Visit(node.index())),
+                    .filter(|node| Some(node.index()) != head)
+                    .map(|node| WorkItem::Visit(node.index()))
+                    .collect(),
             );
-            self.run(stack);
         }
-        for binding in c.children().filter(|node| Self::is_header_binding(*node)) {
-            if let Some(rhs) = binding.bare_rhs() {
-                let values = self.lookup(rhs.sym());
-                self.header_values.insert(binding.index(), values);
-            } else if let Some(rhs) = binding.child(C::Rhs) {
+        for binding in c.children().filter(|node| node.is_header_binding()) {
+            if let Some(rhs) = binding.child(C::Rhs).filter(|rhs| !rhs.has(C::SsaBranch)) {
                 self.walk_children(rhs);
             }
         }
         self.def_stack.pop();
-        self.drop_own_edges(c.index(), first);
-    }
-
-    fn is_header_binding(node: Cursor<'_>) -> bool {
-        node.is(C::Binding)
-            && node.sym_opt().is_some()
-            && !node.lifted()
-            && node.parent().is_some_and(|parent| parent.is(C::Def))
-    }
-
-    fn drop_own_edges(&mut self, owner: u32, first: usize) {
         let tail = self.edges.split_off(first);
         self.edges
-            .extend(tail.into_iter().filter(|edge| edge.to_node != owner));
+            .extend(tail.into_iter().filter(|edge| edge.to_node != c.index()));
     }
 
     fn predeclare(&mut self, scope: Cursor<'t>) {
@@ -666,7 +645,6 @@ impl<'t> Fold<'t> {
         if self.registered.insert(node.index())
             && let Some(name) = node.child_sym(C::DefName)
         {
-            self.defs.push(node.index());
             self.defs_by_name
                 .entry(name)
                 .or_default()
@@ -857,7 +835,7 @@ impl<'t> Fold<'t> {
         if let Some(branch) = branch {
             Self::handle_branch(branch, Some(lhs), stack);
         } else if let Some(rhs) = rhs
-            && !Self::is_header_binding(c)
+            && !c.is_header_binding()
         {
             Self::push_children(rhs, stack);
         }
@@ -913,22 +891,15 @@ impl<'t> Fold<'t> {
                 }
             }
             let tail = rhs.map(Cursor::tail_expr);
-            let header = self.header_values.remove(&c.index());
             let mut val = if c.has(C::SsaTyped)
                 || tail.is_some_and(|tail| tail.is(C::Member) && self.field_slot(tail).is_none())
             {
                 Value::Call(c.index())
-            } else if let Some([value]) = header.as_deref() {
-                match *value {
-                    Value::LocalDef(node) if self.tree.cursor(node).is_class() => Value::Type(node),
-                    ref value => value.clone(),
-                }
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
             if let Some(rhs) = c.bare_rhs() {
-                let values = header.unwrap_or_else(|| self.lookup(rhs.sym()));
-                for value in values {
+                for value in self.lookup(rhs.sym()) {
                     match value {
                         Value::ImportRef(node) => {
                             val = Value::Call(c.index());
@@ -1434,13 +1405,8 @@ impl<'t> Fold<'t> {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
                 bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
-                let member = !bound.is_empty()
-                    && class.is_some_and(|cls| {
-                        bound.iter().all(|r| {
-                            matches!(r, Value::LocalDef(d) if self.tree.cursor(*d).parent().is_some_and(|p| p.index() == cls))
-                        })
-                    });
-                if !member {
+                let own = |r: &Value| matches!(r, Value::LocalDef(d) if class.is_some_and(|cls| self.tree.cursor(*d).parent().is_some_and(|p| p.index() == cls)));
+                if bound.is_empty() || !bound.iter().all(own) {
                     for r in &bound {
                         self.emit(r, from);
                     }
@@ -1552,20 +1518,20 @@ impl<'t> Fold<'t> {
     }
 
     /// `find_method_in` for one container, indexed on first use.
-    fn member_of(&self, container: u32, name: u32) -> Option<u32> {
+    fn member_of(&self, container: u32, name: u32) -> Vec<u32> {
         let mut members = self.members.borrow_mut();
         let index = members.entry(container).or_insert_with(|| {
             let class = self.tree.cursor(container);
-            let mut m = FxHashMap::default();
+            let mut m: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
             let nested = |n: Cursor| n.index() != container && n.is_class() && !n.has(C::ImplBlock);
             for n in class.descendants_pruned(nested).filter(|n| n.is(C::Def)) {
                 if let Some(dn) = n.child_sym(C::DefName) {
-                    m.entry(dn).or_insert(n.index());
+                    m.entry(dn).or_default().push(n.index());
                 }
             }
             m
         });
-        index.get(&name).copied()
+        index.get(&name).cloned().unwrap_or_default()
     }
 
     fn chain_is_class(&mut self, c: Cursor) -> bool {
@@ -1683,28 +1649,12 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn owner_type(&self, def: u32) -> u32 {
-        let c = self.tree.cursor(def);
-        if c.is_class() {
-            return def;
-        }
-        c.enclosing(|node| node.is(C::Def))
-            .filter(|owner| owner.child_sym(C::DefName) == c.child_sym(C::DefName))
-            .map_or(def, |owner| owner.index())
-    }
-
-    fn another_member(&self, container: u32, name: u32, except: u32) -> Option<u32> {
-        let class = self.tree.cursor(container);
-        let nested = |n: Cursor| n.index() != container && n.is_class() && !n.has(C::ImplBlock);
-        class
-            .descendants_pruned(nested)
-            .filter(|n| n.is(C::Def) && n.index() != except)
-            .find(|n| n.child_sym(C::DefName) == Some(name))
-            .map(|n| n.index())
-    }
-
     fn find_method_in(&self, container: u32, name: u32) -> Vec<u32> {
-        let container = self.owner_type(container);
+        let c = self.tree.cursor(container);
+        let owner = c.enclosing(|node| node.is(C::Def)).filter(|owner| {
+            !c.is_class() && owner.child_sym(C::DefName) == c.child_sym(C::DefName)
+        });
+        let container = owner.map_or(container, |owner| owner.index());
         let caller = self.enclosing();
         let wrappers = |dn: u32| {
             let c = self.tree.cursor(dn);
@@ -1722,11 +1672,12 @@ impl<'t> Fold<'t> {
             supers.flat_map(wrappers).collect::<Vec<_>>()
         };
         let found = |dn| {
-            let member = self.member_of(dn, name)?;
-            Some(match member == caller {
-                true => self.another_member(dn, name, caller).unwrap_or(member),
-                false => member,
-            })
+            let members = self.member_of(dn, name);
+            members
+                .iter()
+                .find(|&&m| m != caller)
+                .or(members.first())
+                .copied()
         };
         members_by_level(wrappers(container), supers, found)
     }
@@ -1748,7 +1699,6 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         ssa,
         cur: entry,
         registered: FxHashSet::default(),
-        defs: Vec::new(),
         defs_by_name: FxHashMap::default(),
         members: RefCell::default(),
         ivars: RefCell::default(),
@@ -1777,7 +1727,6 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
         loop_receivers: Vec::new(),
-        header_values: FxHashMap::default(),
         shadowed_calls: FxHashSet::default(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, Vec::new())],

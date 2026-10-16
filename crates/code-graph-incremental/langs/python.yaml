@@ -161,10 +161,6 @@ stages:
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(typed_default_parameter name: $N type: (type $T) value: $V)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
-      - match: '(typed_default_parameter name: $N type: (type $T))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
-      - match: '(typed_default_parameter name: $N)'
-        replace: '(__binding @$N)'
       - match: '(typed_parameter $C:identifier type: (type $T))'
         replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(typed_parameter $C:identifier)'
@@ -173,8 +169,6 @@ stages:
         replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(default_parameter name: $N:identifier value: $V)'
         replace: '(__binding @$N (__rhs @$V))'
-      - match: '(default_parameter name: $N:identifier)'
-        replace: '(__binding @$N)'
       - match: '(list_splat_pattern $C:identifier)'
         replace: '(__binding @$C)'
       - match: '(dictionary_splat_pattern $C:identifier)'
@@ -250,9 +244,9 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
 
       # Classes — supertypes come before the body, decorators after it
-      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")) $$$DECOS:__decorator)'
+      - match: '(class_definition name: $N $$$ANN:__supertype body: $B **/(__def (__defname "__call__")) $$$DECOS:__decorator)'
         replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $$$DECOS $B)'
-      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B $$$DECOS:__decorator)'
+      - match: '(class_definition name: $N $$$ANN:__supertype body: $B $$$DECOS:__decorator)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $$$DECOS $B)'
 
   - name: ssa-cleanup
