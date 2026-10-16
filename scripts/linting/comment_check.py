@@ -153,6 +153,22 @@ def added_lines(base: str | None, head: str | None, old: str | None, new: str) -
     return lines
 
 
+def inline_metadata_lines(source: bytes) -> set[int]:
+    """Lines of PEP 723 blocks, from `# /// <type>` through the closing `# ///`."""
+    lines: set[int] = set()
+    start = None
+    for number, line in enumerate(source.decode("utf8", "replace").splitlines(), 1):
+        if start is None:
+            if re.fullmatch(r"# /// [A-Za-z0-9-]+", line):
+                start = number
+        elif line == "# ///":
+            lines.update(range(start, number + 1))
+            start = None
+        elif not re.fullmatch(r"#( .*)?", line):
+            start = None
+    return lines
+
+
 def is_ignored_comment(text: str) -> bool:
     text = text.strip()
     return bool(DIRECTIVE.match(text) or RUSTDOC.match(text))
@@ -183,7 +199,7 @@ def scan_file(base, head, old_path, new_path) -> list[tuple[str, int, str]]:
         return []
     old_source = git_show(base if head else "HEAD", old_path) if old_path else None
     old_texts = Counter(normalize(text) for _, _, text in comments(ext, old_source)) if old_source else Counter()
-    touched = added_lines(base, head, old_path, new_path)
+    touched = added_lines(base, head, old_path, new_path) - inline_metadata_lines(new_source)
     findings = []
     for first, last, text in comments(ext, new_source):
         if not touched.intersection(range(first, last + 1)) or is_ignored_comment(text):

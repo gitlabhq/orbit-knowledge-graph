@@ -109,6 +109,19 @@ class DetectionTest(RepoTestCase):
         self.stage(a_sh="#!/bin/sh\n# shellcheck disable=SC2086\necho $x\n# /// script\n# ///\n", b_rs="// clippy::all\nfn a() {}\n")
         self.assertEqual(self.flagged(), [])
 
+    def test_pep_723_metadata_block_is_not_flagged(self):
+        header = "#!/usr/bin/env -S uv run\n# /// script\n# requires-python = \">=3.10\"\n# dependencies = [\n#   \"x\",\n# ]\n# ///\nimport x\n"
+        self.stage(a_py=header)
+        self.assertEqual(self.flagged(), [])
+
+    def test_comment_right_after_a_pep_723_block_is_flagged(self):
+        self.stage(a_py="# /// script\n# dependencies = []\n# ///\n# why\nimport x\n")
+        self.assertEqual(self.flagged(), [("a.py", "# why")])
+
+    def test_unclosed_pep_723_block_is_flagged(self):
+        self.stage(a_py="# /// script\n# dependencies = []\nimport x\n")
+        self.assertEqual(len(self.flagged()), 1)
+
     def test_a_schema_prose_comment_is_flagged(self):
         self.stage(a_yml="# Schema changes need a migration\nk: 1\n")
         self.assertEqual(len(self.flagged()), 1)
