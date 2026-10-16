@@ -42,8 +42,6 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.children()
             .find(|node| node.is_value() && self.stands_for(*node))
     }
-    /// A named node is its own chain root, so a member lifted into it is an
-    /// argument, not its member.
     pub fn chain_member(self) -> Option<Self> {
         match self.sym_opt() {
             Some(_) => self

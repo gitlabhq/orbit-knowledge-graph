@@ -256,8 +256,6 @@ stages:
         tag: { scoped: "true", hoisted: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
-      - match: '(__def (__trait))'
-        tag: { scoped: "true", hoisted: "true" }
       - match: '(__def (__enum))'
         tag: { scoped: "true", hoisted: "true" }
 

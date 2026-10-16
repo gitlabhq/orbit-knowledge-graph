@@ -1429,18 +1429,26 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
+        let class = self.enclosing_class(from);
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
                 bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
-                for r in &bound {
-                    self.emit(r, from);
+                let member = !bound.is_empty()
+                    && class.is_some_and(|cls| {
+                        bound.iter().all(|r| {
+                            matches!(r, Value::LocalDef(d) if self.tree.cursor(*d).parent().is_some_and(|p| p.index() == cls))
+                        })
+                    });
+                if !member {
+                    for r in &bound {
+                        self.emit(r, from);
+                    }
+                    return;
                 }
-                return;
             }
         }
-        let members = self
-            .enclosing_class(from)
+        let members = class
             .map(|cls| self.find_method_in(cls, sym))
             .unwrap_or_default();
         if !members.is_empty() {
