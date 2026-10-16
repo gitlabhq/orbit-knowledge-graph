@@ -797,7 +797,7 @@ group_fullpath_wi_by_state:
     }
 
 proj_id_mr_orderby_limit_page:
-  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with a first-page keyset cursor. Verifies order_by + tie-breakers produce a stable, deterministic top-N under PK pruning. Pairs with the next case (larger page) for containment checks."
+  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with a 20-row limit. Verifies order_by produces a stable top-N under PK pruning. Pairs with the next case (larger limit) for containment checks."
   category: traversal
   suite: scoping
   query: |
@@ -809,12 +809,12 @@ proj_id_mr_orderby_limit_page:
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "order_by": "-mr.created_at",
-      "cursor": {"page_size": 20},
+      "limit": 20,
       "options": {"include_debug_sql": true}
     }
 
 proj_id_mr_orderby_limit_page2:
-  desc: "Same scoped+ordered query with a larger first page (40). The 20-row page must be a prefix of this 40-row page under the deterministic order."
+  desc: "Same scoped+ordered query with a larger limit (40). The 20-row result must be a prefix of this 40-row result under the same order."
   category: traversal
   suite: scoping
   query: |
@@ -826,7 +826,7 @@ proj_id_mr_orderby_limit_page2:
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "order_by": "-mr.created_at",
-      "cursor": {"page_size": 40},
+      "limit": 40,
       "options": {"include_debug_sql": true}
     }
 

@@ -545,7 +545,10 @@ impl QueryParser {
     fn Skip(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => row_count(&value, span, "SKIP")?,
+            [UnsignedInteger(value)] => value
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| error_at(span, "SKIP must be a non-negative integer"))?,
         ))
     }
 
