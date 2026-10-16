@@ -8,9 +8,7 @@ use crate::indexer::common::{
 
 const PAGE_SIZE: u64 = 2;
 
-// Within `1/100/1000/`, ids 1/2 and 3/4 share a timestamp, 5/6 differ by one microsecond, and
-// id 0 is the latest session. Id order and (started_at, id) order disagree, so a query ordered
-// differently from the cursor's sort key skips id 0.
+// Id order and (started_at, id) order disagree, so a mis-ordered query would skip id 0.
 const SESSIONS: [(i64, &str, &str); 9] = [
     (0, "1/100/1000/", "2024-01-15 10:00:01.000000"),
     (1, "1/100/1000/", "2024-01-15 10:00:00.000000"),

@@ -70,8 +70,6 @@ impl Cursor {
     }
 }
 
-/// Timestamps use the literal form ClickHouse compares against `DateTime`/`DateTime64`, at the
-/// column's own precision; the JSON form `...Z` is rejected with a type mismatch.
 fn cursor_value(column: &dyn Array, row: usize) -> Option<String> {
     let DataType::Timestamp(unit, _) = column.data_type() else {
         return ArrowUtils::array_value_to_string(column, row);
