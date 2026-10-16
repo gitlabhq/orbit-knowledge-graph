@@ -1,0 +1,164 @@
+name: "Rust: a call behind a question mark, an await or parentheses on the right-hand side links"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "wrapped_rhs_calls"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub struct Item;
+
+      impl Item {
+          pub fn touch(&self) {}
+      }
+
+      pub fn pick() -> Item {
+          Item
+      }
+
+      pub fn try_pick() -> Result<Item, ()> {
+          Ok(Item)
+      }
+
+      pub async fn fetch() -> Item {
+          Item
+      }
+
+      pub async fn try_fetch() -> Result<Item, ()> {
+          Ok(Item)
+      }
+
+      pub struct Builder;
+
+      impl Builder {
+          pub fn touch(&self) {}
+      }
+
+      impl std::future::IntoFuture for Builder {
+          type Output = Item;
+          type IntoFuture = std::future::Ready<Item>;
+
+          fn into_future(self) -> Self::IntoFuture {
+              std::future::ready(Item)
+          }
+      }
+
+      pub fn build() -> Builder {
+          Builder
+      }
+
+      pub async fn await_builder() {
+          let item = build().await;
+          item.touch();
+      }
+
+      pub struct Holder {
+          pub item: Item,
+      }
+
+      impl Holder {
+          pub fn reset(&mut self) -> Result<(), ()> {
+              self.item = try_pick()?;
+              Ok(())
+          }
+
+          pub async fn refresh(&mut self) {
+              self.item = fetch().await;
+          }
+      }
+
+      pub fn let_try() -> Result<(), ()> {
+          let item = try_pick()?;
+          item.touch();
+          Ok(())
+      }
+
+      pub async fn let_await() {
+          let item = fetch().await;
+          item.touch();
+      }
+
+      pub fn let_parens() {
+          let item = (pick());
+          item.touch();
+      }
+
+      pub async fn let_await_try() -> Result<(), ()> {
+          let item = try_fetch().await?;
+          item.touch();
+          Ok(())
+      }
+
+      pub fn assign_try(holder: &mut Holder) -> Result<(), ()> {
+          holder.item = try_pick()?;
+          Ok(())
+      }
+
+tests:
+  - name: "a call behind a question mark links from a let, a self field and a field assignment"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["let_try", "reset", "assign_try"] AND callee.name = "try_pick"
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: caller, values: ["assign_try", "let_try", "reset"] } }
+
+  - name: "a call behind a question mark types the local"
+    # Known gap: the local takes the callee's return type Result<Item, ()>, the wrapper, not its argument, so item.touch() has no edge.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "let_try"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["touch", "try_pick"] } }
+
+  - name: "a call behind an await links and types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["let_await", "refresh"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: let_await, callee: fetch } }
+      - { row: { caller: let_await, callee: touch } }
+      - { row: { caller: refresh, callee: fetch } }
+
+  - name: "a call in parentheses links and types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "let_parens"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["pick", "touch"] } }
+
+  - name: "an awaited builder types the local by the IntoFuture output"
+    # Known gap: the awaited value takes the declared return type Builder, not the IntoFuture output Item, so item.touch() links Builder::touch.
+    skip: true
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "await_builder" AND callee.name = "touch"
+      RETURN owner.name AS owner
+    assert:
+      - { row_count: 1 }
+      - { row: { owner: Item } }
+      - { not: true, row: { owner: Builder } }
+
+  - name: "a call behind an await and a question mark links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "let_await_try" AND callee.name = "try_fetch"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }

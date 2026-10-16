@@ -458,6 +458,8 @@ impl Resolver {
             extensions: &extensions,
             declared_members: &declared_members,
             chains: trees.iter().map(|_| Default::default()).collect(),
+            producer_classes: trees.iter().map(|_| Default::default()).collect(),
+            site_classes: trees.iter().map(|_| Default::default()).collect(),
             exporters: &exporters,
             imports: &imports,
         };
@@ -590,9 +592,7 @@ fn expand(
     for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
-    ctx.chains
-        .iter_mut()
-        .for_each(|memo| memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear());
+    ctx.clear_memos();
     cross_edges.extend(&wave1);
     ctx.run.check()?;
 
@@ -686,6 +686,7 @@ fn expand(
                     .or_insert(e.to());
             }
         }
+        ctx.clear_memos();
         wave = wave
             .par_iter()
             .flat_map(|ce| resolve_type_edges(ctx, ce))
@@ -726,6 +727,8 @@ struct ResolveCtx<'a> {
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     declared_members: &'a [MemberCache],
     chains: Vec<ChainMemo>,
+    producer_classes: Vec<ClassMemo>,
+    site_classes: Vec<SiteMemo>,
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -785,6 +788,18 @@ impl ResolveCtx<'_> {
             .flat_map(move |n| self.imports_to.get(&(fi as u32, n.index())))
             .flatten()
             .copied()
+    }
+
+    fn clear_memos(&mut self) {
+        for memo in &mut self.chains {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        for memo in &mut self.producer_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        for memo in &mut self.site_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
     }
 }
 
@@ -1431,16 +1446,9 @@ fn dispatch(
             let call = ctx.corpus.jump(usage.from_tree, usage.site?);
             let reaching = ctx.producers.get(&(usage.from_tree, usage.site?));
             let class = match reaching {
-                Some(reaching) if reaching.len() > 1 => lub(
-                    ctx,
-                    reaching.iter().map(|e| {
-                        let reached = ctx.corpus.follow(e);
-                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
-                            true => class,
-                            false => producer_class(ctx, reached),
-                        }
-                    }),
-                ),
+                Some(reaching) if reaching.len() > 1 => {
+                    site_class(ctx, usage, reaching, producer, class).or(class)
+                }
                 _ => class,
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
@@ -1460,7 +1468,7 @@ fn dispatch(
                 return Some(Either::Right(call_edges(from, targets, usage.site)));
             };
             let class = match call.member().and_then(|m| m.child(C::Object)) {
-                Some(object) if object.child(C::Member).is_some() => {
+                Some(object) if object.value_child(C::Member).is_some() => {
                     chain(ctx, object, &|_| Some(class))?
                 }
                 _ => class,
@@ -1503,7 +1511,59 @@ enum Owner<'a> {
     External((u32, u32)),
 }
 
+/// The join class at one usage site: the same producer set with the same
+/// reaching producers gives the same class, so a long chain of joins is
+/// classified once per site instead of once per reaching pair.
+fn site_class<'a>(
+    ctx: &'a ResolveCtx,
+    usage: &Edge,
+    reaching: &[&Edge],
+    producer: Cursor<'a>,
+    class: Option<Cursor<'a>>,
+) -> Option<Cursor<'a>> {
+    let id = |c: Cursor| (c.fi(), c.index());
+    let class_id = class.map(id);
+    let key = match class_id == producer_class(ctx, producer).map(id) {
+        true => (usage.site?, None, None),
+        false => (usage.site?, Some(id(producer)), class_id),
+    };
+    let memo = &ctx.site_classes[usage.from_tree as usize];
+    if let Some(&found) = memo.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return found.map(|(fi, node)| ctx.corpus.jump(fi, node));
+    }
+    let found = lub(
+        ctx,
+        reaching.iter().map(|e| {
+            let reached = ctx.corpus.follow(e);
+            match id(reached) == id(producer) {
+                true => class,
+                false => producer_class(ctx, reached),
+            }
+        }),
+    );
+    memo.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, found.map(id));
+    found
+}
+
 fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
+    let memo = &ctx.producer_classes[producer.fi() as usize];
+    if let Some(&(fi, node)) = memo
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&producer.index())
+    {
+        return Some(ctx.corpus.jump(fi, node));
+    }
+    let class = producer_class_uncached(ctx, producer)?;
+    memo.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(producer.index(), (class.fi(), class.index()));
+    Some(class)
+}
+
+fn producer_class_uncached<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
     if producer.typed().is_none()
         && let Some(rhs) = producer.bare_rhs()
     {
@@ -1536,7 +1596,7 @@ fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
     } else if let Some(ty) = target.child(C::SsaReturnType) {
         resolve_chain(ctx, ty)
     } else if let Some(branch) = target
-        .descendants_pruned(|n| n.is(C::Def))
+        .descendants_pruned(|n| n.is(C::Def) || n.is(C::Lambda))
         .find(|n| n.is(C::SsaReturn))
         .and_then(|r| r.child(C::SsaBranch))
     {
@@ -1559,6 +1619,9 @@ thread_local! {
 }
 
 type ChainMemo = std::sync::Mutex<FxHashMap<u32, Option<(u32, u32)>>>;
+type ClassMemo = std::sync::Mutex<FxHashMap<u32, (u32, u32)>>;
+type SiteKey = (u32, Option<(u32, u32)>, Option<(u32, u32)>);
+type SiteMemo = std::sync::Mutex<FxHashMap<SiteKey, Option<(u32, u32)>>>;
 
 struct Resolving((u32, u32));
 
@@ -1624,7 +1687,8 @@ fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>>
         }
         let bound = d
             .children()
-            .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
+            .filter(|c| c.is(C::Binding) && c.sym() == sym)
+            .filter(|c| c.has(C::Qualifier) || (!r.has(C::Qualifier) && c.children().count() == 1))
             .find_map(|c| c.child(C::SsaTyped))
             .filter(|bound| bound.sym() != sym)?;
         resolve_chain(ctx, bound)
@@ -1637,9 +1701,18 @@ fn chain<'a>(
     root: &dyn Fn(Cursor<'a>) -> Option<Cursor<'a>>,
 ) -> Option<Cursor<'a>> {
     let c = c.reference();
-    let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
+    let Some(m) = c
+        .has(C::Object)
+        .then_some(c)
+        .or_else(|| c.value_child(C::Member))
+    else {
         return value_type(ctx, root(c)?);
     };
+    if c.labelled()
+        && let Some(found) = root(c).and_then(|r| value_type(ctx, r))
+    {
+        return Some(found);
+    }
     let object = m.child(C::Object)?;
     let receiver = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || chain(ctx, object, root))?;
     let targets = member_targets(ctx, m, receiver);
@@ -2054,9 +2127,9 @@ fn destructure_calls<'a>(
             .find(|b| b.is(C::Binding) && b.sym_opt() == Some(s))?;
         resolve_chain(ctx, binding.typed()?)
     };
-    let class = match (d.child(C::Call), d.child(C::Rhs)) {
+    let class = match (d.value_child(C::Call), d.child(C::Rhs)) {
         (Some(pattern), _) => pattern.child(C::Callee).and_then(|k| resolve_chain(ctx, k)),
-        (None, Some(value)) => match value.child(C::Call) {
+        (None, Some(value)) => match value.value_child(C::Call) {
             Some(call) => producer_class(ctx, call),
             None => typed_local(value),
         },

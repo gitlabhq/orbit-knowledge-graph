@@ -334,6 +334,28 @@ for `var`. Python assignment rules use function labels. Rust declarations take
 effect in source order. Scope labels are YAML symbols; the engine does not branch
 on language names.
 
+A text label such as `(__rhs @$V)` keeps the node it names under the label.
+A call, lambda or array inside any expression then survives canonicalization
+and is walked for edges. Canonicalization marks a node it hoists out of a kept
+node as lifted. A lifted node is walked, but it is never the value of its label:
+`x = f()` types `x` by the call, and `x = a + f()` leaves `x` opaque. A language
+rule that replaces a transparent wrapper by its call, as Rust does for `f()?`,
+`f().await`, `&f()` and `(f())`, makes the call the value.
+
+A `__qualifier` marker on the object of a member names a module or type, as in
+`ptr::write`. The linker resolves that object through declared items and imports
+only. A parameter or local with the same name does not shadow it. The same marker
+on a binding, as on a bounded type parameter, adds that binding to those items.
+A `__qualifier` binding declares that item only. The linker does not walk its
+right-hand side, so a language rule must not put a call under such a binding.
+
+A `__ssa_loop` has one header shape. The loop variable is a `__binding` with a
+`__declaration` that the loop rule places directly under the loop. The children
+before it are the header, evaluated once before the loop. A bare `__declaration`
+scopes the loop variable to the loop; a labelled one binds it where the label
+says. A loop without a declared variable has no header, and all of its children
+run in the loop block.
+
 C and C++ compound statements, Java and C# blocks, and Lua blocks retain lexical boundaries. Their
 local declarations introduce bindings independently of assignments to outer names.
 JavaScript-family iteration rules retain the source expression and bind the loop

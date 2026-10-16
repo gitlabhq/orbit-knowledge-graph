@@ -1,0 +1,151 @@
+name: "Rust: a call behind a reference on the right-hand side links"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "reference_rhs_calls"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub struct Item;
+
+      impl Item {
+          pub fn touch(&self) {}
+      }
+
+      pub fn pick() -> Item {
+          Item
+      }
+
+      pub fn make() -> Vec<Item> {
+          Vec::new()
+      }
+
+      pub struct Holder<'a> {
+          pub shared: &'a Item,
+          pub items: Vec<Item>,
+      }
+
+      impl<'a> Holder<'a> {
+          pub fn reset(&mut self) {
+              self.shared = &pick();
+          }
+
+          pub fn fill(&mut self) {
+              self.items = vec![pick()];
+          }
+
+          pub fn take(&mut self) {
+              self.items = make();
+          }
+      }
+
+      pub fn assign_reference(holder: &mut Holder) {
+          holder.shared = &pick();
+      }
+
+      pub fn assign_macro(holder: &mut Holder) {
+          holder.items = vec![pick()];
+      }
+
+      pub fn let_reference() {
+          let item = &pick();
+          item.touch();
+      }
+
+      pub fn let_mut_reference() {
+          let item = &mut pick();
+          item.touch();
+      }
+
+      pub fn assign_mut_reference(holder: &mut Holder) {
+          holder.shared = &mut pick();
+      }
+
+      pub mod a {
+          pub fn f() -> super::Item {
+              super::Item
+          }
+      }
+
+      pub fn consume(item: &Item) {}
+
+      pub fn argument_reference() {
+          consume(&crate::a::f());
+      }
+
+      pub fn reassign_reference(item: &Item) {
+          let mut current = item;
+          current = &pick();
+      }
+
+tests:
+  - name: "a call behind a reference links from a field assignment"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["assign_reference", "reset"] AND callee.name = "pick"
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: caller, values: ["assign_reference", "reset"] } }
+
+  - name: "a call behind a reference links from a let and a reassignment and types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["let_reference", "reassign_reference"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: let_reference, callee: pick } }
+      - { row: { caller: let_reference, callee: touch } }
+      - { row: { caller: reassign_reference, callee: pick } }
+
+  - name: "a call assigned to a field through self links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "take"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: make } }
+
+  - name: "a call behind a mutable reference links and types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["let_mut_reference", "assign_mut_reference"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: assign_mut_reference, callee: pick } }
+      - { row: { caller: let_mut_reference, callee: pick } }
+      - { row: { caller: let_mut_reference, callee: touch } }
+
+  - name: "a call with an inline import behind a reference in an argument links"
+    # Known gap until !2887: the argument rule before nested-path-call drops the inline import of a path call, so f has no edge here; !2887 restores it.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "argument_reference"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["consume", "f"] } }
+
+  - name: "a call inside a macro on the right-hand side links"
+    # Known gap: a macro body is a token tree, so the call inside vec![pick()] has no call node to link.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["assign_macro", "fill"] AND callee.name = "pick"
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: caller, values: ["assign_macro", "fill"] } }

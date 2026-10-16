@@ -338,7 +338,7 @@ stages:
           scoped: "true"
           exports: '@$ROOT|child_sym("__defname")'
       - match: '(__def (__lambda))'
-        tag: { callable: "true" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__property))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
