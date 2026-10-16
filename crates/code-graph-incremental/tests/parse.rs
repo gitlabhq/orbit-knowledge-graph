@@ -117,7 +117,7 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
     let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["app.tsx", "util.ts"]);
-    for Parsed(tree) in &parsed.items {
+    for Parsed(tree, _) in &parsed.items {
         assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
     }
 }
@@ -196,7 +196,7 @@ fn a_family_parses_each_member_with_its_own_grammar() {
     let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["Service.kt", "User.java"]);
-    for Parsed(tree) in &parsed.items {
+    for Parsed(tree, _) in &parsed.items {
         assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
     }
 }

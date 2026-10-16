@@ -1,0 +1,43 @@
+name: "C: a relative include in a file with an error root resolves from its directory"
+
+fixtures:
+  - path: helper.h
+    content: |
+      int helper(void);
+
+  - path: helper.c
+    content: |
+      #include "helper.h"
+      int helper(void) { return 2; }
+
+  - path: sub/helper.h
+    content: |
+      int helper(void);
+
+  - path: sub/helper.c
+    content: |
+      #include "helper.h"
+      int helper(void) { return 1; }
+
+  - path: sub/err.c
+    content: |2-
+      #include "helper.h"
+      int run(void) { return helper(); }
+            union {
+      	struct {
+      	  Bits Flag_Bit : 1;
+      #if !defined(OPT_A) && !defined(OPT_B) && defined(OPT_C)
+          void *_call _peek(void);
+      #ifdef __arch__
+      #define CurrentBlock() ((struct _BLK *)_peek())
+      #define CurrentFrame() (((PFRAME)CurrentBlock())->Field)
+
+tests:
+  - name: "run calls the helper next to it, not the one at the root"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: sub/helper.c } }

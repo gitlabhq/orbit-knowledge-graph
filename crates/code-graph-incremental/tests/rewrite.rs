@@ -92,7 +92,7 @@ fn a_python_file_rewrites_into_only_canonical_nodes() {
     let (items, skipped) = rewrite_repo(&env, repo.path());
 
     assert!(skipped.is_empty());
-    let Canonical(tree) = &items[0];
+    let Canonical(tree, _) = &items[0];
     assert_eq!(tree.label, "main.py");
     assert!(
         tree.source.is_empty(),
@@ -115,7 +115,7 @@ fn definitions_carry_their_type_and_name() {
 
     let (items, _) = rewrite_repo(&env, repo.path());
 
-    let Canonical(tree) = &items[0];
+    let Canonical(tree, _) = &items[0];
     let mut defs: Vec<(String, &str)> = nodes(tree, C::Def)
         .map(|d| {
             let name = d
@@ -146,7 +146,7 @@ fn imports_and_calls_become_canonical_nodes() {
 
     let (items, _) = rewrite_repo(&env, repo.path());
 
-    let Canonical(tree) = &items[0];
+    let Canonical(tree, _) = &items[0];
     let mut imports: Vec<String> = nodes(tree, C::Import).map(|i| name_of(&env, i)).collect();
     imports.sort();
     assert_eq!(imports, ["helper", "os"]);

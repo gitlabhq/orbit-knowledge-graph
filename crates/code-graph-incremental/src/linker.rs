@@ -104,10 +104,12 @@ struct Fold<'t> {
     loops: Vec<(BlockId, (u32, u32))>,
     loop_ends: FxHashMap<u32, u32>,
     assigned: FxHashMap<u32, Vec<u32>>,
+    loop_wildcards: Vec<u32>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
+    shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
     visible: FxHashMap<u32, (u32, usize)>,
@@ -117,8 +119,11 @@ struct Fold<'t> {
 
 type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
-fn loop_spans(root: Cursor) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
+type LoopSpans = (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>, Vec<u32>);
+
+fn loop_spans(root: Cursor, wildcard: u32) -> LoopSpans {
     let (mut ends, mut assigned) = (FxHashMap::default(), FxHashMap::<u32, Vec<u32>>::default());
+    let mut wildcards = Vec::new();
     let mut stack = vec![(root, false)];
     let mut last = root.index();
     while let Some((node, leaving)) = stack.pop() {
@@ -129,6 +134,9 @@ fn loop_spans(root: Cursor) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
         last = node.index();
         if node.is(C::Import) || node.is(C::ImportType) {
             for name in std::iter::once(node).chain(node.descendants()) {
+                if name.sym() == wildcard && wildcards.last() != Some(&last) {
+                    wildcards.push(last);
+                }
                 assigned.entry(name.sym()).or_default().push(last);
             }
             continue;
@@ -145,7 +153,7 @@ fn loop_spans(root: Cursor) -> (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>) {
         }
         stack.extend(node.children_rev().map(|child| (child, false)));
     }
-    (ends, assigned)
+    (ends, assigned, wildcards)
 }
 
 impl<'t> Fold<'t> {
@@ -288,10 +296,12 @@ impl<'t> Fold<'t> {
             return;
         } else if k == C::SsaLoop {
             if self.loop_ends.is_empty() {
-                (self.loop_ends, self.assigned) = loop_spans(self.tree.root());
+                (self.loop_ends, self.assigned, self.loop_wildcards) =
+                    loop_spans(self.tree.root(), self.wildcard);
             }
-            self.loops
-                .push((self.cur, (c.index(), self.loop_ends[&c.index()])));
+            let span = (c.index(), self.loop_ends[&c.index()]);
+            self.assign_module_names(span);
+            self.loops.push((self.cur, span));
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
@@ -565,6 +575,17 @@ impl<'t> Fold<'t> {
         };
         if c.has(C::Property) && self.chain_is_class(callee) {
             return;
+        }
+        let root = callee
+            .child(C::Member)
+            .and_then(|member| member.child(C::Object))
+            .map_or(callee, |object| object.chain_root());
+        if !callee.has(C::Ivar)
+            && !root.is(C::Call)
+            && !root.has(C::Call)
+            && !self.lookup(root.sym()).iter().all(is_name)
+        {
+            self.shadowed_calls.insert(c.index());
         }
         let from = self.enclosing();
         let first = self.edges.len();
@@ -953,6 +974,7 @@ impl<'t> Fold<'t> {
         let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
         let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
         let mut copied = FxHashMap::default();
+        let mut reset = FxHashSet::default();
         let mut aliases = smallvec::SmallVec::<[_; 4]>::new();
         while let Some((target, sources)) = copies.pop() {
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
@@ -975,7 +997,11 @@ impl<'t> Fold<'t> {
                 }
                 let value = self.read_value(source);
                 value_updates.push((target, value));
-                if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
+                if source == 0 {
+                    if self.fields.contains_key(&target) && reset.insert(target) {
+                        copies.push((target, FxHashMap::default()));
+                    }
+                } else if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
                     match copied.entry(source) {
                         Entry::Occupied(first) => aliases.push((target, *first.get())),
                         Entry::Vacant(slot) => {
@@ -1053,6 +1079,27 @@ impl<'t> Fold<'t> {
             Some(c) if c.size() > 1 => self.tail_sym(c),
             Some(c) => c.sym(),
             None => node.sym(),
+        }
+    }
+
+    fn assign_module_names(&mut self, (start, end): (u32, u32)) {
+        let first = self.loop_wildcards.partition_point(|&at| at < start);
+        let last = self.loop_wildcards.partition_point(|&at| at < end);
+        let imports: Vec<u32> = self.loop_wildcards.drain(first..last).collect();
+        for at in imports {
+            let Some(module) = self.inline_module(self.tree.cursor(at)) else {
+                continue;
+            };
+            let names = module
+                .children()
+                .filter(|d| d.is(C::Def))
+                .filter_map(|d| d.child_sym(C::DefName));
+            for name in names {
+                let positions = self.assigned.entry(name).or_default();
+                if let Err(slot) = positions.binary_search(&at) {
+                    positions.insert(slot, at);
+                }
+            }
         }
     }
 
@@ -1431,10 +1478,12 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         loops: Vec::new(),
         loop_ends: FxHashMap::default(),
         assigned: FxHashMap::default(),
+        loop_wildcards: Vec::new(),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
+        shadowed_calls: FxHashSet::default(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, Vec::new())],
         visible: FxHashMap::default(),
@@ -1492,6 +1541,9 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
 
     for edge in &mut f.edges {
+        if edge.kind == EdgeKind::TypeFlow && f.shadowed_calls.contains(&edge.to_node) {
+            edge.call_resolution = crate::tree::CallResolution::NonCallable;
+        }
         if edge.kind == EdgeKind::Imports
             && (tree.cursor(edge.to_node).sym() == f.wildcard
                 || tree.cursor(edge.to_node).child_sym(C::SsaHint) == Some(f.wildcard))
@@ -1515,6 +1567,13 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         }
     }
     Ok((f.edges, f.limited))
+}
+
+fn is_name(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::LocalDef(_) | Value::ImportRef(_) | Value::Type(_)
+    )
 }
 
 fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
