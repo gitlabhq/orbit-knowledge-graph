@@ -26,6 +26,9 @@ use orbit_server_config::query::{QueryConfig, QuerySettings};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use serde_json::{Value, json};
+use testcontainers::GenericImage;
+use testcontainers::core::{CmdWaitFor, ExecCommand};
+use testcontainers::runners::AsyncRunner;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tonic::transport::Channel;
@@ -155,6 +158,60 @@ async fn clickhouse_server_memory_limit_is_a_server_error() {
             Some("total_memory_limit"),
         )
         .await;
+}
+
+// Staging runs ClickHouse 23.9, which words the server memory error as "Memory limit (total)".
+// Our client sends settings 23.9 does not know, so run the query with its own client.
+#[tokio::test]
+async fn older_clickhouse_server_memory_limit_is_a_server_error() {
+    let container = GenericImage::new("clickhouse/clickhouse-server", "23.9")
+        .start()
+        .await
+        .unwrap();
+    let run = |sql: &str| {
+        ExecCommand::new(["clickhouse-client", "-q", sql])
+            .with_cmd_ready_condition(CmdWaitFor::exit())
+    };
+    timeout(Duration::from_secs(60), async {
+        while container
+            .exec(run("SELECT 1"))
+            .await
+            .unwrap()
+            .exit_code()
+            .await
+            .unwrap()
+            != Some(0)
+        {
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let write = ExecCommand::new([
+        "sh",
+        "-c",
+        "printf '<clickhouse><max_server_memory_usage>1</max_server_memory_usage></clickhouse>' \
+         > /etc/clickhouse-server/config.d/memory.xml",
+    ])
+    .with_cmd_ready_condition(CmdWaitFor::exit_code(0));
+    container.exec(write).await.unwrap();
+    container.exec(run("SYSTEM RELOAD CONFIG")).await.unwrap();
+
+    let mut query = container
+        .exec(run(
+            "SELECT count() FROM numbers(10000000) GROUP BY number % 1000000 FORMAT Null",
+        ))
+        .await
+        .unwrap();
+    let message = String::from_utf8(query.stderr_to_vec().await.unwrap()).unwrap();
+    let error = PipelineError::Execution(format!("query error: bad response: {message}"));
+
+    assert!(
+        message.contains("Memory limit (total) exceeded"),
+        "{message}"
+    );
+    assert_eq!(error.failure_reason().as_str(), "total_memory_limit");
+    assert_eq!(error.outcome(), "server_error");
 }
 
 #[tokio::test]
