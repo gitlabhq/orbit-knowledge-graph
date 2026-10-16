@@ -11,15 +11,21 @@ fixtures:
   - path: src/lib.rs
     content: |
       mod gen;
+      mod layer;
+      pub mod cycle_a;
+      pub mod cycle_b;
       pub mod named;
       pub mod ops;
 
       pub use crate::gen::consts;
+      pub use crate::gen::consts as c;
+      pub use crate::layer::deep;
       pub use crate::{gen::more, ops::build};
 
   - path: src/gen/mod.rs
     content: |
       pub mod consts;
+      pub mod deep;
       pub mod more;
 
   - path: src/gen/consts.rs
@@ -42,11 +48,48 @@ fixtures:
           }
       }
 
+  - path: src/gen/deep.rs
+    content: |
+      pub struct Deep;
+
+      impl Deep {
+          pub fn new() -> Deep {
+              Deep
+          }
+      }
+
+  - path: src/layer.rs
+    content: |
+      pub use crate::gen::deep;
+
+  - path: src/cycle_a.rs
+    content: |
+      pub use crate::cycle_b::item;
+
+  - path: src/cycle_b.rs
+    content: |
+      pub use crate::cycle_a::item;
+
   - path: src/ops.rs
     content: |
       pub fn build() {
           use crate::consts::*;
           let z = Zero::new();
+      }
+
+      pub fn aliased() {
+          use crate::c::*;
+          let z = Zero::new();
+      }
+
+      pub fn chained() {
+          use crate::deep::*;
+          let d = Deep::new();
+      }
+
+      pub fn cyclic() {
+          use crate::cycle_a::item::*;
+          let t = Thing::new();
       }
 
       #[cfg(test)]
@@ -61,6 +104,7 @@ fixtures:
   - path: src/named.rs
     content: |
       use crate::consts::Zero;
+      use std::{borrow::Cow, collections::HashMap as Map, fmt};
 
       pub fn make() -> Zero {
           Zero::new()
@@ -106,3 +150,47 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: build, file: src/ops.rs } }
+
+  - name: a glob through an aliased re-export reaches the item
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'aliased'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/consts.rs } }
+
+  - name: a glob through two re-exports in a chain reaches the item
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'chained'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/deep.rs } }
+
+  - name: a re-export cycle ends with no edge
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'cyclic'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 0 }
+
+  - name: a use-group entry with a path binds its last segment
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/named.rs' AND i.import_path = 'std::borrow::Cow'
+      RETURN i.identifier_name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Cow } }
+
+  - name: an aliased use-group entry with a path binds its last segment under the alias
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/named.rs' AND i.import_path = 'std::collections::HashMap'
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { name: HashMap, alias: Map } }
