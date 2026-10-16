@@ -14,6 +14,7 @@ SELECT
   project_id,
   traversal_path,
   {{version_column}} AS _version,
+  {{watermark_column}} AS _watermark,
   {{deleted_column}} AS _deleted
 FROM siphon_packages_package_files
 WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}

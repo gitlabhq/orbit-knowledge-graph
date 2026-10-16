@@ -42,6 +42,8 @@ pub const VERSION_COLUMN: &str = "_version";
 
 pub const DELETED_COLUMN: &str = "_deleted";
 
+pub const WATERMARK_COLUMN: &str = "_watermark";
+
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
 use std::sync::LazyLock;

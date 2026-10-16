@@ -223,6 +223,7 @@ mod tests {
         Cursor, CursorFilter, Plan, TransformSpec, TraversalPathFilter, WatermarkFilter,
     };
     use chrono::Utc;
+    use ontology::constants::WATERMARK_COLUMN;
     use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
     use orbit_utils::traversal_path::TraversalPath;
 
@@ -285,6 +286,19 @@ mod tests {
             })
             .to_sql()
             .expect("renders extract SQL")
+    }
+
+    #[test]
+    fn every_extract_selects_the_row_watermark() {
+        let plans = plans(&test_ontology(), 1_000_000);
+        for plan in plans.global.iter().chain(&plans.namespaced) {
+            let sql = normalize(plan.extract_template.as_str());
+            assert!(
+                sql.contains(&format!(" AS {WATERMARK_COLUMN}")),
+                "{} does not select {WATERMARK_COLUMN}: {sql}",
+                plan.name
+            );
+        }
     }
 
     #[test]

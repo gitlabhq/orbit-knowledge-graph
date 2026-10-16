@@ -11,6 +11,7 @@ WITH
     link_type,
     traversal_path,
     {{version_column}} AS _version,
+    {{watermark_column}} AS _watermark,
     {{deleted_column}} AS _deleted
   FROM siphon_duo_workflows_workflow_merge_requests
   -- Namespace-level sessions have no AgentSession node (project sessions only),
@@ -54,6 +55,7 @@ SELECT
      nullIf(if(_batch._deleted, _prev.prev_merge_request_id, _batch.merge_request_id), 0),
      NULL) AS target_id,
   _batch._version AS _version,
+  _batch._watermark AS _watermark,
   _batch._deleted AS _deleted
 FROM _batch
 LEFT JOIN _prev ON _prev.id = _batch.id

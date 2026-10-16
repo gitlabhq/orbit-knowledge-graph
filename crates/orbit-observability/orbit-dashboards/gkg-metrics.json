@@ -871,7 +871,7 @@
     {
       "otel_name": "gkg.indexer.sdlc.change.delay",
       "prom_name": "gkg_indexer_sdlc_change_delay_seconds",
-      "description": "Seconds from dispatch of an incremental run until it completes, outside migration campaigns.",
+      "description": "Seconds from the oldest change an incremental run read until the run completes, outside migration campaigns.",
       "kind": "histogram_f64",
       "unit": "s",
       "labels": [],

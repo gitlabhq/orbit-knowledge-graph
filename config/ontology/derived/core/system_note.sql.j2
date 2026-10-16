@@ -9,6 +9,7 @@ WITH
     created_at,
     traversal_path,
     {{version_column}} AS _version,
+    {{watermark_column}} AS _watermark,
     {{deleted_column}} AS _deleted
   FROM siphon_notes
   WHERE startsWith(traversal_path, {traversal_path:String}) AND (system = true AND {{deleted_column}} = false) {{filters}}
@@ -34,6 +35,7 @@ SELECT
   _batch.created_at AS created_at,
   _batch.traversal_path AS traversal_path,
   _batch._version AS _version,
+  _batch._watermark AS _watermark,
   _batch._deleted AS _deleted,
   _e0.action AS action
 FROM _batch

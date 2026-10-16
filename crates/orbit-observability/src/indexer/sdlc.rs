@@ -81,7 +81,7 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
 
 pub const CHANGE_DELAY: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.sdlc.change.delay",
-    "Seconds from dispatch of an incremental run until it completes, outside migration campaigns.",
+    "Seconds from the oldest change an incremental run read until the run completes, outside migration campaigns.",
     Some("s"),
     &[],
     LATENCY_SLOW,

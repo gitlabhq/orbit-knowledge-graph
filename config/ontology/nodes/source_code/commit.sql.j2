@@ -4,6 +4,7 @@ SELECT
   m.target_project_id AS project_id,
   m.traversal_path AS traversal_path,
   m.{{version_column}} AS _version,
+  m.{{watermark_column}} AS _watermark,
   m.{{deleted_column}} AS _deleted
 FROM (
   SELECT

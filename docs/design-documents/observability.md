@@ -81,7 +81,7 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.indexer.sdlc.datalake.query` | Counter | By | `entity` | Total bytes returned by ClickHouse datalake extraction queries |
 | `gkg.indexer.sdlc.transform.duration` | Histogram | s | | Duration of DataFusion SQL transform per batch |
 | `gkg.indexer.sdlc.watermark.lag` | Gauge | s | | Seconds between the current watermark and wall clock (data freshness) |
-| `gkg.indexer.sdlc.change.delay` | Histogram | s | | Seconds from dispatch of an incremental run until it completes, outside migration campaigns |
+| `gkg.indexer.sdlc.change.delay` | Histogram | s | | Seconds from the oldest change an incremental run read until the run completes, outside migration campaigns |
 
 *Code module metrics:*
 

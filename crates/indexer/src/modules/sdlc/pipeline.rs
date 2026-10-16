@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arrow::array::TimestampMicrosecondArray;
 use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use serde_json::Value;
@@ -22,6 +24,7 @@ use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
 use crate::durability::{RunDurability, WriteDurability};
+use ontology::constants::WATERMARK_COLUMN;
 use orbit_arrow::batch_slice_bytes;
 use orbit_server_config::DatalakeRetryConfig;
 
@@ -39,7 +42,7 @@ const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
-/// rows/bytes inserted.
+/// rows/bytes inserted. `oldest_watermark` is the earliest change read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PipelineStats {
     pub read_rows: u64,
@@ -53,6 +56,7 @@ pub(in crate::modules::sdlc) struct PipelineStats {
     pub extract_ms: u64,
     pub transform_ms: u64,
     pub write_ms: u64,
+    pub oldest_watermark: Option<DateTime<Utc>>,
 }
 
 impl PipelineStats {
@@ -67,6 +71,7 @@ impl PipelineStats {
         self.extract_ms += other.extract_ms;
         self.transform_ms += other.transform_ms;
         self.write_ms += other.write_ms;
+        self.oldest_watermark = earliest(self.oldest_watermark, other.oldest_watermark);
     }
 }
 
@@ -91,6 +96,20 @@ impl Page {
     fn bytes(&self) -> u64 {
         self.batches.iter().map(batch_slice_bytes).sum()
     }
+
+    fn oldest_watermark(&self) -> Option<DateTime<Utc>> {
+        self.batches
+            .iter()
+            .filter_map(|batch| batch.column_by_name(WATERMARK_COLUMN))
+            .filter_map(|column| column.as_any().downcast_ref::<TimestampMicrosecondArray>())
+            .filter_map(arrow::compute::min)
+            .min()
+            .and_then(DateTime::from_timestamp_micros)
+    }
+}
+
+fn earliest(a: Option<DateTime<Utc>>, b: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+    a.into_iter().chain(b).min()
 }
 
 pub(in crate::modules::sdlc) struct PipelineContext {
@@ -175,6 +194,7 @@ impl Pipeline {
             stats.read_bytes += bytes_in_page;
             stats.scanned_rows += page.scan_stats.scanned_rows;
             stats.scanned_bytes += page.scan_stats.scanned_bytes;
+            stats.oldest_watermark = earliest(stats.oldest_watermark, page.oldest_watermark());
 
             #[expect(
                 clippy::expect_used,
@@ -476,8 +496,8 @@ mod tests {
     use crate::modules::sdlc::test_helpers::{passthrough_registry, test_metrics};
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
-    use arrow::array::{BooleanArray, Int64Array, StringArray};
-    use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
+    use arrow::array::{BooleanArray, Int64Array, StringArray, TimestampMicrosecondArray};
+    use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema, TimeUnit};
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use orbit_server_config::AppConfig;
@@ -551,12 +571,21 @@ mod tests {
             ArrowField::new("name", ArrowDataType::Utf8, true),
             ArrowField::new("_version", ArrowDataType::Int64, false),
             ArrowField::new("_deleted", ArrowDataType::Boolean, false),
+            ArrowField::new(
+                "_watermark",
+                ArrowDataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                false,
+            ),
         ]));
 
         let ids: Vec<i64> = (start_id..start_id + count as i64).collect();
         let names: Vec<Option<&str>> = (0..count).map(|_| Some("test")).collect();
         let versions: Vec<i64> = ids.clone();
         let deleted: Vec<bool> = vec![false; count];
+        let watermarks: Vec<i64> = ids
+            .iter()
+            .map(|id| row_watermark(*id).timestamp_micros())
+            .collect();
 
         RecordBatch::try_new(
             schema,
@@ -565,9 +594,14 @@ mod tests {
                 Arc::new(StringArray::from(names)),
                 Arc::new(Int64Array::from(versions)),
                 Arc::new(BooleanArray::from(deleted)),
+                Arc::new(TimestampMicrosecondArray::from(watermarks).with_timezone("UTC")),
             ],
         )
         .unwrap()
+    }
+
+    fn row_watermark(id: i64) -> DateTime<Utc> {
+        test_watermark() - chrono::Duration::hours(1) + chrono::Duration::seconds(id)
     }
 
     use crate::modules::sdlc::test_helpers::EmptyDatalake;
@@ -752,6 +786,61 @@ mod tests {
 
         let final_state = store.current_state().unwrap();
         assert!(final_state.is_completed(), "should be completed");
+    }
+
+    #[tokio::test]
+    async fn run_reports_the_oldest_row_watermark_across_pages() {
+        let plan = simple_plan_with_batch_size("Test", 10);
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 10,
+            }),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
+        );
+
+        let stats = pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                Checkpoint::new(test_watermark()),
+                test_window(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(stats.oldest_watermark, Some(row_watermark(1)));
+    }
+
+    #[tokio::test]
+    async fn run_without_rows_reports_no_watermark() {
+        let plan = simple_plan("Test");
+        let pipeline = Pipeline::new(
+            Arc::new(EmptyDatalake),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
+        );
+
+        let stats = pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                Checkpoint::new(test_watermark()),
+                test_window(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(stats.oldest_watermark, None);
     }
 
     #[tokio::test]
