@@ -126,6 +126,13 @@ impl Input {
     pub fn fetch_limit(&self) -> u32 {
         self.limit + 1
     }
+
+    /// Rows the final sort materializes: the skipped prefix plus the fetched
+    /// window. Per-row text budgets divide by this rather than by the rows
+    /// returned.
+    pub fn sorted_rows(&self) -> u32 {
+        self.skip.unwrap_or(0) + self.fetch_limit()
+    }
 }
 
 impl Default for Input {

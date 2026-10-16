@@ -1,4 +1,4 @@
-description: Multi-hop traversal with redaction pages cover authorized edges only
+description: Multi-hop traversal with redaction pages cover authorized edges only. SKIP counts redacted rows, so pages shrink rather than shift.
 
 config:
   redaction:
@@ -50,17 +50,16 @@ expect:
         Project: { ids: [1004], absent: [1001, 1003] }
       edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
       has_more: true
-    - node_count: 3
+    - node_count: 4
       nodes:
         User: { ids: [6] }
         Group: { ids: [100], absent: [101] }
-        Project: { ids: [1000], absent: [1001, 1003] }
-      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+        Project: { ids: [1000, 1002], absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 2 }
       has_more: true
-    - node_count: 3
+    - node_count: 0
       nodes:
-        User: { ids: [6] }
-        Group: { ids: [100], absent: [101] }
-        Project: { ids: [1002], absent: [1001, 1003] }
-      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+        Group: { absent: [101] }
+        Project: { absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 0, CONTAINS: 0 }
       has_more: false

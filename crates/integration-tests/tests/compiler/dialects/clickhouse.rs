@@ -1329,13 +1329,15 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
         "MATCH (u:User) RETURN collect(u.username)",
-        "MATCH (u:User) RETURN u SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP -1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP 10001",
         "MATCH (u:User) RETURN u DEBUG DEBUG",
         "MATCH (u:User) RETURN u DEBUG LIMIT 1",
         "MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id",
-        "MATCH (u:User) RETURN u LIMIT 1 PAGE 1",
-        "MATCH (u:User) RETURN u PAGE 1 LIMIT 1",
-        "MATCH (u:User) RETURN u AFTER 'token'",
+        "MATCH (u:User {id: 1}) RETURN u PAGE 1",
+        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 AFTER 'token'",
         "MATCH (u:User) RETURN u; DEBUG",
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
@@ -1782,8 +1784,8 @@ fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
             "RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5",
         ),
         (
-            "RETURN mr.iid ORDER BY mr.iid PAGE 5",
-            "RETURN mr.iid AS number ORDER BY number PAGE 5",
+            "RETURN mr.iid ORDER BY mr.iid SKIP 5 LIMIT 5",
+            "RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5",
         ),
     ] {
         let plain = compile(&format!("{base} {plain}"), Frontend::Gql, &ontology, &ctx).unwrap();
@@ -1949,10 +1951,10 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
 }
 
 #[test]
-fn orbit_query_reserved_page_words_need_backticks() {
+fn orbit_query_reserved_skip_words_need_backticks() {
     assert!(
         compile(
-            "MATCH (page:User {id: 1}) RETURN page",
+            "MATCH (offset:User {id: 1}) RETURN offset",
             Frontend::Gql,
             &test_ontology(),
             &test_ctx()
@@ -1960,7 +1962,7 @@ fn orbit_query_reserved_page_words_need_backticks() {
         .is_err()
     );
     compile(
-        "MATCH (`page`:User {id: 1}) RETURN `page`",
+        "MATCH (`offset`:User {id: 1}) RETURN `offset`",
         Frontend::Gql,
         &test_ontology(),
         &test_ctx(),

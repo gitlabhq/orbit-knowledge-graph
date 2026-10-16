@@ -98,20 +98,20 @@ query type.
 | `group_by` | `array` | Group keys for aggregation rows. Maximum 4. |
 | `path` | `object` | Path finding configuration. Required for `path_finding`. |
 | `neighbors` | `object` | Neighbor lookup configuration. Required for `neighbors`. |
-| `limit` | `integer` | Maximum rows to return when no `cursor` is set. Default 30. Maximum 1000. Check `pagination.truncated` in the response: when true, more matching rows exist. |
-| `cursor` | `object` | Keyset pagination: `{"page_size": N}` for the first page, then `{"page_size": N, "after": "<pagination.next_cursor>"}` until `next_cursor` is absent. Reaches every row regardless of dataset size. The token is bound to the exact query that issued it. |
+| `limit` | `integer` | Maximum rows to return. Default 30. Maximum 1000. Check `pagination.truncated` in the response: when true, more matching rows exist. |
 | `order_by` | `string` | Sort rows by a node property: `"node.property"` (asc) or `"-node.property"` (desc). |
 | `aggregation_sort` | `string` | Sort aggregation rows by output column (aggregation or group-key alias): `"column"` (asc) or `"-column"` (desc). |
 | `options` | `object` | Presentation and debug options. |
 
+The JSON DSL does not paginate. To page through results, use the GQL
+`SKIP n LIMIT m` clauses.
+
 Pagination reads live data at request time; there is no snapshot. Each page
 independently resolves the latest version of every row and filters out
-soft-deleted rows, so version churn and tombstone cleanup between pages do not
-skip or duplicate results. Rows inserted after the cursor position in sort
-order appear on later pages; rows inserted or reordered behind it are not
-revisited. Rows whose sort key is NULL sort last and paginate like any other
-row. A row whose sort key changes between pages can appear twice or not
-at all, the same as any keyset pagination without a snapshot.
+soft-deleted rows. `SKIP` counts rows by position, so a row inserted or deleted
+ahead of the current position between pages shifts later pages by one row: a
+row can repeat or be missed. Rows whose sort key is NULL sort last and paginate
+like any other row.
 
 ## Node selectors
 
