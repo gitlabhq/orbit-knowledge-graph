@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
+use orbit_log_fields::safe;
 use rand::seq::SliceRandom;
-use tracing::{debug, info};
+use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -120,8 +121,14 @@ impl CodeBackfill {
         order.shuffle(&mut rand::rng());
         for index in order {
             let (namespace_id, traversal_path) = &namespaces[index];
+            let span = info_span!(
+                "code_backfill_namespace",
+                { safe::GL_ROOT_NAMESPACE_ID } = *namespace_id,
+                { safe::TRAVERSAL_PATH } = traversal_path.as_str(),
+            );
             let pending = self
-                .fetch_pending_for_namespace(*namespace_id, traversal_path, share)
+                .fetch_pending_for_namespace(traversal_path, share)
+                .instrument(span)
                 .await?;
             if pending.is_empty() {
                 outcome.drained_paths.push(traversal_path.clone());
@@ -138,8 +145,8 @@ impl CodeBackfill {
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             info!(
-                dispatched = outcome.dispatched,
-                skipped = outcome.skipped,
+                { safe::DISPATCHED_COUNT } = outcome.dispatched,
+                { safe::SKIPPED_COUNT } = outcome.skipped,
                 "dispatched code backfill requests"
             );
         }
@@ -200,7 +207,6 @@ impl CodeBackfill {
 
     async fn fetch_pending_for_namespace(
         &self,
-        namespace_id: i64,
         traversal_path: &TraversalPath,
         share: usize,
     ) -> Result<Vec<PendingProject>, TaskError> {
@@ -212,16 +218,15 @@ impl CodeBackfill {
 
         if projects.is_empty() {
             debug!(
-                namespace_id,
-                already_checkpointed, "no pending projects in namespace"
+                { safe::SKIPPED_COUNT } = already_checkpointed,
+                "no pending projects in namespace"
             );
             return Ok(Vec::new());
         }
 
         debug!(
-            namespace_id,
-            count = projects.len(),
-            already_checkpointed,
+            { safe::COUNT } = projects.len(),
+            { safe::SKIPPED_COUNT } = already_checkpointed,
             "fetched pending projects for code backfill"
         );
 

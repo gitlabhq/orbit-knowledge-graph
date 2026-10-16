@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use labkit_events::StructuredEvent;
+use orbit_log_fields::expanded;
 use orbit_server_config::AnalyticsConfig;
 use tokio::time::{Instant, MissedTickBehavior};
 
@@ -59,7 +60,7 @@ impl SnowplowAnalyticsTracker {
 impl AnalyticsTracker for SnowplowAnalyticsTracker {
     fn track(&self, event: StructuredEvent) {
         if let Err(e) = self.tracker.track_structured_event(event) {
-            tracing::error!(error = %e, "failed to track analytics event");
+            tracing::error!({ expanded::ERROR_MESSAGE } = %e, "failed to track analytics event");
         }
     }
 }

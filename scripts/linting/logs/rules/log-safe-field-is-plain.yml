@@ -1,0 +1,64 @@
+id: log-safe-field-is-plain
+language: rust
+severity: error
+message: Record a safe field as a plain value, not with `%`, `?`, `display`, `debug` or `format!`.
+note: |
+  The allowlist checks the field name, not the value. A formatted struct or
+  error under a safe name is written on every log line. Pass an integer, a
+  bool, or a `&str` from a closed set (for example an enum `as_str()`).
+utils:
+  safe-field-value-is-formatted:
+    any:
+      # `{ safe::X } = %value`, `= ?value`, `= debug(value)`, `= format!(..)`
+      - kind: token_tree
+        regex: '^\{\s*safe::'
+        precedes:
+          regex: '^=$'
+          precedes:
+            any:
+              - regex: '^[%?]$'
+              - regex: '^(display|debug|format)$'
+      # `{ safe::X } = tracing::field::debug(value)`, `= std::format!(..)`
+      - kind: identifier
+        regex: '^(display|debug|format)$'
+        precedes:
+          any:
+            - kind: token_tree
+              regex: '^\('
+            - regex: '^!$'
+        follows:
+          kind: token_tree
+          regex: '^\{\s*safe::'
+          stopBy:
+            regex: '^,$'
+rule:
+  any:
+    - matches: safe-field-value-is-formatted
+      inside:
+        matches: log-args
+      not:
+        matches: test-code
+    - matches: safe-field-value-is-formatted
+      inside:
+        kind: token_tree
+        follows:
+          kind: identifier
+          regex: '^fields$'
+        inside:
+          kind: token_tree
+          inside:
+            kind: attribute
+            regex: '^(::)?(tracing::)?instrument\b'
+    # `span.record(safe::X, display(value))`, `span.record(safe::X, format!(..))`
+    - kind: arguments
+      regex: '^\(\s*safe::\w+\s*,\s*((tracing::)?(field::)?(display|debug)\(|(std::)?format!)'
+      inside:
+        kind: call_expression
+        has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: '^record$'
+      not:
+        matches: test-code

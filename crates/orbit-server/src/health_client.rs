@@ -1,4 +1,5 @@
 use health_check::HealthStatus;
+use orbit_log_fields::expanded;
 use tracing::warn;
 
 #[derive(Clone)]
@@ -37,7 +38,7 @@ impl InfrastructureHealthClient {
         match self.check().await {
             Ok(status) => status,
             Err(e) => {
-                warn!(error = %e, "Failed to reach health-check service");
+                warn!({ expanded::ERROR_MESSAGE } = %e, "Failed to reach health-check service");
                 HealthStatus {
                     status: health_check::Status::Unhealthy,
                     services: vec![],

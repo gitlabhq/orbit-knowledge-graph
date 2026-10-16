@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
 use gitlab_client::GitlabClientError;
+use orbit_log_fields::{expanded, safe};
 use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
@@ -123,6 +124,8 @@ struct ProjectCommit {
     store: Arc<dyn CodeCheckpointStore>,
     cleaner: Arc<dyn StaleDataCleaner>,
     inflight: Arc<AtomicUsize>,
+    // The last release can run on a writer task, outside the project's span.
+    span: tracing::Span,
 }
 
 impl ProjectCommit {
@@ -130,17 +133,18 @@ impl ProjectCommit {
         if self.remaining.fetch_sub(1, Ordering::AcqRel) != 1 {
             return;
         }
-        tokio::spawn(async move {
-            self.finalize().await;
-        });
+        let span = self.span.clone();
+        tokio::spawn(
+            async move {
+                self.finalize().await;
+            }
+            .instrument(span),
+        );
     }
 
     async fn finalize(&self) {
         if self.failed.load(Ordering::Acquire) {
-            warn!(
-                project_id = self.request.project_id,
-                "a buffered write failed; skipping checkpoint so the project is re-indexed",
-            );
+            warn!("a buffered write failed; skipping checkpoint so the project is re-indexed");
         } else {
             self.checkpoint().await;
         }
@@ -173,8 +177,7 @@ impl ProjectCommit {
                 .await
         {
             warn!(
-                project_id = checkpoint.project_id,
-                %error,
+                { expanded::ERROR_MESSAGE } = %error,
                 "failed to delete stale data, will retry on next indexing"
             );
         }
@@ -185,15 +188,10 @@ impl ProjectCommit {
             self.indexed_at,
         );
         match self.store.save(&checkpoint).await {
-            Ok(()) => info!(
-                project_id = checkpoint.project_id,
-                task_id = checkpoint.last_task_id,
-                "completed code indexing"
-            ),
+            Ok(()) => info!("completed code indexing"),
             Err(e) => {
                 warn!(
-                    project_id = checkpoint.project_id,
-                    error = %e,
+                    { expanded::ERROR_MESSAGE } = %e,
                     "failed to checkpoint code indexing; project will be re-indexed",
                 );
                 self.failed.store(true, Ordering::Release);
@@ -452,10 +450,8 @@ impl CodeIndexer {
                     .into());
                 }
                 warn!(
-                    project_id = request.project_id,
-                    branch = %request.branch,
-                    reason = %reason,
-                    detail,
+                    { safe::REASON } = reason.as_metric_label(),
+                    { expanded::ADDITIONAL_DETAILS } = %detail,
                     "checkpointing repository as indexed-empty"
                 );
                 self.metrics.record_resolution_strategy("empty_repository");
@@ -484,7 +480,7 @@ impl CodeIndexer {
         let fetch_duration = fetch_start.elapsed();
         self.metrics.record_fetch_duration(fetch_duration);
         info!(
-            duration_ms = fetch_duration.as_millis() as u64,
+            { safe::DURATION_S } = fetch_duration.as_secs_f64(),
             "repository extraction completed"
         );
 
@@ -588,7 +584,6 @@ impl CodeIndexer {
         let rows_written = self.record_indexing_results(
             &result,
             observer,
-            request,
             indexing_start,
             metered_bytes.load(Ordering::Relaxed),
         );
@@ -675,6 +670,7 @@ impl CodeIndexer {
             store: self.checkpoint_store.clone(),
             cleaner: self.stale_data_cleaner.clone(),
             inflight: self.inflight.clone(),
+            span: tracing::Span::current(),
         });
 
         let writer = self.writer.clone();
@@ -694,7 +690,11 @@ impl CodeIndexer {
                 let batch_bytes = match orbit_arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
-                        tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
+                        tracing::error!(
+                            { safe::TABLE } = table,
+                            { expanded::ERROR_MESSAGE } = %e,
+                            "batch has no logical-byte-size rule; counting 0 bytes"
+                        );
                         0
                     }
                 };
@@ -736,7 +736,14 @@ impl CodeIndexer {
             phase_started: {
                 let span = span.clone();
                 Arc::new(move |family, phase, files| {
-                    span.in_scope(|| info!(family, phase, files, "code-graph phase started"));
+                    span.in_scope(|| {
+                        info!(
+                            { safe::LANGUAGE_FAMILY } = family,
+                            { safe::PHASE } = phase,
+                            { safe::FILE_COUNT } = files,
+                            "code-graph phase started"
+                        )
+                    });
                 })
             },
         };
@@ -776,7 +783,7 @@ impl CodeIndexer {
             }
         };
         info!(
-            duration_ms = code_graph_start.elapsed().as_millis() as u64,
+            { safe::DURATION_S } = code_graph_start.elapsed().as_secs_f64(),
             "code-graph building completed"
         );
 
@@ -787,7 +794,6 @@ impl CodeIndexer {
         &self,
         result: &IndexingReport,
         observer: &mut dyn IndexingObserver,
-        request: &IndexingRequest,
         indexing_start: Instant,
         written_bytes: u64,
     ) -> u64 {
@@ -817,12 +823,12 @@ impl CodeIndexer {
             .take(SLOW_FILE_LOG_MAX)
         {
             info!(
-                path = %entry.path,
-                language = %entry.language,
-                size_bytes = entry.size_bytes,
-                parse_ms = entry.parse_ms,
-                resolve_ms = entry.resolve_ms,
-                total_ms = entry.total_ms,
+                { expanded::FILE_PATH } = entry.path.as_str(),
+                { safe::LANGUAGE } = entry.language.as_str(),
+                { safe::SIZE_BYTES } = entry.size_bytes,
+                { safe::PARSE_DURATION_S } = entry.parse_ms / 1000.0,
+                { safe::RESOLVE_DURATION_S } = entry.resolve_ms / 1000.0,
+                { safe::DURATION_S } = entry.total_ms / 1000.0,
                 "slow file during code indexing"
             );
         }
@@ -856,19 +862,15 @@ impl CodeIndexer {
             );
             if skipped.path.is_empty() {
                 warn!(
-                    project_id = request.project_id,
-                    branch = %request.branch,
-                    family = skipped.family.as_deref().unwrap_or_default(),
-                    reason = skipped.kind.as_metric_label(),
-                    detail = %skipped.detail,
+                    { safe::LANGUAGE_FAMILY } = skipped.family.as_deref(),
+                    { safe::REASON } = skipped.kind.as_metric_label(),
+                    { expanded::ADDITIONAL_DETAILS } = skipped.detail.as_str(),
                     "cross-file resolution stopped early during code indexing"
                 );
             } else {
                 debug!(
-                    project_id = request.project_id,
-                    branch = %request.branch,
-                    path = %skipped.path,
-                    reason = skipped.kind.as_metric_label(),
+                    { expanded::FILE_PATH } = skipped.path.as_str(),
+                    { safe::REASON } = skipped.kind.as_metric_label(),
                     "file skipped during code indexing"
                 );
             }
@@ -881,11 +883,9 @@ impl CodeIndexer {
                 limited.family.as_deref(),
             );
             warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                path = %limited.path,
-                reason = limited.kind.as_metric_label(),
-                detail = %limited.detail,
+                { expanded::FILE_PATH } = limited.path.as_str(),
+                { safe::REASON } = limited.kind.as_metric_label(),
+                { expanded::ADDITIONAL_DETAILS } = limited.detail.as_str(),
                 "file reached a limit during code indexing and was indexed in part"
             );
         }
@@ -896,9 +896,7 @@ impl CodeIndexer {
         }
         if !result.faults.is_empty() {
             warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                count = result.faults.len(),
+                { safe::FILE_COUNT } = result.faults.len(),
                 "files faulted during code indexing"
             );
             self.metrics
@@ -999,6 +997,7 @@ mod tests {
             store,
             cleaner,
             inflight,
+            span: tracing::Span::none(),
         })
     }
 

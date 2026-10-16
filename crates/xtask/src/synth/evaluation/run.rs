@@ -3,6 +3,7 @@ use crate::synth::clickhouse::check_clickhouse_health;
 use crate::synth::config::Config;
 use anyhow::Result;
 use ontology::Ontology;
+use orbit_log_fields::{expanded, safe};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -89,17 +90,20 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)))
         .init();
 
-    tracing::info!("Loading config from {:?}", config_path);
+    tracing::info!({ expanded::LOCAL_PATH } = %config_path.display(), "loading config");
     let config = Config::load(config_path)?;
     config.evaluation.validate()?;
 
     tracing::info!(
-        "Loading ontology from {:?}",
-        config.generation.ontology_path
+        { expanded::LOCAL_PATH } = %config.generation.ontology_path,
+        "loading ontology"
     );
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
 
-    tracing::info!("Loading queries from {:?}", config.evaluation.queries_path);
+    tracing::info!(
+        { expanded::LOCAL_PATH } = %config.evaluation.queries_path,
+        "loading queries"
+    );
     let mut queries = load_queries(config.evaluation.queries_path.as_ref())?;
 
     if let Some(pattern) = &config.evaluation.filter {
@@ -109,22 +113,22 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
                 || entry.desc.to_lowercase().contains(&pattern_lower)
         });
         tracing::info!(
-            "Filtered to {} queries matching '{}'",
-            queries.len(),
-            pattern
+            { safe::COUNT } = queries.len(),
+            { expanded::ADDITIONAL_DETAILS } = %pattern,
+            "filtered queries by pattern"
         );
     }
 
     if queries.is_empty() {
-        tracing::warn!("No queries to execute");
+        tracing::warn!("no queries to execute");
         return Ok(());
     }
 
-    tracing::info!("Loaded {} queries", queries.len());
+    tracing::info!({ safe::COUNT } = queries.len(), "loaded queries");
 
     tracing::info!(
-        "Checking ClickHouse connection at {}...",
-        config.clickhouse.url
+        { expanded::URL } = %config.clickhouse.url,
+        "checking ClickHouse connection"
     );
     let client = config.clickhouse.build_client();
     check_clickhouse_health(&client).await?;
@@ -138,24 +142,31 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
     );
 
     if !config.evaluation.skip_cache_warm {
-        tracing::info!("Warming parameter cache...");
+        tracing::info!("warming parameter cache");
         executor
             .warm_cache(&config.generation.namespace_entity)
             .await?;
 
         let stats = executor.cache_stats();
         for (entity, count) in &stats {
-            tracing::debug!("  {}: {} IDs sampled", entity, count);
+            tracing::debug!(
+                { safe::ENTITY } = entity.as_str(),
+                { safe::COUNT } = *count,
+                "sampled IDs"
+            );
         }
-        tracing::info!("Cache warmed: {} entity types", stats.len());
+        tracing::info!(
+            { safe::COUNT } = stats.len(),
+            "warmed parameter cache for entity types"
+        );
     }
 
     let concurrency = config.evaluation.concurrency;
     tracing::info!(
-        "Executing {} queries ({} iteration(s), concurrency={})...",
-        queries.len(),
-        config.evaluation.iterations,
-        concurrency
+        { safe::COUNT } = queries.len(),
+        { safe::ITERATION_COUNT } = config.evaluation.iterations,
+        { safe::CONCURRENCY } = concurrency,
+        "executing queries"
     );
 
     let mut run_metadata = RunMetadata::new(RunConfig {
@@ -170,9 +181,9 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
     for iteration in 0..config.evaluation.iterations {
         if config.evaluation.iterations > 1 {
             tracing::info!(
-                "Iteration {}/{}",
-                iteration + 1,
-                config.evaluation.iterations
+                { safe::ITERATION } = iteration + 1,
+                { safe::ITERATION_COUNT } = config.evaluation.iterations,
+                "starting iteration"
             );
         }
 
@@ -200,7 +211,7 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
 
     let wrote_to_file = if let Some(ref path) = config.evaluation.output.path {
         std::fs::write(path, &output)?;
-        tracing::info!("Report written to {:?}", path);
+        tracing::info!({ expanded::LOCAL_PATH } = %path, "report written");
         true
     } else {
         println!("{}", output);
@@ -222,16 +233,16 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
 fn log_result(result: &ExecutionResult) {
     if result.success {
         tracing::debug!(
-            "✓ {} - {} rows in {:.2}ms",
-            result.query_name,
-            result.row_count.unwrap_or(0),
-            result.execution_time.as_secs_f64() * 1000.0
+            { safe::QUERY_NAME } = result.query_name.as_str(),
+            { safe::ROW_COUNT } = result.row_count.unwrap_or(0),
+            { safe::DURATION_S } = result.execution_time.as_secs_f64(),
+            "query succeeded"
         );
     } else {
         tracing::warn!(
-            "✗ {} - {}",
-            result.query_name,
-            result.error.as_deref().unwrap_or("unknown error")
+            { safe::QUERY_NAME } = result.query_name.as_str(),
+            { expanded::ERROR_MESSAGE } = result.error.as_deref().unwrap_or("unknown error"),
+            "query failed"
         );
     }
 }

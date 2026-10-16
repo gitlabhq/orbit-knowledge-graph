@@ -52,3 +52,8 @@ query:
 
 health_check:
   bind_address: "127.0.0.1:4201"
+
+# Write every field on every log line. Local data only; never set this in production.
+metrics:
+  expanded_logs:
+    global_override: true

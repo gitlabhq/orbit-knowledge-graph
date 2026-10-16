@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use orbit_log_fields::{expanded, safe};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::ArrowClickHouseClient;
@@ -78,15 +79,26 @@ impl CodeStaleSweep {
         let attempted = pending.len().min(self.sweeps_per_tick);
         let mut failed = 0usize;
         for path in pending.iter().take(attempted) {
-            if let Err(error) = self.sweep_namespace(path).await {
+            let span = info_span!(
+                "code_stale_sweep_namespace",
+                { safe::GL_ROOT_NAMESPACE_ID } = path.top_level_namespace_id(),
+                { safe::TRAVERSAL_PATH } = path.as_str(),
+            );
+            let result = self.sweep_namespace(path).instrument(span.clone()).await;
+            if let Err(error) = result {
                 failed += 1;
-                warn!(%path, %error, "post-backfill stale sweep failed, retrying on a later tick");
+                span.in_scope(|| {
+                    warn!(
+                        { expanded::ERROR_MESSAGE } = %error,
+                        "post-backfill stale sweep failed, retrying on a later tick"
+                    )
+                });
             }
         }
         if pending.len() > self.sweeps_per_tick {
             info!(
-                pending = pending.len(),
-                cap = self.sweeps_per_tick,
+                { safe::COUNT } = pending.len(),
+                { safe::LIMIT } = self.sweeps_per_tick,
                 "post-backfill stale sweeps deferred to later ticks"
             );
         }
@@ -111,9 +123,8 @@ impl CodeStaleSweep {
                     TaskError::new(format!("stale sweep on {table} for {traversal_path}: {e}"))
                 })?;
             debug!(
-                table,
-                %traversal_path,
-                duration_ms = statement_start.elapsed().as_millis() as u64,
+                { safe::TABLE } = table.as_str(),
+                { safe::DURATION_S } = statement_start.elapsed().as_secs_f64(),
                 "stale sweep statement complete"
             );
         }
@@ -126,7 +137,7 @@ impl CodeStaleSweep {
             )
             .await
             .map_err(TaskError::new)?;
-        info!(%traversal_path, "post-backfill stale sweep complete");
+        info!("post-backfill stale sweep complete");
         Ok(())
     }
 }

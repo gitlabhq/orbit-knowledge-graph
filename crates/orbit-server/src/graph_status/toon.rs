@@ -1,3 +1,4 @@
+use orbit_log_fields::expanded;
 use serde::Serialize;
 use toon_format::{EncodeOptions, encode};
 use tracing::warn;
@@ -105,7 +106,10 @@ pub fn format_status_as_toon(status: &StructuredGraphStatus) -> String {
     };
 
     encode(&toon, &EncodeOptions::default()).unwrap_or_else(|e| {
-        warn!(error = %e, "Failed to encode graph status as TOON, falling back");
+        warn!(
+            { expanded::ERROR_MESSAGE } = %e,
+            "Failed to encode graph status as TOON, falling back"
+        );
         format!(
             "projects:{}/{}",
             status.projects.as_ref().map_or(0, |p| p.indexed),

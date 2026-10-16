@@ -1,3 +1,4 @@
+use orbit_log_fields::expanded;
 use std::path::{Path, PathBuf};
 
 use crate::utils::Range as SourceRange;
@@ -66,9 +67,11 @@ pub fn analyze_files(
     let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
     // an OXC invariant takes down that file's analysis, not the pipeline.
+    let span = tracing::Span::current();
     let results: Vec<_> = files
         .par_iter()
         .filter_map(|relative_path| {
+            let _entered = span.enter();
             if cancel.is_cancelled() || root_gone.load(std::sync::atomic::Ordering::Relaxed) {
                 return None;
             }
@@ -107,7 +110,7 @@ pub fn analyze_files(
             {
                 if !root_gone.swap(true, std::sync::atomic::Ordering::Relaxed) {
                     tracing::warn!(
-                        root_path,
+                        { expanded::LOCAL_PATH } = root_path,
                         "js: repository tree removed mid-analysis, dropping remaining files"
                     );
                 }

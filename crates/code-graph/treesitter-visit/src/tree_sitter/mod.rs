@@ -6,6 +6,7 @@ use crate::Language;
 use crate::node::{KindId, Position, Root};
 use crate::source::{Doc, SgNode};
 use cpu_time::ThreadTime;
+use orbit_log_fields::safe;
 use std::borrow::Cow;
 use std::num::NonZero;
 use std::time::Duration;
@@ -133,8 +134,9 @@ impl<L: LanguageExt> StrDoc<L> {
                     if offset == last_offset.load(Ordering::Relaxed) {
                         if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
                             tracing::warn!(
-                                "tree-sitter parse aborted: stalled at byte offset {offset} \
-                                 (>{max_stall} iterations without progress)"
+                                { safe::BYTE_OFFSET } = offset,
+                                { safe::LIMIT } = max_stall,
+                                "tree-sitter parse aborted: stalled without progress"
                             );
                             return ControlFlow::Break(());
                         }

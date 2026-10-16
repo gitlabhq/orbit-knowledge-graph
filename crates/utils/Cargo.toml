@@ -10,6 +10,7 @@ flate2 = { workspace = true }
 ignore = { workspace = true }
 lz4_flex = { workspace = true }
 memchr = { workspace = true }
+orbit-log-fields = { workspace = true }
 regex = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }

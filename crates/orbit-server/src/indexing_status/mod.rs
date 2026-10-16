@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::EtlScope;
 use ontology::pipelines::PipelineDescriptor;
+use orbit_log_fields::expanded;
 use orbit_utils::traversal_path::TraversalPath;
 use tracing::warn;
 
@@ -65,10 +66,20 @@ impl IndexingStatusService {
             projects::read_project_coverage(&self.client, &schema.ontology, scopes),
         );
         let checkpoints = checkpoints
-            .inspect_err(|error| warn!(%error, "Indexing status could not read plan checkpoints"))
+            .inspect_err(|error| {
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "Indexing status could not read plan checkpoints"
+                )
+            })
             .unwrap_or_default();
         let coverage = coverage
-            .inspect_err(|error| warn!(%error, "Indexing status could not read project coverage"))
+            .inspect_err(|error| {
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "Indexing status could not read project coverage"
+                )
+            })
             .ok();
 
         let now = Utc::now();

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
+use orbit_log_fields::{expanded, safe};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -94,7 +95,10 @@ impl MaxDeliveriesReconciler {
         let advisory: MaxDeliverAdvisory = match serde_json::from_slice(&message.payload) {
             Ok(advisory) => advisory,
             Err(error) => {
-                warn!(%error, "failed to decode max-deliveries advisory payload");
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to decode max-deliveries advisory payload"
+                );
                 return;
             }
         };
@@ -107,8 +111,8 @@ impl MaxDeliveriesReconciler {
             Ok(stream) => stream,
             Err(error) => {
                 warn!(
-                    stream = %advisory.stream,
-                    %error,
+                    { safe::NATS_STREAM } = advisory.stream.as_str(),
+                    { expanded::ERROR_MESSAGE } = %error,
                     "failed to look up stream for exhausted max-deliveries advisory"
                 );
                 return;
@@ -124,9 +128,9 @@ impl MaxDeliveriesReconciler {
             }
             Err(error) => {
                 warn!(
-                    stream = %advisory.stream,
-                    stream_seq = advisory.stream_seq,
-                    %error,
+                    { safe::NATS_STREAM } = advisory.stream.as_str(),
+                    { safe::NATS_STREAM_SEQUENCE } = advisory.stream_seq,
+                    { expanded::ERROR_MESSAGE } = %error,
                     "failed to fetch exhausted message for logging; proceeding with deletion"
                 );
                 None
@@ -138,10 +142,11 @@ impl MaxDeliveriesReconciler {
                 self.metrics
                     .record_exhaustion(&advisory.stream, &advisory.consumer);
                 warn!(
-                    stream = %advisory.stream,
-                    consumer = %advisory.consumer,
-                    subject = ?subject,
-                    deliveries = advisory.deliveries,
+                    { safe::NATS_STREAM } = advisory.stream.as_str(),
+                    { safe::NATS_CONSUMER } = advisory.consumer.as_str(),
+                    { safe::NATS_STREAM_SEQUENCE } = advisory.stream_seq,
+                    { expanded::NATS_SUBJECT } = subject.as_deref(),
+                    { safe::NATS_DELIVERY_COUNT } = advisory.deliveries,
                     "deleted permanently stuck message after max_deliver exhaustion"
                 );
             }
@@ -153,9 +158,9 @@ impl MaxDeliveriesReconciler {
                 }
                 _ => {
                     warn!(
-                        stream = %advisory.stream,
-                        stream_seq = advisory.stream_seq,
-                        %error,
+                        { safe::NATS_STREAM } = advisory.stream.as_str(),
+                        { safe::NATS_STREAM_SEQUENCE } = advisory.stream_seq,
+                        { expanded::ERROR_MESSAGE } = %error,
                         "failed to delete exhausted message"
                     );
                 }
@@ -185,7 +190,10 @@ impl Trigger for MaxDeliveriesReconciler {
             {
                 Ok(subscription) => subscription,
                 Err(error) => {
-                    warn!(%error, "failed to subscribe to max-deliveries advisories, retrying");
+                    warn!(
+                        { expanded::ERROR_MESSAGE } = %error,
+                        "failed to subscribe to max-deliveries advisories, retrying"
+                    );
                     tokio::select! {
                         () = cancel.cancelled() => break,
                         () = tokio::time::sleep(RESUBSCRIBE_BACKOFF) => continue,

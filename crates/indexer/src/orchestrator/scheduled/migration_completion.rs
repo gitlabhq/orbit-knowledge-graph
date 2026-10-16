@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use orbit_arrow::ArrowUtils;
+use orbit_log_fields::{expanded, safe};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use orbit_migrations::version::{
@@ -131,7 +132,7 @@ impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
         self.check_completion().await?;
         if let Err(error) = self.catalog.sync_active_version(&self.graph).await {
-            warn!(%error, "active version mirror skipped this tick");
+            warn!({ expanded::ERROR_MESSAGE } = %error, "active version mirror skipped this tick");
         }
         self.reconcile_dead_versions().await?;
         Ok(())
@@ -156,7 +157,7 @@ impl MigrationCompletionChecker {
         }
 
         info!(
-            version = migrating_version,
+            { safe::MIGRATING_SCHEMA_VERSION } = migrating_version,
             "checking migration completion for migrating version"
         );
 
@@ -169,7 +170,7 @@ impl MigrationCompletionChecker {
 
         if !complete {
             info!(
-                version = migrating_version,
+                { safe::MIGRATING_SCHEMA_VERSION } = migrating_version,
                 "migration not yet complete — namespaces still being indexed"
             );
             return Ok(());
@@ -209,16 +210,17 @@ impl MigrationCompletionChecker {
         })?;
 
         info!(
-            version = migrating_version,
+            { safe::MIGRATING_SCHEMA_VERSION } = migrating_version,
             "marking migrating version as active — schema migration complete"
         );
         let retired_versions = promote_version(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
+        let retired: Vec<String> = retired_versions.iter().map(u32::to_string).collect();
         info!(
-            version = migrating_version,
-            ?retired_versions,
+            { safe::MIGRATING_SCHEMA_VERSION } = migrating_version,
+            { safe::RETIRED_SCHEMA_VERSIONS } = retired.join(","),
             "promoted schema version, retired previously active versions"
         );
 
@@ -230,7 +232,11 @@ impl MigrationCompletionChecker {
             )
             .await
             {
-                warn!(version, %error, "failed to drop refreshable views for retired schema");
+                warn!(
+                    { safe::SCHEMA_VERSION } = version,
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to drop refreshable views for retired schema"
+                );
             }
         }
         self.campaign.clear();
@@ -238,8 +244,8 @@ impl MigrationCompletionChecker {
         self.metrics.record_migration_completed();
 
         info!(
-            version = migrating_version,
-            "schema migration to v{migrating_version} complete"
+            { safe::MIGRATING_SCHEMA_VERSION } = migrating_version,
+            "schema migration complete"
         );
 
         Ok(())
@@ -261,7 +267,11 @@ impl MigrationCompletionChecker {
         {
             Ok(coverage) => Some(coverage),
             Err(error) => {
-                warn!(version, %error, "code coverage telemetry unavailable this tick");
+                warn!(
+                    { safe::MIGRATING_SCHEMA_VERSION } = version,
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "code coverage telemetry unavailable this tick"
+                );
                 None
             }
         };
@@ -278,13 +288,13 @@ impl MigrationCompletionChecker {
         .map_err(|error| format!("check SDLC reindex progress: {error}"))?;
 
         info!(
-            version,
-            sdlc_indexed_namespaces = sdlc_progress.completed_namespaces,
-            enabled_namespaces = enabled_count,
-            code_indexed_projects = code_coverage.map(|(_, indexed, _)| indexed),
-            code_eligible_projects = code_coverage.map(|(eligible, _, _)| eligible),
-            code_coverage = code_coverage.map(|(_, _, ratio)| ratio),
-            migration_scope = %scope,
+            { safe::MIGRATING_SCHEMA_VERSION } = version,
+            { safe::SDLC_INDEXED_NAMESPACE_COUNT } = sdlc_progress.completed_namespaces,
+            { safe::ENABLED_NAMESPACE_COUNT } = enabled_count,
+            { safe::CODE_INDEXED_PROJECT_COUNT } = code_coverage.map(|(_, indexed, _)| indexed),
+            { safe::CODE_ELIGIBLE_PROJECT_COUNT } = code_coverage.map(|(eligible, _, _)| eligible),
+            { safe::CODE_COVERAGE_RATIO } = code_coverage.map(|(_, _, ratio)| ratio),
+            { safe::MIGRATION_SCOPE } = scope.as_str(),
             "migration completion status"
         );
 
@@ -432,14 +442,22 @@ impl MigrationCompletionChecker {
             .await
             {
                 let e = e.to_string();
-                warn!(version, error = %e, "GC: NATS cleanup failed, skipping mark_version_dropped");
+                warn!(
+                    { safe::SCHEMA_VERSION } = version,
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "GC: NATS cleanup failed, skipping mark_version_dropped"
+                );
                 self.metrics.record_cleanup(version, current, "failure");
                 continue;
             }
             if let Err(e) =
                 orbit_migrations::version::mark_version_dropped(&self.graph, version).await
             {
-                warn!(version, error = %e, "GC: failed to mark dropped");
+                warn!(
+                    { safe::SCHEMA_VERSION } = version,
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "GC: failed to mark dropped"
+                );
             }
             self.metrics.record_cleanup(version, current, "success");
         }

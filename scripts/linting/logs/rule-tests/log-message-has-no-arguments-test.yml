@@ -1,0 +1,11 @@
+id: log-message-has-no-arguments
+valid:
+  - 'info!("done");'
+  - 'info!("done",);'
+  - 'info!({ safe::COUNT } = n, "done");'
+  - 'info_span!("index_project", { safe::GL_PROJECT_ID } = id);'
+  - 'tracing::event!(Level::INFO, "done");'
+invalid:
+  - 'info!("done {}", n);'
+  - 'tracing::warn!("failed: {e}", e = err);'
+  - 'error!(target: "x", "failed {}", err);'

@@ -2,6 +2,7 @@ use super::manifest::{ManifestCache, build_project_workspace};
 use super::sysroot::EmbeddedSysroot;
 use super::*;
 use crate::v2::pipeline::FileInput;
+use orbit_log_fields::expanded;
 
 #[derive(Clone)]
 pub(super) struct WorkspaceIndex {
@@ -150,8 +151,8 @@ impl WorkspacePlan {
                 }
                 Err(err) => {
                     tracing::warn!(
-                        manifest = %workspace_manifest_path.display(),
-                        error = %err,
+                        { expanded::MANIFEST_PATH } = %workspace_manifest_path.display(),
+                        { expanded::ERROR_MESSAGE } = %err,
                         "failed to plan rust-analyzer workspace; continuing with others"
                     );
                     last_error = Some(err);

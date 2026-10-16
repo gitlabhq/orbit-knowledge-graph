@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use gitlab_client::{GitlabClient, MergeRequestDiffFileEntry};
 use orbit_arrow::ColumnValue;
+use orbit_log_fields::{expanded, safe};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 use tracing::warn;
@@ -163,9 +164,10 @@ async fn fetch_mr_raw_diff(client: &GitlabClient, key: &MrKey) -> Option<String>
         .await
         .map_err(|e| {
             warn!(
-                project_id = key.project_id,
-                iid = key.iid,
-                error = %e,
+                { safe::GL_PROJECT_ID } = key.project_id,
+                { safe::IID } = key.iid,
+                { expanded::ERROR_MESSAGE } = %e,
+                { safe::ERROR_TYPE } = <&str>::from(&e),
                 "get_merge_request_raw_diff_by_iid failed; diff will be None"
             );
         })
@@ -177,9 +179,9 @@ async fn fetch_mr_raw_diff(client: &GitlabClient, key: &MrKey) -> Option<String>
             Ok(b) => b,
             Err(e) => {
                 warn!(
-                    project_id = key.project_id,
-                    iid = key.iid,
-                    error = %e,
+                    { safe::GL_PROJECT_ID } = key.project_id,
+                    { safe::IID } = key.iid,
+                    { expanded::ERROR_MESSAGE } = %e,
                     "mr_raw_diff stream error; diff will be None"
                 );
                 return None;
@@ -187,9 +189,9 @@ async fn fetch_mr_raw_diff(client: &GitlabClient, key: &MrKey) -> Option<String>
         };
         if bytes.len().saturating_add(chunk.len()) > MAX_RAW_DIFF_BYTES {
             warn!(
-                project_id = key.project_id,
-                iid = key.iid,
-                cap = MAX_RAW_DIFF_BYTES,
+                { safe::GL_PROJECT_ID } = key.project_id,
+                { safe::IID } = key.iid,
+                { safe::LIMIT_BYTES } = MAX_RAW_DIFF_BYTES,
                 "mr_raw_diff exceeds size cap; diff will be None"
             );
             return None;
@@ -200,8 +202,8 @@ async fn fetch_mr_raw_diff(client: &GitlabClient, key: &MrKey) -> Option<String>
     String::from_utf8(bytes)
         .map_err(|_| {
             warn!(
-                project_id = key.project_id,
-                iid = key.iid,
+                { safe::GL_PROJECT_ID } = key.project_id,
+                { safe::IID } = key.iid,
                 "mr_raw_diff is not valid UTF-8; diff will be None"
             );
         })
@@ -216,9 +218,10 @@ async fn fetch_raw_diff(client: &GitlabClient, key: &DiffKey) -> Option<String> 
         .await
         .map_err(|e| {
             warn!(
-                project_id = key.project_id,
-                diff_id = key.diff_id,
-                error = %e,
+                { safe::GL_PROJECT_ID } = key.project_id,
+                { safe::DIFF_ID } = key.diff_id,
+                { expanded::ERROR_MESSAGE } = %e,
+                { safe::ERROR_TYPE } = <&str>::from(&e),
                 "get_merge_request_raw_diff failed; diff will be None"
             );
         })
@@ -230,9 +233,9 @@ async fn fetch_raw_diff(client: &GitlabClient, key: &DiffKey) -> Option<String> 
             Ok(b) => b,
             Err(e) => {
                 warn!(
-                    project_id = key.project_id,
-                    diff_id = key.diff_id,
-                    error = %e,
+                    { safe::GL_PROJECT_ID } = key.project_id,
+                    { safe::DIFF_ID } = key.diff_id,
+                    { expanded::ERROR_MESSAGE } = %e,
                     "raw_diff stream error; diff will be None"
                 );
                 return None;
@@ -240,9 +243,9 @@ async fn fetch_raw_diff(client: &GitlabClient, key: &DiffKey) -> Option<String> 
         };
         if bytes.len().saturating_add(chunk.len()) > MAX_RAW_DIFF_BYTES {
             warn!(
-                project_id = key.project_id,
-                diff_id = key.diff_id,
-                cap = MAX_RAW_DIFF_BYTES,
+                { safe::GL_PROJECT_ID } = key.project_id,
+                { safe::DIFF_ID } = key.diff_id,
+                { safe::LIMIT_BYTES } = MAX_RAW_DIFF_BYTES,
                 "raw_diff exceeds size cap; diff will be None"
             );
             return None;
@@ -253,8 +256,8 @@ async fn fetch_raw_diff(client: &GitlabClient, key: &DiffKey) -> Option<String> 
     String::from_utf8(bytes)
         .map_err(|_| {
             warn!(
-                project_id = key.project_id,
-                diff_id = key.diff_id,
+                { safe::GL_PROJECT_ID } = key.project_id,
+                { safe::DIFF_ID } = key.diff_id,
                 "raw_diff is not valid UTF-8; diff will be None"
             );
         })
@@ -404,9 +407,10 @@ async fn fetch_diff_files(
         })
         .map_err(|e| {
             warn!(
-                project_id,
-                diff_id,
-                error = %e,
+                { safe::GL_PROJECT_ID } = project_id,
+                { safe::DIFF_ID } = diff_id,
+                { expanded::ERROR_MESSAGE } = %e,
+                { safe::ERROR_TYPE } = <&str>::from(&e),
                 "list_merge_request_diff_files failed; rows will be None"
             );
         })

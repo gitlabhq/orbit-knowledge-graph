@@ -5,6 +5,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::Utc;
 use ontology::{EdgeMapping, NodeRef, NodeRefKind, Ontology};
+use orbit_log_fields::{expanded, safe};
 use tracing::{info, warn};
 
 use crate::checkpoint::{CheckpointStore, NAMESPACE_KEY_PREFIX, namespace_id_from_key};
@@ -50,8 +51,8 @@ impl StaleEdgeReconciliation {
             .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
             .collect();
         info!(
-            groups = groups.len(),
-            ?kinds,
+            { safe::ENTITY_COUNT } = groups.len(),
+            { safe::RELATIONSHIP_KINDS } = kinds.join(","),
             "stale-edge reconciliation groups resolved",
         );
         Self {
@@ -94,12 +95,12 @@ impl StaleEdgeReconciliation {
         let mut failed = 0u64;
         for group in &self.groups {
             info!(
-                emitting_node = group.emitting_node,
-                emitting_node_table = group.emitting_node_table,
-                edge_table = group.edge_table,
-                kinds = ?group.relationship_kinds,
-                cursor = cursor,
-                pending_namespaces = pending.len(),
+                { safe::ENTITY } = group.emitting_node.as_str(),
+                { safe::SOURCE_TABLE } = group.emitting_node_table.as_str(),
+                { safe::TABLE } = group.edge_table.as_str(),
+                { safe::RELATIONSHIP_KINDS } = group.relationship_kinds.join(","),
+                { safe::WATERMARK } = cursor.as_str(),
+                { safe::NAMESPACE_COUNT } = pending.len(),
                 "reconcile started",
             );
             let statement_start = Instant::now();
@@ -112,10 +113,10 @@ impl StaleEdgeReconciliation {
                         elapsed.as_secs_f64(),
                     );
                     info!(
-                        emitting_node = group.emitting_node,
-                        edge_table = group.edge_table,
-                        duration_ms = elapsed.as_millis() as u64,
-                        outcome = "success",
+                        { safe::ENTITY } = group.emitting_node.as_str(),
+                        { safe::TABLE } = group.edge_table.as_str(),
+                        { safe::DURATION_S } = elapsed.as_secs_f64(),
+                        { safe::OUTCOME } = "success",
                         "reconcile completed",
                     );
                 }
@@ -123,11 +124,11 @@ impl StaleEdgeReconciliation {
                     failed += 1;
                     self.metrics.record_error(self.name(), "reconcile");
                     warn!(
-                        emitting_node = group.emitting_node,
-                        edge_table = group.edge_table,
-                        duration_ms = elapsed.as_millis() as u64,
-                        outcome = "error",
-                        %error,
+                        { safe::ENTITY } = group.emitting_node.as_str(),
+                        { safe::TABLE } = group.edge_table.as_str(),
+                        { safe::DURATION_S } = elapsed.as_secs_f64(),
+                        { safe::OUTCOME } = "error",
+                        { expanded::ERROR_MESSAGE } = %error,
                         "reconcile completed",
                     );
                 }

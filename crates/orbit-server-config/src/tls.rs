@@ -8,6 +8,7 @@
 //! inherit that identity or name their own, so an external-facing certificate
 //! and an internal one can be rotated on different cycles.
 
+use orbit_log_fields::safe;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -74,9 +75,9 @@ impl TlsConfig {
         if !listener.enabled {
             if own.is_some() {
                 tracing::warn!(
-                    group,
-                    "tls.{group} names a certificate but tls.{group}.enabled is false, so the \
-                     listener stays plaintext"
+                    { safe::LISTENER_GROUP } = group,
+                    "TLS listener group names a certificate but is not enabled, so the listener \
+                     stays plaintext"
                 );
             }
             return Ok(None);

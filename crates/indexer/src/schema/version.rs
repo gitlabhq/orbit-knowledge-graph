@@ -3,6 +3,7 @@ pub use orbit_migrations::version::*;
 
 use std::time::Duration;
 
+use orbit_log_fields::{expanded, safe};
 use thiserror::Error;
 use tokio::time::Instant;
 use tracing::{info, warn};
@@ -69,8 +70,8 @@ pub async fn wait_until_ready(
     poll_interval: Duration,
 ) -> Result<(), SchemaWaitError> {
     info!(
-        target_version,
-        timeout_secs = timeout.as_secs(),
+        { safe::SCHEMA_VERSION } = target_version,
+        { safe::TIMEOUT_S } = timeout.as_secs_f64(),
         "waiting for schema version to become ready"
     );
 
@@ -89,17 +90,26 @@ pub async fn wait_until_ready(
         (None, None),
         |_carried, _attempt| async move {
             let active = read_active_version(graph).await.unwrap_or_else(|error| {
-                warn!(%error, "failed to read active schema version — retrying");
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to read active schema version — retrying"
+                );
                 None
             });
             let migrating = read_migrating_version(graph).await.unwrap_or_else(|error| {
-                warn!(%error, "failed to read migrating schema version — retrying");
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to read migrating schema version — retrying"
+                );
                 None
             });
 
             match classify_readiness(active, migrating, target_version) {
                 SchemaReadiness::Ready => {
-                    info!(target_version, "schema version is ready — proceeding");
+                    info!(
+                        { safe::SCHEMA_VERSION } = target_version,
+                        "schema version is ready — proceeding"
+                    );
                     Step::Done(())
                 }
                 SchemaReadiness::Outdated { active } => Step::GiveUp(SchemaWaitError::Outdated {
@@ -108,9 +118,9 @@ pub async fn wait_until_ready(
                 }),
                 SchemaReadiness::Pending => {
                     info!(
-                        target_version,
-                        active_version = ?active,
-                        migrating_version = ?migrating,
+                        { safe::SCHEMA_VERSION } = target_version,
+                        { safe::ACTIVE_SCHEMA_VERSION } = active,
+                        { safe::MIGRATING_SCHEMA_VERSION } = migrating,
                         "schema version not ready yet — dispatcher has not prepared it"
                     );
                     Step::Retry((active, migrating))

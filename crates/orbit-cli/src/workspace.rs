@@ -6,6 +6,7 @@ use crate::database::{GraphReader, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
+use orbit_log_fields::expanded;
 
 pub struct Workspace {
     root: PathBuf,
@@ -371,8 +372,11 @@ fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
     if let Err(e) = ws.index_repositories() {
-        let path = workspace_path.display();
-        tracing::warn!("repository discovery failed in {path}: {e}");
+        tracing::warn!(
+            { expanded::LOCAL_PATH } = %workspace_path.display(),
+            { expanded::ERROR_MESSAGE } = %e,
+            "repository discovery failed"
+        );
         return vec![];
     }
     ws.get_repositories()

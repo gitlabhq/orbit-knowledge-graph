@@ -6,6 +6,7 @@
 //! `JsCrossFileResolver`, tsconfig discovery, the webpack evaluator, and
 //! `is_bun` detection.
 
+use orbit_log_fields::expanded;
 use oxc_resolver::{TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
 use std::path::{Path, PathBuf};
 
@@ -38,7 +39,7 @@ impl WorkspaceProbe {
         // check on a coincidental prefix match.
         let Ok(root_dir) = std::fs::canonicalize(root_dir) else {
             tracing::warn!(
-                root_dir = %root_dir.display(),
+                { expanded::LOCAL_PATH } = %root_dir.display(),
                 "js: failed to canonicalize root_dir, disabling workspace probe"
             );
             return Self {

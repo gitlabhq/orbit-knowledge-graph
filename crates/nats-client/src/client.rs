@@ -9,6 +9,7 @@ use async_nats::jetstream::kv::{
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
+use orbit_log_fields::safe;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -145,7 +146,11 @@ impl NatsClient {
             }
         })?;
 
-        info!(stream = %stream_name, ?subjects, "stream created or updated");
+        info!(
+            { safe::NATS_STREAM } = stream_name,
+            { safe::NATS_SUBSCRIPTIONS } = subjects.join(","),
+            "stream created or updated"
+        );
 
         let mut cache = self.streams.write().await;
         cache.insert(stream_name.to_string(), stream.clone());
@@ -187,7 +192,7 @@ impl NatsClient {
             .insert(bucket.to_string(), config.clone());
 
         let store = self.create_or_update_kv_bucket(bucket, &config).await?;
-        info!(bucket, "KV bucket ready");
+        info!({ safe::NATS_KV_BUCKET } = bucket, "KV bucket ready");
 
         self.kv_stores
             .write()

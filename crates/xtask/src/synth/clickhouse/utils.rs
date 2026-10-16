@@ -1,12 +1,16 @@
 use anyhow::{Result, bail};
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::safe;
 
 pub async fn check_clickhouse_health(client: &ArrowClickHouseClient) -> Result<()> {
     let result: Result<String, _> = client.inner().query("SELECT version()").fetch_one().await;
 
     match result {
         Ok(version) => {
-            tracing::debug!("ClickHouse version: {}", version);
+            tracing::debug!(
+                { safe::CLICKHOUSE_VERSION } = version.as_str(),
+                "ClickHouse version"
+            );
             Ok(())
         }
         Err(e) => {

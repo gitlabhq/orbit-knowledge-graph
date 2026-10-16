@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use orbit_log_fields::{expanded, safe};
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::{error, info, warn};
@@ -29,11 +30,19 @@ impl RedactionExchangeError {
             Self::ReceiveFailed(s) => s,
             Self::InvalidMessage(msg) => Status::invalid_argument(msg),
             Self::ResultIdMismatch { expected, received } => {
-                warn!(expected = %expected, received = %received, "result_id mismatch");
+                warn!(
+                    { safe::RESULT_ID } = expected.as_str(),
+                    { expanded::RECEIVED_RESULT_ID } = received.as_str(),
+                    "result_id mismatch"
+                );
                 Status::invalid_argument("result_id mismatch in redaction response")
             }
             Self::ClientError { code, message } => {
-                warn!(code = %code, message = %message, "Client sent error");
+                warn!(
+                    { expanded::CLIENT_ERROR_CODE } = code.as_str(),
+                    { expanded::ERROR_MESSAGE } = message.as_str(),
+                    "Client sent error"
+                );
                 Status::aborted(format!("{}: {}", code, message))
             }
         }
@@ -95,9 +104,9 @@ impl RedactionService {
             .collect();
 
         info!(
-            result_id = %result_id,
-            resource_count = proto_resources.len(),
-            "Requesting redaction authorization"
+            { safe::RESULT_ID } = result_id.as_str(),
+            { safe::COUNT } = proto_resources.len(),
+            "Requesting redaction authorization for resources"
         );
 
         let redaction_required = RedactionExchange {
@@ -112,7 +121,7 @@ impl RedactionService {
         let redaction_msg = match stream.next().await {
             Some(Ok(msg)) => msg,
             Some(Err(e)) => {
-                error!(error = %e, "Failed to receive redaction response");
+                error!({ expanded::ERROR_MESSAGE } = %e, "Failed to receive redaction response");
                 return Err(RedactionExchangeError::ReceiveFailed(e));
             }
             None => {

@@ -13,6 +13,7 @@ use code_graph::v2::{
     SilentProgress,
 };
 use ontology::Ontology;
+use orbit_log_fields::{expanded, safe};
 use serde::Serialize;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -338,7 +339,11 @@ struct LogReporter;
 
 impl IndexReporter for LogReporter {
     fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error) {
-        tracing::error!("failed to index {}: {error:#}", repo_path.display());
+        tracing::error!(
+            { expanded::LOCAL_PATH } = %repo_path.display(),
+            { expanded::ERROR_MESSAGE } = %format_args!("{error:#}"),
+            "failed to index repository"
+        );
     }
 }
 
@@ -573,9 +578,10 @@ impl LocalIndexer {
         let writer = Arc::new(std::sync::Mutex::new(GraphWriter::open(&db_path, &git)?));
         let key = git.repo_path.to_string_lossy().to_string();
         info!(
-            "Indexing repository at: {key} (branch: {}, commit: {})",
-            git.branch,
-            git.short_sha()
+            { expanded::LOCAL_PATH } = %key,
+            { expanded::BRANCH } = %git.branch,
+            { safe::COMMIT_SHA } = git.commit_sha.as_str(),
+            "indexing repository"
         );
         manifest::record_status(
             &self.manifest_path,
@@ -597,7 +603,10 @@ impl LocalIndexer {
                     &db_path,
                 );
                 if let Err(manifest_error) = recorded {
-                    tracing::warn!("failed to record error status in manifest: {manifest_error}");
+                    tracing::warn!(
+                        { expanded::ERROR_MESSAGE } = %manifest_error,
+                        "failed to record error status in manifest"
+                    );
                 }
             })?;
         manifest::record_status(
@@ -685,7 +694,12 @@ fn index_repo(
     }
 
     for err in &v2_result.errors {
-        tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
+        tracing::warn!(
+            { safe::PHASE } = err.stage,
+            { expanded::ERROR_MESSAGE } = %err.error,
+            { expanded::FILE_PATH } = %err.file_path,
+            "pipeline error"
+        );
     }
     if let Some(reason) = fatal_pipeline_reason(&v2_result.errors) {
         anyhow::bail!(reason);

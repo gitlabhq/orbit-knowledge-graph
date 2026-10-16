@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use labkit::tls::ServerTls;
+use orbit_log_fields::safe;
 use tracing::info;
 
 use crate::checker::HealthChecker;
@@ -44,7 +45,11 @@ pub async fn run_server(
     let listener = TcpListener::bind(bind_address)
         .map_err(|e| Error::Config(format!("Failed to bind to {}: {}", bind_address, e)))?;
 
-    info!(%bind_address, tls = tls.is_some(), "Health check server listening");
+    info!(
+        { safe::TCP_ADDRESS } = bind_address.to_string().as_str(),
+        { safe::TLS_ENABLED } = tls.is_some(),
+        "Health check server listening"
+    );
 
     labkit::server::serve(listener, app, tls)
         .await

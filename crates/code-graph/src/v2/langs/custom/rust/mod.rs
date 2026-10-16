@@ -1,3 +1,4 @@
+use orbit_log_fields::{expanded, safe};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -91,12 +92,16 @@ fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
     {
         let waited = Instant::now();
         let exclusive = TY_INTERNER_GC.try_write_for(FORCE_TY_GC_MAX_WAIT);
-        let waited_ms = waited.elapsed().as_millis() as u64;
+        let waited_s = waited.elapsed().as_secs_f64();
         let swept = exclusive.is_some_and(|exclusive| {
             collect_ty_garbage(exclusive);
             true
         });
-        tracing::info!(waited_ms, swept, "rust-analyzer type interner sweep forced");
+        tracing::info!(
+            { safe::DURATION_S } = waited_s,
+            { safe::OUTCOME } = if swept { "swept" } else { "lock_timeout" },
+            "rust-analyzer type interner sweep forced"
+        );
     }
     TY_INTERNER_GC.read()
 }
@@ -116,11 +121,11 @@ fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
     let started = Instant::now();
     match std::panic::catch_unwind(|| AnalysisHost::new(None).trigger_garbage_collection()) {
         Ok(()) => tracing::debug!(
-            sweep_ms = started.elapsed().as_millis() as u64,
+            { safe::DURATION_S } = started.elapsed().as_secs_f64(),
             "rust-analyzer type interner swept"
         ),
         Err(payload) => tracing::warn!(
-            error = %rust_panic_message(&payload),
+            { expanded::ERROR_MESSAGE } = rust_panic_message(&payload),
             "rust-analyzer type interner sweep panicked"
         ),
     }
@@ -208,7 +213,7 @@ impl LanguagePipeline for RustPipeline {
             Ok(Ok(plan)) => Some(plan),
             Ok(Err(err)) => {
                 tracing::debug!(
-                    error = %err,
+                    { expanded::ERROR_MESSAGE } = %err,
                     "rust v2 workspace load failed; falling back to standalone parsing"
                 );
                 None
@@ -216,7 +221,7 @@ impl LanguagePipeline for RustPipeline {
             Err(err) => {
                 let message = rust_panic_message(&err);
                 tracing::warn!(
-                    error = %message,
+                    { expanded::ERROR_MESSAGE } = message,
                     "rust v2 workspace load panicked; falling back to standalone parsing"
                 );
                 None
@@ -239,11 +244,21 @@ impl LanguagePipeline for RustPipeline {
         for (path, error) in &output.errors {
             match error {
                 AnalyzerError::Skip { kind, detail } => {
-                    tracing::warn!(path, kind = %kind, %detail, "rust: skipped file");
+                    tracing::warn!(
+                        { expanded::FILE_PATH } = path,
+                        { safe::REASON } = kind.as_metric_label(),
+                        { expanded::ADDITIONAL_DETAILS } = detail,
+                        "rust: skipped file"
+                    );
                     ctx.record_skip(path.clone(), *kind, detail.clone());
                 }
                 AnalyzerError::Fault { kind, detail } => {
-                    tracing::warn!(path, kind = %kind, %detail, "rust: faulted file");
+                    tracing::warn!(
+                        { expanded::FILE_PATH } = path,
+                        { safe::REASON } = kind.as_metric_label(),
+                        { expanded::ADDITIONAL_DETAILS } = detail,
+                        "rust: faulted file"
+                    );
                     ctx.record_fault(path.clone(), *kind, detail.clone());
                 }
             }
@@ -384,6 +399,7 @@ fn parse_rust_files_with_workspaces(
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     let mut claimed = vec![false; files.len()];
+    let span = tracing::Span::current();
 
     for workspace_id in 0..plan.len() {
         if cancel.is_cancelled() {
@@ -404,16 +420,16 @@ fn parse_rust_files_with_workspaces(
             Ok(Ok(workspace)) => workspace,
             Ok(Err(err)) => {
                 tracing::warn!(
-                    manifest = %plan.manifest_path(workspace_id).display(),
-                    error = %err,
+                    { expanded::MANIFEST_PATH } = %plan.manifest_path(workspace_id).display(),
+                    { expanded::ERROR_MESSAGE } = %err,
                     "failed to load rust-analyzer workspace; continuing with others"
                 );
                 continue;
             }
             Err(payload) => {
                 tracing::warn!(
-                    manifest = %plan.manifest_path(workspace_id).display(),
-                    error = %rust_panic_message(&payload),
+                    { expanded::MANIFEST_PATH } = %plan.manifest_path(workspace_id).display(),
+                    { expanded::ERROR_MESSAGE } = rust_panic_message(&payload),
                     "rust-analyzer workspace load panicked; continuing with others"
                 );
                 continue;
@@ -432,6 +448,7 @@ fn parse_rust_files_with_workspaces(
         let workspace_results = workspace_files
             .par_iter()
             .map_with(workspace.clone(), |workspace, file| {
+                let _entered = span.enter();
                 if cancel.is_cancelled() {
                     return None;
                 }
@@ -479,6 +496,7 @@ fn parse_rust_files_with_workspaces(
     let standalone_results = standalone
         .par_iter()
         .filter_map(|file_path| {
+            let _entered = span.enter();
             if cancel.is_cancelled() {
                 return None;
             }
@@ -522,9 +540,11 @@ fn parse_rust_files_standalone(
     cancel: &CancellationToken,
     progress: &dyn ProgressObserver,
 ) -> RustParseOutput {
+    let span = tracing::Span::current();
     let results = files
         .par_iter()
         .filter_map(|file_path| {
+            let _entered = span.enter();
             if cancel.is_cancelled() {
                 return None;
             }
@@ -1125,8 +1145,8 @@ impl<'a> ResolvedEdgeCollector<'a> {
             for node in expanded.value.descendants() {
                 if self.expanded_macro_nodes >= MAX_EXPANDED_MACRO_NODES {
                     tracing::debug!(
-                        file = self.relative_path,
-                        max_nodes = MAX_EXPANDED_MACRO_NODES,
+                        { expanded::FILE_PATH } = self.relative_path,
+                        { safe::LIMIT } = MAX_EXPANDED_MACRO_NODES,
                         "rust macro expansion budget exhausted"
                     );
                     break;

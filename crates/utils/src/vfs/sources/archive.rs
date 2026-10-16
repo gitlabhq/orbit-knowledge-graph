@@ -2,6 +2,7 @@
 //! Entry paths are validated before stripping the archive root. Hard links name archive entries;
 //! symlink targets stay virtual. Malformed streams fail rather than returning partial contents.
 
+use orbit_log_fields::expanded;
 use std::io::Read;
 use std::sync::Arc;
 
@@ -25,7 +26,10 @@ impl<R: Read> Source for Archive<R> {
             let mut entry = match entry {
                 Ok(entry) => entry,
                 Err(e) if !any_entry_seen && e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    warn!(error = %e, "archive stream truncated before first entry; treating as empty");
+                    warn!(
+                        { expanded::ERROR_MESSAGE } = %e,
+                        "archive stream truncated before first entry; treating as empty"
+                    );
                     return Err(SourceError::Empty);
                 }
                 Err(e) => return Err(SourceError::Io(e)),
@@ -144,7 +148,10 @@ fn relative_path<'a>(
         return Ok(None);
     };
     if first.as_str() != root.get_or_insert_with(|| first.as_str().to_owned()) {
-        warn!(entry = %path, "skipping archive entry outside the archive root");
+        warn!(
+            { expanded::FILE_PATH } = %path,
+            "skipping archive entry outside the archive root"
+        );
         return Ok(None);
     }
     Ok(Some(components.as_str()))

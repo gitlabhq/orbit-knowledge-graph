@@ -2,6 +2,7 @@
 //! validation, path-traversal prevention). Security-critical: review
 //! carefully before modification.
 
+use orbit_log_fields::{expanded, safe};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -16,6 +17,15 @@ pub struct RemovedSymlink {
 pub enum RemovedSymlinkReason {
     EscapesRoot,
     Dangling,
+}
+
+impl RemovedSymlinkReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EscapesRoot => "escapes_root",
+            Self::Dangling => "dangling",
+        }
+    }
 }
 
 /// Canonicalize `path` and return it only if the real target lives
@@ -143,9 +153,9 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
                 match check_symlink(&path, root) {
                     Ok(Some(removed)) => {
                         tracing::warn!(
-                            relative_path = %removed.relative_path.display(),
-                            target = %removed.target.display(),
-                            reason = ?removed.reason,
+                            { expanded::FILE_PATH } = %removed.relative_path.display(),
+                            { expanded::SYMLINK_TARGET } = %removed.target.display(),
+                            { safe::REASON } = removed.reason.as_str(),
                             "removing symlink"
                         );
                         removed_symlinks.push(removed);

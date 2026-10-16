@@ -1,3 +1,4 @@
+use orbit_log_fields::{expanded, safe};
 use std::collections::HashSet;
 
 use arrow::datatypes::UInt32Type;
@@ -85,7 +86,11 @@ pub async fn find_droppable_entities(
             if !known_names.contains(base_name)
                 && matches_preserve_pattern(base_name, &preserve_patterns)
             {
-                tracing::info!(version = dead_version, entity = %name, "GC: preserving (matches preserve pattern)");
+                tracing::info!(
+                    { safe::SCHEMA_VERSION } = dead_version,
+                    { safe::TABLE } = name.as_str(),
+                    "GC: preserving (matches preserve pattern)"
+                );
                 continue;
             }
 
@@ -121,9 +126,9 @@ pub async fn drop_entities(
             }
             Err(error) => {
                 tracing::warn!(
-                    version = entity.version,
-                    entity = %entity.name,
-                    %error,
+                    { safe::SCHEMA_VERSION } = entity.version,
+                    { safe::TABLE } = entity.name.as_str(),
+                    { expanded::ERROR_MESSAGE } = %error,
                     "GC: drop failed"
                 );
                 failed_versions.insert(entity.version);
@@ -142,7 +147,11 @@ pub async fn mark_dropped_versions(graph: &ArrowClickHouseClient, versions: &[u3
     let mut marked = Vec::new();
     for &version in versions {
         if let Err(error) = mark_version_dropped(graph, version).await {
-            tracing::warn!(version, %error, "GC: failed to mark version as dropped");
+            tracing::warn!(
+                { safe::SCHEMA_VERSION } = version,
+                { expanded::ERROR_MESSAGE } = %error,
+                "GC: failed to mark version as dropped"
+            );
             continue;
         }
         marked.push(version);
@@ -161,8 +170,8 @@ fn compile_preserve_patterns(raw_patterns: &[String]) -> Vec<regex::Regex> {
             regex::Regex::new(pattern)
                 .inspect_err(|error| {
                     tracing::warn!(
-                        %pattern,
-                        %error,
+                        { expanded::ADDITIONAL_DETAILS } = pattern.as_str(),
+                        { expanded::ERROR_MESSAGE } = %error,
                         "gc_preserve_patterns: invalid regex, skipping"
                     )
                 })

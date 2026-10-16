@@ -1,6 +1,7 @@
 use circuit_breaker::{CircuitBreakerObserver, StateLabel, Transition};
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue};
+use orbit_log_fields::safe;
 
 use crate::MetricSpec;
 
@@ -81,22 +82,22 @@ impl CircuitBreakerObserver for MetricsObserver {
         match transition.to {
             StateLabel::Open => {
                 tracing::warn!(
-                    service,
-                    from = transition.from.as_str(),
+                    { safe::COMPONENT } = service,
+                    { safe::FROM_STATE } = transition.from.as_str(),
                     "circuit breaker opened"
                 );
             }
             StateLabel::Closed => {
                 tracing::info!(
-                    service,
-                    from = transition.from.as_str(),
+                    { safe::COMPONENT } = service,
+                    { safe::FROM_STATE } = transition.from.as_str(),
                     "circuit breaker closed"
                 );
             }
             StateLabel::HalfOpen => {
                 tracing::info!(
-                    service,
-                    from = transition.from.as_str(),
+                    { safe::COMPONENT } = service,
+                    { safe::FROM_STATE } = transition.from.as_str(),
                     "circuit breaker half-open"
                 );
             }

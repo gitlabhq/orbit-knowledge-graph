@@ -5,6 +5,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use orbit_log_fields::safe;
 use serde_json::Value;
 use thiserror::Error;
 use tracing::debug;
@@ -199,8 +200,8 @@ fn scan_stats_from_summary(summary: QuerySummary) -> ScanStats {
     let scanned_bytes = summary.read_bytes();
     if scanned_rows.is_none() || scanned_bytes.is_none() {
         debug!(
-            ?scanned_rows,
-            ?scanned_bytes,
+            { safe::SCANNED_ROWS } = scanned_rows,
+            { safe::SCANNED_BYTES } = scanned_bytes,
             "datalake summary missing read_rows/read_bytes; defaulting to 0"
         );
     }

@@ -8,6 +8,7 @@ pub mod cli;
 pub mod clickhouse_setup;
 pub mod cluster_health;
 pub mod content;
+pub mod expanded_logs;
 pub mod fips;
 pub mod graph_status;
 pub mod grpc;

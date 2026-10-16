@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use orbit_log_fields::expanded;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -121,7 +122,7 @@ impl RunMetadata {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, json)?;
 
-        tracing::info!("Saved run metadata to {:?}", path);
+        tracing::info!({ expanded::LOCAL_PATH } = %path.display(), "saved run metadata");
         Ok(())
     }
 }

@@ -1,0 +1,38 @@
+id: log-field-is-constant
+valid:
+  - 'info!({ safe::GL_PROJECT_ID } = project.id, { expanded::FILE_PATH } = %path, "parsed");'
+  - 'info!(parent: &span, target: "orbit", "message only");'
+  - 'tracing::event!(Level::INFO, { safe::COUNT } = a == b, "compare");'
+  - 'info_span!("index_project", { safe::GL_PROJECT_ID } = tracing::field::Empty);'
+  - 'info!({ safe::COUNT } = values.iter().filter(|v| v.ok).count(), "nested args are values");'
+  - 'trace_event!(self.tracer, ScopePush { name: n });'
+  - |
+    #[cfg(test)]
+    mod tests {
+        fn t() { info!(project_id = 1, "test"); }
+    }
+  - 'tracing::info!(target: "x", { { safe::COUNT } = n }, "legacy block with constants");'
+  - |
+    #[rstest]
+    fn t() { info!(project_id = 1, "test"); }
+  - |
+    #[cfg(any(test, feature = "testkit"))]
+    mod helpers {
+        fn h() { info!(project_id = 1, "helper"); }
+    }
+invalid:
+  - 'info!(project_id = id, "parsed");'
+  - 'info!(foo.bar = 1, "dotted");'
+  - 'info!("file.path" = %p, "quoted");'
+  - 'info!(%path, "shorthand display");'
+  - 'info!(?config, "shorthand debug");'
+  - 'info!(project_id, "shorthand");'
+  - 'info!({ PROJECT_ID } = id, "local constant");'
+  - 'info_span!("index_project", project_id = id);'
+  - 'tracing::warn!(error = %e, "failed");'
+  - 'tracing::info!(target: "x", { path = %path }, "legacy block");'
+  - |
+    #[cfg(not(test))]
+    mod prod {
+        fn p() { info!(project_id = 1, "prod"); }
+    }

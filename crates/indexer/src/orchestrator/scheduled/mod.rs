@@ -23,9 +23,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use orbit_log_fields::{expanded, safe};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
@@ -97,13 +98,13 @@ pub async fn run_loop(
     for task in tasks {
         let lock = lock_service.clone();
         let token = shutdown.clone();
-        handles.spawn(run_task_loop(task, lock, token));
+        handles.spawn(run_task_loop(task, lock, token).in_current_span());
     }
 
     let mut panicked = 0usize;
     while let Some(result) = handles.join_next().await {
         if let Err(error) = result {
-            warn!(%error, "task loop panicked");
+            warn!({ expanded::ERROR_MESSAGE } = %error, "task loop panicked");
             panicked += 1;
         }
     }
@@ -121,7 +122,7 @@ async fn run_task_loop(
     shutdown: CancellationToken,
 ) {
     let task_name = task.name().to_owned();
-    info!(task = task_name, "task loop started");
+    info!({ safe::TASK } = task_name.as_str(), "task loop started");
 
     loop {
         let delay = task.schedule().next_delay(Utc::now());
@@ -131,31 +132,38 @@ async fn run_task_loop(
             () = tokio::time::sleep(delay) => {}
         }
 
-        let cadence_key = format!("cadence.{}", task_name);
-        let ttl = task.schedule().interval_hint();
-        match lock_service.try_acquire(&cadence_key, ttl).await {
-            Ok(true) => {}
-            Ok(false) => {
-                info!(task = task_name, "skipping, within interval");
-                continue;
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "cadence lock check failed");
-                continue;
-            }
-        }
+        let span = info_span!("scheduled_task_run", { safe::TASK } = task_name.as_str());
+        run_task_iteration(task.as_ref(), lock_service.as_ref())
+            .instrument(span)
+            .await;
+    }
 
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
-            }
+    info!({ safe::TASK } = task_name.as_str(), "task loop stopped");
+}
+
+async fn run_task_iteration(task: &dyn ScheduledTask, lock_service: &dyn LockService) {
+    let cadence_key = format!("cadence.{}", task.name());
+    let ttl = task.schedule().interval_hint();
+    match lock_service.try_acquire(&cadence_key, ttl).await {
+        Ok(true) => {}
+        Ok(false) => {
+            info!("skipping, within interval");
+            return;
+        }
+        Err(error) => {
+            warn!({ expanded::ERROR_MESSAGE } = %error, "cadence lock check failed");
+            return;
         }
     }
 
-    info!(task = task_name, "task loop stopped");
+    match task.run().await {
+        Ok(()) => {
+            debug!("task completed");
+        }
+        Err(error) => {
+            warn!({ expanded::ERROR_MESSAGE } = %error, "task failed");
+        }
+    }
 }
 
 /// Runs all tasks once (for integration tests and backward compatibility).
@@ -164,30 +172,10 @@ pub async fn run_once(
     lock_service: &dyn LockService,
 ) -> Result<(), SchedulerError> {
     for task in tasks {
-        let task_name = task.name();
-
-        let cadence_key = format!("cadence.{}", task_name);
-        let ttl = task.schedule().interval_hint();
-        match lock_service.try_acquire(&cadence_key, ttl).await {
-            Ok(true) => {}
-            Ok(false) => {
-                info!(task = task_name, "skipping, within interval");
-                continue;
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "cadence lock check failed");
-                continue;
-            }
-        }
-
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
-            }
-        }
+        let span = info_span!("scheduled_task_run", { safe::TASK } = task.name());
+        run_task_iteration(task.as_ref(), lock_service)
+            .instrument(span)
+            .await;
     }
 
     Ok(())

@@ -360,6 +360,19 @@ rust-toolchain-sync-check:
   script:
     - mise run toolchain:check
 
+# Red data gate for log, span and print call sites; rules in scripts/linting/logs.
+log-safety-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+    - .no-cargo-home-cache
+  needs: []
+  before_script:
+    - mise install ast-grep
+  script:
+    - mise run lint:logs
+
 metrics-catalog-check:
   stage: lint
   extends:

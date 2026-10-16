@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use gitlab_client::GitlabClient;
 use indexer::modules::code::repository::blob_stream::BlobStream;
 use orbit_arrow::ColumnValue;
+use orbit_log_fields::{expanded, safe};
 use query_engine::pipeline::PipelineError;
 use tracing::{debug, warn};
 
@@ -83,8 +84,9 @@ impl ColumnResolver for GitalyContentService {
                     Ok(s) => s,
                     Err(e) => {
                         warn!(
-                            project_id,
-                            error = %e,
+                            { safe::GL_PROJECT_ID } = project_id,
+                            { expanded::ERROR_MESSAGE } = %e,
+                            { safe::ERROR_TYPE } = <&str>::from(&e),
                             "list_blobs failed, content will be missing for this project"
                         );
                         return (vec![], true);
@@ -95,7 +97,11 @@ impl ColumnResolver for GitalyContentService {
 
                 let had_error = err.is_some();
                 if let Some(e) = err {
-                    warn!(project_id, error = %e, "blob stream decode error");
+                    warn!(
+                        { safe::GL_PROJECT_ID } = project_id,
+                        { expanded::ERROR_MESSAGE } = %e,
+                        "blob stream decode error"
+                    );
                 }
 
                 let results = blobs
@@ -107,7 +113,11 @@ impl ColumnResolver for GitalyContentService {
                             Some((key.clone(), text))
                         }
                         Err(_) => {
-                            debug!(project_id, path = %key.2, "skipping binary blob");
+                            debug!(
+                                { safe::GL_PROJECT_ID } = project_id,
+                                { expanded::FILE_PATH } = key.2.as_str(),
+                                "skipping binary blob"
+                            );
                             None
                         }
                     })

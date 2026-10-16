@@ -2,6 +2,7 @@
 //! path, hand the entry to the hooks, and write the bytes of the files they
 //! load ([`Decision::Parse`] or [`Decision::Load`]). No filtering of its own.
 
+use orbit_log_fields::expanded;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -51,7 +52,10 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 e
             }
             Err(e) if !any_entry_seen && e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                warn!(error = %e, "archive stream truncated before first entry; treating as empty");
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "archive stream truncated before first entry; treating as empty"
+                );
                 return Err(StreamError::Empty);
             }
             Err(e) => return Err(StreamError::Io(e)),
@@ -73,7 +77,11 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         let relative_path = match strip_archive_root(relative_path, &mut archive_root) {
             Ok(path) => path,
             Err(e) => {
-                warn!(entry = %entry_path_str, error = %e, "skipping archive entry outside the archive root");
+                warn!(
+                    { expanded::FILE_PATH } = %entry_path_str,
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "skipping archive entry outside the archive root"
+                );
                 continue;
             }
         };
@@ -143,7 +151,11 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                             return Err(StreamError::Io(e));
                         }
                         Err(e) => {
-                            warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
+                            warn!(
+                                { expanded::FILE_PATH } = %meta.path,
+                                { expanded::ERROR_MESSAGE } = %e,
+                                "skipping archive entry that could not be written"
+                            );
                             continue;
                         }
                     }
@@ -160,7 +172,11 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 return Err(StreamError::Io(e));
             }
             Err(e) => {
-                warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
+                warn!(
+                    { expanded::FILE_PATH } = %relative_path.display(),
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "skipping archive entry that could not be unpacked"
+                );
                 continue;
             }
         }

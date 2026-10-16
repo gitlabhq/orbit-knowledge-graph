@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
+use orbit_log_fields::expanded;
 use serde_json::json;
 use strum::{AsRefStr, Display};
 
@@ -103,14 +104,18 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     let _lock = match lock_database(db_path) {
         Ok(lock) => lock,
         Err(error) => {
-            tracing::warn!("failed to lock manifest: {error}");
+            tracing::warn!({ expanded::ERROR_MESSAGE } = %error, "failed to lock manifest");
             return;
         }
     };
     let client = match open_manifest(db_path) {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!("failed to open DuckDB to record git failure for {key}: {e}");
+            tracing::warn!(
+                { expanded::LOCAL_PATH } = %key,
+                { expanded::ERROR_MESSAGE } = %e,
+                "failed to open DuckDB to record git failure"
+            );
             return;
         }
     };
@@ -123,7 +128,11 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
         None,
         None,
     ) {
-        tracing::warn!("failed to record git failure status for {key}: {e}");
+        tracing::warn!(
+            { expanded::LOCAL_PATH } = %key,
+            { expanded::ERROR_MESSAGE } = %e,
+            "failed to record git failure status"
+        );
     }
 }
 

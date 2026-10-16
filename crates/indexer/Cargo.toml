@@ -20,6 +20,7 @@ clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 code-graph-incremental = { path = "../code-graph-incremental" }
 orbit-analytics = { path = "../orbit-analytics" }
+orbit-log-fields = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 petgraph = { workspace = true }

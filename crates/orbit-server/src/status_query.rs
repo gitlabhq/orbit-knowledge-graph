@@ -1,5 +1,6 @@
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
+use orbit_log_fields::{expanded, safe};
 use orbit_server_config::QueryConfig;
 use serde::Serialize;
 use tonic::Status;
@@ -14,7 +15,11 @@ pub(crate) async fn fetch_status_query_batches(
     let sql = append_query_settings(sql)
         .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
-    debug!(sql, label, "Status query");
+    debug!(
+        { expanded::SQL } = sql.as_str(),
+        { safe::QUERY_NAME } = label,
+        "Status query"
+    );
 
     bind_params(client.query(&sql))
         .fetch_arrow()

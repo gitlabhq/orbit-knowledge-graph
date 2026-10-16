@@ -1,6 +1,7 @@
 use super::sysroot::EmbeddedSysroot;
 use super::workspace::{discover_manifest_paths_for_root, normalize_existing_path};
 use super::*;
+use orbit_log_fields::expanded;
 
 /// Upper bound on a Cargo.toml file we will read off disk. Real manifests are
 /// well under this; anything larger is rejected before the read allocates.
@@ -791,9 +792,9 @@ fn resolve_dependency_candidate(
     let Some(target_manifest_path) = manifest_cache.dependency_manifest_path(&dependency_dir)?
     else {
         tracing::debug!(
-            rejected_path = %dependency_dir.display(),
-            source_manifest = %parsed.manifest_path.display(),
-            dependency = manifest_name,
+            { expanded::LOCAL_PATH } = %dependency_dir.display(),
+            { expanded::MANIFEST_PATH } = %parsed.manifest_path.display(),
+            { expanded::PACKAGE_NAME } = manifest_name,
             "dropping path dependency resolving outside the indexed repository",
         );
         return Ok(None);

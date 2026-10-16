@@ -59,6 +59,7 @@ use engine::handler::HandlerRegistry;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orbit_log_fields::{expanded, safe};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_server_config::IndexerModule;
 use orchestrator::Trigger;
@@ -90,13 +91,17 @@ pub async fn run(
     config.engine.validate()?;
     config.graph.validate()?;
 
-    info!(modules = ?config.engine.modules, "indexer module selection");
+    let module_names: Vec<&str> = config.engine.modules.iter().map(|m| (*m).into()).collect();
+    info!(
+        { safe::INDEXER_MODULES } = module_names.join(","),
+        "indexer module selection"
+    );
 
     let clients = ClickHouseClients::new(&config.graph, &config.datalake);
-    info!(url = %config.graph.url, "initializing schema version table");
+    info!({ expanded::URL } = %config.graph.url, "initializing schema version table");
     schema::version::init(&clients.graph).await?;
 
-    info!(url = %config.nats.url, "connecting to NATS");
+    info!({ expanded::URL } = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
     broker
@@ -109,7 +114,7 @@ pub async fn run(
 
     let schema_version = *schema::version::SCHEMA_VERSION;
     info!(
-        schema_version,
+        { safe::SCHEMA_VERSION } = schema_version,
         "waiting for dispatcher to prepare schema version before processing"
     );
     schema::version::wait_until_ready(
@@ -122,7 +127,7 @@ pub async fn run(
 
     let metrics = Arc::new(engine::metrics::EngineMetrics::new());
 
-    info!(url = %config.graph.url, "connecting to graph ClickHouse");
+    info!({ expanded::URL } = %config.graph.url, "connecting to graph ClickHouse");
     let writer = Arc::new(ClickHouseWriter::new(
         clients.graph.clone(),
         metrics.clone(),
@@ -133,7 +138,7 @@ pub async fn run(
     let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
     if analytics.is_enabled() {
         info!(
-            collector_url = %config.analytics.collector_url,
+            { expanded::URL } = %config.analytics.collector_url,
             "indexing analytics enabled"
         );
     }
@@ -183,7 +188,7 @@ pub async fn run(
     }
 
     info!(
-        subscriptions = registry.subscriptions().len(),
+        { safe::SUBSCRIPTION_COUNT } = registry.subscriptions().len(),
         "registered handlers"
     );
 
@@ -241,7 +246,7 @@ pub async fn run_dispatcher(
     )
     .await
     {
-        warn!(%error, "release GC failed, will retry next startup");
+        warn!({ expanded::ERROR_MESSAGE } = %error, "release GC failed, will retry next startup");
     }
 
     let datalake = clients.datalake.clone();
@@ -267,7 +272,10 @@ pub async fn run_dispatcher(
     )
     .await?;
     if let Err(error) = catalog.sync_active_version(&graph).await {
-        warn!(%error, "active version not mirrored at startup; retried every completion tick");
+        warn!(
+            { expanded::ERROR_MESSAGE } = %error,
+            "active version not mirrored at startup; retried every completion tick"
+        );
     }
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
@@ -282,7 +290,10 @@ pub async fn run_dispatcher(
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await
                 {
-                    warn!(%error, "failed to create unversioned tables at startup");
+                    warn!(
+                        { expanded::ERROR_MESSAGE } = %error,
+                        "failed to create unversioned tables at startup"
+                    );
                 }
             }
             if let Err(error) = orbit_migrations::execute::replace_refreshable_views(
@@ -292,12 +303,18 @@ pub async fn run_dispatcher(
             )
             .await
             {
-                warn!(%error, "failed to replace refreshable views at startup");
+                warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to replace refreshable views at startup"
+                );
             }
         }
         Ok(_) => {}
         Err(error) => {
-            warn!(%error, "failed to read active version for auxiliary tables and refreshable views")
+            warn!(
+                { expanded::ERROR_MESSAGE } = %error,
+                "failed to read active version for auxiliary tables and refreshable views"
+            )
         }
     }
 

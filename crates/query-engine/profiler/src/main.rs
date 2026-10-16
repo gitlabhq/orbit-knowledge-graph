@@ -11,6 +11,7 @@ use clap::Parser;
 use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
 use ontology::Ontology;
+use orbit_log_fields::expanded;
 use tracing::Instrument;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -419,7 +420,7 @@ async fn main() -> Result<()> {
         match client.fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
-                tracing::warn!("failed to fetch instance health: {e}");
+                tracing::warn!({ expanded::ERROR_MESSAGE } = %e, "failed to fetch instance health");
                 None
             }
         }

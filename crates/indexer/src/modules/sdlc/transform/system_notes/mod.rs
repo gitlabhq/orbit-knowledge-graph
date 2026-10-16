@@ -27,6 +27,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::Utc;
+use orbit_log_fields::expanded;
 use serde_json::json;
 use tracing::{debug, warn};
 
@@ -248,13 +249,13 @@ where
 
     if !dropped_actions.is_empty() {
         debug!(
-            ?dropped_actions,
+            { expanded::ADDITIONAL_DETAILS } = ?dropped_actions,
             "system_notes: dropped notes with unrecognized action"
         );
     }
     if !dropped_noteables.is_empty() {
         debug!(
-            ?dropped_noteables,
+            { expanded::ADDITIONAL_DETAILS } = ?dropped_noteables,
             "system_notes: dropped notes with unsupported noteable_type"
         );
     }

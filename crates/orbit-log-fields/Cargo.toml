@@ -1,0 +1,14 @@
+[package]
+name = "orbit-log-fields"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+labkit-fields = { workspace = true }
+
+[dev-dependencies]
+tracing = { workspace = true }
+
+[lints]
+workspace = true

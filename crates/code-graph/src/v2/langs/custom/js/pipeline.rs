@@ -1,3 +1,4 @@
+use orbit_log_fields::{expanded, safe};
 use std::path::Path;
 
 use std::sync::Arc;
@@ -52,11 +53,21 @@ impl LanguagePipeline for JsPipeline {
         for (path, error) in &errors {
             match error {
                 AnalyzerError::Skip { kind, detail } => {
-                    tracing::warn!(path, kind = %kind, %detail, "js: skipped file");
+                    tracing::warn!(
+                        { expanded::FILE_PATH } = path,
+                        { safe::REASON } = kind.as_metric_label(),
+                        { expanded::ADDITIONAL_DETAILS } = detail,
+                        "js: skipped file"
+                    );
                     ctx.record_skip(path.clone(), *kind, detail.clone());
                 }
                 AnalyzerError::Fault { kind, detail } => {
-                    tracing::warn!(path, kind = %kind, %detail, "js: faulted file");
+                    tracing::warn!(
+                        { expanded::FILE_PATH } = path,
+                        { safe::REASON } = kind.as_metric_label(),
+                        { expanded::ADDITIONAL_DETAILS } = detail,
+                        "js: faulted file"
+                    );
                     ctx.record_fault(path.clone(), *kind, detail.clone());
                 }
             }

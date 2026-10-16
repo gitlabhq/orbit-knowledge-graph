@@ -1058,6 +1058,13 @@
             "null"
           ]
         },
+        "expanded_logs": {
+          "$ref": "#/$defs/ExpandedLogsConfig",
+          "default": {
+            "global_override": false,
+            "root_namespace_ids": []
+          }
+        },
         "otel": {
           "$ref": "#/$defs/OtelConfig"
         },
@@ -1070,6 +1077,28 @@
         "otel",
         "prometheus"
       ]
+    },
+    "ExpandedLogsConfig": {
+      "description": "Which log lines carry expanded fields (file paths, branch names, query text,\nerror text). Every other line carries only the safe fields of\n`orbit_log_fields::safe`.",
+      "type": "object",
+      "properties": {
+        "global_override": {
+          "description": "Expand every log line. Use only in local development, test and staging.",
+          "type": "boolean",
+          "default": false
+        },
+        "root_namespace_ids": {
+          "description": "Root namespace IDs whose requests and indexing work are always logged\nexpanded, for example GitLab's own top-level groups.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
     },
     "OtelConfig": {
       "type": "object",

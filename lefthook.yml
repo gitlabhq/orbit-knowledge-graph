@@ -34,6 +34,21 @@ pre-commit:
     - name: narration
       run: ./scripts/linting/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
+    - name: log-safety
+      run: mise exec -- ast-grep scan {staged_files}
+      glob: "crates/**/*.rs"
+      exclude:
+        - "**/tests/**"
+        - "**/tests.rs"
+        - "**/test_helpers.rs"
+        - "**/testing.rs"
+        - "**/testkit.rs"
+        - "**/testkit/**"
+        - "**/benches/**"
+        - "**/examples/**"
+        - "**/build.rs"
+        - "crates/integration-*/**"
+        - "crates/fuzz/**"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:

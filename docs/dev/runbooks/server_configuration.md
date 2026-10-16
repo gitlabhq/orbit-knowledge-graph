@@ -381,8 +381,12 @@ Required for code indexing (repository archive download) and authorization.
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `metrics.log_level` | None | Rust log filter string |
+| `metrics.expanded_logs.global_override` | `false` | Write expanded fields (file paths, query text, error text) on every log line. Only for local development, test and staging |
+| `metrics.expanded_logs.root_namespace_ids` | `[]` | Root namespace IDs whose requests and indexing work are always logged with expanded fields |
 
 Example: `info,orbit_server=debug,gkg_indexer=trace`
+
+Debug and trace lines are written only when they are expanded (see `metrics.expanded_logs`). The server adds `ra_ap=off` to the filter.
 
 ### OpenTelemetry
 

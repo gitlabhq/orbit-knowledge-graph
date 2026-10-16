@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
+use orbit_log_fields::expanded;
 use serde_json::json;
 
 use super::read_lock_database;
@@ -33,8 +34,8 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
 
     if had_data {
         tracing::warn!(
-            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
-            db_path.display()
+            { expanded::LOCAL_PATH } = %db_path.display(),
+            "local graph schema or code index changed; rebuilding (previously indexed repositories must be re-indexed)"
         );
     }
     remove_db_files(db_path)?;

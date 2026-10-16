@@ -5,6 +5,7 @@ use anyhow::Result;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::stream::{self, StreamExt};
 use ontology::Ontology;
+use orbit_log_fields::{expanded, safe};
 use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
@@ -694,7 +695,7 @@ impl QueryExecutor {
         let mut cursor = match result {
             Ok(c) => c,
             Err(e) => {
-                tracing::debug!("fetch_bytes failed: {}", e);
+                tracing::debug!({ expanded::ERROR_MESSAGE } = %e, "fetch_bytes failed");
                 return String::new();
             }
         };
@@ -705,7 +706,7 @@ impl QueryExecutor {
                 Ok(Some(chunk)) => buffer.extend(chunk),
                 Ok(None) => break,
                 Err(e) => {
-                    tracing::debug!("fetch_bytes cursor error: {}", e);
+                    tracing::debug!({ expanded::ERROR_MESSAGE } = %e, "fetch_bytes cursor error");
                     return String::new();
                 }
             }
@@ -764,7 +765,7 @@ impl QueryExecutor {
         let mut cursor = match result {
             Ok(c) => c,
             Err(e) => {
-                tracing::debug!("fetch_bytes failed: {}", e);
+                tracing::debug!({ expanded::ERROR_MESSAGE } = %e, "fetch_bytes failed");
                 return String::new();
             }
         };
@@ -776,9 +777,9 @@ impl QueryExecutor {
                     buffer.extend(&chunk);
                     if buffer.len() > max_bytes {
                         tracing::debug!(
-                            "Truncating metadata sample at {} bytes (limit: {})",
-                            buffer.len(),
-                            max_bytes
+                            { safe::SIZE_BYTES } = buffer.len(),
+                            { safe::LIMIT_BYTES } = max_bytes,
+                            "truncating metadata sample"
                         );
                         buffer.truncate(max_bytes);
                         break;
@@ -786,7 +787,7 @@ impl QueryExecutor {
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    tracing::debug!("fetch_bytes cursor error: {}", e);
+                    tracing::debug!({ expanded::ERROR_MESSAGE } = %e, "fetch_bytes cursor error");
                     return String::new();
                 }
             }

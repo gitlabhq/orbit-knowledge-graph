@@ -2,8 +2,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use orbit_log_fields::{expanded, safe};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{Instrument, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::campaign::CampaignState;
@@ -52,7 +53,8 @@ impl Siphon {
     pub async fn drain_once(&self) -> Result<RouteOutcome, TaskError> {
         let mut total = RouteOutcome::default();
         for route in &self.routes {
-            let outcome = self.drain_route(route.as_ref()).await?;
+            let span = info_span!("siphon_route", { safe::TABLE } = route.source_table());
+            let outcome = self.drain_route(route.as_ref()).instrument(span).await?;
             total.dispatched += outcome.dispatched;
             total.skipped += outcome.skipped;
         }
@@ -132,14 +134,14 @@ impl Trigger for Siphon {
             match result {
                 Ok(total) if total.dispatched > 0 || total.skipped > 0 => {
                     info!(
-                        dispatched = total.dispatched,
-                        skipped = total.skipped,
+                        { safe::DISPATCHED_COUNT } = total.dispatched,
+                        { safe::SKIPPED_COUNT } = total.skipped,
                         "siphon drain pass dispatched requests"
                     );
                 }
                 Ok(_) => {}
                 Err(error) => {
-                    warn!(%error, "siphon drain pass failed");
+                    warn!({ expanded::ERROR_MESSAGE } = %error, "siphon drain pass failed");
                 }
             }
 

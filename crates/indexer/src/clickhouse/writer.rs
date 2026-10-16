@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::{expanded, safe};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -98,8 +99,8 @@ impl ClickHouseWriter {
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
                     error!(
-                        table,
-                        error = %e,
+                        { safe::TABLE } = table,
+                        { expanded::ERROR_MESSAGE } = %e,
                         "batch has no logical-byte-size rule; counting 0 bytes and writing anyway"
                     );
                     0
@@ -391,7 +392,12 @@ async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
             match fut.await {
                 Ok(report) => Step::Done(report),
                 Err(e) => {
-                    warn!(table, attempt = attempt + 1, error = %e, "buffered write failed");
+                    warn!(
+                        { safe::TABLE } = table,
+                        { safe::ATTEMPT } = attempt + 1,
+                        { expanded::ERROR_MESSAGE } = %e,
+                        "buffered write failed"
+                    );
                     WRITE_RETRY.retry_or_give_up(attempt, (), e)
                 }
             }
@@ -403,7 +409,11 @@ async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
     match durable {
         Ok(_) => tokens.into_iter().for_each(|t| t.on_flushed()),
         Err(e) => {
-            warn!(table, error = %e, "buffered write flush failed after retries");
+            warn!(
+                { safe::TABLE } = table,
+                { expanded::ERROR_MESSAGE } = %e,
+                "buffered write flush failed after retries"
+            );
             tokens.into_iter().for_each(|t| t.on_failed());
         }
     }

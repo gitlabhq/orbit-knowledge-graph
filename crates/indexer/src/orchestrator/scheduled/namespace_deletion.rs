@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use tracing::{debug, info, warn};
+use orbit_log_fields::{expanded, safe};
+use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
@@ -87,30 +88,39 @@ impl NamespaceDeletionScheduler {
 
         let mut reconciled = 0u64;
         for root in &roots {
+            let span = info_span!(
+                "reconcile_namespace",
+                { safe::GL_ROOT_NAMESPACE_ID } = root.top_level_namespace_id(),
+                { safe::TRAVERSAL_PATH } = root.as_str(),
+            );
             if !root.is_valid() {
-                warn!(
-                    traversal_path = %root,
-                    "skipping reconcile for enabled namespace with invalid traversal_path"
-                );
+                span.in_scope(|| {
+                    warn!("skipping reconcile for enabled namespace with invalid traversal_path")
+                });
                 continue;
             }
 
-            let outcomes = self.store.reconcile_moved_entities(root).await;
-            for outcome in &outcomes {
-                if let Some(error) = &outcome.error {
-                    warn!(
-                        traversal_path = %root,
-                        table = %outcome.table,
-                        error,
-                        "failed to reconcile moved entities for table"
-                    );
+            let outcomes = self
+                .store
+                .reconcile_moved_entities(root)
+                .instrument(span.clone())
+                .await;
+            span.in_scope(|| {
+                for outcome in &outcomes {
+                    if let Some(error) = &outcome.error {
+                        warn!(
+                            { safe::TABLE } = outcome.table.as_str(),
+                            { expanded::ERROR_MESSAGE } = error.as_str(),
+                            "failed to reconcile moved entities for table"
+                        );
+                    }
                 }
-            }
+            });
             reconciled += 1;
         }
 
         info!(
-            reconciled,
+            { safe::COUNT } = reconciled,
             "reconciled moved entities for enabled namespaces"
         );
         Ok(())
@@ -171,7 +181,7 @@ impl NamespaceDeletionScheduler {
             .map_err(TaskError::new)?;
 
         info!(
-            recorded,
+            { safe::COUNT } = recorded,
             "recorded newly deleted namespaces for scheduled deletion"
         );
         Ok(())
@@ -200,20 +210,24 @@ impl NamespaceDeletionScheduler {
                 TaskError::new(error)
             })?;
 
-            match self.nats.publish(&subscription, &envelope).await {
+            let span = info_span!(
+                "dispatch_namespace_deletion",
+                { safe::GL_NAMESPACE_ID } = entry.namespace_id,
+                { safe::TRAVERSAL_PATH } = entry.traversal_path.as_str(),
+            );
+            let published = self
+                .nats
+                .publish(&subscription, &envelope)
+                .instrument(span.clone())
+                .await;
+            match published {
                 Ok(()) => {
                     dispatched += 1;
-                    debug!(
-                        namespace_id = entry.namespace_id,
-                        "dispatched namespace deletion request"
-                    );
+                    span.in_scope(|| debug!("dispatched namespace deletion request"));
                 }
                 Err(crate::nats::NatsError::PublishDuplicate) => {
                     skipped += 1;
-                    debug!(
-                        namespace_id = entry.namespace_id,
-                        "skipped, deletion request already in-flight"
-                    );
+                    span.in_scope(|| debug!("skipped, deletion request already in-flight"));
                 }
                 Err(error) => {
                     self.metrics.record_error(self.name(), "publish");
@@ -226,7 +240,11 @@ impl NamespaceDeletionScheduler {
             .record_requests_published(self.name(), dispatched);
         self.metrics.record_requests_skipped(self.name(), skipped);
 
-        info!(dispatched, skipped, "dispatched due namespace deletions");
+        info!(
+            { safe::DISPATCHED_COUNT } = dispatched,
+            { safe::SKIPPED_COUNT } = skipped,
+            "dispatched due namespace deletions"
+        );
         Ok(())
     }
 }

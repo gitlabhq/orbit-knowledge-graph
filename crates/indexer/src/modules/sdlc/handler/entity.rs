@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
+use orbit_log_fields::{expanded, safe};
 use tokio::task::JoinSet;
 use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
@@ -203,8 +204,7 @@ impl EntityHandler {
                 .await
         } else {
             info!(
-                entity = %self.plan.name,
-                partitions = ranges.len(),
+                { safe::PARTITION_COUNT } = ranges.len(),
                 "running partitioned initial load"
             );
 
@@ -239,10 +239,9 @@ impl EntityHandler {
                         // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
                         Err(incomplete) => {
                             info!(
-                                entity = %self.plan.name,
-                                checkpoint = %checkpoint_key,
-                                incomplete = incomplete.len(),
-                                partitions = %incomplete.join(", "),
+                                { expanded::KV_KEY } = checkpoint_key.as_str(),
+                                { safe::PARTITION_COUNT } = incomplete.len(),
+                                { expanded::ADDITIONAL_DETAILS } = %incomplete.join(", "),
                                 "partitions still in progress; deferring consolidation to next dispatch"
                             );
                             Ok(stats)
@@ -256,12 +255,11 @@ impl EntityHandler {
         match &result {
             Ok(stats) => {
                 debug!(
-                    entity = %self.plan.name,
-                    read_rows = stats.read_rows,
-                    read_bytes = stats.read_bytes,
-                    written_rows = stats.written_rows,
-                    written_bytes = stats.written_bytes,
-                    duration_ms = stats.duration_ms,
+                    { safe::READ_ROWS } = stats.read_rows,
+                    { safe::READ_BYTES } = stats.read_bytes,
+                    { safe::WRITTEN_ROWS } = stats.written_rows,
+                    { safe::WRITTEN_BYTES } = stats.written_bytes,
+                    { safe::DURATION_S } = stats.duration_ms as f64 / 1000.0,
                     "indexing resource stats"
                 );
                 #[expect(
@@ -307,7 +305,10 @@ impl EntityHandler {
                 .map_err(|err| HandlerError::Processing(err.to_string()))?;
             let checkpoint = match existing {
                 Some(cp) if cp.is_completed() => {
-                    info!(partition = %position_key, "skipping already-completed partition");
+                    info!(
+                        { expanded::KV_KEY } = position_key.as_str(),
+                        "skipping already-completed partition"
+                    );
                     continue;
                 }
                 Some(cp) => cp,
@@ -322,7 +323,7 @@ impl EntityHandler {
                 observer: Arc::clone(&parent_pipeline_context.observer),
             };
 
-            set.spawn(async move {
+            let task = async move {
                 pipeline
                     .run_plan(
                         &partition_context,
@@ -333,7 +334,8 @@ impl EntityHandler {
                         window,
                     )
                     .await
-            });
+            };
+            set.spawn(task.in_current_span());
         }
 
         let mut errors = Vec::new();
@@ -397,34 +399,33 @@ impl Handler for EntityHandler {
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let request = self.deserialize(message)?;
+        let traversal_path = request.traversal_path.as_ref().map(TraversalPath::as_str);
+        let message_span = tracing::Span::current();
+        message_span.record(safe::GL_ROOT_NAMESPACE_ID, request.namespace_id);
+        message_span.record(safe::TRAVERSAL_PATH, traversal_path);
+
+        let dispatch_id = request.dispatch_id.to_string();
+        let span = info_span!(
+            "entity_indexing",
+            { safe::ENTITY } = self.plan.name.as_str(),
+            { safe::GL_ROOT_NAMESPACE_ID } = request.namespace_id,
+            { safe::TRAVERSAL_PATH } = traversal_path,
+            { safe::DISPATCH_ID } = dispatch_id.as_str(),
+            { safe::CAMPAIGN_ID } = request.campaign_id.as_deref(),
+        );
 
         if !request.indexing_requested(&self.plan.target) {
-            debug!(
-                entity = %self.plan.name,
-                target = %self.plan.target,
-                targets = ?request.targets,
-                "skipping request: target not selected"
-            );
+            span.in_scope(|| {
+                debug!(
+                    { safe::PLAN_TARGET } = self.plan.target.as_str(),
+                    { expanded::ADDITIONAL_DETAILS } = ?request.targets,
+                    "skipping request: target not selected"
+                )
+            });
             return Ok(());
         }
 
         let started_at = Utc::now();
-        let span = match &request.namespace_id {
-            Some(id) => info_span!(
-                "entity_indexing",
-                entity = %self.plan.name,
-                namespace_id = id,
-                dispatch_id = %request.dispatch_id,
-                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
-            ),
-            None => info_span!(
-                "entity_indexing",
-                entity = %self.plan.name,
-                dispatch_id = %request.dispatch_id,
-                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
-            ),
-        };
-
         async {
             let result = self.execute(context.clone(), request).await;
             let completed_at = Utc::now();

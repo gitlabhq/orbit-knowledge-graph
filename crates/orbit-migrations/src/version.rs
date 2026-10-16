@@ -1,3 +1,4 @@
+use orbit_log_fields::safe;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -229,7 +230,13 @@ pub async fn version_tables_complete(
         .collect();
 
     if !missing.is_empty() {
-        tracing::warn!(version, ?missing, "version table set is incomplete");
+        for table in &missing {
+            tracing::warn!(
+                { safe::SCHEMA_VERSION } = version,
+                { safe::TABLE } = table.as_str(),
+                "version table set is incomplete"
+            );
+        }
         return Ok(false);
     }
 

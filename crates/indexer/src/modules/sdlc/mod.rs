@@ -30,6 +30,7 @@ use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
+use orbit_log_fields::safe;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use pipeline::Pipeline;
 use tracing::info;
@@ -110,7 +111,10 @@ pub async fn register_handlers(
     let mut namespaced_count = 0;
     for plan in plans.global {
         if !transform_registry.is_registered(&plan.transform) {
-            info!(entity = %plan.name, transform = ?plan.transform, "skipping handler: transform not registered");
+            info!(
+                { safe::ENTITY } = plan.name.as_str(),
+                "skipping handler: transform not registered"
+            );
             continue;
         }
         let strategy = partition_strategies.get(&plan.name).cloned();
@@ -130,7 +134,10 @@ pub async fn register_handlers(
     }
     for plan in plans.namespaced {
         if !transform_registry.is_registered(&plan.transform) {
-            info!(entity = %plan.name, transform = ?plan.transform, "skipping handler: transform not registered");
+            info!(
+                { safe::ENTITY } = plan.name.as_str(),
+                "skipping handler: transform not registered"
+            );
             continue;
         }
         let strategy = partition_strategies.get(&plan.name).cloned();
@@ -150,9 +157,9 @@ pub async fn register_handlers(
     }
 
     info!(
-        global_handlers = global_count,
-        namespaced_handlers = namespaced_count,
-        partitioned_entities = partition_strategies.len(),
+        { safe::GLOBAL_HANDLER_COUNT } = global_count,
+        { safe::NAMESPACED_HANDLER_COUNT } = namespaced_count,
+        { safe::PARTITIONED_ENTITY_COUNT } = partition_strategies.len(),
         "registered SDLC entity handlers"
     );
 

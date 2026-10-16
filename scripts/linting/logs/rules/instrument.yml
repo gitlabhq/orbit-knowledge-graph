@@ -1,0 +1,61 @@
+id: instrument-skips-arguments
+language: rust
+severity: error
+message: '`#[instrument]` must use `skip_all` and name each field with a constant in `fields(...)`.'
+note: |
+  Without `skip_all`, `#[instrument]` records every argument with `Debug`
+  under the argument name.
+rule:
+  kind: attribute_item
+  has:
+    kind: attribute
+    has:
+      any:
+        - kind: identifier
+          regex: '^instrument$'
+        - kind: scoped_identifier
+          regex: '^(::)?tracing::instrument$'
+  not:
+    any:
+      - regex: '\bskip_all\b'
+      - matches: test-code
+---
+id: instrument-field-is-constant
+language: rust
+severity: error
+message: 'Name `#[instrument]` fields with a constant from orbit_log_fields, `{ safe::NAME }` or `{ expanded::NAME }`.'
+rule:
+  any:
+    - any:
+        - kind: identifier
+        - kind: string_literal
+      precedes:
+        regex: '^=$'
+    - kind: token_tree
+      regex: '^\{'
+      not:
+        regex: '^\{\s*(safe|expanded)::[A-Z][A-Z0-9_]*\s*\}$'
+      precedes:
+        regex: '^=$'
+    - kind: identifier
+      follows:
+        any:
+          - regex: '^[%?]$'
+          - regex: '^\($'
+          - regex: '^,$'
+      precedes:
+        any:
+          - regex: '^,$'
+          - regex: '^\)$'
+  inside:
+    kind: token_tree
+    follows:
+      kind: identifier
+      regex: '^fields$'
+    inside:
+      kind: token_tree
+      inside:
+        kind: attribute
+        regex: '^(::)?(tracing::)?instrument\b'
+  not:
+    matches: test-code

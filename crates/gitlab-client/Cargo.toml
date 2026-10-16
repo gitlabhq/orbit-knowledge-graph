@@ -18,8 +18,10 @@ reqwest = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
+orbit-log-fields = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

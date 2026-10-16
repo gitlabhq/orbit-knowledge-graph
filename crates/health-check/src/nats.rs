@@ -1,6 +1,7 @@
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::stream::Stream;
 use nats_client::NatsClient;
+use orbit_log_fields::{expanded, safe};
 use orbit_server_config::NatsConfiguration;
 use tokio::sync::OnceCell;
 use tracing::warn;
@@ -42,7 +43,10 @@ impl NatsDepthChecker {
         self.client
             .get_or_try_init(|| async {
                 NatsClient::connect(&self.config).await.map_err(|e| {
-                    warn!(error = %e, "NATS queue-depth check failed to connect");
+                    warn!(
+                        { expanded::ERROR_MESSAGE } = %e,
+                        "NATS queue-depth check failed to connect"
+                    );
                     format!("failed to connect to NATS: {e}")
                 })
             })
@@ -55,12 +59,22 @@ impl NatsDepthChecker {
         consumer_name: &str,
     ) -> Result<ConsumerDepth, String> {
         let mut consumer: PullConsumer = stream.get_consumer(consumer_name).await.map_err(|e| {
-            warn!(stream = %self.stream_name, consumer = consumer_name, error = %e, "NATS queue-depth check failed to get consumer");
+            warn!(
+                { safe::NATS_STREAM } = self.stream_name.as_str(),
+                { safe::NATS_CONSUMER } = consumer_name,
+                { expanded::ERROR_MESSAGE } = %e,
+                "NATS queue-depth check failed to get consumer"
+            );
             format!("failed to get consumer '{consumer_name}': {e}")
         })?;
 
         let info = consumer.info().await.map_err(|e| {
-            warn!(stream = %self.stream_name, consumer = consumer_name, error = %e, "NATS queue-depth check failed to get consumer info");
+            warn!(
+                { safe::NATS_STREAM } = self.stream_name.as_str(),
+                { safe::NATS_CONSUMER } = consumer_name,
+                { expanded::ERROR_MESSAGE } = %e,
+                "NATS queue-depth check failed to get consumer info"
+            );
             format!("failed to get consumer info for '{consumer_name}': {e}")
         })?;
 
@@ -82,7 +96,11 @@ impl NatsDepthChecker {
         let client = self.client().await?;
 
         let stream = client.get_stream(&self.stream_name).await.map_err(|e| {
-            warn!(stream = %self.stream_name, error = %e, "NATS queue-depth check failed to get stream");
+            warn!(
+                { safe::NATS_STREAM } = self.stream_name.as_str(),
+                { expanded::ERROR_MESSAGE } = %e,
+                "NATS queue-depth check failed to get stream"
+            );
             format!("failed to get stream '{}': {e}", self.stream_name)
         })?;
 

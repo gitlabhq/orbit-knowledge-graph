@@ -30,7 +30,7 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.23.4"
-"cargo:ast-grep" = "0.42.0"
+ast-grep = "0.51.0"
 "cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
@@ -200,6 +200,17 @@ run = [
   "cargo clippy -p duckdb-client --all-targets -- -D warnings",
 ]
 description = "Run clippy lint checks"
+
+[tasks."lint:logs"]
+run = [
+  "ast-grep test --skip-snapshot-tests",
+  """ast-grep scan crates \
+    --globs '!**/tests/**' --globs '!**/tests.rs' --globs '!**/test_helpers.rs' \
+    --globs '!**/testing.rs' --globs '!**/testkit.rs' --globs '!**/testkit/**' \
+    --globs '!**/benches/**' --globs '!**/examples/**' --globs '!**/build.rs' \
+    --globs '!crates/integration-*/**' --globs '!crates/fuzz/**'""",
+]
+description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
 
 [tasks."lint:deps"]
 run = "cargo shear"

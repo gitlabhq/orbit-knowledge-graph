@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use orbit_log_fields::{expanded, safe};
 use tracing::{info, warn};
 
 use super::cache::{CachedRepository, RepositoryCache, RepositoryCacheError};
@@ -168,29 +169,24 @@ impl RepositoryResolver {
             namespace_id,
         )
         .then_some(config);
-        self.full_download(
-            project_id,
-            branch,
-            ref_name,
-            virtual_config,
-            commit_sha.is_some(),
-        )
-        .await
+        self.full_download(project_id, ref_name, virtual_config, commit_sha.is_some())
+            .await
     }
 
     async fn full_download(
         &self,
         project_id: i64,
-        branch: &str,
         ref_name: &str,
         virtual_config: Option<&orbit_server_config::CodeIndexingPipelineConfig>,
         retry_empty: bool,
     ) -> Result<Repository, ResolveError> {
+        let mode = if virtual_config.is_some() {
+            "incremental"
+        } else {
+            "full"
+        };
         info!(
-            project_id,
-            branch,
-            ref_name,
-            incremental = virtual_config.is_some(),
+            { safe::INDEXING_MODE } = mode,
             "downloading repository archive"
         );
 
@@ -206,7 +202,11 @@ impl RepositoryResolver {
                         Ok(resolved) => return Step::GiveUp(resolved),
                         Err(err) => err,
                     };
-                    warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
+                    warn!(
+                        { safe::ATTEMPT } = attempt + 1,
+                        { expanded::ERROR_MESSAGE } = %err,
+                        "archive download failed"
+                    );
                     let e = HandlerError::Processing(format!("failed to download archive: {err}"));
                     return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
                 }
@@ -228,7 +228,10 @@ impl RepositoryResolver {
                     if !retry_empty {
                         return Step::GiveUp(empty);
                     }
-                    warn!(project_id, ref_name, attempt = attempt + 1, "archive empty for a commit that exists; retrying the download");
+                    warn!(
+                        { safe::ATTEMPT } = attempt + 1,
+                        "archive empty for a commit that exists; retrying the download"
+                    );
                     ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), empty)
                 }
                 Err(RepositoryCacheError::RepositoryTooLarge) => Step::GiveUp(ResolveError::EmptyRepository {
@@ -238,7 +241,11 @@ impl RepositoryResolver {
                     ),
                 }),
                 Err(e) => {
-                    warn!(project_id, ref_name, attempt = attempt + 1, error = %e, "archive extraction failed");
+                    warn!(
+                        { safe::ATTEMPT } = attempt + 1,
+                        { expanded::ERROR_MESSAGE } = %e,
+                        "archive extraction failed"
+                    );
                     let e = HandlerError::Processing(format!("failed to extract archive: {e}"));
                     ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into())
                 }

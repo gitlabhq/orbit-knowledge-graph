@@ -1,4 +1,5 @@
 use super::*;
+use orbit_log_fields::safe;
 
 #[expect(
     clippy::too_many_arguments,
@@ -720,7 +721,10 @@ impl RustStructureExtractor {
         N: AstNode + HasName,
     {
         let Some(name) = node.name().map(|name| name.text().to_string()) else {
-            tracing::debug!(definition_type, "rust named item missing name; skipping");
+            tracing::debug!(
+                { safe::KIND } = definition_type,
+                "rust named item missing name; skipping"
+            );
             return;
         };
         let fqn_parts = child_parts(module_parts, &name);

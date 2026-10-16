@@ -23,6 +23,7 @@ use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
+use orbit_log_fields::expanded;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
@@ -91,7 +92,10 @@ pub async fn register_handlers(
         metrics.clone(),
     );
     if let Err(error) = local_cache.purge_all().await {
-        tracing::warn!(%error, "failed to purge repository cache on startup");
+        tracing::warn!(
+            { expanded::ERROR_MESSAGE } = %error,
+            "failed to purge repository cache on startup"
+        );
     }
     let cache: Arc<dyn repository::RepositoryCache> = Arc::new(local_cache);
 

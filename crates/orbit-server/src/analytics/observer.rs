@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use labkit_events::StructuredEvent;
+use orbit_log_fields::expanded;
 use orbit_server_config::AnalyticsConfig;
 use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
@@ -94,7 +95,10 @@ impl AnalyticsObserver {
         let common = match build_common(&self.config, &self.claims, &self.schema_version) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to build orbit_common context, skipping analytics event");
+                tracing::warn!(
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "failed to build orbit_common context, skipping analytics event"
+                );
                 return;
             }
         };
@@ -109,7 +113,10 @@ impl AnalyticsObserver {
         ) {
             Ok(q) => q,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to build orbit_query context, skipping analytics event");
+                tracing::warn!(
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "failed to build orbit_query context, skipping analytics event"
+                );
                 return;
             }
         };
@@ -123,7 +130,10 @@ impl AnalyticsObserver {
             .build()
         {
             Ok(event) => tracker.track(event),
-            Err(e) => tracing::warn!(error = %e, "failed to build analytics event"),
+            Err(e) => tracing::warn!(
+                { expanded::ERROR_MESSAGE } = %e,
+                "failed to build analytics event"
+            ),
         }
     }
 }

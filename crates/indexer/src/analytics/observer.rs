@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use labkit_events::StructuredEvent;
 use orbit_analytics::AnalyticsTracker;
+use orbit_log_fields::expanded;
 use orbit_server_config::AnalyticsConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use uuid::Uuid;
@@ -129,7 +130,10 @@ impl SnowplowIndexingObserver {
         let common = match build_common(&self.config, root_namespace_id) {
             Ok(context) => context,
             Err(error) => {
-                tracing::warn!(%error, "failed to build orbit_common context, skipping indexing event");
+                tracing::warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to build orbit_common context, skipping indexing event"
+                );
                 return;
             }
         };
@@ -190,7 +194,10 @@ impl SnowplowIndexingObserver {
         match event {
             Ok(event) => self.tracker.track(event),
             Err(error) => {
-                tracing::warn!(%error, "failed to build indexing analytics event")
+                tracing::warn!(
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to build indexing analytics event"
+                )
             }
         }
     }

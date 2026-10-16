@@ -1,5 +1,6 @@
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::DeleteStreamErrorKind;
+use orbit_log_fields::{expanded, safe};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -18,18 +19,13 @@ pub async fn cleanup_schema_version_buckets(
         .map(|bucket_name| format!("KV_{bucket_name}_v{schema_version}"))
         .collect();
 
-    delete_nats_streams(
-        nats_client,
-        &backing_stream_names,
-        &format!("schema_v{schema_version}"),
-    )
-    .await
+    delete_nats_streams(nats_client, &backing_stream_names, schema_version).await
 }
 
 async fn delete_nats_streams(
     nats_client: &async_nats::Client,
     stream_names: &[String],
-    log_context: &str,
+    schema_version: u32,
 ) -> Result<(), NatsCleanupError> {
     let jetstream = async_nats::jetstream::new(nats_client.clone());
     let mut errors: Vec<String> = Vec::new();
@@ -38,8 +34,8 @@ async fn delete_nats_streams(
         match jetstream.delete_stream(stream_name).await {
             Ok(_) => {
                 tracing::info!(
-                    context = log_context,
-                    stream = %stream_name,
+                    { safe::SCHEMA_VERSION } = schema_version,
+                    { safe::NATS_STREAM } = stream_name.as_str(),
                     "deleted NATS stream"
                 );
             }
@@ -51,16 +47,16 @@ async fn delete_nats_streams(
                 ) =>
             {
                 tracing::debug!(
-                    context = log_context,
-                    stream = %stream_name,
+                    { safe::SCHEMA_VERSION } = schema_version,
+                    { safe::NATS_STREAM } = stream_name.as_str(),
                     "NATS stream already deleted"
                 );
             }
             Err(error) => {
                 tracing::warn!(
-                    context = log_context,
-                    stream = %stream_name,
-                    %error,
+                    { safe::SCHEMA_VERSION } = schema_version,
+                    { safe::NATS_STREAM } = stream_name.as_str(),
+                    { expanded::ERROR_MESSAGE } = %error,
                     "failed to delete NATS stream"
                 );
                 errors.push(format!("{stream_name}: {error}"));

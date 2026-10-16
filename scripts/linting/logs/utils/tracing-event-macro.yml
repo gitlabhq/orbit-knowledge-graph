@@ -1,0 +1,7 @@
+id: tracing-event-macro
+language: rust
+rule:
+  kind: macro_invocation
+  has:
+    field: macro
+    regex: '^(::)?(tracing::)?(trace|debug|info|warn|error|event)$'

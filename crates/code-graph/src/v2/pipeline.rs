@@ -2,6 +2,7 @@ use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
 use crate::v2::error::FileReason;
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
+use orbit_log_fields::{expanded, safe};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -92,9 +93,12 @@ pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
     if bytes >= LARGE_FILE_BREADCRUMB_BYTES {
         tracing::info!(
             target: "code_graph::breadcrumb",
-            path,
-            bytes,
-            language,
+            // A bare `{ CONST } = value` right after `target:` parses as the legacy fields block.
+            {
+                { expanded::FILE_PATH } = path,
+                { safe::SIZE_BYTES } = bytes,
+                { safe::LANGUAGE } = language,
+            },
             "indexing large file (crash breadcrumb)"
         );
     }
@@ -818,6 +822,7 @@ impl Pipeline {
             sem_tx.send(()).unwrap();
         }
 
+        let span = tracing::Span::current();
         std::thread::scope(|s| {
             for (family, files) in &files_by_family {
                 sem_rx.recv().unwrap();
@@ -835,7 +840,9 @@ impl Pipeline {
                 let edges_count = &edges_count;
                 let all_errors = &all_errors;
                 let worker_threads = ctx.config.worker_threads;
+                let span = &span;
                 s.spawn(move || {
+                    let _entered = span.enter();
                     if ctx.is_cancelled() {
                         sem_tx.send(()).ok();
                         return;
@@ -877,16 +884,18 @@ impl Pipeline {
                     };
 
                     tracing::info!(
-                        family = %family,
-                        file_count,
-                        threads = pool.current_num_threads(),
+                        { safe::LANGUAGE_FAMILY } = family.as_str(),
+                        { safe::FILE_COUNT } = file_count,
+                        { safe::THREAD_COUNT } = pool.current_num_threads(),
                         "processing language family"
                     );
 
                     let result = pool.install(|| {
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            crate::v2::registry::dispatch_family(*family, files, ctx, &btx)
-                        }))
+                        span.in_scope(|| {
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                crate::v2::registry::dispatch_family(*family, files, ctx, &btx)
+                            }))
+                        })
                     });
 
                     drop(pool);
@@ -945,16 +954,16 @@ impl Pipeline {
                     }) {
                         Some(Ok(())) => {
                             tracing::info!(
-                                family = %family,
-                                duration_ms = t_lang.elapsed().as_millis() as u64,
+                                { safe::LANGUAGE_FAMILY } = family.as_str(),
+                                { safe::DURATION_S } = t_lang.elapsed().as_secs_f64(),
                                 "language family done"
                             );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
                         }
                         Some(Err(errors)) => {
                             tracing::warn!(
-                                family = %family,
-                                error_count = errors.len(),
+                                { safe::LANGUAGE_FAMILY } = family.as_str(),
+                                { safe::ERROR_COUNT } = errors.len(),
                                 "language processing failed"
                             );
                             // After the typed-outcome refactor the
@@ -974,8 +983,8 @@ impl Pipeline {
                         }
                         None => {
                             tracing::debug!(
-                                family = %family,
-                                file_count,
+                                { safe::LANGUAGE_FAMILY } = family.as_str(),
+                                { safe::FILE_COUNT } = file_count,
                                 "language family not supported, skipping"
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
@@ -1216,10 +1225,12 @@ impl FamilyPipeline {
             parse_ms: f64,
         }
 
+        let span = tracing::Span::current();
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
             .map(|(idx, f)| {
+                let _entered = span.enter();
                 if ctx.is_cancelled() {
                     progress.files_advanced(ProgressPhase::Parse, 1);
                     return None;
@@ -1246,7 +1257,12 @@ impl FamilyPipeline {
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
                     Err(e) => {
-                        tracing::debug!(path = f.path, error = %e, "failed to read file");
+                        tracing::debug!(
+                            { expanded::FILE_PATH } = f.path,
+                            { safe::ERROR_TYPE } = FileFault::FileRead.as_metric_label(),
+                            { expanded::ERROR_MESSAGE } = %e,
+                            "failed to read file"
+                        );
                         progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
@@ -1277,7 +1293,12 @@ impl FamilyPipeline {
                 let mut result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
-                        tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
+                        tracing::warn!(
+                            { expanded::FILE_PATH } = f.path,
+                            { safe::PHASE } = phase.as_ref(),
+                            { expanded::ADDITIONAL_DETAILS } = %detail,
+                            "parse aborted: per-file CPU budget"
+                        );
                         progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Skip(SkippedFile {
                             path: f.path.clone(),
@@ -1287,7 +1308,12 @@ impl FamilyPipeline {
                         }));
                     }
                     Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
-                        tracing::debug!(path = f.path, error = %err, "failed to parse file");
+                        tracing::debug!(
+                            { expanded::FILE_PATH } = f.path,
+                            { safe::ERROR_TYPE } = FileFault::InvalidUtf8.as_metric_label(),
+                            { expanded::ERROR_MESSAGE } = %err,
+                            "failed to parse file"
+                        );
                         progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
@@ -1417,9 +1443,9 @@ impl FamilyPipeline {
         }
 
         tracing::debug!(
-            total_defs,
-            total_imports,
-            elapsed = ?t0.elapsed(),
+            { safe::DEFINITION_COUNT } = total_defs,
+            { safe::IMPORT_COUNT } = total_imports,
+            { safe::DURATION_S } = t0.elapsed().as_secs_f64(),
             "parse phase finished"
         );
 
@@ -1481,6 +1507,7 @@ impl FamilyPipeline {
             .into_par_iter()
             .enumerate()
             .map(|(file_idx, fwr_opt)| -> Phase2Result {
+                let _entered = span.enter();
                 if ctx.is_cancelled() {
                     progress.files_advanced(ProgressPhase::Resolve, 1);
                     return Default::default();
@@ -1575,8 +1602,8 @@ impl FamilyPipeline {
             .collect();
 
         tracing::debug!(
-            total_edges = total_edges.load(std::sync::atomic::Ordering::Relaxed),
-            elapsed = ?t2.elapsed(),
+            { safe::EDGE_COUNT } = total_edges.load(std::sync::atomic::Ordering::Relaxed),
+            { safe::DURATION_S } = t2.elapsed().as_secs_f64(),
             "resolve phase finished"
         );
 
@@ -1632,6 +1659,7 @@ impl FamilyPipeline {
             let phase3_results: Vec<_> = all_failed
                 .into_par_iter()
                 .map(|(info, lang, failed_chains)| {
+                    let _entered = span.enter();
                     let lctx = &member_ctxs[&lang];
                     let guard = sentinel
                         .as_ref()
@@ -1688,7 +1716,10 @@ impl FamilyPipeline {
                 }
             }
             if phase3_edges > 0 {
-                tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
+                tracing::info!(
+                    { safe::EDGE_COUNT } = phase3_edges,
+                    "phase 3: cross-file edges resolved"
+                );
             }
         }
 
@@ -1725,12 +1756,12 @@ impl FamilyPipeline {
         });
 
         tracing::info!(
-            duration_ms = t0.elapsed().as_millis() as u64,
-            nodes = graph.graph.node_count(),
-            edges = graph.graph.edge_count(),
-            defs = graph.defs.len(),
-            imports = graph.imports.len(),
-            strings = graph.strings.len(),
+            { safe::DURATION_S } = t0.elapsed().as_secs_f64(),
+            { safe::NODE_COUNT } = graph.graph.node_count(),
+            { safe::EDGE_COUNT } = graph.graph.edge_count(),
+            { safe::DEFINITION_COUNT } = graph.defs.len(),
+            { safe::IMPORT_COUNT } = graph.imports.len(),
+            { safe::STRING_COUNT } = graph.strings.len(),
             "family pipeline complete"
         );
 

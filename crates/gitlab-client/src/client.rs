@@ -9,6 +9,7 @@ use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use futures::{Stream, StreamExt};
 use jsonwebtoken::dangerous::insecure_decode;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use orbit_log_fields::{expanded, safe};
 use orbit_observability::resilience::MetricsObserver;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -126,9 +127,9 @@ impl GitlabClient {
                 })?;
 
             debug!(
-                domain,
-                resolve_host,
-                addr = %addr,
+                { expanded::HOST } = domain,
+                { expanded::RESOLVE_HOST } = resolve_host.as_str(),
+                { expanded::REMOTE_ADDR } = %addr,
                 "overriding DNS for base_url host"
             );
             // Port 0 tells reqwest to use the port from the request URL.
@@ -148,7 +149,11 @@ impl GitlabClient {
             self.base_url, project_id
         );
 
-        debug!(project_id, url = %url, "fetching project info from GitLab");
+        debug!(
+            { safe::GL_PROJECT_ID } = project_id,
+            { expanded::URL } = %url,
+            "fetching project info from GitLab"
+        );
 
         let response = self.authenticated_get(&url).await?;
         Self::check_response_status(&response, project_id)?;
@@ -163,7 +168,7 @@ impl GitlabClient {
             self.base_url
         );
 
-        info!(url = %url, "fetching cloud connector token from GitLab");
+        info!({ expanded::URL } = %url, "fetching cloud connector token from GitLab");
 
         let response = self.authenticated_get(&url).await?;
         Self::check_token_response_status(&response)?;
@@ -191,7 +196,12 @@ impl GitlabClient {
         )
         .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
 
-        debug!(project_id, ref_name, url = %url, "downloading archive from GitLab");
+        debug!(
+            { safe::GL_PROJECT_ID } = project_id,
+            { expanded::BRANCH } = ref_name,
+            { expanded::URL } = %url,
+            "downloading archive from GitLab"
+        );
 
         let response = self.authenticated_get(url).await?;
         Self::check_response_status(&response, project_id)?;
@@ -219,8 +229,10 @@ impl GitlabClient {
         .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
 
         debug!(
-            project_id,
-            from_sha, to_sha, "fetching changed paths from GitLab"
+            { safe::GL_PROJECT_ID } = project_id,
+            { safe::FROM_COMMIT_SHA } = from_sha,
+            { safe::TO_COMMIT_SHA } = to_sha,
+            "fetching changed paths from GitLab"
         );
 
         self.streaming_get(url, project_id).await
@@ -237,8 +249,8 @@ impl GitlabClient {
         );
 
         debug!(
-            project_id,
-            blob_count = oids.len(),
+            { safe::GL_PROJECT_ID } = project_id,
+            { safe::COUNT } = oids.len(),
             "listing blobs from GitLab"
         );
 
@@ -272,9 +284,9 @@ impl GitlabClient {
         }
 
         debug!(
-            project_id,
-            diff_id,
-            path_count = paths.len(),
+            { safe::GL_PROJECT_ID } = project_id,
+            { safe::DIFF_ID } = diff_id,
+            { safe::FILE_COUNT } = paths.len(),
             "listing MR diff files"
         );
 
@@ -293,7 +305,11 @@ impl GitlabClient {
             self.base_url, project_id, diff_id,
         );
 
-        debug!(project_id, diff_id, "fetching MR raw diff");
+        debug!(
+            { safe::GL_PROJECT_ID } = project_id,
+            { safe::DIFF_ID } = diff_id,
+            "fetching MR raw diff"
+        );
 
         let response = self.authenticated_get(&url).await?;
         Self::check_response_status(&response, project_id)?;
@@ -310,7 +326,11 @@ impl GitlabClient {
             self.base_url, project_id, merge_request_iid,
         );
 
-        debug!(project_id, merge_request_iid, "fetching MR raw diff by IID");
+        debug!(
+            { safe::GL_PROJECT_ID } = project_id,
+            { safe::IID } = merge_request_iid,
+            "fetching MR raw diff by IID"
+        );
 
         let response = self.authenticated_get(&url).await?;
         Self::check_response_status(&response, project_id)?;

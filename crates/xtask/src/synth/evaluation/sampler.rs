@@ -3,6 +3,7 @@ use clickhouse::Row;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use orbit_log_fields::{expanded, safe};
 use rand::RngExt;
 use rand::seq::IndexedRandom;
 use serde::Deserialize;
@@ -232,7 +233,11 @@ impl ParameterSampler {
     pub async fn warm_cache(&mut self, ontology: &Ontology) -> Result<()> {
         for node in ontology.nodes() {
             if let Err(e) = self.sample_ids(&node.name, ontology).await {
-                tracing::warn!("Failed to sample IDs for {}: {}", node.name, e);
+                tracing::warn!(
+                    { safe::ENTITY } = node.name.as_str(),
+                    { expanded::ERROR_MESSAGE } = %e,
+                    "failed to sample IDs"
+                );
             }
         }
         Ok(())

@@ -1,3 +1,4 @@
+use orbit_log_fields::safe;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -105,7 +106,7 @@ impl OntologyCatalog {
                     OntologyArchive::bundled(version)?.ok_or(CatalogError::Missing(version))?;
                 self.publish(&archive).await?;
                 tracing::info!(
-                    version,
+                    { safe::SCHEMA_VERSION } = version,
                     "bootstrapped missing ontology archive from release bundle"
                 );
                 Ok(())

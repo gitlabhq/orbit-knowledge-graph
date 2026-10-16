@@ -1,3 +1,4 @@
+use orbit_log_fields::safe;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -116,10 +117,11 @@ pub async fn fetch_enabled_top_level_namespaces(
             .collect(),
     );
 
-    if !split.skipped.is_empty() {
+    for (namespace_id, path) in &split.skipped {
         tracing::warn!(
-            skipped = ?split.skipped,
-            "excluding non-top-level namespace paths from completion gate"
+            { safe::GL_NAMESPACE_ID } = namespace_id,
+            { safe::TRAVERSAL_PATH } = path.as_str(),
+            "excluding non-top-level namespace path from completion gate"
         );
     }
 

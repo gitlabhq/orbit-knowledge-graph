@@ -1,10 +1,11 @@
+use orbit_log_fields::expanded;
 use std::sync::Arc;
 
 use super::types::{ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
-use crate::trace;
+use crate::trace_event;
 use crate::utils::node_to_range;
 use crate::v2::config::Language;
 use crate::v2::trace::Tracer;
@@ -241,7 +242,7 @@ impl LanguageSpec {
 
             if cc.ident_kinds.contains(&kind_ref) {
                 let text = current.text().to_string();
-                trace!(
+                trace_event!(
                     tracer,
                     ChainStepMatched {
                         node_kind: kind_ref.to_string(),
@@ -254,7 +255,7 @@ impl LanguageSpec {
             }
 
             if cc.this_kinds.contains(&kind_ref) {
-                trace!(
+                trace_event!(
                     tracer,
                     ChainStepMatched {
                         node_kind: kind_ref.to_string(),
@@ -267,7 +268,7 @@ impl LanguageSpec {
             }
 
             if cc.super_kinds.contains(&kind_ref) {
-                trace!(
+                trace_event!(
                     tracer,
                     ChainStepMatched {
                         node_kind: kind_ref.to_string(),
@@ -284,7 +285,7 @@ impl LanguageSpec {
                 if let Some(first) = segments.next() {
                     let name = first.text().to_string();
                     let resolved = resolve_type_name(&name, import_map, module_prefix, sep);
-                    trace!(
+                    trace_event!(
                         tracer,
                         ChainStepMatched {
                             node_kind: kind_ref.to_string(),
@@ -295,7 +296,7 @@ impl LanguageSpec {
                     chain.push(ExpressionStep::Ident(resolved.into()));
                     for seg in segments {
                         let seg_text = seg.text().to_string();
-                        trace!(
+                        trace_event!(
                             tracer,
                             ChainStepMatched {
                                 node_kind: kind_ref.to_string(),
@@ -320,7 +321,7 @@ impl LanguageSpec {
                                 let name = first.text().to_string();
                                 let resolved =
                                     resolve_type_name(&name, import_map, module_prefix, sep);
-                                trace!(
+                                trace_event!(
                                     tracer,
                                     ChainStepMatched {
                                         node_kind: kind_ref.to_string(),
@@ -337,7 +338,7 @@ impl LanguageSpec {
                         } else {
                             let bare = type_node.text().to_string();
                             let resolved = resolve_type_name(&bare, import_map, module_prefix, sep);
-                            trace!(
+                            trace_event!(
                                 tracer,
                                 ChainStepMatched {
                                     node_kind: kind_ref.to_string(),
@@ -360,7 +361,7 @@ impl LanguageSpec {
             for fa in &cc.field_access {
                 if kind_ref == fa.kind {
                     if let Some(name) = fa.member.apply(&current) {
-                        trace!(
+                        trace_event!(
                             tracer,
                             ChainStepMatched {
                                 node_kind: kind_ref.to_string(),
@@ -384,7 +385,7 @@ impl LanguageSpec {
             if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
                 let rule = &self.refs[rule_idx];
                 if let Some(name) = rule.extract().apply(&current) {
-                    trace!(
+                    trace_event!(
                         tracer,
                         ChainStepMatched {
                             node_kind: kind_ref.to_string(),
@@ -405,7 +406,7 @@ impl LanguageSpec {
 
             let text = current.text().to_string();
             if !text.is_empty() {
-                trace!(
+                trace_event!(
                     tracer,
                     ChainStepMatched {
                         node_kind: kind_ref.to_string(),
@@ -627,7 +628,7 @@ impl LanguageSpec {
             && let Some(module) = f(file_path, sep)
         {
             state.scope_stack.push(Arc::from(module.as_str()));
-            trace!(
+            trace_event!(
                 tracer,
                 PackageMatched {
                     name: module.clone()
@@ -710,7 +711,7 @@ impl LanguageSpec {
                 }
             });
             if let Some(rt) = inferred {
-                trace!(
+                trace_event!(
                     tracer,
                     ReturnTypeInferred {
                         def_index: enclosing_idx,
@@ -823,7 +824,7 @@ impl LanguageSpec {
         }
         if state.budget.is_some_and(|b| b.expired()) {
             tracing::warn!(
-                file_path = state.file_path,
+                { expanded::FILE_PATH } = state.file_path,
                 "AST walk aborted: per-file CPU budget exceeded"
             );
             state.timed_out = true;
@@ -833,7 +834,7 @@ impl LanguageSpec {
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
             tracing::debug!(
-                file_path = state.file_path,
+                { expanded::FILE_PATH } = state.file_path,
                 "stack limit reached during AST walk, subtree truncated"
             );
             return;
@@ -890,7 +891,7 @@ impl LanguageSpec {
             let is_type_scope = m.def_kind.is_type_container();
 
             let def_name = m.name.clone();
-            trace!(
+            trace_event!(
                 state.tracer,
                 ScopePush {
                     name: def_name.clone(),
@@ -910,7 +911,7 @@ impl LanguageSpec {
                 metadata: m.metadata,
             });
             let last_def = &state.defs[def_index as usize];
-            trace!(
+            trace_event!(
                 state.tracer,
                 DefDiscovered {
                     name: last_def.name.clone(),
@@ -979,7 +980,7 @@ impl LanguageSpec {
                             && let Some(name) =
                                 treesitter_visit::extract::default_name().apply(&sibling)
                         {
-                            trace!(
+                            trace_event!(
                                 state.tracer,
                                 SiblingRefAdopted {
                                     name: name.clone(),
@@ -1066,7 +1067,7 @@ impl LanguageSpec {
                 let import_idx = idx as u32;
                 let effective_name =
                     import_scope_name(&self.hooks, imp, sep, scope_override.as_deref());
-                trace!(
+                trace_event!(
                     state.tracer,
                     ImportRecorded {
                         path: imp.path.clone(),
@@ -1143,7 +1144,7 @@ impl LanguageSpec {
                         }
                         state.current_block
                     };
-                    trace!(
+                    trace_event!(
                         state.tracer,
                         BindingWrite {
                             name: name.clone(),
@@ -1232,7 +1233,7 @@ impl LanguageSpec {
                 state.tracer,
             );
             if self.ref_dispatch.contains_key(nk) {
-                trace!(
+                trace_event!(
                     state.tracer,
                     RefEvaluated {
                         node_kind: nk.to_string(),
@@ -1273,7 +1274,7 @@ impl LanguageSpec {
                     state.arena.alloc_str(&name)
                 };
 
-                trace!(
+                trace_event!(
                     state.tracer,
                     RefQueued {
                         name: name.clone(),
@@ -1311,7 +1312,7 @@ impl LanguageSpec {
 
         if pushed_scope {
             if let Some(name) = state.scope_stack.last() {
-                trace!(
+                trace_event!(
                     state.tracer,
                     ScopePop {
                         name: name.to_string(),
@@ -1336,7 +1337,7 @@ impl LanguageSpec {
     ) {
         let rule = &self.branches[rule_idx];
         let pre_block = state.current_block;
-        trace!(
+        trace_event!(
             state.tracer,
             BranchEnter {
                 node_kind: node.kind().to_string(),
@@ -1369,7 +1370,7 @@ impl LanguageSpec {
                 state.ssa.add_predecessor(arm_block, pre_block);
                 state.ssa.seal_block(arm_block);
                 state.current_block = arm_block;
-                trace!(
+                trace_event!(
                     state.tracer,
                     BranchArm {
                         block_id: arm_block.0,
@@ -1403,7 +1404,7 @@ impl LanguageSpec {
             state.ssa.add_predecessor(join, pre_block);
         }
         state.ssa.seal_block(join);
-        trace!(
+        trace_event!(
             state.tracer,
             BranchJoin {
                 block_id: join.0,
@@ -1439,7 +1440,7 @@ impl LanguageSpec {
         state.ssa.add_predecessor(body, header);
         state.ssa.seal_block(body);
         state.current_block = body;
-        trace!(
+        trace_event!(
             state.tracer,
             LoopEnter {
                 node_kind: node.kind().to_string(),
@@ -1464,7 +1465,7 @@ impl LanguageSpec {
         let exit = state.ssa.add_block();
         state.ssa.add_predecessor(exit, header);
         state.ssa.seal_block(exit);
-        trace!(state.tracer, LoopExit { exit_block: exit.0 });
+        trace_event!(state.tracer, LoopExit { exit_block: exit.0 });
         state.current_block = exit;
     }
 }

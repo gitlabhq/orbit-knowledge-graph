@@ -6,6 +6,7 @@ use code_graph::v2::pipeline::{FileTimingEntry, LanguageTimings};
 use code_graph::v2::{OnBatch, SinkError};
 use code_graph_incremental::pipeline::FileStats;
 use code_graph_incremental::{Envelope, Error, Scalar, export::ExportConfig, templates};
+use orbit_log_fields::safe;
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -27,10 +28,8 @@ pub(in crate::modules::code) fn run(
     let dropped = repository.usage().dropped_listed;
     if dropped > 0 {
         tracing::warn!(
-            project_id = envelope.project_id,
-            branch = %envelope.branch,
-            dropped,
-            reason = "file_limit",
+            { safe::SKIPPED_COUNT } = dropped,
+            { safe::REASON } = "file_limit",
             "listed-only files past the repository file limit have no File row"
         );
     }

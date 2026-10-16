@@ -3,6 +3,7 @@ use std::sync::Arc;
 use gitlab_client::CloudConnectorTokenCache;
 use labkit_events::{BillingEvent, DeliveryFailure, TokenSource};
 use opentelemetry::KeyValue;
+use orbit_log_fields::safe;
 use orbit_observability::billing::events as spec;
 use orbit_server_config::{BillingAuthMode, BillingConfig};
 use uuid::Uuid;
@@ -38,9 +39,10 @@ impl SnowplowBillingTracker {
             .token_source(source)
             .on_success(Arc::new(|event_ids: &[Uuid]| {
                 METRICS.delivered.add(event_ids.len() as u64, &[]);
+                let ids: Vec<String> = event_ids.iter().map(Uuid::to_string).collect();
                 tracing::info!(
-                    events = event_ids.len(),
-                    event_ids = ?event_ids,
+                    { safe::COUNT } = event_ids.len(),
+                    { safe::EVENT_IDS } = ids.join(","),
                     "billing event delivery: success"
                 );
             }))
@@ -61,11 +63,12 @@ impl SnowplowBillingTracker {
                     event_ids.len() as u64,
                     &[KeyValue::new(spec::labels::REASON, reason_label)],
                 );
+                let ids: Vec<String> = event_ids.iter().map(Uuid::to_string).collect();
                 tracing::warn!(
-                    events = event_ids.len(),
-                    event_ids = ?event_ids,
-                    reason = reason_label,
-                    status = ?status,
+                    { safe::COUNT } = event_ids.len(),
+                    { safe::EVENT_IDS } = ids.join(","),
+                    { safe::REASON } = reason_label,
+                    { safe::HTTP_STATUS_CODE } = status,
                     "billing event delivery: failed"
                 );
             }))

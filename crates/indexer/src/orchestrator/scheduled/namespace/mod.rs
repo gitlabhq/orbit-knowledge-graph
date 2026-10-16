@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use orbit_log_fields::safe;
 use tracing::info;
 
 use crate::campaign::CampaignState;
@@ -129,10 +130,10 @@ impl NamespaceDispatcher {
             .record_requests_skipped(self.name(), outcome.skipped);
 
         info!(
-            dispatched = outcome.dispatched,
-            skipped = outcome.skipped,
-            changed_namespaces = changed_count,
-            sweeping,
+            { safe::DISPATCHED_COUNT } = outcome.dispatched,
+            { safe::SKIPPED_COUNT } = outcome.skipped,
+            { safe::NAMESPACE_COUNT } = changed_count,
+            { safe::FULL_SWEEP } = sweeping,
             "dispatched namespace indexing requests"
         );
 

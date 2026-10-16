@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use orbit_log_fields::{expanded, safe};
 use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
@@ -71,7 +72,11 @@ impl TableCleanup {
             .await;
 
         let tables = self.tables.len();
-        info!(tables, failed, "apply deleted mask complete");
+        info!(
+            { safe::COUNT } = tables,
+            { safe::ERROR_COUNT } = failed,
+            "apply deleted mask complete"
+        );
 
         if failed > 0 {
             return Err(TaskError::new(format!(
@@ -95,15 +100,19 @@ impl TableCleanup {
                 let elapsed = started.elapsed().as_secs_f64();
                 self.metrics.record_query_duration(&table, elapsed);
                 info!(
-                    table = table.as_str(),
-                    duration_ms = (elapsed * 1000.0) as u64,
+                    { safe::TABLE } = table.as_str(),
+                    { safe::DURATION_S } = elapsed,
                     "applied deleted mask"
                 );
                 true
             }
             Err(error) => {
                 self.metrics.record_error(TASK_NAME, "apply_deleted_mask");
-                warn!(table = table.as_str(), %error, "failed to apply deleted mask");
+                warn!(
+                    { safe::TABLE } = table.as_str(),
+                    { expanded::ERROR_MESSAGE } = %error,
+                    "failed to apply deleted mask"
+                );
                 false
             }
         }

@@ -2,6 +2,7 @@
 //! `register_v2_pipelines!` invocation below.
 
 use crate::v2::config::{Language, LanguageFamily};
+use orbit_log_fields::safe;
 
 use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
@@ -165,7 +166,10 @@ pub fn dispatch_family(
                     all_errors.extend(errs);
                 }
                 None => {
-                    tracing::warn!(%lang, "no pipeline registered for language");
+                    tracing::warn!(
+                        { safe::LANGUAGE } = lang.as_ref(),
+                        "no pipeline registered for language"
+                    );
                 }
             }
         }

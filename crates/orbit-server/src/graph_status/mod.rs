@@ -5,6 +5,7 @@ use std::slice;
 use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::safe;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::SecurityContext;
 use tonic::Status;
@@ -39,7 +40,10 @@ impl GraphStatusService {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        info!(%traversal_path, "Graph status fetching");
+        info!(
+            { safe::TRAVERSAL_PATH } = traversal_path.as_str(),
+            "Graph status fetching"
+        );
 
         let scopes = slice::from_ref(traversal_path);
         let (statuses, counts) = tokio::join!(
@@ -53,10 +57,10 @@ impl GraphStatusService {
             .ok_or_else(|| Status::internal("indexing status returned no scope"))?;
 
         info!(
-            phase = ?status.phase,
-            entity_count = counts.len(),
-            projects_indexed = status.projects.indexed,
-            projects_total = status.projects.total_known,
+            { safe::PHASE } = <&str>::from(status.phase),
+            { safe::ENTITY_COUNT } = counts.len(),
+            { safe::INDEXED_PROJECT_COUNT } = status.projects.indexed,
+            { safe::PROJECT_COUNT } = status.projects.total_known,
             "Graph status fetched"
         );
 

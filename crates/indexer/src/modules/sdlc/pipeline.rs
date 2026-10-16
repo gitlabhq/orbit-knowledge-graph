@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use orbit_log_fields::{expanded, safe};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
@@ -256,22 +257,22 @@ impl Pipeline {
 
             if page_number > 1 {
                 info!(
-                    page = page_number,
-                    rows = rows_in_page,
-                    scanned_rows = page.scan_stats.scanned_rows,
-                    extract_ms = page.extract_elapsed.as_millis() as u64,
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    write_ms = write_elapsed.as_millis() as u64,
+                    { safe::PAGE_NUMBER } = page_number,
+                    { safe::ROW_COUNT } = rows_in_page,
+                    { safe::SCANNED_ROWS } = page.scan_stats.scanned_rows,
+                    { safe::EXTRACT_DURATION_S } = page.extract_elapsed.as_secs_f64(),
+                    { safe::TRANSFORM_DURATION_S } = transform_elapsed.as_secs_f64(),
+                    { safe::WRITE_DURATION_S } = write_elapsed.as_secs_f64(),
                     "page indexed"
                 );
             } else {
                 debug!(
-                    page = page_number,
-                    rows = rows_in_page,
-                    scanned_rows = page.scan_stats.scanned_rows,
-                    extract_ms = page.extract_elapsed.as_millis() as u64,
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    write_ms = write_elapsed.as_millis() as u64,
+                    { safe::PAGE_NUMBER } = page_number,
+                    { safe::ROW_COUNT } = rows_in_page,
+                    { safe::SCANNED_ROWS } = page.scan_stats.scanned_rows,
+                    { safe::EXTRACT_DURATION_S } = page.extract_elapsed.as_secs_f64(),
+                    { safe::TRANSFORM_DURATION_S } = transform_elapsed.as_secs_f64(),
+                    { safe::WRITE_DURATION_S } = write_elapsed.as_secs_f64(),
                     "page indexed"
                 );
             }
@@ -318,18 +319,18 @@ impl Pipeline {
 
         if stats.written_rows > 0 || stats.read_rows > 0 {
             info!(
-                read_rows = stats.read_rows,
-                scanned_rows = stats.scanned_rows,
-                written_rows = stats.written_rows,
-                duration_ms = stats.duration_ms,
-                extract_ms = stats.extract_ms,
-                transform_ms = stats.transform_ms,
-                write_ms = stats.write_ms,
+                { safe::READ_ROWS } = stats.read_rows,
+                { safe::SCANNED_ROWS } = stats.scanned_rows,
+                { safe::WRITTEN_ROWS } = stats.written_rows,
+                { safe::DURATION_S } = elapsed.as_secs_f64(),
+                { safe::EXTRACT_DURATION_S } = stats.extract_ms as f64 / 1000.0,
+                { safe::TRANSFORM_DURATION_S } = stats.transform_ms as f64 / 1000.0,
+                { safe::WRITE_DURATION_S } = stats.write_ms as f64 / 1000.0,
                 "pipeline completed"
             );
         } else {
             debug!(
-                duration_ms = stats.duration_ms,
+                { safe::DURATION_S } = elapsed.as_secs_f64(),
                 "pipeline completed with no data"
             );
         }
@@ -394,10 +395,10 @@ impl Pipeline {
                         }
                         Err(err) => {
                             warn!(
-                                attempt,
-                                max_retries = MAX_RETRIES,
-                                max_block_size = ?block_size,
-                                %err,
+                                { safe::ATTEMPT } = attempt + 1,
+                                { safe::MAX_ATTEMPTS } = DATALAKE_EXTRACT_RETRY.max_attempts,
+                                { safe::BATCH_SIZE } = block_size,
+                                { expanded::ERROR_MESSAGE } = %err,
                                 "datalake query failed, retrying with smaller block size"
                             );
                             // An overflow only clears once blocks are small, and each halving step

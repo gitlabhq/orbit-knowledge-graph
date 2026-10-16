@@ -3,6 +3,7 @@
 //! When a file exceeds its timeout, the sentinel sets its kill flag, causing
 //! the worker to bail out at the next check point via `Result<T, Killed>`.
 
+use orbit_log_fields::expanded;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -130,7 +131,10 @@ pub fn spawn_sentinel(timeout: Duration) -> Option<(SentinelHandle, std::thread:
     match join {
         Ok(join) => Some((handle, join)),
         Err(e) => {
-            tracing::warn!("failed to spawn sentinel thread: {e}, running without file timeouts");
+            tracing::warn!(
+                { expanded::ERROR_MESSAGE } = %e,
+                "failed to spawn sentinel thread, running without file timeouts"
+            );
             None
         }
     }

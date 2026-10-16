@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::safe;
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
@@ -77,7 +78,7 @@ impl GrpcServer {
 
     pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
         let tls_enabled = self.tls_config.is_some();
-        info!(tls = tls_enabled, "Starting gRPC server");
+        info!({ safe::TLS_ENABLED } = tls_enabled, "Starting gRPC server");
 
         let service = Arc::new(self.service);
         let gc = &self.grpc_config;
@@ -108,6 +109,12 @@ impl GrpcServer {
             ))
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
+            .layer(labkit::grpc::GrpcVerboseLogsLayer::new(
+                crate::expanded_logs::VERBOSE_LOGS.clone(),
+            ))
+            .layer(tower::util::MapFutureLayer::new(|future| {
+                tracing::Instrument::instrument(future, crate::auth::request_span())
+            }))
             .add_service(OrbitServiceServer::from_arc(Arc::clone(&service)))
             .add_service(super::legacy::LegacyGkgService::new(
                 OrbitServiceServer::from_arc(service),

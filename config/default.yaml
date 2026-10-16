@@ -197,6 +197,9 @@ query:
 
 metrics:
   # log_level: "info"
+  expanded_logs:
+    global_override: false
+    root_namespace_ids: []
   otel:
     enabled: false
     endpoint: "http://localhost:4317"

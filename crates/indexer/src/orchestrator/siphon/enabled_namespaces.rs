@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
+use orbit_log_fields::safe;
 use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
 use tracing::warn;
@@ -124,8 +125,8 @@ async fn lookup_paths(
 
     if found.len() < namespace_ids.len() {
         warn!(
-            requested = namespace_ids.len(),
-            resolved = found.len(),
+            { safe::COUNT } = namespace_ids.len(),
+            { safe::SKIPPED_COUNT } = namespace_ids.len() - found.len(),
             "enabled namespaces without a live top-level traversal path; \
              the sweep picks up any that become resolvable"
         );

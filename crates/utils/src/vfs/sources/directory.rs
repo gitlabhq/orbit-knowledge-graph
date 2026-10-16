@@ -1,3 +1,4 @@
+use orbit_log_fields::expanded;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,7 +42,10 @@ impl Source for Directory<'_> {
                             if e.io_error()
                                 .is_some_and(|io| io.kind() == ErrorKind::NotFound) =>
                         {
-                            warn!(error = %e, "skipping an entry deleted during the walk");
+                            warn!(
+                                { expanded::ERROR_MESSAGE } = %e,
+                                "skipping an entry deleted during the walk"
+                            );
                             return WalkState::Continue;
                         }
                         Err(e) => return fail(SourceError::Io(std::io::Error::other(e))),
