@@ -46,32 +46,39 @@ where
     } else {
         config.rel_types.iter().map(String::as_str).collect()
     };
+    let touches = |relationship: &str, source: bool| {
+        model
+            .relationship_routes(relationship)
+            .into_iter()
+            .any(|route| match source {
+                true => route.has_source(center_entity_id),
+                false => route.has_target(center_entity_id),
+            })
+    };
     let relationship_ids = |source: bool| {
         relationships
             .iter()
-            .filter_map(|relationship| {
-                let relationship_id = model.graph().relationship_id(relationship)?;
-                model
-                    .relationship_routes(relationship)
-                    .into_iter()
-                    .any(|route| match source {
-                        true => route.has_source(center_entity_id),
-                        false => route.has_target(center_entity_id),
-                    })
-                    .then_some(relationship_id)
-            })
+            .filter(|relationship| touches(relationship, source))
+            .filter_map(|relationship| model.graph().relationship_id(relationship))
             .collect::<Vec<_>>()
+    };
+    let arm_kinds = |source: bool| {
+        let kinds: Vec<String> = config
+            .rel_types
+            .iter()
+            .filter(|kind| touches(kind, source))
+            .cloned()
+            .collect();
+        match kinds.is_empty() {
+            true => config.rel_types.clone(),
+            false => kinds,
+        }
     };
     let outgoing_relationships = relationship_ids(true);
     let incoming_relationships = relationship_ids(false);
     let incoming_kinds: Vec<_> = relationships
         .iter()
-        .filter(|relationship| {
-            model
-                .relationship_routes(relationship)
-                .into_iter()
-                .any(|route| route.has_target(center_entity_id))
-        })
+        .filter(|relationship| touches(relationship, false))
         .copied()
         .collect();
     let incoming_scope_preserving: Vec<_> = incoming_kinds
@@ -191,6 +198,8 @@ where
         edge,
         has_non_denorm,
         fused_table,
+        outgoing_kinds: arm_kinds(true),
+        incoming_kinds: arm_kinds(false),
         incoming_scope_preserving,
         incoming_cross_scope,
     }))
