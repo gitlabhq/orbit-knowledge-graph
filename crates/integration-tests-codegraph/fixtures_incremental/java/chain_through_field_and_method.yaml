@@ -1,0 +1,87 @@
+name: "Java: a chain through a field and a method of one name is typed by the method"
+
+fixtures:
+  - path: hint/ReflectionHints.java
+    content: |
+      package hint;
+
+      public class ReflectionHints {
+          public ReflectionHints registerType(String type) {
+              return this;
+          }
+      }
+
+  - path: hint/RuntimeHints.java
+    content: |
+      package hint;
+
+      public class RuntimeHints {
+          private final ReflectionHints reflection = new ReflectionHints();
+
+          public ReflectionHints reflection() {
+              return this.reflection;
+          }
+      }
+
+  - path: hint/Registrar.java
+    content: |
+      package hint;
+
+      public class Registrar {
+          public void register(ReflectionHints hints, String type) {
+              hints.registerType(type);
+          }
+      }
+
+  - path: app/Hints.java
+    content: |
+      package app;
+
+      import hint.Registrar;
+      import hint.RuntimeHints;
+
+      class Hints {
+          void chained(RuntimeHints hints) {
+              hints.reflection().registerType("a").registerType("b");
+          }
+
+          void passed(RuntimeHints hints) {
+              Registrar registrar = new Registrar();
+              registrar.register(hints.reflection(), "a");
+          }
+      }
+
+tests:
+  - name: the chained call targets the method of the shared name and the method of its return type
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'chained' AND t.name IN ['reflection', 'registerType']
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["hint.RuntimeHints.reflection", "hint.ReflectionHints.registerType"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: the chained call has no edge to the class that the field initializer constructs
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'chained' AND t.name = 'ReflectionHints'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 0 }
+
+  - name: a call passed as an argument targets the method of the shared name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'passed' AND t.name = 'reflection'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "hint.RuntimeHints.reflection", kind: "Method" } }
+
+  - name: a call passed as an argument has no edge to the class that the field initializer constructs
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'passed' AND t.name = 'ReflectionHints'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 0 }
