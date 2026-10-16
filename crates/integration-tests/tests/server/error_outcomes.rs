@@ -5,6 +5,7 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, SeededColumnResolver, TestContext, load_ontology, t,
 };
+use jsonwebtoken::{EncodingKey, Header, encode};
 use opentelemetry::global;
 use opentelemetry_sdk::metrics::data::{
     AggregatedMetrics, MetricData, ResourceMetrics, SumDataPoint,
@@ -12,13 +13,14 @@ use opentelemetry_sdk::metrics::data::{
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::InMemoryAnalyticsTracker;
+use orbit_server::auth::Claims;
 use orbit_server::auth::JwtValidator;
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::OrbitServiceImpl;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::{
-    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, RedactionExchange,
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, QueryLanguage, RedactionExchange,
     RedactionResponse, redaction_exchange,
 };
 use orbit_server_config::AppConfig;
@@ -30,6 +32,7 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tonic::transport::Channel;
 
 use super::schema_readiness::{QueryStream, serve_grpc};
+use crate::common::DummyClaims;
 
 const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const RESOLVER_CAP: usize = 2;
@@ -41,6 +44,73 @@ async fn successful_query_is_a_success() {
     server.run(project_query(json!({}))).await.unwrap();
 
     server.assert_recorded("ok", "success", None).await;
+}
+
+#[tokio::test]
+async fn schema_call_is_a_success() {
+    let mut server = Server::start().await;
+
+    server
+        .run(ExecuteQueryRequest {
+            query: "CALL db.schema()".into(),
+            language: QueryLanguage::Gql as i32,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Schema calls emit no analytics event, so only the metric is checked.
+    server.meter_provider.force_flush().unwrap();
+    let metrics = server.metrics.get_finished_metrics().unwrap();
+    assert_eq!(
+        metric_labels(
+            &metrics,
+            "gkg.query.pipeline.queries",
+            &["status", "outcome"]
+        ),
+        [["ok", "success"]]
+    );
+}
+
+#[tokio::test]
+async fn caller_without_enabled_namespaces_is_a_caller_error() {
+    let mut server = Server::start().await;
+    let claims = Claims {
+        admin: false,
+        group_traversal_ids: Vec::new(),
+        ..Claims::dummy()
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(SECRET.as_bytes()),
+    )
+    .unwrap();
+    let mut call = tonic::Request::new(tokio_stream::iter([ExecuteQueryMessage {
+        content: Some(Content::Request(project_query(json!({})))),
+    }]));
+    call.metadata_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+
+    let mut responses = server
+        .client
+        .execute_query(call)
+        .await
+        .unwrap()
+        .into_inner();
+    let response = responses.message().await.unwrap().unwrap().content.unwrap();
+
+    let Content::Error(error) = response else {
+        panic!("expected a query error, got {response:?}");
+    };
+    assert_eq!(error.code, "security_error");
+    server
+        .assert_recorded(
+            "security_error",
+            "caller_error",
+            Some("no_enabled_namespaces"),
+        )
+        .await;
 }
 
 #[tokio::test]
@@ -187,6 +257,33 @@ async fn oversized_redaction_response_is_a_caller_error() {
     assert_eq!(error.code, "streaming_error");
     server
         .assert_recorded("streaming_error", "caller_error", Some("streaming"))
+        .await;
+}
+
+#[tokio::test]
+async fn mismatched_redaction_response_is_a_server_error() {
+    let mut server = Server::start().await;
+    let mut query = server.open(project_query(json!({}))).await;
+    query.await_authorization_request().await;
+
+    let mismatched = RedactionResponse {
+        result_id: "not-the-requested-result".into(),
+        authorizations: Vec::new(),
+    };
+    query
+        .sender
+        .send(ExecuteQueryMessage {
+            content: Some(Content::Redaction(RedactionExchange {
+                content: Some(redaction_exchange::Content::Response(mismatched)),
+            })),
+        })
+        .await
+        .unwrap();
+    let error = query.finish().await.unwrap_err();
+
+    assert_eq!(error.code, "authorization_error");
+    server
+        .assert_recorded("authorization_error", "server_error", Some("redaction"))
         .await;
 }
 
@@ -371,6 +468,8 @@ impl Server {
         let failed = match (status, failure_reason) {
             ("compile_error", _) => None,
             ("execution_error", _) => Some("execution"),
+            ("security_error", _) => Some("security"),
+            (_, Some("redaction")) => Some("authorization"),
             (_, reason) => reason,
         };
         assert_eq!(
