@@ -78,3 +78,19 @@ tests:
       - { row: { caller: by_field } }
       - { row: { caller: by_param } }
       - { row: { caller: by_return } }
+
+  - name: "the typed field of Kennel adds no call to a definition"
+    query: |
+      MATCH (k:Definition)-[:CALLS]->(t:Definition)
+      WHERE k.name = 'Kennel'
+      RETURN t.name AS target
+    assert:
+      - { row_count: 0 }
+
+  - name: "the typed field of Kennel adds no call to an import"
+    query: |
+      MATCH (k:Definition)-[:CALLS]->(t:ImportedSymbol)
+      WHERE k.name = 'Kennel'
+      RETURN t.identifier_name AS target
+    assert:
+      - { row_count: 0 }
