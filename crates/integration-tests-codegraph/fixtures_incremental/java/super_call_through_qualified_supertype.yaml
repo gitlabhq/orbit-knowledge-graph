@@ -1,0 +1,27 @@
+name: "Java: a super call through a qualified supertype keeps its edge"
+
+fixtures:
+  - path: Shelf.java
+    content: |
+      public abstract class Shelf<E> extends Base<E> implements Marker {
+        Shelf() {}
+        public abstract static class Stack<E> {
+          @Keep
+          public Stack<E> pushAll(Iterator<? extends E> items) {
+          }
+        }
+        abstract static class ArrayStack<E> extends Shelf.Stack<E> {
+          public Stack<E> pushAll(Iterable<? extends E> items) {
+            super.pushAll(items);
+          }
+        }
+      }
+
+tests:
+  - name: "the override in ArrayStack calls the pushAll of Stack through super"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'pushAll' AND callee.name = 'pushAll'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

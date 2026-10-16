@@ -170,9 +170,38 @@ cases:
         MATCH (project:Project)<-[:IN_PROJECT]-(neighbor) WHERE project.id IN [1000, 3000] RETURN project, neighbor
     expect:
       node_count: 14
-      skip_requirements: [node_ids]
-      edges:
-        IN_PROJECT: [[1101, 1000], [1201, 1000], [1301, 1000], [1401, 1000], [1501, 1000], [1601, 1000], [1701, 1000], [1801, 1000], [1901, 1000], [2101, 1000], [2201, 1000], [2500, 1000], [2601, 1000]]
+      nodes:
+        Pipeline: { ids: [1101] }
+        Stage: { ids: [1201] }
+        Job: { ids: [1301] }
+        Vulnerability: { ids: [1401] }
+        Finding: { ids: [1501] }
+        VulnerabilityIdentifier: { ids: [1601] }
+        SecurityScan: { ids: [1701] }
+        Deployment: { ids: [1801] }
+        Environment: { ids: [1901] }
+        VulnerabilityScanner: { ids: [2101] }
+        VulnerabilityOccurrence: { ids: [2201] }
+        MergeRequest: { ids: [2500] }
+        Branch: { ids: [2601] }
+        Project: { ids: [1000] }
+      total_edge_count: 13
+      edge_exists:
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+          - { from: Stage, from_id: 1201, to: Project, to_id: 1000 }
+          - { from: Job, from_id: 1301, to: Project, to_id: 1000 }
+          - { from: Vulnerability, from_id: 1401, to: Project, to_id: 1000 }
+          - { from: Finding, from_id: 1501, to: Project, to_id: 1000 }
+          - { from: VulnerabilityIdentifier, from_id: 1601, to: Project, to_id: 1000 }
+          - { from: SecurityScan, from_id: 1701, to: Project, to_id: 1000 }
+          - { from: Deployment, from_id: 1801, to: Project, to_id: 1000 }
+          - { from: Environment, from_id: 1901, to: Project, to_id: 1000 }
+          - { from: VulnerabilityScanner, from_id: 2101, to: Project, to_id: 1000 }
+          - { from: VulnerabilityOccurrence, from_id: 2201, to: Project, to_id: 1000 }
+          - { from: MergeRequest, from_id: 2500, to: Project, to_id: 1000 }
+          - { from: Branch, from_id: 2601, to: Project, to_id: 1000 }
+      referential_integrity: true
       sql_contains: [gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge]
 
   - name: MergeRequestDiff IN_PROJECT preserves indirect authorization and scope
@@ -186,12 +215,15 @@ cases:
         MATCH (diff:MergeRequestDiff)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE diff.id IN [20001, 40001] RETURN diff, project
     expect:
       node_count: 2
-      skip_requirements: [node_ids, "relationship:CONTAINS"]
       nodes:
         MergeRequestDiff: { ids: [20001], absent: [40001] }
         Project: { ids: [1000], absent: [3000] }
-      edges:
-        IN_PROJECT: [[20001, 1000]]
+      total_edge_count: 1
+      edge_exists:
+        IN_PROJECT:
+          - { from: MergeRequestDiff, from_id: 20001, to: Project, to_id: 1000 }
+      edge_count: { CONTAINS: 0 }
+      referential_integrity: true
       sql_contains: [gl_diff_edge]
 
   - name: MergeRequestDiffFile IN_PROJECT preserves indirect authorization and scope
@@ -205,12 +237,14 @@ cases:
         MATCH (file:MergeRequestDiffFile)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE file.id IN [20002, 40002] RETURN file, project
     expect:
       node_count: 2
-      skip_requirements: [node_ids]
       nodes:
         MergeRequestDiffFile: { ids: [20002], absent: [40002] }
         Project: { ids: [1000], absent: [3000] }
-      edges:
-        IN_PROJECT: [[20002, 1000]]
+      total_edge_count: 1
+      edge_exists:
+        IN_PROJECT:
+          - { from: MergeRequestDiffFile, from_id: 20002, to: Project, to_id: 1000 }
+      referential_integrity: true
       sql_contains: [gl_diff_edge]
 
   - name: Vulnerability neighbors return every security route
@@ -222,15 +256,27 @@ cases:
         MATCH (vulnerability:Vulnerability {id: 1401})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY|FIXES|HAS_VULNERABILITY]-(neighbor) RETURN vulnerability, neighbor
     expect:
       node_count: 4
-      edges:
-        AUTHORED: [[1, 1401]]
-        CONFIRMED_BY: [[1, 1401]]
-        RESOLVED_BY: [[1, 1401]]
-        DISMISSED_BY: [[1, 1401]]
-        FIXES: [[2501, 1401]]
-        HAS_VULNERABILITY: [[2301, 1401]]
+      nodes:
+        Vulnerability: { ids: [1401] }
+        User: { ids: [1] }
+        MergeRequest: { ids: [2501] }
+        Package: { ids: [2301] }
+      total_edge_count: 6
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        CONFIRMED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        RESOLVED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        DISMISSED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        FIXES:
+          - { from: MergeRequest, from_id: 2501, to: Vulnerability, to_id: 1401 }
+        HAS_VULNERABILITY:
+          - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
       sql_contains: [gl_sec_edge]
-      skip_requirements: [node_ids]
 
   - name: Global user lifecycle routes exclude another namespace
     description: Split AUTHORED and vulnerability lifecycle routes prune to the authorized target namespace
@@ -243,12 +289,22 @@ cases:
         MATCH (user:User {id: 1})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY]->(neighbor) RETURN user, neighbor
     expect:
       node_count: 3
-      skip_requirements: [node_ids]
-      edges:
-        AUTHORED: [[1, 1401], [1, 2500]]
-        CONFIRMED_BY: [[1, 1401]]
-        RESOLVED_BY: [[1, 1401]]
-        DISMISSED_BY: [[1, 1401]]
+      nodes:
+        User: { ids: [1] }
+        Vulnerability: { ids: [1401] }
+        MergeRequest: { ids: [2500] }
+      total_edge_count: 5
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        CONFIRMED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        RESOLVED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        DISMISSED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
       sql_contains: [gl_edge, gl_sec_edge]
 
   - name: FIXES excludes another namespace through endpoint authorization
@@ -262,12 +318,14 @@ cases:
         MATCH (mr:MergeRequest)-[:FIXES]->(vulnerability:Vulnerability) WHERE mr.id IN [2501, 4500] RETURN mr, vulnerability
     expect:
       node_count: 2
-      skip_requirements: [node_ids]
       nodes:
         MergeRequest: { ids: [2501], absent: [4500] }
         Vulnerability: { ids: [1401], absent: [3401] }
-      edges:
-        FIXES: [[2501, 1401]]
+      total_edge_count: 1
+      edge_exists:
+        FIXES:
+          - { from: MergeRequest, from_id: 2501, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
       sql_contains: [gl_sec_edge]
 
   - name: Pipeline neighbors return every CI route
@@ -279,10 +337,18 @@ cases:
         MATCH (pipeline:Pipeline)-[:CHILD_OF|BUILT_BY]-(neighbor) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, neighbor
     expect:
       node_count: 4
-      skip_requirements: [node_ids]
-      edges:
-        CHILD_OF: [[1101, 1102]]
-        BUILT_BY: [[2301, 1101], [2401, 1101]]
+      nodes:
+        Pipeline: { ids: [1101, 1102] }
+        Package: { ids: [2301] }
+        PackageFile: { ids: [2401] }
+      total_edge_count: 3
+      edge_exists:
+        CHILD_OF:
+          - { from: Pipeline, from_id: 1101, to: Pipeline, to_id: 1102 }
+        BUILT_BY:
+          - { from: Package, from_id: 2301, to: Pipeline, to_id: 1101 }
+          - { from: PackageFile, from_id: 2401, to: Pipeline, to_id: 1101 }
+      referential_integrity: true
       sql_contains: [gl_ci_edge]
       sql_not_contains: [gl_edge]
 
@@ -295,9 +361,18 @@ cases:
         MATCH (branch:Branch)-[:CONTAINS]-(neighbor) WHERE branch.id IN [2601, 3601] RETURN branch, neighbor
     expect:
       node_count: 4
-      skip_requirements: [node_ids]
-      edges:
-        CONTAINS: [[1000, 2601], [2601, 2701], [2601, 2801]]
+      nodes:
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+        Directory: { ids: [2701] }
+        File: { ids: [2801] }
+      total_edge_count: 3
+      edge_exists:
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+          - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
+          - { from: Branch, from_id: 2601, to: File, to_id: 2801 }
+      referential_integrity: true
       sql_contains: [gl_code_edge]
       sql_not_contains: [gl_edge]
 
@@ -310,9 +385,17 @@ cases:
         MATCH (directory:Directory)-[:CONTAINS]-(neighbor) WHERE directory.id IN [2701, 4701] RETURN directory, neighbor
     expect:
       node_count: 4
-      skip_requirements: [node_ids]
-      edges:
-        CONTAINS: [[2601, 2701], [2701, 2702], [2701, 2802]]
+      nodes:
+        Branch: { ids: [2601] }
+        Directory: { ids: [2701, 2702] }
+        File: { ids: [2802] }
+      total_edge_count: 3
+      edge_exists:
+        CONTAINS:
+          - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
+          - { from: Directory, from_id: 2701, to: Directory, to_id: 2702 }
+          - { from: Directory, from_id: 2701, to: File, to_id: 2802 }
+      referential_integrity: true
       sql_contains: [gl_code_edge]
       sql_not_contains: [gl_edge]
 
@@ -327,12 +410,14 @@ cases:
         MATCH (package:Package)-[:HAS_VULNERABILITY]->(neighbor) WHERE package.id IN [2301, 4301] RETURN package, neighbor
     expect:
       node_count: 2
-      skip_requirements: [node_ids]
       nodes:
         Package: { ids: [2301], absent: [4301] }
         Vulnerability: { ids: [1401], absent: [3401] }
-      edges:
-        HAS_VULNERABILITY: [[2301, 1401]]
+      total_edge_count: 1
+      edge_exists:
+        HAS_VULNERABILITY:
+          - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
       sql_contains: [gl_sec_edge]
 
   - name: Merge request pipeline branch chain crosses three edge tables
@@ -344,12 +429,23 @@ cases:
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     expect:
       node_count: 5
-      skip_requirements: [node_ids]
-      edges:
-        AUTHORED: [[1, 2500]]
-        HAS_HEAD_PIPELINE: [[2500, 1101]]
-        IN_PROJECT: [[1101, 1000]]
-        CONTAINS: [[1000, 2601]]
+      nodes:
+        User: { ids: [1] }
+        MergeRequest: { ids: [2500] }
+        Pipeline: { ids: [1101] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+      total_edge_count: 4
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        HAS_HEAD_PIPELINE:
+          - { from: MergeRequest, from_id: 2500, to: Pipeline, to_id: 1101 }
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
       sql_contains: [gl_edge, gl_ci_edge, gl_code_edge]
 
   - name: Merge request diff branch chain crosses three edge tables
@@ -361,12 +457,23 @@ cases:
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
     expect:
       node_count: 5
-      skip_requirements: [node_ids]
-      edges:
-        AUTHORED: [[1, 2500]]
-        HAS_DIFF: [[2500, 20001]]
-        IN_PROJECT: [[20001, 1000]]
-        CONTAINS: [[1000, 2601]]
+      nodes:
+        User: { ids: [1] }
+        MergeRequest: { ids: [2500] }
+        MergeRequestDiff: { ids: [20001] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+      total_edge_count: 4
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        HAS_DIFF:
+          - { from: MergeRequest, from_id: 2500, to: MergeRequestDiff, to_id: 20001 }
+        IN_PROJECT:
+          - { from: MergeRequestDiff, from_id: 20001, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
       sql_contains: [gl_edge, gl_diff_edge, gl_code_edge]
 
   - name: Security scan directory chain crosses security and code tables
@@ -378,10 +485,19 @@ cases:
         MATCH (scan:SecurityScan {id: 1701})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
     expect:
       node_count: 4
-      skip_requirements: [node_ids]
-      edges:
-        IN_PROJECT: [[1701, 1000]]
-        CONTAINS: [[1000, 2601], [2601, 2701]]
+      nodes:
+        SecurityScan: { ids: [1701] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+        Directory: { ids: [2701] }
+      total_edge_count: 3
+      edge_exists:
+        IN_PROJECT:
+          - { from: SecurityScan, from_id: 1701, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+          - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
+      referential_integrity: true
       sql_contains: [gl_sec_edge, gl_code_edge]
 
   - name: Merge request alternatives union default CI and diff tables
@@ -395,13 +511,20 @@ cases:
         MATCH (mr:MergeRequest)-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) WHERE mr.id IN [2500, 3500] RETURN mr, target
     expect:
       node_count: 4
-      skip_requirements: [node_ids]
       nodes:
         MergeRequest: { ids: [2500], absent: [3500] }
-      edges:
-        IN_PROJECT: [[2500, 1000]]
-        HAS_HEAD_PIPELINE: [[2500, 1101]]
-        HAS_DIFF: [[2500, 20001]]
+        Project: { ids: [1000] }
+        Pipeline: { ids: [1101] }
+        MergeRequestDiff: { ids: [20001] }
+      total_edge_count: 3
+      edge_exists:
+        IN_PROJECT:
+          - { from: MergeRequest, from_id: 2500, to: Project, to_id: 1000 }
+        HAS_HEAD_PIPELINE:
+          - { from: MergeRequest, from_id: 2500, to: Pipeline, to_id: 1101 }
+        HAS_DIFF:
+          - { from: MergeRequest, from_id: 2500, to: MergeRequestDiff, to_id: 20001 }
+      referential_integrity: true
       sql_contains: [gl_edge, gl_ci_edge, gl_diff_edge]
 
   - name: Cross-table chain excludes another namespace
@@ -415,17 +538,23 @@ cases:
         MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
     expect:
       node_count: 5
-      skip_requirements: [node_ids]
       nodes:
+        User: { ids: [1] }
         MergeRequest: { ids: [2500], absent: [3500] }
         Pipeline: { ids: [1101], absent: [3101] }
         Project: { ids: [1000], absent: [3000] }
         Branch: { ids: [2601], absent: [3601] }
-      edges:
-        AUTHORED: [[1, 2500]]
-        HAS_HEAD_PIPELINE: [[2500, 1101]]
-        IN_PROJECT: [[1101, 1000]]
-        CONTAINS: [[1000, 2601]]
+      total_edge_count: 4
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        HAS_HEAD_PIPELINE:
+          - { from: MergeRequest, from_id: 2500, to: Pipeline, to_id: 1101 }
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
       sql_contains: [gl_edge, gl_ci_edge, gl_code_edge]
 
   - name: Specialized routes exclude another namespace
@@ -443,11 +572,14 @@ cases:
         SecurityScan: { ids: [1701], absent: [3701] }
         Project: { ids: [1000], absent: [3000] }
         Branch: { ids: [2601], absent: [3601] }
-      edges:
-        IN_PROJECT: [[1701, 1000]]
-        CONTAINS: [[1000, 2601]]
+      total_edge_count: 2
+      edge_exists:
+        IN_PROJECT:
+          - { from: SecurityScan, from_id: 1701, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
       sql_contains: [gl_sec_edge, gl_code_edge]
-      skip_requirements: [node_ids]
 
   - name: Cross-table shortest path excludes another namespace
     description: A multi-table path frontier returns the authorized project and excludes the same path in another organization
@@ -460,10 +592,15 @@ cases:
         MATCH path = ANY SHORTEST (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] AND branch.id IN [2601, 3601] RETURN path
     expect:
       path_count: 1
+      nodes:
+        Pipeline: { ids: [1101] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
       path_destinations:
         Branch: [2601]
       path_edges:
-        - [{ from: Pipeline, from_id: 1101, type: IN_PROJECT, to: Project, to_id: 1000 }, { type: CONTAINS, to: Branch, to_id: 2601 }]
+        - [{ from: Pipeline, from_id: 1101, type: IN_PROJECT, to: Project, to_id: 1000, step: 0 }, { from: Project, from_id: 1000, type: CONTAINS, to: Branch, to_id: 2601, step: 1 }]
+      referential_integrity: true
       sql_contains: [gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge]
 
   - name: Variable traversal excludes another namespace
@@ -477,12 +614,15 @@ cases:
         MATCH (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, branch
     expect:
       node_count: 2
-      skip_requirements: [node_ids, "relationship:CONTAINS"]
       nodes:
         Pipeline: { ids: [1101], absent: [3101] }
         Branch: { ids: [2601], absent: [3601] }
-      edges:
-        IN_PROJECT: [[1101, 2601]]
+      total_edge_count: 1
+      edge_exists:
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Branch, to_id: 2601 }
+      edge_count: { CONTAINS: 0 }
+      referential_integrity: true
       sql_contains: [gl_ci_edge, gl_code_edge, gl_edge]
 
   - name: Mixed-table aggregation excludes another namespace

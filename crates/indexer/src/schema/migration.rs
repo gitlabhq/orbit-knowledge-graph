@@ -226,7 +226,7 @@ async fn acquire_migration_lock(
     metrics: &MigrationMetrics,
 ) -> Result<LockGuard, DispatcherMigrationError> {
     for attempt in 0..MAX_LOCK_WAIT_ITERATIONS {
-        if let Some(guard) =
+        if let Ok(guard) =
             LockGuard::acquire(lock_service.clone(), MIGRATION_LOCK_KEY, MIGRATION_LOCK_TTL).await?
         {
             info!("acquired schema migration lock");

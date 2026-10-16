@@ -285,7 +285,7 @@ impl Engine {
 enum HandlerTaskOutcome {
     Ok,
     RetryRequested,
-    Backpressure,
+    Backpressure(Option<Duration>),
     TransientError(String),
     Exhausted(String),
     Dropped(String),
@@ -404,6 +404,7 @@ async fn run_handlers(
     subscription: &Subscription,
 ) -> HandlersOutcome {
     let concurrency_group = subscription.concurrency_group.clone();
+    let retry_interval = subscription.retry_interval();
     let mut tasks = tokio::task::JoinSet::new();
 
     for handler in handlers {
@@ -448,14 +449,19 @@ async fn run_handlers(
                 .metrics
                 .record_handler_error(handler.name(), error.error_kind());
 
-            if let HandlerError::Backpressure(reason) = &error {
+            let retry_delay = match &error {
+                HandlerError::Backpressure(_) => Some(retry_interval),
+                HandlerError::Deferred { delay, .. } => Some(Some(*delay)),
+                _ => None,
+            };
+            if let Some(retry_delay) = retry_delay {
                 info!(
                     handler = handler.name(),
                     subject = %envelope.subject,
-                    reason,
-                    "no capacity for this message; redelivering without counting an attempt"
+                    %error,
+                    "redelivering without counting an attempt"
                 );
-                return HandlerTaskOutcome::Backpressure;
+                return HandlerTaskOutcome::Backpressure(retry_delay);
             }
 
             let permanent_action = match &error {
@@ -486,6 +492,7 @@ async fn run_handlers(
     let mut dropped_error: Option<String> = None;
     let mut has_retry_requested = false;
     let mut has_backpressure = false;
+    let mut backpressure_delay: Option<Duration> = None;
     let mut transient_error: Option<String> = None;
 
     while let Some(result) = tasks.join_next().await {
@@ -494,8 +501,9 @@ async fn run_handlers(
             Ok(HandlerTaskOutcome::RetryRequested) => {
                 has_retry_requested = true;
             }
-            Ok(HandlerTaskOutcome::Backpressure) => {
+            Ok(HandlerTaskOutcome::Backpressure(delay)) => {
                 has_backpressure = true;
+                backpressure_delay = backpressure_delay.max(delay);
             }
             Ok(HandlerTaskOutcome::TransientError(error)) => {
                 transient_error.get_or_insert(error);
@@ -528,7 +536,7 @@ async fn run_handlers(
     // Skips the `should_redeliver` check below: contention must not spend an attempt.
     if has_backpressure {
         return HandlersOutcome::Failed {
-            retry_delay: subscription.retry_interval(),
+            retry_delay: backpressure_delay,
         };
     }
     if let Some(error) = transient_error {
@@ -638,6 +646,37 @@ mod tests {
         assert!(
             matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(5))),
             "expected Failed with 5s delay, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_at_retry_limit_redelivers_after_its_own_delay() {
+        let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Deferred {
+            reason: "project lock held".into(),
+            delay: Duration::from_secs(42),
+        });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&test_engine_configuration());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(42))),
+            "expected Failed with the handler's 42s delay, got {outcome:?}"
         );
     }
 

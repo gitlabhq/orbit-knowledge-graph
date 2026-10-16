@@ -729,3 +729,43 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
     );
     assert_eq!(displayed.state.trees.len(), 2);
 }
+
+#[test]
+fn exporting_deeply_nested_definitions_grows_linearly() {
+    use std::time::Instant;
+
+    fn export_ms(levels: usize) -> f64 {
+        let mut source = String::new();
+        for i in 0..levels {
+            source += &format!("function h{i}() {{\n");
+        }
+        source += &"}\n".repeat(levels);
+        let repo = tempfile::tempdir().unwrap();
+        write_all(repo.path(), &[("deep.js", source.as_bytes())]);
+        let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
+        let ontology = Ontology::load_embedded().unwrap();
+        let displayed = templates::index(Context::new(&env, common::walk(repo.path())))
+            .unwrap()
+            .then(Display)
+            .unwrap();
+        let started = Instant::now();
+        displayed
+            .then(Export {
+                ontology: &ontology,
+                envelope: envelope(),
+            })
+            .unwrap();
+        started.elapsed().as_secs_f64() * 1000.0
+    }
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(templates::WORKER_STACK_BYTES)
+        .build()
+        .unwrap();
+    let best = |levels| (0..3).map(|_| export_ms(levels)).fold(f64::MAX, f64::min);
+    let (small, large) = pool.install(|| (best(1_000), best(16_000)));
+    assert!(
+        large < 64.0 * small.max(1.0),
+        "exporting 16x the nesting went from {small:.0} ms to {large:.0} ms"
+    );
+}

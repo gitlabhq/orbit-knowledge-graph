@@ -31,6 +31,9 @@ pub fn test_pipeline_configuration() -> CodeIndexingPipelineConfig {
         .pipeline;
     pipeline.small_indexing_slots = Some(TEST_SMALL_INDEXING_SLOTS);
     pipeline.big_indexing_slots = Some(TEST_BIG_INDEXING_SLOTS);
+    pipeline.write_buffer_age_secs = 1;
+    pipeline.write_max_flush_age_secs = 1;
+    pipeline.write_min_flush_rows = 1;
     pipeline
 }
 

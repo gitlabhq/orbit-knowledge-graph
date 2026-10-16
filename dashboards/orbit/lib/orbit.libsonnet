@@ -150,17 +150,13 @@ local unitFor(spec, rate=false) = (
 
 // ---------- Panel + datasource primitives ----------
 
-// RAILS_DS is derived from `$rails_env` because the Rails Mimir tenants are
-// split per environment (`mimir-gitlab-gprd`, `mimir-gitlab-gstg`). Keeping
-// it as a free-standing datasource picker let users select the gprd tenant
-// while querying gstg labels, producing silent "no data" panels.
-// On Dedicated the one tenant Prometheus scrapes Rails too, so RAILS_DS
-// collapses into $ORBIT_DS.
+// RAILS_DS is a hidden variable that follows `$rails_env` because the Rails
+// Mimir tenants are split per environment. A visible picker let users mix the
+// gprd tenant with gstg labels. A variable, unlike a composed uid, also
+// resolves inside Mixed panels. On Dedicated it collapses into $ORBIT_DS.
 local datasource(uid_var) = {
   type: 'prometheus',
-  uid: if uid_var == 'RAILS_DS' then
-    (if IS_DEDICATED then '$ORBIT_DS' else 'mimir-gitlab-${rails_env}')
-  else '$' + uid_var,
+  uid: if uid_var == 'RAILS_DS' && IS_DEDICATED then '$ORBIT_DS' else '$' + uid_var,
 };
 
 local target(expr, legend, ds_var, refId='A') = {
@@ -170,12 +166,20 @@ local target(expr, legend, ds_var, refId='A') = {
   refId: refId,
 };
 
+// Grafana runs every target against the panel datasource unless it is Mixed.
+local panelDatasource(targets) = (
+  local uids = std.set([t.datasource.uid for t in targets]);
+  if std.length(targets) == 0 then null
+  else if std.length(uids) > 1 then { type: 'datasource', uid: '-- Mixed --' }
+  else targets[0].datasource
+);
+
 local timeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, legendPlacement='bottom', overrides=[]) = {
   kind: 'panel',
   type: 'timeseries',
   title: title,
   description: description,
-  datasource: if std.length(targets) > 0 then targets[0].datasource else null,
+  datasource: panelDatasource(targets),
   targets: targets,
   fieldConfig: {
     defaults: {
@@ -824,6 +828,15 @@ local TEMPLATING = if IS_DEDICATED then {
       includeAll: false,
       multi: false,
       hide: 0,
+    },
+    {
+      name: 'RAILS_DS',
+      label: 'Rails datasource',
+      type: 'datasource',
+      query: 'prometheus',
+      regex: '/^Mimir - Gitlab ${rails_env}$/i',
+      hide: 2,
+      refresh: 1,
     },
   ],
 };

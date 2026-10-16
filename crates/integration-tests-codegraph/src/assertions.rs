@@ -57,6 +57,23 @@ pub struct TestSuite {
     /// When true, emit detailed engine/resolver trace events to stderr.
     #[serde(default)]
     pub trace: bool,
+    /// `default` indexes with the production budgets of config/default.yaml;
+    /// `unlimited` or unset, no budget applies.
+    #[serde(default)]
+    pub limits: Option<String>,
+    /// Overrides the `max_tree_depth` of `limits`, so a suite can cut a file
+    /// at a small depth that the per-file budgets still walk in time.
+    #[serde(default)]
+    pub max_tree_depth: Option<usize>,
+    /// The files the budgets must skip, each with the label of the limit
+    /// that stopped it when one guard must fire; the suite fails when the
+    /// engine skips any other set.
+    #[serde(default)]
+    pub skipped: Vec<SkippedFile>,
+    /// The files the budgets must keep but cut short, in the same form as
+    /// `skipped`; the suite fails when the engine limits any other set.
+    #[serde(default)]
+    pub limited: Vec<SkippedFile>,
     pub tests: Vec<TestCase>,
     /// Incremental re-index steps; only the incremental runner executes them.
     #[serde(default)]
@@ -77,6 +94,13 @@ pub struct IncrementalStep {
     pub remove: Vec<String>,
     #[serde(default)]
     pub tests: Vec<TestCase>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkippedFile {
+    pub path: String,
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

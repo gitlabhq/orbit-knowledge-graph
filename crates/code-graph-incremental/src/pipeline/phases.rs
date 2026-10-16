@@ -305,7 +305,7 @@ impl ItemPhase<SourceFile> for Parse {
             &budget,
             env.limits.max_tree_depth,
         )
-        .map(Parsed)
+        .map(|(tree, cut)| Parsed(tree, cut))
     }
 }
 
@@ -323,14 +323,21 @@ impl ItemPhase<Parsed> for Rewrite {
         &self,
         env: &Env,
         run: &Sentinel,
-        Parsed(mut tree): Parsed,
+        Parsed(mut tree, cut): Parsed,
     ) -> Result<Rewritten, Killed> {
         let budget =
             Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms).on_thread_cpu();
+        let root = tree.root;
+        if tree.root().kind() == 0 {
+            tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
+        }
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
-        Ok(Rewritten(tree))
+        if !tree.root().is(crate::canonical::Canonical::SourceFile) {
+            tree.node_mut(root).kind = crate::canonical::Canonical::SourceFile.into();
+        }
+        Ok(Rewritten(tree, cut))
     }
 }
 
@@ -349,7 +356,7 @@ impl ItemPhase<Rewritten> for Canonicalize {
         &self,
         env: &Env,
         _run: &Sentinel,
-        Rewritten(mut tree): Rewritten,
+        Rewritten(mut tree, cut): Rewritten,
     ) -> Result<Canonical, Killed> {
         tree.prune();
         for id in tree.preorder() {
@@ -371,7 +378,7 @@ impl ItemPhase<Rewritten> for Canonicalize {
             tree.set_tag(node, key, path);
         }
         tree.source = std::sync::Arc::from("");
-        Ok(Canonical(tree.compact_and_remap()))
+        Ok(Canonical(tree.compact_and_remap(), cut))
     }
 }
 
@@ -388,13 +395,13 @@ impl ItemPhase<Canonical> for Link {
         &self,
         env: &Env,
         run: &Sentinel,
-        Canonical(tree): Canonical,
+        Canonical(tree, cut): Canonical,
     ) -> Result<LinkedFile, Killed> {
         let (edges, limited) = linker::link(&tree, env, run)?;
         Ok(LinkedFile {
             tree,
             edges,
-            limited,
+            limited: limited.or(cut),
         })
     }
 }
@@ -457,7 +464,6 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
                 _ if skipped.contains_key(path) => match skipped[path] {
                     "tree-sitter" => "skip_timeout_parse",
-                    "depth" => "skip_deeply_nested",
                     "stack" => "skip_stack_limit",
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
