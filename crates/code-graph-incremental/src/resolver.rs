@@ -1090,7 +1090,8 @@ fn propagate_reexports(
             }
             let exports = req.exports(trees, visible);
             let import = trees[req.fi as usize].cursor(req.node);
-            let file_level = import.enclosing(|p| p.is(C::Def)).is_none();
+            let reexport =
+                import.has_tag(tags.reexport) && import.enclosing(|p| p.is(C::Def)).is_none();
             for c in import.names() {
                 let ns = wildcard_or_name(wildcard_sym, c);
                 if ns == wildcard_sym {
@@ -1113,7 +1114,7 @@ fn propagate_reexports(
                         req.fi as usize,
                         c.child_sym(C::Alias).unwrap_or(ns),
                         loc,
-                        file_level,
+                        reexport,
                     );
                 }
             }
