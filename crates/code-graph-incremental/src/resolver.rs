@@ -1783,7 +1783,13 @@ fn wildcard_uses<'a>(
             edges.push(name.edge_to(target, EdgeKind::Imports));
         }
     };
-    let root = |r: Cursor<'_>| qualified(ctx, r.sym(), &provided);
+    let root = |r: Cursor<'a>| {
+        let local = resolve_reference(ctx, r).or_else(|| enclosing_name(ctx, r, r.sym()));
+        match local {
+            Some(_) => None,
+            None => qualified(ctx, r.sym(), &provided),
+        }
+    };
     for from in referrers.iter().map(|&n| ctx.corpus.jump(fi as u32, n)) {
         for call in from.calls() {
             let Some(target) = call.child(C::Callee).and_then(|c| chain(ctx, c, &root)) else {
@@ -1984,7 +1990,9 @@ fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
     {
         branch_type(ctx, branch)
     } else {
-        infer_return_type(target).and_then(|sym| visible_type(ctx, target.fi(), sym))
+        infer_return_type(target).and_then(|sym| {
+            enclosing_name(ctx, target, sym).or_else(|| visible_type(ctx, target.fi(), sym))
+        })
     }
 }
 
@@ -2036,7 +2044,7 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
         chain(ctx, c, &|r| {
             resolve_reference(ctx, r)
-                .or_else(|| enclosing_name(ctx, r))
+                .or_else(|| enclosing_name(ctx, r, r.sym()))
                 .or_else(|| visible_type(ctx, r.fi(), r.sym()).filter(|_| !imported_inline(r)))
         })
     });
@@ -2080,9 +2088,8 @@ fn enclosing_defs<'a>(r: Cursor<'a>) -> impl Iterator<Item = (Cursor<'a>, bool)>
     })
 }
 
-fn enclosing_name<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>> {
-    let sym = r.sym();
-    enclosing_defs(r).find_map(|(d, header)| {
+fn enclosing_name<'a>(ctx: &'a ResolveCtx, at: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
+    enclosing_defs(at).find_map(|(d, header)| {
         enclosing_alias(ctx, d, sym).or_else(|| match header {
             true => None,
             false => enclosing_type(ctx, d, sym),
