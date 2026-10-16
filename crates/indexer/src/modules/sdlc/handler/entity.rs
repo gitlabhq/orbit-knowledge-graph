@@ -611,10 +611,10 @@ mod tests {
 
     #[tokio::test]
     async fn incremental_run_records_the_wait_of_its_oldest_change() {
+        let oldest_change_age = (Utc::now() - changed_at()).num_milliseconds() as f64 / 1000.0;
         let (count, seconds) =
             change_delay_observations(changed_row(), completed_store(), namespace_request(None))
                 .await;
-        let oldest_change_age = (Utc::now() - changed_at()).num_seconds() as f64;
         assert_eq!(count, 1);
         assert!(
             seconds >= oldest_change_age,
