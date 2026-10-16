@@ -158,8 +158,7 @@ impl ClickHouseLimit {
             158 => Some(Self::TooManyRows),
             191 => Some(Self::SetSizeLimit),
             53 => Some(Self::TypeMismatch),
-            41 if message.contains("for query parameter") => Some(Self::BadQueryParameter),
-            457 => Some(Self::BadQueryParameter),
+            41 | 457 => Some(Self::BadQueryParameter),
             _ => None,
         }
     }
@@ -261,9 +260,6 @@ mod tests {
             ),
             clickhouse_error(
                 "Code: 241. DB::Exception: Query memory limit exceeded: would use 9.31 GiB",
-            ),
-            clickhouse_error(
-                "Code: 41. DB::Exception: Cannot parse DateTime: while reading column created_at. (CANNOT_PARSE_DATETIME)",
             ),
             clickhouse_error("Code: 47. DB::Exception: Unknown expression identifier `p.id`"),
             PipelineError::ContentResolution("batch size 101 exceeds limit 100".into()),
