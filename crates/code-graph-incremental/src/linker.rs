@@ -654,9 +654,9 @@ impl<'t> Fold<'t> {
             }
         } else if let Some(sym) = callee.sym_opt() {
             if c.has_tag(self.tags.implicit_self) {
-                self.resolve_implicit(sym, from);
+                self.resolve_implicit(sym, from, c.index());
             } else {
-                self.resolve_name(sym, from, Wildcards::All);
+                self.resolve_name(sym, from, c.index(), Wildcards::All);
             }
         }
         self.finish_call(first, c.index());
@@ -672,11 +672,13 @@ impl<'t> Fold<'t> {
             let remap = callee.is_some()
                 && self.edges[i].kind == EdgeKind::Calls
                 && target.child_sym(C::DefName) == callee;
+            let to = match remap {
+                true => self.sibling_member(target.index(), false, site),
+                false => target.index(),
+            };
             let edge = &mut self.edges[i];
             edge.site = Some(site);
-            if remap {
-                edge.to_node = crate::tree::callable_target(target).index();
-            }
+            edge.to_node = to;
         }
     }
 
@@ -1197,7 +1199,7 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn resolve_implicit(&mut self, sym: u32, from: u32) {
+    fn resolve_implicit(&mut self, sym: u32, from: u32, site: u32) {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
@@ -1216,14 +1218,14 @@ impl<'t> Fold<'t> {
             self.push_calls(from, members);
             return;
         }
-        self.resolve_name(sym, from, Wildcards::Callable);
+        self.resolve_name(sym, from, site, Wildcards::Callable);
     }
 
-    fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) {
+    fn resolve_name(&mut self, sym: u32, from: u32, site: u32, fallback: Wildcards) {
         let mut targets = self.lookup(sym);
         for target in &mut targets {
             if let Value::LocalDef(d) = target {
-                *d = self.sibling_member(*d, false);
+                *d = self.sibling_member(*d, false, site);
             }
         }
         if targets.is_empty() {
@@ -1332,12 +1334,14 @@ impl<'t> Fold<'t> {
             for n in class.descendants_pruned(nested).filter(|n| n.is(C::Def)) {
                 if let Some(dn) = n.child_sym(C::DefName) {
                     let slots = m.entry(dn).or_insert((n.index(), None, None));
-                    let slot = if n.is_field() {
-                        &mut slots.1
-                    } else {
-                        &mut slots.2
-                    };
-                    slot.get_or_insert(n.index());
+                    if crate::tree::is_member_of(n, class) {
+                        let slot = if n.is_field() {
+                            &mut slots.1
+                        } else {
+                            &mut slots.2
+                        };
+                        slot.get_or_insert(n.index());
+                    }
                 }
             }
             m
@@ -1345,22 +1349,37 @@ impl<'t> Fold<'t> {
         index.get(&name).copied()
     }
 
-    fn sibling_member(&self, def: u32, field: bool) -> u32 {
+    fn sibling_member(&self, def: u32, field: bool, site: u32) -> u32 {
         let target = self.tree.cursor(def);
         if target.is_field() == field {
             return def;
         }
-        let class = target.ancestors().find(|node| node.is_class());
-        let nearest = target
+        let Some(class) = target.ancestors().find(|node| node.is_class()) else {
+            return def;
+        };
+        let name = target.child_sym(C::DefName);
+        let declaration = target.parent().and_then(|parent| {
+            parent.children().find(|node| {
+                node.is(C::Binding) && node.has(C::Declaration) && Some(node.sym()) == name
+            })
+        });
+        let own = |node: Cursor| {
+            node.index() == def || declaration.is_some_and(|decl| decl.index() == node.index())
+        };
+        let scope = target
             .ancestors()
             .find(|node| node.is(C::Def))
             .map(|node| node.index());
-        if !target.is_field() && nearest != class.map(|node| node.index()) {
+        let mut inside_own = false;
+        let mut visible = false;
+        for node in self.tree.cursor(site).ancestors() {
+            inside_own |= own(node);
+            visible |= Some(node.index()) == scope;
+        }
+        if visible && !inside_own && !crate::tree::is_member_of(target, class) {
             return def;
         }
-        class
-            .zip(target.child_sym(C::DefName))
-            .and_then(|(class, name)| self.member_slot(class.index(), name, field))
+        name.and_then(|name| self.member_slot(class.index(), name, field))
             .unwrap_or(def)
     }
 
@@ -1408,7 +1427,7 @@ impl<'t> Fold<'t> {
                 .into_iter()
                 .map(|r| match r {
                     Value::LocalDef(d) => {
-                        let d = self.sibling_member(d, !c.is(C::Callee));
+                        let d = self.sibling_member(d, !c.is(C::Callee), c.index());
                         self.field_value(d).unwrap_or(Value::LocalDef(d))
                     }
                     _ => r,

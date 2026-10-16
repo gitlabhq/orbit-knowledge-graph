@@ -207,18 +207,12 @@ fn same_name_member<'a, S: Storage<Node = Node>>(
 ) -> Option<Cursor<'a, S>> {
     let name = target.child_sym(C::DefName)?;
     let class = target.ancestors().find(|node| node.is_class())?;
-    let nearest = target
-        .ancestors()
-        .find(|node| node.is(C::Def))
-        .map(|node| node.index());
-    if !target.is_field() && nearest != Some(class.index()) {
-        return None;
-    }
     class.descend(|node| {
         if node.is(C::Def)
             && node.index() != class.index()
             && node.child_sym(C::DefName) == Some(name)
             && node.is_field() == field
+            && is_member_of(node, class)
         {
             return Step::Out(node);
         }
@@ -227,6 +221,24 @@ fn same_name_member<'a, S: Storage<Node = Node>>(
         }
         Step::Into
     })
+}
+
+pub fn is_member_of<'a, S: Storage<Node = Node>>(def: Cursor<'a, S>, class: Cursor<'a, S>) -> bool {
+    let mut in_scope = false;
+    for node in def.ancestors() {
+        if node.index() == class.index() {
+            return true;
+        }
+        if node.is(C::Def) {
+            let of_class = node
+                .ancestors()
+                .find(|outer| outer.is(C::Def))
+                .is_some_and(|outer| outer.index() == class.index());
+            return def.is_field() && !in_scope && of_class;
+        }
+        in_scope |= node.is(C::Scope);
+    }
+    false
 }
 
 pub fn callable_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cursor<'a, S> {
