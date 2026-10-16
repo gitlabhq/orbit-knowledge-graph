@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
 use super::limits::{LimitKind, add_capped};
@@ -48,7 +48,7 @@ pub struct Loading<T> {
     limits: Limits,
     cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     entries: Vec<Mutex<Vec<VfsEntry<T>>>>,
-    paths: Vec<Mutex<FxHashSet<u64>>>,
+    paths: Vec<Mutex<FxHashMap<Box<str>, bool>>>,
     blobs: Vec<Mutex<FxHashMap<[u8; 32], Content>>>,
     scratch: Scratch,
     files: AtomicU64,
@@ -181,17 +181,25 @@ impl<T: Tag> Loading<T> {
     fn record(&self, file: File<'static, T>, content: Content) -> Result<(), SourceError> {
         let mut hasher = FxHasher::default();
         file.path.hash(&mut hasher);
-        let hash = hasher.finish();
-        let shard = hash as usize % ENTRY_SHARDS;
-        if lock(&self.paths[shard]).insert(hash) {
-            let cap = self.limits.files.map(|n| n as u64);
-            if file.keeps() && !matches!(content, Content::Failed(_)) {
+        let shard = hasher.finish() as usize % ENTRY_SHARDS;
+        let cap = self.limits.files.map(|n| n as u64);
+        let kept = file.keeps() && !matches!(content, Content::Failed(_));
+        let mut paths = lock(&self.paths[shard]);
+        match (paths.get(file.path.as_ref()).copied(), kept) {
+            (Some(true), _) | (Some(false), false) => {}
+            (_, true) => {
                 add_capped(&self.files, LimitKind::Files, 1, cap)?;
-            } else if add_capped(&self.listed, LimitKind::Files, 1, cap).is_err() {
-                self.dropped.fetch_add(1, Relaxed);
-                return Ok(());
+                paths.insert(file.path.as_ref().into(), true);
+            }
+            (None, false) => {
+                if add_capped(&self.listed, LimitKind::Files, 1, cap).is_err() {
+                    self.dropped.fetch_add(1, Relaxed);
+                    return Ok(());
+                }
+                paths.insert(file.path.as_ref().into(), false);
             }
         }
+        drop(paths);
         lock(&self.entries[shard]).push(VfsEntry { file, content });
         Ok(())
     }
