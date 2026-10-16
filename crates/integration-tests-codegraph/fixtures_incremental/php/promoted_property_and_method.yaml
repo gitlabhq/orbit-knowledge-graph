@@ -1,0 +1,66 @@
+name: "PHP: a promoted constructor property and a method of one name"
+
+fixtures:
+  - path: Box.php
+    content: |
+      <?php
+
+      class Other
+      {
+          public function b(): void {}
+      }
+
+      class Box
+      {
+          public function __construct(protected Other $x)
+          {
+              $this->x();
+          }
+
+          public function x(): Box
+          {
+              return $this;
+          }
+
+          public function b(): void {}
+
+          public function go(): Box
+          {
+              return $this->x();
+          }
+
+          public function read(): void
+          {
+              $this->x->b();
+          }
+      }
+
+tests:
+  - name: a call on this of the shared name targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'go' AND t.name = 'x'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box\\x", kind: "Method" } }
+
+  - name: a call on this of the shared name inside the constructor targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = '__construct' AND t.name = 'x'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box\\x", kind: "Method" } }
+
+  - name: a read on this of the shared name types by the promoted property
+    # Known gap: a member read through this of a promoted property is not typed, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'read' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other\\b" } }

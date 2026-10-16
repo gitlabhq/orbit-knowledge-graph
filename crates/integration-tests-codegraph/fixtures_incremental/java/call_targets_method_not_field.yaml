@@ -1,0 +1,81 @@
+name: "Java: a call targets the method, not a field of the same name"
+
+fixtures:
+  - path: Main.java
+    content: |
+      public class Main {
+          static class SampleElements {
+              int e4 = 4;
+
+              int e4() {
+                  return e4;
+              }
+          }
+
+          static class Other {
+              void b() {}
+          }
+
+          static class Converter {
+              Other reverse = new Other();
+
+              Converter reverse() {
+                  return this;
+              }
+
+              void b() {}
+          }
+
+          void use(SampleElements samples, Converter converter) {
+              samples.e4();
+              converter.reverse();
+          }
+
+          int readField(SampleElements samples) {
+              return samples.e4 + 1;
+          }
+
+          void chainRead(Converter converter) {
+              converter.reverse.b();
+          }
+
+      }
+
+tests:
+  - name: a call on a receiver with a field and a method of the same name targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'use'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 4 }
+      - { column_values: { field: callee, values: ["Main.Converter", "Main.Converter.reverse", "Main.SampleElements", "Main.SampleElements.e4"] } }
+      - { column_values: { field: kind, values: ["Class", "Method"] } }
+
+  - name: a field read keeps the field as its target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'readField' AND t.name = 'e4'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Main.SampleElements.e4", kind: "Field" } }
+
+  - name: a receiver chain through a field does not type by the method of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'chainRead' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { not: true, row: { callee: "Main.Converter.b" } }
+
+  - name: a receiver chain through a field types by the field
+    # Known gap: a Java receiver chain through a field is not typed, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'chainRead' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Main.Other.b" } }

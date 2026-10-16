@@ -1,0 +1,79 @@
+name: "Kotlin: a call targets the function, not a property of the same name"
+
+fixtures:
+  - path: Main.kt
+    content: |
+      class Other {
+          fun b() {}
+      }
+
+      class Samples {
+          val size: Int = 4
+
+          fun size(): Int = size
+
+          val reverse: Other = Other()
+
+          fun reverse(): Samples = this
+
+          fun b() {}
+      }
+
+      class Handlers {
+          val run: () -> Unit = {}
+      }
+
+      fun use(samples: Samples) {
+          samples.size()
+      }
+
+      fun propertyValue(handlers: Handlers) {
+          handlers.run()
+      }
+
+      fun readProperty(samples: Samples): Int {
+          return samples.size
+      }
+
+      fun chainRead(samples: Samples) {
+          samples.reverse.b()
+      }
+
+tests:
+  - name: a call on a receiver with a property and a function of the same name targets the function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'use'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["Samples", "Samples.size"] } }
+      - { column_values: { field: kind, values: ["Class", "Function"] } }
+
+  - name: a call on a property of function type keeps the property as its target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'propertyValue'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["Handlers", "Handlers.run"] } }
+      - { column_values: { field: kind, values: ["Class", "Property"] } }
+
+  - name: a property read keeps the property as its target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'readProperty' AND t.name = 'size'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Samples.size", kind: "Property" } }
+
+  - name: a receiver chain through a property types by the property, not by the function of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'chainRead' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b" } }
