@@ -215,6 +215,7 @@ pub struct GatedClickHouse {
     open: tokio::sync::watch::Sender<bool>,
     arrivals: Arc<tokio::sync::Semaphore>,
     arrived: Arc<AtomicUsize>,
+    max_in_flight: Arc<AtomicUsize>,
 }
 
 struct GateState {
@@ -223,6 +224,8 @@ struct GateState {
     open: tokio::sync::watch::Receiver<bool>,
     arrivals: Arc<tokio::sync::Semaphore>,
     arrived: Arc<AtomicUsize>,
+    in_flight: AtomicUsize,
+    max_in_flight: Arc<AtomicUsize>,
 }
 
 impl GatedClickHouse {
@@ -230,18 +233,22 @@ impl GatedClickHouse {
         let (open, opened) = tokio::sync::watch::channel(false);
         let arrivals = Arc::new(tokio::sync::Semaphore::new(0));
         let arrived = Arc::new(AtomicUsize::new(0));
+        let max_in_flight = Arc::new(AtomicUsize::new(0));
         let state = Arc::new(GateState {
             upstream: upstream.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
             open: opened,
             arrivals: Arc::clone(&arrivals),
             arrived: Arc::clone(&arrived),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: Arc::clone(&max_in_flight),
         });
         Self {
             url: serve(Router::new().fallback(hold_then_forward).with_state(state)).await,
             open,
             arrivals,
             arrived,
+            max_in_flight,
         }
     }
 
@@ -267,6 +274,10 @@ impl GatedClickHouse {
         self.arrived.load(Ordering::SeqCst)
     }
 
+    pub fn max_in_flight(&self) -> usize {
+        self.max_in_flight.load(Ordering::SeqCst)
+    }
+
     pub fn open(&self) {
         self.open.send_replace(true);
     }
@@ -281,6 +292,8 @@ async fn hold_then_forward(
         .await
         .expect("request body");
     state.arrived.fetch_add(1, Ordering::SeqCst);
+    let in_flight = state.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+    state.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
     state.arrivals.add_permits(1);
     let mut open = state.open.clone();
     while !*open.borrow_and_update() {
@@ -305,6 +318,7 @@ async fn hold_then_forward(
     let status = response.status();
     let headers = response.headers().clone();
     let body = response.bytes().await.expect("upstream body");
+    state.in_flight.fetch_sub(1, Ordering::SeqCst);
     let mut out = (status, body).into_response();
     for (name, value) in &headers {
         if !matches!(name.as_str(), "content-length" | "transfer-encoding") {

@@ -1146,14 +1146,6 @@ async fn released(slot: &tokio::sync::Semaphore) {
     slot.acquire().await.expect("slot stays open").forget();
 }
 
-/// Lets a whole small job's inserts wait at the gate, so the parse never blocks on a write slot.
-fn wide_write_bound() -> orbit_server_config::CodeIndexingPipelineConfig {
-    orbit_server_config::CodeIndexingPipelineConfig {
-        write_max_concurrent: 64,
-        ..indexer::testkit::test_pipeline_configuration()
-    }
-}
-
 #[tokio::test]
 async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
     let project_id: i64 = 63;
@@ -1176,7 +1168,7 @@ async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
     );
 
     let gate = GatedClickHouse::start(&clickhouse.config.url).await;
-    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, wide_write_bound());
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = Arc::new(deps.gated_handler(&gate));
     let cache_dir = deps.cache_dir_path().to_path_buf();
 
@@ -1207,6 +1199,12 @@ async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1)
+    );
+    assert!(gate.arrived() >= 6, "one insert per code table");
+    assert_eq!(
+        gate.max_in_flight(),
+        gate.arrived(),
+        "a small job sends every table's insert at once, so it waits one server flush"
     );
 }
 
@@ -1253,18 +1251,17 @@ async fn a_job_keeps_at_most_write_max_concurrent_inserts_in_flight() {
 
     gate.insert_arrived().await;
     gate.insert_arrived().await;
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    assert_eq!(
-        gate.arrived(),
-        2,
-        "the parse must pause until one of the two in-flight inserts lands"
-    );
-
     gate.open();
     job.await.expect("join").expect("indexing succeeds");
+
     assert!(
         gate.arrived() > 2,
         "one-row slices must have produced more inserts than the bound"
+    );
+    assert_eq!(
+        gate.max_in_flight(),
+        2,
+        "the parse must pause until one of the two in-flight inserts lands"
     );
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
 }
@@ -1307,7 +1304,7 @@ async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
     );
 
     let gate = GatedClickHouse::start(&clickhouse.config.url).await;
-    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, wide_write_bound());
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.gated_handler(&gate);
     let (engine, configuration) = indexer::testkit::TestEngineBuilder::new(Arc::clone(&broker))
         .with_handler(Box::new(handler))

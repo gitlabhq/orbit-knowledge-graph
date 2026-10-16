@@ -673,7 +673,7 @@
           "minimum": 0
         },
         "write_max_concurrent": {
-          "description": "Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory.",
+          "description": "Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory. Keep it at or above the number of code tables, so a small job sends every table's insert at once.",
           "type": "integer",
           "format": "uint",
           "minimum": 0
