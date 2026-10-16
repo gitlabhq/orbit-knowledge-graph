@@ -2,7 +2,12 @@
 //! limit (`mise run test:integration:memory`), where the kernel would otherwise
 //! kill the whole process and every job in it.
 
-use indexer::handler::{Handler, HandlerError, PermanentAction};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use indexer::handler::{Handler, HandlerContext, HandlerError, PermanentAction};
+use indexer::nats::{MessageAcker, NatsError, ProgressNotifier};
+use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{TestContext, t};
@@ -129,6 +134,27 @@ async fn a_job_killed_under_pressure_is_retried_then_dead_lettered_and_a_small_j
     assert!(!indexed(&clickhouse, BIG).await);
 }
 
+/// Counts in-progress acks; a job sends its first one right before it waits for a lane.
+#[derive(Default)]
+struct ProgressAcks(AtomicUsize);
+
+#[async_trait::async_trait]
+impl MessageAcker for ProgressAcks {
+    async fn ack(&self) -> Result<(), NatsError> {
+        Ok(())
+    }
+    async fn ack_term(&self) -> Result<(), NatsError> {
+        Ok(())
+    }
+    async fn ack_progress(&self) -> Result<(), NatsError> {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+    async fn nack(&self, _: Option<std::time::Duration>) -> Result<(), NatsError> {
+        Ok(())
+    }
+}
+
 fn refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
     files
         .iter()
@@ -170,36 +196,47 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
             per_file_ssa_timeout_ms: 0,
             ..indexer::testkit::test_pipeline_configuration()
         },
-        watchdog.clone(),
+        watchdog,
     );
     let first = deps.code_indexing_task_handler();
     let second = deps.code_indexing_task_handler();
+    let acks = Arc::new(ProgressAcks::default());
+    let waiting_context = HandlerContext::new(
+        Arc::new(MockNatsServices::new()),
+        Arc::new(MockLockService::new()),
+        ProgressNotifier::new(acks.clone()),
+    );
     let parsing_job =
         tokio::spawn(async move { first.handle(handler_context(), envelope(PARSING, 1)).await });
     let waiting_job =
-        tokio::spawn(async move { second.handle(handler_context(), envelope(WAITING, 1)).await });
+        tokio::spawn(async move { second.handle(waiting_context, envelope(WAITING, 1)).await });
 
     let started = std::time::Instant::now();
-    while mock.archive_downloads(WAITING) == 0 || watchdog.candidates() == 0 {
+    while acks.0.load(Ordering::Relaxed) == 0 {
         assert!(
             started.elapsed() < std::time::Duration::from_secs(60),
-            "the waiter never fetched"
+            "the waiter never reached the lane"
         );
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        !parsing_job.is_finished(),
+        "the parsing job must still hold the lane when the pressure rises"
+    );
     fake_cgroup(cgroup.path(), 1000, 950);
     let parsed = parsing_job.await.expect("join");
     fake_cgroup(cgroup.path(), 1000, 500);
-    eprintln!("parsing job: {parsed:?}");
-    assert!(
-        matches!(&parsed, Err(HandlerError::Processing(message)) if message.contains("memory pressure")),
-        "the job on the lane is the victim: {parsed:?}"
-    );
     let waited = waiting_job.await.expect("join");
+    let victim = match (&parsed, &waited) {
+        (Err(_), Ok(_)) => "the parsing job",
+        (Ok(_), Err(_)) => "the lane waiter",
+        _ => "unclear",
+    };
+    eprintln!("victim: {victim}; parsing: {parsed:?}; waiting: {waited:?}");
     assert!(
-        waited.is_ok(),
-        "the lane waiter lands once it gets the lane: {waited:?}"
+        matches!(&parsed, Err(HandlerError::Processing(message)) if message.contains("memory pressure"))
+            && waited.is_ok(),
+        "the victim must be the job on the lane, not the waiter; it was {victim}: parsing {parsed:?}, waiting {waited:?}"
     );
     deps.code_indexing_task_handler()
         .flush()

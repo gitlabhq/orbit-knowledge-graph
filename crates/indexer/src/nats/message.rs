@@ -161,6 +161,10 @@ impl ProgressNotifier {
         Self { acker: None }
     }
 
+    pub fn new(acker: Arc<dyn MessageAcker>) -> Self {
+        Self { acker: Some(acker) }
+    }
+
     pub async fn notify_in_progress(&self) {
         if let Some(acker) = &self.acker
             && let Err(error) = acker.ack_progress().await

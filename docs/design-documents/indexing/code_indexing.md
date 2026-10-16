@@ -213,9 +213,10 @@ The policy retains source and resolver inputs. The incremental engine groups sou
 The code pipeline settings `source_memory_budget_bytes` and `source_compress_spill` control retained content.
 The memory budget is small, so most repositories stay in memory and a large one spills the rest to one temporary file. A job that waits for a lane holds at most that much source. Zero spills all retained content.
 
-Within one language family, the engine admits files to the parse against a source-byte budget (`max_inflight_source_bytes`, default 4 MiB) in arrival order. One file in flight costs 50 to 190 bytes of heap per source byte. The budget bounds the parse transient; the worker count does not. A file larger than the budget runs alone.
 Spill compression defaults to off.
 The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
+
+Within one language family, the engine admits files to the parse against a source-byte budget (`max_inflight_source_bytes`, default 4 MiB) in arrival order. A file in flight costs many times its size in heap, so the budget bounds the parse transient and the worker count does not. A file larger than the budget runs alone.
 
 Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
 An engine error that cannot succeed on retry dead-letters the job at once, as a fatal legacy pipeline error does. Examples are a rules load error and an export schema mismatch. A cancelled run and a failed hand-off to the buffered writer stay retryable.

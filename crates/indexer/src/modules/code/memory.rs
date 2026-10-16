@@ -14,7 +14,8 @@ use tracing::{info, warn};
 use super::metrics::CodeMetrics;
 
 const INTERVAL: Duration = Duration::from_millis(100);
-/// Freed memory shows up in the cgroup a little after a cancelled job unwinds.
+/// Freed memory shows up in the cgroup a little after a cancelled job unwinds;
+/// memory that keeps rising past the last kill does not wait for it.
 const SETTLE_AFTER_UNWIND: Duration = Duration::from_millis(750);
 const UNREADABLE_SAMPLES_BEFORE_GIVING_UP: u32 = 10;
 /// cgroup v1 reports "no limit" as a value near i64::MAX; at or above this
@@ -70,6 +71,7 @@ pub struct MemoryWatchdog {
     jobs: Mutex<Vec<Job>>,
     holding: Arc<AtomicUsize>,
     settled_at: Mutex<Option<Instant>>,
+    used_at_last_kill: AtomicU64,
     next_id: AtomicU64,
     watching: AtomicBool,
 }
@@ -126,14 +128,10 @@ impl MemoryWatchdog {
             jobs: Mutex::new(Vec::new()),
             holding: Arc::new(AtomicUsize::new(0)),
             settled_at: Mutex::new(None),
+            used_at_last_kill: AtomicU64::new(0),
             next_id: AtomicU64::new(0),
             watching: AtomicBool::new(false),
         })
-    }
-
-    /// Jobs that hold a lane and can be cancelled.
-    pub fn candidates(&self) -> usize {
-        self.jobs().len()
     }
 
     pub fn hold(&self) -> Hold {
@@ -216,7 +214,7 @@ impl MemoryWatchdog {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .is_some_and(|until| Instant::now() < until);
-        if settling {
+        if settling && pressure.used <= self.used_at_last_kill.load(Ordering::Relaxed) {
             return None;
         }
         let jobs = self.jobs();
@@ -229,6 +227,8 @@ impl MemoryWatchdog {
             alone: self.holding.load(Ordering::Acquire) <= 1,
         };
         let _ = victim.killed.set(kill);
+        self.used_at_last_kill
+            .store(pressure.used, Ordering::Relaxed);
         victim.cancel.cancel();
         self.metrics.record_stage_error("memory_pressure");
         Some((kill, victim.bytes))
@@ -412,8 +412,19 @@ mod tests {
             None,
             "freed memory needs a moment to show in the cgroup"
         );
-        std::thread::sleep(SETTLE_AFTER_UNWIND);
-        assert_eq!(watchdog.tick(pressure(&dir)), Some((kill, 50)));
+        set(&dir, "1000", 960);
+        let rising = MemoryKill {
+            pressure: Pressure {
+                used: 960,
+                limit: 1000,
+            },
+            alone: false,
+        };
+        assert_eq!(
+            watchdog.tick(pressure(&dir)),
+            Some((rising, 50)),
+            "memory that rises past the last kill does not wait out the settle"
+        );
         assert!(big.is_cancelled() && !small.is_cancelled());
     }
 
