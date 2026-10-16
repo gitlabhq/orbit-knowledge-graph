@@ -68,7 +68,11 @@ impl SetupRun {
     }
 }
 
-pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
+pub(crate) async fn install(
+    options: Options,
+    target: Target,
+    machine: &Machine,
+) -> Result<SetupRun> {
     let interactive = tui::can_prompt(options.yes)?;
     let detected_agents = machine.installed_agents();
     let finish = |selection: &Selection, outcome, indexed: bool| SetupRun {
@@ -80,6 +84,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         "Orbit setup ({})",
         summary::join_component_labels(&selection.components)
     ))?;
+    crate::skill::warn_inside_setup_frame();
 
     if interactive {
         let location_hints = summary::detected_location_hints(&detected_agents, machine);
@@ -103,6 +108,12 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     if options.dry_run {
         show_dry_run(&plan, "Dry run: nothing written.")?;
         return Ok(finish(&selection, Outcome::DryRun, false));
+    }
+
+    if selection.components.contains(&Component::Skill)
+        && needs_instance_skill(&selection.skill, &selection.agents, &target)
+    {
+        selection.skill.full_tree = Some(crate::skill::full_tree().await?);
     }
 
     apply_and_report(&options, |report| {
@@ -282,47 +293,18 @@ pub(crate) enum SkillKind {
 pub(crate) struct SkillRequest {
     pub(crate) kind: Option<SkillKind>,
     pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
+    pub(crate) search_path: Option<std::ffi::OsString>,
 }
 
-/// Fetches the full tree only when an agent that will be configured can load nothing else, or
-/// the directory already holds a full install;
-/// anything chosen later in the picker falls back to the embedded skill.
-pub(crate) async fn skill_request(
-    kind: Option<SkillKind>,
-    agents: &[String],
-    all: bool,
-    components: &BTreeSet<Component>,
-    dry_run: bool,
-    machine: &Machine,
-    target: &Target,
-) -> Result<SkillRequest> {
-    let needed = match kind {
-        Some(kind) => kind == SkillKind::Full,
-        None => requires_full_skill(agents, all, machine, target),
-    };
-    let wanted = !dry_run && components.contains(&Component::Skill) && needed;
-    let full_tree = match wanted {
-        true => Some(crate::skill::full_tree().await?),
-        false => None,
-    };
-    Ok(SkillRequest { kind, full_tree })
-}
-
-fn requires_full_skill(agents: &[String], all: bool, machine: &Machine, target: &Target) -> bool {
-    let selected: Vec<_> = match (all, agents.is_empty()) {
-        (true, _) => spec::agents().collect(),
-        (false, false) => plan::agents_named(agents).unwrap_or_default(),
-        (false, true) => machine
-            .installed_agents()
-            .into_iter()
-            .map(|(agent, _)| agent)
-            .collect(),
-    };
+fn needs_instance_skill(request: &SkillRequest, selected: &[spec::Agent], target: &Target) -> bool {
+    if let Some(kind) = request.kind {
+        return kind == SkillKind::Full;
+    }
     let needs_full = selected
         .iter()
         .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full));
     // A rerun keeps `full`, so it needs the instance's tree again, not the embedded one.
-    needs_full || components::records_full_skill(&selected, target)
+    needs_full || components::records_full_skill(selected, target)
 }
 
 pub(crate) struct Options {
@@ -396,8 +378,33 @@ mod tests {
 
     use super::*;
 
+    fn install(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(super::install(options, target, machine))
+    }
+
     fn project(dir: &Path) -> Target {
         Target::project(Some(dir.to_path_buf())).unwrap()
+    }
+
+    #[test]
+    fn the_instance_skill_is_needed_when_duo_is_in_the_final_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
+        let request = SkillRequest::default();
+        let duo = plan::agents_named(&["duo".to_string()]).unwrap();
+        let claude = plan::agents_named(&["claude".to_string()]).unwrap();
+        assert!(needs_instance_skill(&request, &duo, &target));
+        assert!(!needs_instance_skill(&request, &claude, &target));
+        let wrapper = SkillRequest {
+            kind: Some(SkillKind::Wrapper),
+            full_tree: None,
+            search_path: None,
+        };
+        assert!(!needs_instance_skill(&wrapper, &duo, &target));
     }
 
     fn options_for(names: &[&str]) -> Options {
@@ -800,6 +807,7 @@ mod tests {
             skill: SkillRequest {
                 kind: Some(SkillKind::Full),
                 full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+                search_path: None,
             },
             ..options_for(&["codex"])
         };
@@ -843,6 +851,107 @@ mod tests {
         std::fs::remove_file(skills.join(".orbit-managed")).unwrap();
         uninstall_named(&["codex"], dir.path());
         assert!(installed.join("SKILL.md").is_file());
+    }
+
+    fn write_glab_wrapper(skills: &Path) {
+        let tree = crate::skill::wrapper_tree_for(spec::GLAB_LAUNCHER).unwrap();
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/SKILL.md"), &tree["SKILL.md"]).unwrap();
+    }
+
+    fn search_path_with(program: Option<&str>) -> (tempfile::TempDir, std::ffi::OsString) {
+        let bin = tempfile::tempdir().unwrap();
+        if let Some(program) = program {
+            std::fs::write(bin.path().join(program), "").unwrap();
+        }
+        let path = bin.path().as_os_str().to_owned();
+        (bin, path)
+    }
+
+    fn install_with_search_path(names: &[&str], dir: &Path, search_path: std::ffi::OsString) {
+        let mut options = options_with_mcp(names);
+        options.skill.search_path = Some(search_path);
+        install(options, project(dir), &bare_machine()).unwrap();
+    }
+
+    #[test]
+    fn a_glab_wrapper_without_a_record_is_adopted_when_glab_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+        let (_bin, path) = search_path_with(Some("glab"));
+
+        install_with_search_path(&["codex"], dir.path(), path);
+
+        let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+        assert!(
+            manifest.contains("!`glab orbit skills get orbit`"),
+            "{manifest}"
+        );
+        assert!(skills.join(".orbit-managed").is_file());
+        assert!(!skills.join("orbit.orbit-backup").exists());
+    }
+
+    #[test]
+    fn a_glab_wrapper_is_replaced_when_glab_cannot_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+        let (_bin, path) = search_path_with(None);
+
+        install_with_search_path(&["claude"], dir.path(), path);
+
+        let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+        assert!(manifest.contains("!`orbit skills get orbit`"), "{manifest}");
+        assert!(!skills.join("orbit.orbit-backup").exists());
+        let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
+        assert!(!settings.contains("glab orbit"), "{settings}");
+    }
+
+    #[test]
+    fn a_glab_wrapper_survives_setup_and_gets_its_permission_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+        let (_bin, path) = search_path_with(Some("glab"));
+
+        install_with_search_path(&["claude"], dir.path(), path.clone());
+        install_with_search_path(&["claude"], dir.path(), path);
+
+        let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+        assert!(
+            manifest.contains("!`glab orbit skills get orbit`"),
+            "{manifest}"
+        );
+        let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
+        for rule in [
+            "Bash(glab orbit skills get orbit)",
+            "Bash(orbit skills get orbit)",
+        ] {
+            assert!(settings.contains(rule), "{settings}");
+        }
+    }
+
+    #[test]
+    fn a_full_skill_replaces_an_unrecorded_wrapper_without_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+
+        let mut options = options_with_mcp(&["duo"]);
+        options.skill = SkillRequest {
+            kind: Some(SkillKind::Full),
+            full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+            search_path: None,
+        };
+        install(options, project(dir.path()), &bare_machine()).unwrap();
+
+        assert!(!skills.join("orbit.orbit-backup").exists());
+        assert!(
+            !std::fs::read_to_string(skills.join("orbit/SKILL.md"))
+                .unwrap()
+                .contains("!`glab orbit")
+        );
     }
 
     #[test]
@@ -898,6 +1007,7 @@ mod tests {
             skill: SkillRequest {
                 kind: Some(SkillKind::Wrapper),
                 full_tree: None,
+                search_path: None,
             },
             ..options_with_mcp(&["claude"])
         };

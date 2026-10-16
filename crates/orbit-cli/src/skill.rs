@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,6 +22,20 @@ struct SkillAssets;
 #[derive(Embed)]
 #[folder = "$SKILLS_DIR/orbit-wrapper"]
 struct WrapperAssets;
+
+/// Set while the setup frame is drawn, so fallback warnings keep its gutter.
+static WARN_IN_FRAME: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn warn_inside_setup_frame() {
+    WARN_IN_FRAME.store(true, Ordering::Relaxed);
+}
+
+fn warn(message: impl std::fmt::Display) {
+    match WARN_IN_FRAME.load(Ordering::Relaxed) {
+        true => crate::tui::warning(message),
+        false => eprintln!("warning: {message}"),
+    }
+}
 
 const MANIFEST: &str = "SKILL.md";
 const CACHE_MANIFEST: &str = ".orbit-cache.json";
@@ -63,7 +78,7 @@ pub(crate) fn wrapper_tree_for(launcher: &str) -> Result<BTreeMap<String, Vec<u8
 
 pub(crate) async fn full_tree() -> Result<BTreeMap<String, Vec<u8>>> {
     let view = resolved_view(DEFAULT_SKILL).await.unwrap_or_else(|error| {
-        eprintln!("warning: {error:#}; using the embedded local skill");
+        warn(format!("{error:#}; using the embedded local skill"));
         local_tree()
     });
     view.into_iter()
@@ -242,11 +257,11 @@ fn skill_client() -> Option<OrbitClient> {
     match OrbitClient::from_skill_env() {
         Ok(Some(client)) => Some(client),
         Ok(None) => {
-            eprintln!("warning: no GitLab credential found; using the embedded local skill");
+            warn("no GitLab credential found; using the embedded local skill");
             None
         }
         Err(error) => {
-            eprintln!("warning: {error}; using the embedded local skill");
+            warn(format!("{error}; using the embedded local skill"));
             None
         }
     }
@@ -269,21 +284,21 @@ async fn list_skills() -> Result<()> {
             Ok(())
         }
         Ok(response) if response.status == 404 => {
-            eprintln!(
-                "warning: this GitLab instance does not serve Orbit skills; using the embedded local skill"
+            warn(
+                "this GitLab instance does not serve Orbit skills; using the embedded local skill",
             );
             print_local_list()
         }
         Ok(response) if degradation(response.status).is_some() => {
-            eprintln!(
-                "warning: {}; using the embedded local skill",
+            warn(format!(
+                "{}; using the embedded local skill",
                 degradation_warning(&response)
-            );
+            ));
             print_local_list()
         }
         Ok(response) => Err(map_http_error(response.status, body_text(&response)).into()),
         Err(error) => {
-            eprintln!("warning: {error}; using the embedded local skill");
+            warn(format!("{error}; using the embedded local skill"));
             print_local_list()
         }
     }
@@ -316,9 +331,7 @@ async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {
         return Ok(local);
     };
     Ok(compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
-        eprintln!(
-            "warning: could not compose the instance Orbit skill ({error}); using the embedded local skill"
-        );
+        warn(format!("could not compose the instance Orbit skill ({error}); using the embedded local skill"));
         local
     }))
 }
@@ -345,10 +358,12 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
         Ok(response) => response,
         Err(error) => {
             if let Some(cached) = cached {
-                eprintln!("warning: {error}; using the last validated Orbit skill for {origin}");
+                warn(format!(
+                    "{error}; using the last validated Orbit skill for {origin}"
+                ));
                 return Ok(Some(cached.tree));
             }
-            eprintln!("warning: {error}; using the embedded local skill");
+            warn(format!("{error}; using the embedded local skill"));
             return Ok(None);
         }
     };
@@ -357,21 +372,19 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
         200 => {
             let Some(etag) = response.etag else {
                 if let Some(cached) = cached {
-                    eprintln!(
-                        "warning: Orbit skill response has no ETag; using the last validated tree for {origin}"
-                    );
+                    warn(format!(
+                        "Orbit skill response has no ETag; using the last validated tree for {origin}"
+                    ));
                     return Ok(Some(cached.tree));
                 }
-                eprintln!(
-                    "warning: Orbit skill response has no ETag; using the embedded local skill"
-                );
+                warn("Orbit skill response has no ETag; using the embedded local skill");
                 return Ok(None);
             };
             let tree = validate_remote_envelope(name, &etag, &response.body)?;
             if let Err(error) = publish_cache(&origin, &tree) {
-                eprintln!(
-                    "warning: could not cache the validated Orbit skill ({error:#}); using the downloaded tree"
-                );
+                warn(format!(
+                    "could not cache the validated Orbit skill ({error:#}); using the downloaded tree"
+                ));
             }
             Ok(Some(tree))
         }
@@ -383,24 +396,24 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             Ok(Some(cached.tree))
         }
         404 => {
-            eprintln!(
-                "warning: this GitLab instance does not serve Orbit skills; using the embedded local skill"
+            warn(
+                "this GitLab instance does not serve Orbit skills; using the embedded local skill",
             );
             Ok(None)
         }
         status => match degradation(status) {
             Some(Degradation::Unavailable) if cached.is_some() => {
-                eprintln!(
-                    "warning: {}; using the last validated tree for {origin}",
+                warn(format!(
+                    "{}; using the last validated tree for {origin}",
                     degradation_warning(&response)
-                );
+                ));
                 Ok(cached.map(|cached| cached.tree))
             }
             Some(_) => {
-                eprintln!(
-                    "warning: {}; using the embedded local skill",
+                warn(format!(
+                    "{}; using the embedded local skill",
                     degradation_warning(&response)
-                );
+                ));
                 Ok(None)
             }
             None => Err(map_http_error(status, body_text(&response)).into()),
