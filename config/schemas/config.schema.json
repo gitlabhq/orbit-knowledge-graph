@@ -291,7 +291,6 @@
           "default": {}
         },
         "insert_timeout_secs": {
-          "description": "Bound on one INSERT request: sending a chunk, and waiting for the\nserver's answer after the last one. A hung connection fails the write\ninstead of holding its commit open. 0 turns the bound off. Keep it\nabove the server's `insert_quorum_timeout`: the client starts its\ntimer before the server starts the quorum wait, and a shorter bound\nturns a quorum wait the server would retry into a hard timeout.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0,
