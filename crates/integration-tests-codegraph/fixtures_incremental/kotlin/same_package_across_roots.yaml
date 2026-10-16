@@ -1,0 +1,34 @@
+name: "Kotlin: a same-package name declared in two source roots stays ambiguous and links to both"
+
+fixtures:
+  - path: lib/src/main/kotlin/acme/Builders.kt
+    content: |
+      package acme
+
+      fun launch(): Int = 1
+
+  - path: lib/src/test/kotlin/acme/Helpers.kt
+    content: |
+      package acme
+
+      fun launch(): Int = 2
+
+  - path: lib/src/test/kotlin/acme/UseTest.kt
+    content: |
+      package acme
+
+      class UseTest {
+          fun run(): Int = launch()
+      }
+
+tests:
+  - name: "the test root does not shadow the main root's function"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'launch'
+      RETURN callee.file_path AS file
+      ORDER BY file
+    assert:
+      - { row_count: 2 }
+      - { row: { file: lib/src/main/kotlin/acme/Builders.kt } }
+      - { row: { file: lib/src/test/kotlin/acme/Helpers.kt } }

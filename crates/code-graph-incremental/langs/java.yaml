@@ -41,6 +41,7 @@ config:
   resolve:
     lookup_from:
       - __source_root
+    same_path_same_type: true
 
 stages:
   - name: imports

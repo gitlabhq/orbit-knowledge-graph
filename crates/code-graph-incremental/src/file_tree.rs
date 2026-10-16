@@ -81,6 +81,14 @@ impl Roots {
         self.of(fi).map(|root| self.paths[root as usize].as_str())
     }
 
+    /// A file's path below its root.
+    pub fn rel_path<'a>(&self, fi: u32, label: &'a str) -> &'a str {
+        self.path(fi)
+            .and_then(|root| label.strip_prefix(root))
+            .unwrap_or(label)
+            .trim_start_matches(PATH_SEP)
+    }
+
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.paths.iter().map(String::as_str)
     }

@@ -90,6 +90,10 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
+    /// A file at the same path below another source root holds the same
+    /// type, so a package glob keeps the importer's own copy only. True for
+    /// Java, where the file name is the public class name.
+    pub same_path_same_type: bool,
     /// The root package clauses of a file nest, so its package joins them
     /// all and an inner clause's names shadow an outer clause's. True for
     /// Scala, where `package a` then `package b` means `a.b`.
@@ -148,6 +152,7 @@ impl ResolveConfig {
             }
         }
         self.merge_same_named_types |= other.merge_same_named_types;
+        self.same_path_same_type |= other.same_path_same_type;
         self.nested_packages |= other.nested_packages;
         if self.precedence.is_empty() {
             self.precedence = other.precedence.clone();
@@ -186,6 +191,8 @@ struct ResolveSettingsSection {
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+    #[serde(default)]
+    same_path_same_type: bool,
     #[serde(default)]
     nested_packages: bool,
     #[serde(default)]
@@ -335,6 +342,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .map(parse_file)
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
+        same_path_same_type: r.same_path_same_type,
         nested_packages: r.nested_packages,
         precedence: r.precedence.clone(),
     };

@@ -612,11 +612,12 @@ fn rust_import_shapes_resolve_once_and_stay_resolved() {
 
 const CHECKS: &str = "package com.acme.base;\npublic final class Checks { public static void checkState(boolean ok) {} }\n";
 const LISTS: &str = "package com.acme.coll;\nimport com.acme.base.*;\npublic class Lists { void set() { Checks.checkState(true); } }\n";
+const STRINGS: &str = "package com.acme.base;\npublic final class Strings {}\n";
 
 /// A Java tree with a package copied under two source roots, a nested-class
-/// import, and a package glob: an importer moves to its own copy when that
-/// copy appears, and a file added to a package re-resolves only the
-/// importers that use a name it declares.
+/// import, and a package glob: every importer of the package in the own
+/// root moves to its own copy when that copy appears, and a file added to a
+/// package re-resolves only the importers that use a name it declares.
 #[test]
 fn java_two_root_tree_resolves_once_and_stays_resolved() {
     let repo = tempfile::tempdir().unwrap();
@@ -624,18 +625,20 @@ fn java_two_root_tree_resolves_once_and_stays_resolved() {
         repo.path(),
         &[
             ("android/lib/src/com/acme/base/Checks.java", CHECKS),
+            ("android/lib/src/com/acme/base/Strings.java", STRINGS),
+            ("lib/src/com/acme/base/Strings.java", STRINGS),
             ("lib/src/com/acme/coll/Lists.java", LISTS),
             (
                 "lib/src/com/acme/misc/Other.java",
                 "package com.acme.misc;\npublic class Other {}\n",
             ),
             (
-                "lib/src/com/acme/base/Names.java",
-                "package com.acme.base;\npublic final class Names { public static void name() {} }\n",
+                "lib/src/com/acme/util/Names.java",
+                "package com.acme.util;\npublic final class Names { public static void name() {} }\n",
             ),
             (
                 "lib/src/com/acme/app/Worker.java",
-                "package com.acme.app;\nimport com.acme.base.*;\npublic class Worker { public void work() { Names.name(); Later.later(); } }\n",
+                "package com.acme.app;\nimport com.acme.base.*;\nimport com.acme.util.*;\npublic class Worker { public void work() { Names.name(); Later.later(); } }\n",
             ),
             (
                 "lib/src/pkg/Outer.java",
@@ -660,7 +663,7 @@ fn java_two_root_tree_resolves_once_and_stays_resolved() {
     );
     let names = pair(
         "lib/src/com/acme/app/Worker.java:work",
-        "lib/src/com/acme/base/Names.java:name",
+        "lib/src/com/acme/util/Names.java:name",
     );
     let later = pair(
         "lib/src/com/acme/app/Worker.java:work",
@@ -695,7 +698,9 @@ fn java_two_root_tree_resolves_once_and_stays_resolved() {
     assert_eq!(
         resolved_paths(&resolved),
         [
+            "lib/src/com/acme/app/Worker.java",
             "lib/src/com/acme/base/Checks.java",
+            "lib/src/com/acme/base/Strings.java",
             "lib/src/com/acme/coll/Lists.java"
         ]
     );

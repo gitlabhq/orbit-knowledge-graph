@@ -231,13 +231,7 @@ impl Resolver {
                     continue;
                 }
                 let gained = now.iter().filter(|loc| !targets.contains(loc));
-                let claims = |name: u32, from: u32| match self.visible[fi as usize].get(&name) {
-                    None => true,
-                    Some(held) if held.fi == fi => false,
-                    Some(held) => {
-                        paths.roots.distance(fi, from) <= paths.roots.distance(fi, held.fi)
-                    }
-                };
+                let claims = |name: u32| !matches!(self.visible[fi as usize].get(&name), Some(held) if held.fi == fi);
                 let gained_names: FxHashSet<u32> = gained
                     .flat_map(|loc| {
                         names_of
@@ -253,7 +247,7 @@ impl Resolver {
                             })
                             .iter()
                             .copied()
-                            .filter(|&name| claims(name, loc.fi))
+                            .filter(|&name| claims(name))
                             .collect::<Vec<_>>()
                     })
                     .collect();
@@ -404,7 +398,6 @@ impl Resolver {
         };
         let scope = Scope {
             env,
-            roots: &roots,
             tags: self.tags,
             wildcard_sym: self.wildcard_sym,
             owners: &packages,
@@ -971,6 +964,7 @@ struct Hit {
 /// the same question and get the same answer.
 struct PathLookup<'a> {
     trees: &'a [Tree],
+    env: &'a Env,
     lang: &'a Lang,
     config: &'a ResolveConfig,
     file_index: &'a FileIndex,
@@ -998,6 +992,7 @@ impl<'a> PathLookup<'a> {
             .collect();
         Self {
             trees,
+            env,
             lang: &env.lang,
             config: &env.resolve.config,
             file_index,
@@ -1085,7 +1080,10 @@ impl<'a> PathLookup<'a> {
     }
 
     /// The files or defs a path names from file `fi`, nearest root first:
-    /// every file of a directory for a glob, else the one best match.
+    /// every file of a directory for a glob, else the one best match. A
+    /// glob drops a file from another root when the importer's root has a
+    /// file at the same relative path and the language says that path
+    /// names one type.
     fn files(&self, fi: u32, path: &str, prefixes: &[String]) -> Vec<Loc> {
         let keyed = |key: &str| -> Vec<Loc> {
             std::iter::once(key.to_owned())
@@ -1115,7 +1113,24 @@ impl<'a> PathLookup<'a> {
         found.sort_by_key(|loc| (self.roots.distance(fi, loc.fi), loc.node != 0));
         if glob.is_none() {
             found.truncate(1);
+            return found;
         }
+        let rel = |fi: u32| self.roots.rel_path(fi, &self.trees[fi as usize].label);
+        let own: FxHashSet<&str> = std::iter::once(fi)
+            .chain(found.iter().map(|loc| loc.fi))
+            .filter(|&hit| self.roots.distance(fi, hit) == Distance::Own)
+            .map(rel)
+            .collect();
+        found.retain(|loc| {
+            self.roots.distance(fi, loc.fi) == Distance::Own
+                || !own.contains(rel(loc.fi))
+                || !self
+                    .env
+                    .rules_for(&self.trees[loc.fi as usize].label)
+                    .config
+                    .resolve
+                    .same_path_same_type
+        });
         found
     }
 
@@ -1254,21 +1269,19 @@ impl<'a> PathLookup<'a> {
 }
 
 /// What `propagate_reexports` reads besides the requests: the per-file rule
-/// config, the roots, and the C# partial-class owners.
+/// config and the C# partial-class owners.
 struct Scope<'a> {
     env: &'a Env,
-    roots: &'a Roots,
     tags: ReservedTags,
     wildcard_sym: u32,
     owners: &'a [FxHashMap<u32, u32>],
 }
 
 /// How strongly an export claims a name: an inner package clause beats an
-/// outer one, then a nearer source root beats a farther one.
+/// outer one; any other two claims on one name make it ambiguous.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Claim {
     level: u32,
-    distance: Distance,
 }
 
 impl Claim {
@@ -1276,12 +1289,7 @@ impl Claim {
     fn beats(self, other: Claim) -> Option<bool> {
         match (self.level > 0, other.level > 0) {
             (true, true) if self.level != other.level => Some(self.level > other.level),
-            (true, false) | (false, true) => None,
-            _ => match self.distance.cmp(&other.distance) {
-                std::cmp::Ordering::Less => Some(true),
-                std::cmp::Ordering::Greater => Some(false),
-                std::cmp::Ordering::Equal => None,
-            },
+            _ => None,
         }
     }
 }
@@ -1389,10 +1397,7 @@ fn propagate_reexports(
                     return;
                 }
             }
-            let claim = Claim {
-                level,
-                distance: scope.roots.distance(fi as u32, loc.fi),
-            };
+            let claim = Claim { level };
             match new_exports.entry((fi, name)) {
                 indexmap::map::Entry::Vacant(entry) => {
                     entry.insert((loc, claim));
@@ -1740,17 +1745,6 @@ fn wildcard_uses<'a>(
             .get(&sym)
             .filter(|_| !ctx.ambiguous.contains(&(req.target_fi, sym)))
             .filter(|loc| loc.fi as usize != fi)
-            .filter(|&&loc| match ctx.visible[fi].get(&sym) {
-                Some(&held)
-                    if held != loc
-                        && held.fi as usize != fi
-                        && !ctx.ambiguous.contains(&(req.fi, sym)) =>
-                {
-                    let key = |l: Loc| partial_key(ctx.corpus.jump(l.fi, l.node), ctx.packages);
-                    key(held).is_some() && key(held) == key(loc)
-                }
-                _ => true,
-            })
             .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
     };
     let mut imported: FxHashSet<(u32, u32)> = FxHashSet::default();
