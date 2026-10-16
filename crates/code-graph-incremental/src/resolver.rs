@@ -1440,7 +1440,8 @@ fn dispatch(
                             false => producer_class(ctx, reached),
                         }
                     }),
-                ),
+                )
+                .or(class),
                 _ => class,
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);

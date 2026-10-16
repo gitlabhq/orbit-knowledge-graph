@@ -1,0 +1,76 @@
+name: "Python: a call result joined with a constructor result types the member call"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Foo:
+          def bar(self):
+              pass
+
+
+      class Foo2:
+          def bar(self):
+              pass
+
+
+      def make():
+          return Foo()
+
+
+      def call_then_new(c):
+          x = make()
+          if c:
+              x = Foo2()
+          x.bar()
+
+
+      def new_then_call(c):
+          x = Foo2()
+          if c:
+              x = make()
+          x.bar()
+
+
+      def call_only():
+          x = make()
+          x.bar()
+
+
+      def new_only(c):
+          x = Foo()
+          if c:
+              x = Foo2()
+          x.bar()
+
+tests:
+  - name: a call result joined with a constructor result reaches both bar methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'call_then_new'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.Foo2", "main.Foo2.bar", "main.Foo.bar", "main.make"] } }
+
+  - name: the join order does not matter
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'new_then_call'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.Foo2", "main.Foo2.bar", "main.Foo.bar", "main.make"] } }
+
+  - name: a call result alone still types the member call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'call_only'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.Foo.bar", "main.make"] } }
+
+  - name: two constructor results still reach both bar methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'new_only'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.Foo", "main.Foo.bar", "main.Foo2", "main.Foo2.bar"] } }
