@@ -90,6 +90,9 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
+    /// An import path may continue through an import that binds its next
+    /// segment, as a `pub use` of a module does in Rust.
+    pub path_bindings: bool,
 }
 
 impl ResolveConfig {
@@ -115,6 +118,7 @@ impl ResolveConfig {
             }
         }
         self.merge_same_named_types |= other.merge_same_named_types;
+        self.path_bindings |= other.path_bindings;
     }
 }
 
@@ -149,6 +153,8 @@ struct ResolveSettingsSection {
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+    #[serde(default)]
+    path_bindings: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -294,6 +300,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .map(parse_file)
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
+        path_bindings: r.path_bindings,
     };
     Ok(Config { link, resolve })
 }

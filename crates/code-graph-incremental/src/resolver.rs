@@ -937,16 +937,18 @@ fn gather_imports_for(
                             }
                         }
                     }
-                    if direct.is_empty()
-                        && mapped.is_none()
-                        && let Some(path) = bindings.follow(&target_path, prefixes, own_root)
-                    {
-                        direct = resolve_glob(&path, file_index, prefixes);
-                        direct.retain(|loc| loc.fi != fi);
-                        target_path = path;
-                    }
                     if direct.is_empty() && stdlib {
                         return;
+                    }
+                    if direct.is_empty()
+                        && mapped.is_none()
+                        && config.path_bindings
+                        && let Some((path, found)) =
+                            bindings.follow(&target_path, prefixes, own_root)
+                    {
+                        direct = found;
+                        direct.retain(|loc| loc.fi != fi);
+                        target_path = path;
                     }
                     let candidates = match direct.is_empty() {
                         false => Either::Left(
@@ -2229,7 +2231,12 @@ struct ImportBindings<'a> {
 }
 
 impl ImportBindings<'_> {
-    fn follow(&self, target: &str, prefixes: &[String], own_root: Option<&str>) -> Option<String> {
+    fn follow(
+        &self,
+        target: &str,
+        prefixes: &[String],
+        own_root: Option<&str>,
+    ) -> Option<(String, Vec<Loc>)> {
         let mut path = target.to_owned();
         for _ in 0..IMPORT_BINDING_HOPS {
             let bound = self.bind_once(&path, prefixes, own_root)?;
@@ -2237,8 +2244,9 @@ impl ImportBindings<'_> {
                 return None;
             }
             path = bound;
-            if !resolve_glob(&path, self.file_index, prefixes).is_empty() {
-                return Some(path);
+            let found = resolve_glob(&path, self.file_index, prefixes);
+            if !found.is_empty() {
+                return Some((path, found));
             }
         }
         None
@@ -2267,8 +2275,8 @@ impl ImportBindings<'_> {
             let tree = &self.trees[file.fi as usize];
             let (import, original) = tree
                 .root()
-                .descendants()
-                .filter(|c| c.is(C::Import) && c.enclosing(|p| p.is(C::Def)).is_none())
+                .descendants_pruned(|c| c.is(C::Def))
+                .filter(|c| c.is(C::Import))
                 .find_map(|import| {
                     let bound = import
                         .names()

@@ -32,6 +32,7 @@ config:
     lookup_from:
       - __source_root
       - __crate_root
+    path_bindings: true
 
 stages:
   - name: normalize
