@@ -19,6 +19,36 @@ fixtures:
       def root_validator(pre=False):
           pass
 
+  - path: shadow.py
+    content: |
+      from lib import Library
+
+
+      class Other:
+          def tag(self, name=None):
+              pass
+
+
+      register = Library()
+
+
+      def make():
+          pass
+
+
+      def deco(arg):
+          pass
+
+
+      @register.tag
+      def shadowed():
+          register = Other()
+
+
+      @deco(make())
+      def uses_local():
+          make = 1
+
   - path: main.py
     content: |
       from lib import Library
@@ -199,3 +229,27 @@ tests:
       - { row_count: 2 }
       - { row: { callee: "main.deco", to: 82 } }
       - { row: { callee: "main.foo", to: 86 } }
+
+  - name: a decorator receiver names the module value, not a body local of the same name
+    # Known gap: the walk enters the def scope before its decorators, so the body local `register`
+    # shadows the receiver. Python evaluates a decorator in the enclosing scope, before the body runs.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadowed' AND callee.name = 'tag'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "lib.Library.tag" } }
+
+  - name: a call in a decorator argument names the module function, not a body local of the same name
+    # Known gap: the body local `make` is in scope when the walk reaches the decorator arguments,
+    # for the same reason as above.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'uses_local' AND callee.name = 'make'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "shadow.make" } }
