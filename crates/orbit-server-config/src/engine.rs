@@ -292,17 +292,9 @@ pub struct CodeIndexingPipelineConfig {
     pub archive_lease_ttl_secs: u64,
     /// Seconds a download queues for an archive lease while holding a fetch slot. After that the task is NAKed without spending a checkpoint attempt, so a busy storage cannot hold every fetch slot of a pod. Each NAK still counts toward the stream's `max_deliver`.
     pub archive_lease_max_wait_secs: u64,
-    /// In-flight batches the streaming sink holds before back-pressuring the parser.
-    pub write_channel_capacity: usize,
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending.
     pub write_slice_rows: usize,
-    /// Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick.
-    pub write_buffer_age_secs: u64,
-    /// Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached.
-    pub write_min_flush_rows: usize,
-    /// Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`.
-    pub write_max_flush_age_secs: u64,
-    /// Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput.
+    /// Inserts one code job keeps in flight at ClickHouse.
     pub write_max_concurrent: usize,
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane.
     pub small_repo_max_files: usize,
@@ -356,14 +348,6 @@ impl CodeIndexingPipelineConfig {
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
-    }
-
-    pub fn write_buffer_age(&self) -> Duration {
-        Duration::from_secs(self.write_buffer_age_secs.max(1))
-    }
-
-    pub fn write_max_flush_age(&self) -> Duration {
-        Duration::from_secs(self.write_max_flush_age_secs.max(1))
     }
 }
 
