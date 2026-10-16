@@ -73,6 +73,12 @@ fixtures:
           item.touch();
       }
 
+      pub fn loop_mut_shadows_outer(item: &Other, items: Vec<Item>) {
+          for mut item in items {
+              item.touch();
+          }
+      }
+
       pub fn loop_over_constructors() {
           for item in [pick(), pick_other()] {
               item.touch();
@@ -112,6 +118,15 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { owner: Other } }
+
+  - name: "a mutable loop variable shadows the outer binding"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "loop_mut_shadows_outer" AND callee.name = "touch"
+      RETURN owner.name AS owner
+    assert:
+      - { empty: true }
+      - { not: true, row: { owner: Other } }
 
   - name: "array elements type the loop variable"
     # Known gap on this branch: the loop variable takes the element types of an array iterable only with the loop element typing of the loop-phi producers branch (G32); the shape here matches it.
