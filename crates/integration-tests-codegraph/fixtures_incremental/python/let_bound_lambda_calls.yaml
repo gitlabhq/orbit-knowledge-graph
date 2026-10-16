@@ -3,6 +3,11 @@ name: "Python: calls inside a lambda bound to a local reach the callee"
 fixtures:
   - path: main.py
     content: |
+      class Foo:
+          def run(self):
+              return self
+
+
       def helper(x):
           return x
 
@@ -17,6 +22,11 @@ fixtures:
           g = lambda x: helper(x)
           return g(2)
 
+
+      def shadowing(x: Foo):
+          h = lambda x: x.run()
+          return h(3)
+
 tests:
   - name: helper is reached from both lambdas
     query: |
@@ -27,3 +37,11 @@ tests:
     assert:
       - { empty: false }
       - { column_values: { field: caller, values: ["f", "g"] } }
+
+  - name: an untyped lambda parameter shadows the outer typed parameter
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'run'
+      RETURN caller.name AS caller
+    assert:
+      - { empty: true }

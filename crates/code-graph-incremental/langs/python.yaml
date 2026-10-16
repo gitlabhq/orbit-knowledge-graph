@@ -156,6 +156,8 @@ stages:
         replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
+      - match: '(lambda_parameters $$$P:identifier)'
+        replace: '(lambda_parameters $$$P=>__binding)'
 
       # Bindings — RHS wrapped in __rhs for canonical containment
       - match: '(assignment left: $N:__ivar right: $R:__call)'

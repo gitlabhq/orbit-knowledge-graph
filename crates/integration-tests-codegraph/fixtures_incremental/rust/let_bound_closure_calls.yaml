@@ -3,6 +3,20 @@ name: "Rust: calls inside a let-bound closure belong to the enclosing function"
 fixtures:
   - path: main.rs
     content: |
+      struct Foo {
+          x: i32,
+      }
+
+      impl Foo {
+          fn run(&self) {}
+      }
+
+      struct Bar;
+
+      impl Bar {
+          fn run(&self) {}
+      }
+
       fn helper(x: i32) -> i32 {
           x
       }
@@ -24,6 +38,11 @@ fixtures:
               y
           };
           h(3)
+      }
+
+      fn shadowing(x: Foo) {
+          let h = |x| x.run();
+          h(Bar);
       }
 
 tests:
@@ -51,3 +70,11 @@ tests:
           RETURN callee.name AS callee
         assert:
           - { column_values: { field: callee, values: ["helper"] } }
+
+  - name: an untyped closure parameter shadows the outer typed local
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadowing' AND callee.name = 'run'
+      RETURN callee.fqn AS callee
+    assert:
+      - { empty: true }

@@ -55,6 +55,9 @@ stages:
       - match: '(match_arm value: $V)'
         replace: '(__ssa_arm $V)'
 
+      - match: '(closure_expression $$$C)'
+        replace: '(__lambda $$$C)'
+
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
         replace: '(__ivar @$F (__object "self"))'
@@ -244,8 +247,8 @@ stages:
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__obj)'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
-      - match: '(let_declaration pattern: $N value: $V:closure_expression)'
-        replace: '(__binding @$N (__declaration) (__rhs (__lambda $V)))'
+      - match: '(let_declaration pattern: $N value: $V:__lambda)'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'
         replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(let_declaration pattern: $N)'
@@ -259,8 +262,8 @@ stages:
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:__member right: $R)'
         replace: '(__binding $N (__rhs @$R) $R)'
-      - match: '(assignment_expression left: $N right: $R:closure_expression)'
-        replace: '(__binding @$N (__rhs (__lambda $R)))'
+      - match: '(assignment_expression left: $N right: $R:__lambda)'
+        replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N (__rhs @$R))'
       - match: '(const_item name: $N)'
@@ -301,6 +304,8 @@ stages:
         replace: '(__binding @$N (__ssa_typed @$T))'
       - match: '(parameter pattern: $N:identifier)'
         replace: '(__binding @$N)'
+      - match: '(closure_parameters $$$P:identifier|__binding)'
+        replace: '(closure_parameters $$$P->__binding)'
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R)'
