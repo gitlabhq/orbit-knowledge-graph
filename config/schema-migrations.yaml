@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 107
+  scope: "*"
+  note: >-
+    Drops auto_statistics_types from every table. Loading the statistics cost
+    250-1050 ms per query with no better plans; a full rebuild creates the tables without
+    them (a clone would copy the old SETTINGS).
 - version: 106
   scope: "*"
 - version: 105
