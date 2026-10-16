@@ -230,7 +230,8 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
     let victim = match (&parsed, &waited) {
         (Err(_), Ok(_)) => "the parsing job",
         (Ok(_), Err(_)) => "the lane waiter",
-        _ => "unclear",
+        (Err(_), Err(_)) => "the lane waiter first, then the parsing job",
+        (Ok(_), Ok(_)) => "nobody",
     };
     eprintln!("victim: {victim}; parsing: {parsed:?}; waiting: {waited:?}");
     assert!(
