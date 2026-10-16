@@ -16,8 +16,8 @@ instructions: |
 
 remote:
   remote_grep: " GitLab too: `is:issue`, `is:mr`, `is:branch`, `is:commit`, `is:comment`, `repo:group/project`."
-  remote_context: " and GitLab entities (`Branch:x`: its MR and CI)"
-  remote_context_example: " MergeRequest[42]"
+  remote_context: " and GitLab (`mr:42`, `issue:7`, `branch:x`, `pipeline:9`)"
+  remote_context_example: " mr:42"
 
 nudge_search: |
   MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `is:def`/`file:x`.

@@ -82,15 +82,19 @@ project or group, including its code when there is no local checkout;
 ```shell
 orbit grep "is:mr rate limit repo:gitlab-org/gitlab"
 orbit grep "is:branch approval rules"
-orbit context MergeRequest[42] gitlab-org/gitlab#7 src/lib.rs:120-180
+orbit context mr:42 issue:7 src/lib.rs:120-180
+orbit context branch:fix-ci pipeline:123 job:456 commit:0123abc repo:gitlab-org/cli
 ```
 
-Pass names as printed by `grep`, paths, ranges, directories, or GitLab tokens
-to `context`. GitLab tokens return entity context after the local output:
-description, comments, and for merge requests the changed files and failed CI
-jobs. `Branch:<name>` reads a branch's merge request, or its latest pipeline and
-failed job logs (`branch:x` works too); bare `orbit context` reads the current
-branch. A `Definition:<id>` from another indexed checkout reads that checkout.
+Pass names as printed by `grep`, paths, ranges, directories, or GitLab targets
+as grep prints them: `mr:42`, `issue:7`, `branch:name`, `pipeline:123`,
+`job:456`, `commit:sha`. They resolve in the `origin` project unless
+`repo:group/project` names another; `mr:group/project!42` names one per target.
+Merge requests and issues return description, comments, and review threads, and
+merge requests add changed files and failed CI jobs. A branch reads its merge
+request, or its latest pipeline. Pipelines and jobs show failed jobs with log
+tails; commits show message, changed files, and merge requests. Bare
+`orbit context` reads the current branch. A `Definition:<id>` from another indexed checkout reads that checkout.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.

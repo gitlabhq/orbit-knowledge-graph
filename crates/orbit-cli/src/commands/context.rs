@@ -50,43 +50,40 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let dir = args.repo.clone().unwrap_or_else(|| ".".into());
     let mut client = None;
     let mut origin = None;
-    let mut branch_notes = String::new();
-    let mut branches: Vec<String> = args
-        .target
-        .iter()
-        .filter_map(|target| branch_target(target))
-        .collect();
-    if args.target.is_empty() {
-        branches.push(crate::remote::branch::current(&dir)?);
+    let mut repo: Option<String> = None;
+    let (mut targets, mut sdlc_targets) = (Vec::new(), Vec::new());
+    for target in &args.target {
+        match qualify(target) {
+            Some(Qualified::Repo(path)) => repo = Some(path),
+            Some(Qualified::Target(target)) => targets.push(target),
+            Some(Qualified::Sdlc(target)) => sdlc_targets.push(target),
+            None => targets.push(target.clone()),
+        }
     }
-    for name in branches {
-        let (host, project) = origin
-            .get_or_insert_with(|| crate::remote::origin::project(&dir))
-            .clone()
-            .context("Branch targets need a GitLab `origin` remote")?;
-        let found_client = match &client {
-            Some(client) => client,
-            None => client.insert(crate::remote::client::OrbitClient::from_env_in(&dir)?),
-        };
-        let api_host = found_client.get_host()?;
-        anyhow::ensure!(
-            host == api_host,
-            "`origin` is {project} on {host}, but Orbit uses {api_host}"
-        );
-        match crate::remote::branch::resolve(found_client, &project, &name).await? {
-            crate::remote::branch::Found::MergeRequest { branch, token } => {
-                branch_notes.push_str(&format!("branch {branch}: {token}\n"));
-                if !remote.contains(&token) {
-                    remote.push(token);
+    if args.target.is_empty() {
+        sdlc_targets.push(crate::remote::sdlc::Target::Branch(
+            crate::remote::sdlc::current_branch(&dir)?,
+        ));
+    }
+    let mut sdlc_notes = String::new();
+    for target in &sdlc_targets {
+        let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &target.to_string())?;
+        let found_client = client.as_ref().expect("gitlab_project sets the client");
+        match crate::remote::sdlc::read(found_client, &project, target).await {
+            Ok(crate::remote::sdlc::Found::MergeRequest { note, reference }) => {
+                sdlc_notes.push_str(&note);
+                if !remote.contains(&reference) {
+                    remote.push(reference);
                 }
             }
-            crate::remote::branch::Found::Pipeline { text, .. } => branch_notes.push_str(&text),
+            Ok(crate::remote::sdlc::Found::Text(text)) => sdlc_notes.push_str(&text),
+            Err(error) => {
+                let message = error.message.lines().next().unwrap_or_default().to_string();
+                sdlc_notes.push_str(&format!("{target}: {message}\n"));
+            }
         }
     }
-    for target in &args.target {
-        if branch_target(target).is_some() {
-            continue;
-        }
+    for target in &targets {
         let token = match route(target, &nodes) {
             Route::Local(target) => {
                 local.push(target);
@@ -94,25 +91,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             }
             Route::Remote(token) => token,
             Route::Relative(reference) => {
-                let (host, project) = origin
-                    .get_or_insert_with(|| crate::remote::origin::project(&dir))
-                    .as_ref()
-                    .with_context(|| {
-                        format!(
-                            "{reference} needs a GitLab `origin` remote; name the project, as in \
-                             group/project{reference}"
-                        )
-                    })?;
-                let api_host = match &client {
-                    Some(client) => client,
-                    None => client.insert(crate::remote::client::OrbitClient::from_env_in(&dir)?),
-                }
-                .get_host()?;
-                anyhow::ensure!(
-                    *host == api_host,
-                    "{reference} names a merge request or issue in {project} on {host}, but Orbit \
-                     uses {api_host}; pass its URL or {project}{reference} with Orbit pointed at {host}"
-                );
+                let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &reference)?;
                 format!("{project}{reference}")
             }
         };
@@ -150,11 +129,11 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         }
         print!("{}", run_local(repo, args.db.clone(), &targets)?);
     }
-    if !branch_notes.is_empty() {
+    if !sdlc_notes.is_empty() {
         if printed {
             println!();
         }
-        print!("{branch_notes}");
+        print!("{sdlc_notes}");
         printed = false;
     }
     let Some(pending) = pending else {
@@ -179,9 +158,63 @@ enum Route {
 
 const LOCAL_NODES: &[&str] = &["Definition", "File"];
 
-fn branch_target(target: &str) -> Option<String> {
-    let (kind, name) = target.split_once(':')?;
-    (kind.eq_ignore_ascii_case("branch") && !name.is_empty()).then(|| name.to_string())
+#[derive(Debug, PartialEq, Eq)]
+enum Qualified {
+    Repo(String),
+    Target(String),
+    Sdlc(crate::remote::sdlc::Target),
+}
+
+fn qualify(target: &str) -> Option<Qualified> {
+    use crate::remote::sdlc::Target;
+    let (name, value) = target.split_once(':')?;
+    if value.is_empty() || value.starts_with(':') {
+        return None;
+    }
+    let number = value.parse::<i64>().ok().filter(|id| *id > 0);
+    let hex = value.len() >= 7 && value.chars().all(|c| c.is_ascii_hexdigit());
+    let qualified = match (name.to_ascii_lowercase().as_str(), number) {
+        ("mr" | "mrs" | "pr", Some(iid)) => Qualified::Target(format!("!{iid}")),
+        ("mr" | "mrs" | "pr", None) if value.contains('!') => Qualified::Target(value.into()),
+        ("issue" | "issues", Some(iid)) => Qualified::Target(format!("#{iid}")),
+        ("issue" | "issues", None) if value.contains('#') => Qualified::Target(value.into()),
+        ("branch", _) => Qualified::Sdlc(Target::Branch(value.into())),
+        ("pipeline", Some(id)) => Qualified::Sdlc(Target::Pipeline(id)),
+        ("job", Some(id)) => Qualified::Sdlc(Target::Job(id)),
+        ("commit", _) if hex => Qualified::Sdlc(Target::Commit(value.into())),
+        ("symbol" | "def" | "file" | "path", None) => Qualified::Target(value.into()),
+        ("repo" | "in", _) => Qualified::Repo(value.trim_end_matches('/').into()),
+        _ => return None,
+    };
+    Some(qualified)
+}
+
+fn gitlab_project(
+    dir: &std::path::Path,
+    repo: &Option<String>,
+    origin: &mut Option<Option<(String, String)>>,
+    client: &mut Option<crate::remote::client::OrbitClient>,
+    what: &str,
+) -> Result<String> {
+    let found_client = match client {
+        Some(client) => client,
+        None => client.insert(crate::remote::client::OrbitClient::from_env_in(dir)?),
+    };
+    let api_host = found_client.get_host()?;
+    if let Some(repo) = repo {
+        return Ok(crate::remote::token::namespace(repo, &api_host));
+    }
+    let (host, project) = origin
+        .get_or_insert_with(|| crate::remote::origin::project(dir))
+        .clone()
+        .with_context(|| {
+            format!("{what} needs a GitLab `origin` remote; add repo:group/project")
+        })?;
+    anyhow::ensure!(
+        host == api_host,
+        "{what} names {project} on {host}, but Orbit uses {api_host}; add repo:group/project"
+    );
+    Ok(project)
 }
 
 fn route(target: &str, nodes: &[&str]) -> Route {
@@ -843,6 +876,47 @@ fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualified_targets_use_what_gitlab_shows() {
+        use crate::remote::sdlc::Target;
+        let target = |value: &str| Some(Qualified::Target(value.to_string()));
+        assert_eq!(qualify("mr:42"), target("!42"));
+        assert_eq!(qualify("MR:gitlab-org/cli!42"), target("gitlab-org/cli!42"));
+        assert_eq!(qualify("issue:7"), target("#7"));
+        assert_eq!(
+            qualify("issue:gitlab-org/cli#7"),
+            target("gitlab-org/cli#7")
+        );
+        assert_eq!(qualify("symbol:Foo::bar"), target("Foo::bar"));
+        assert_eq!(qualify("file:src/a.rs:10-40"), target("src/a.rs:10-40"));
+        assert_eq!(
+            qualify("branch:aa/fix-ci"),
+            Some(Qualified::Sdlc(Target::Branch("aa/fix-ci".into())))
+        );
+        assert_eq!(
+            qualify("pipeline:7"),
+            Some(Qualified::Sdlc(Target::Pipeline(7)))
+        );
+        assert_eq!(qualify("job:9"), Some(Qualified::Sdlc(Target::Job(9))));
+        assert_eq!(
+            qualify("commit:0123abc"),
+            Some(Qualified::Sdlc(Target::Commit("0123abc".into())))
+        );
+        assert_eq!(
+            qualify("repo:gitlab-org/cli/"),
+            Some(Qualified::Repo("gitlab-org/cli".into()))
+        );
+        for literal in [
+            "src/a.rs:10-40",
+            "Definition:7",
+            "MergeRequest:42",
+            "commit:main",
+            "mr:x",
+        ] {
+            assert_eq!(qualify(literal), None, "{literal}");
+        }
+    }
 
     #[test]
     fn gitlab_tokens_route_remotely_and_code_targets_stay_local() {

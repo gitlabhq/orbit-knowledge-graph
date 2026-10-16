@@ -12,23 +12,44 @@ const MAX_SEARCH_WORDS: usize = 3;
 const MAX_FAILED_JOBS: usize = 5;
 const TRACED_JOBS: usize = 3;
 const TRACE_LINES: usize = 30;
+const MAX_CHANGED_FILES: usize = 100;
+const SHORT_SHA: usize = 12;
 
 static TERMINAL_NOISE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"\x1b\[[0-9;]*[A-Za-z]|section_(?:start|end):\d+:[^\r\n]*")
         .expect("terminal noise pattern is valid")
 });
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Target {
+    Branch(String),
+    Pipeline(i64),
+    Job(i64),
+    Commit(String),
+}
+
+impl std::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Target::Branch(name) => write!(f, "branch:{name}"),
+            Target::Pipeline(id) => write!(f, "pipeline:{id}"),
+            Target::Job(id) => write!(f, "job:{id}"),
+            Target::Commit(sha) => write!(f, "commit:{sha}"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Found {
-    MergeRequest { branch: String, token: String },
-    Pipeline { branch: String, text: String },
+    MergeRequest { note: String, reference: String },
+    Text(String),
 }
 
 fn error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(EXIT_GENERIC, message.into())
 }
 
-pub(crate) fn current(dir: &Path) -> Result<String, RemoteError> {
+pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -38,7 +59,7 @@ pub(crate) fn current(dir: &Path) -> Result<String, RemoteError> {
     let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     match output.status.success() && !name.is_empty() {
         true => Ok(name),
-        false => Err(error("no current branch; pass a Branch:<name> target")),
+        false => Err(error("no current branch; pass a branch:<name> target")),
     }
 }
 
@@ -49,6 +70,14 @@ async fn get_json(
 ) -> Result<Value, RemoteError> {
     let body = client.get_api(path, params).await?;
     serde_json::from_slice(&body).map_err(|e| error(format!("unreadable response: {e}")))
+}
+
+fn text(value: &Value) -> &str {
+    value.as_str().unwrap_or_default()
+}
+
+fn short(sha: &str) -> String {
+    sha.chars().take(SHORT_SHA).collect()
 }
 
 fn names(value: &Value) -> Vec<String> {
@@ -73,19 +102,15 @@ fn words(text: &str) -> Vec<String> {
 
 pub(crate) fn rank(wanted: &str, candidates: &[String]) -> Vec<String> {
     let wanted_words = words(wanted);
-    let score = |name: &String| {
-        let lower = name.to_lowercase();
-        let exact = usize::from(lower == wanted.to_lowercase());
-        let matched = wanted_words
-            .iter()
-            .filter(|word| lower.contains(word.as_str()))
-            .count();
-        (exact, matched)
-    };
     let mut ranked: Vec<(usize, usize, &String)> = candidates
         .iter()
         .map(|name| {
-            let (exact, matched) = score(name);
+            let lower = name.to_lowercase();
+            let exact = usize::from(lower == wanted.to_lowercase());
+            let matched = wanted_words
+                .iter()
+                .filter(|word| lower.contains(word.as_str()))
+                .count();
             (exact, matched, name)
         })
         .filter(|(exact, matched, _)| exact + matched > 0)
@@ -111,11 +136,16 @@ async fn branch_exists(
     Ok(names(&exact).iter().any(|found| found == name))
 }
 
+struct MergeRequest {
+    iid: i64,
+    state: String,
+}
+
 async fn merge_request(
     client: &OrbitClient,
     project: &str,
     branch: &str,
-) -> Result<Option<(i64, String)>, RemoteError> {
+) -> Result<Option<MergeRequest>, RemoteError> {
     let merge_requests = get_json(
         client,
         &format!("projects/{project}/merge_requests"),
@@ -133,8 +163,10 @@ async fn merge_request(
         .find(|mr| mr["state"] == "opened")
         .or(list.first());
     Ok(chosen.and_then(|mr| {
-        let id = mr["id"].as_i64()?;
-        Some((id, mr["state"].as_str().unwrap_or_default().to_string()))
+        Some(MergeRequest {
+            iid: mr["iid"].as_i64()?,
+            state: text(&mr["state"]).to_string(),
+        })
     }))
 }
 
@@ -152,36 +184,51 @@ async fn latest_pipeline(
     Ok(pipelines.as_array().and_then(|list| list.first()).cloned())
 }
 
-pub(crate) async fn resolve(
+pub(crate) async fn read(
     client: &OrbitClient,
     project: &str,
+    target: &Target,
+) -> Result<Found, RemoteError> {
+    let encoded = encode(project);
+    match target {
+        Target::Branch(branch) => read_branch(client, project, &encoded, branch).await,
+        Target::Pipeline(id) => {
+            let pipeline =
+                get_json(client, &format!("projects/{encoded}/pipelines/{id}"), &[]).await?;
+            Ok(Found::Text(
+                pipeline_text(client, &encoded, &pipeline).await?,
+            ))
+        }
+        Target::Job(id) => Ok(Found::Text(job_text(client, &encoded, *id).await?)),
+        Target::Commit(sha) => Ok(Found::Text(commit_text(client, &encoded, sha).await?)),
+    }
+}
+
+async fn read_branch(
+    client: &OrbitClient,
+    project: &str,
+    encoded: &str,
     branch: &str,
 ) -> Result<Found, RemoteError> {
-    let project = encode(project);
-    if let Some((id, _)) = merge_request(client, &project, branch).await? {
+    if let Some(mr) = merge_request(client, encoded, branch).await? {
         return Ok(Found::MergeRequest {
-            branch: branch.to_string(),
-            token: format!("MergeRequest[{id}]"),
+            note: format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state),
+            reference: format!("{project}!{}", mr.iid),
         });
     }
-    if let Some(pipeline) = latest_pipeline(client, &project, branch).await? {
-        let text = failed_pipeline(client, &project, branch, &pipeline).await?;
-        return Ok(Found::Pipeline {
-            branch: branch.to_string(),
-            text,
-        });
+    if let Some(pipeline) = latest_pipeline(client, encoded, branch).await? {
+        let mut out = format!("branch:{branch} no merge request\n");
+        out.push_str(&pipeline_text(client, encoded, &pipeline).await?);
+        return Ok(Found::Text(out));
     }
-    let text = match branch_exists(client, &project, branch).await? {
-        true => format!("branch {branch}: no merge request or pipeline\n"),
+    let text = match branch_exists(client, encoded, branch).await? {
+        true => format!("branch:{branch} no merge request or pipeline\n"),
         false => format!(
-            "branch {branch}: not found; find one with `{} grep 'words' --kind Branch`\n",
+            "branch:{branch} not found; find one with `{} grep 'is:branch words'`\n",
             crate::commands::setup::spec::launcher()
         ),
     };
-    Ok(Found::Pipeline {
-        branch: branch.to_string(),
-        text,
-    })
+    Ok(Found::Text(text))
 }
 
 pub(crate) async fn search_text(
@@ -229,10 +276,10 @@ pub(crate) async fn search_text(
         let Ok((name, mr, pipeline)) = task.await else {
             continue;
         };
-        let mut row = name;
+        let mut row = format!("branch:{name}");
         match mr {
-            Ok(Some((id, state))) => {
-                let _ = write!(row, "  MergeRequest[{id}] {state}");
+            Ok(Some(mr)) => {
+                let _ = write!(row, "  mr:{} {}", mr.iid, mr.state);
             }
             Ok(None) => row.push_str("  no merge request"),
             Err(_) => {}
@@ -240,8 +287,9 @@ pub(crate) async fn search_text(
         if let Ok(Some(pipeline)) = pipeline {
             let _ = write!(
                 row,
-                "  pipeline {}",
-                pipeline["status"].as_str().unwrap_or("unknown")
+                "  pipeline:{} {}",
+                pipeline["id"],
+                text(&pipeline["status"])
             );
         }
         let _ = writeln!(out, "{row}");
@@ -251,32 +299,25 @@ pub(crate) async fn search_text(
     }
     let _ = writeln!(
         out,
-        "next: {} context Branch:{}",
+        "next: {} context branch:{}",
         crate::commands::setup::spec::launcher(),
         ranked[0]
     );
     Ok(Some(out))
 }
 
-async fn failed_pipeline(
+async fn pipeline_text(
     client: &OrbitClient,
     project: &str,
-    branch: &str,
     pipeline: &Value,
 ) -> Result<String, RemoteError> {
     let id = pipeline["id"].as_i64().unwrap_or_default();
-    let mut out = format!("branch {branch}: no merge request\n");
-    let _ = writeln!(
-        out,
-        "pipeline {id} {} {} {}",
-        pipeline["status"].as_str().unwrap_or("unknown"),
-        pipeline["sha"]
-            .as_str()
-            .unwrap_or_default()
-            .chars()
-            .take(12)
-            .collect::<String>(),
-        pipeline["web_url"].as_str().unwrap_or_default()
+    let mut out = format!(
+        "pipeline:{id} {} ref {} commit:{} {}\n",
+        text(&pipeline["status"]),
+        text(&pipeline["ref"]),
+        short(text(&pipeline["sha"])),
+        text(&pipeline["web_url"])
     );
     let jobs = get_json(
         client,
@@ -296,37 +337,136 @@ async fn failed_pipeline(
     }
     let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
     for (index, job) in jobs.iter().enumerate() {
-        let flags: Vec<&str> = [
-            job["stage"].as_str(),
-            job["failure_reason"].as_str(),
-            job["allow_failure"]
-                .as_bool()
-                .filter(|allowed| *allowed)
-                .map(|_| "allowed to fail"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        let _ = writeln!(
-            out,
-            "  {} ({}) {}",
-            job["name"].as_str().unwrap_or_default(),
-            flags.join(", "),
-            job["web_url"].as_str().unwrap_or_default()
-        );
+        let _ = writeln!(out, "  {}", job_line(job));
         if index >= TRACED_JOBS {
             continue;
         }
-        let Some(job_id) = job["id"].as_i64() else {
-            continue;
-        };
-        if let Ok(trace) = client
-            .get_api(&format!("projects/{project}/jobs/{job_id}/trace"), &[])
-            .await
-        {
-            for line in trace_tail(&String::from_utf8_lossy(&trace)) {
+        if let Some(job_id) = job["id"].as_i64() {
+            for line in trace(client, project, job_id).await {
                 let _ = writeln!(out, "    | {line}");
             }
+        }
+    }
+    Ok(out)
+}
+
+fn job_line(job: &Value) -> String {
+    let flags: Vec<&str> = [
+        job["stage"].as_str(),
+        job["failure_reason"].as_str(),
+        job["allow_failure"]
+            .as_bool()
+            .filter(|allowed| *allowed)
+            .map(|_| "allowed to fail"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    format!(
+        "job:{} {} ({}) {}",
+        job["id"],
+        text(&job["name"]),
+        flags.join(", "),
+        text(&job["web_url"])
+    )
+}
+
+async fn trace(client: &OrbitClient, project: &str, job: i64) -> Vec<String> {
+    match client
+        .get_api(&format!("projects/{project}/jobs/{job}/trace"), &[])
+        .await
+    {
+        Ok(trace) => trace_tail(&String::from_utf8_lossy(&trace)),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn job_text(client: &OrbitClient, project: &str, id: i64) -> Result<String, RemoteError> {
+    let job = get_json(client, &format!("projects/{project}/jobs/{id}"), &[]).await?;
+    let mut out = format!(
+        "{} {} pipeline:{} ref {} commit:{}\n",
+        job_line(&job),
+        text(&job["status"]),
+        job["pipeline"]["id"],
+        text(&job["ref"]),
+        short(text(&job["commit"]["id"]))
+    );
+    for line in trace(client, project, id).await {
+        let _ = writeln!(out, "  | {line}");
+    }
+    Ok(out)
+}
+
+async fn commit_text(
+    client: &OrbitClient,
+    project: &str,
+    sha: &str,
+) -> Result<String, RemoteError> {
+    let base = format!("projects/{project}/repository/commits/{sha}");
+    let commit = get_json(client, &base, &[]).await?;
+    let mut out = format!(
+        "commit:{} {}\n  author {} {}\n",
+        short(text(&commit["id"])),
+        text(&commit["title"]),
+        text(&commit["author_name"]),
+        text(&commit["authored_date"])
+            .chars()
+            .take(10)
+            .collect::<String>()
+    );
+    let message = text(&commit["message"]);
+    let body: Vec<&str> = message
+        .lines()
+        .skip(1)
+        .skip_while(|line| line.trim().is_empty())
+        .collect();
+    if !body.is_empty() {
+        out.push_str("  message:\n");
+        for line in body {
+            let _ = writeln!(out, "    {line}");
+        }
+    }
+    if let Ok(diff) = get_json(
+        client,
+        &format!("{base}/diff"),
+        &[("per_page", MAX_CHANGED_FILES.to_string())],
+    )
+    .await
+    {
+        let files = diff.as_array().cloned().unwrap_or_default();
+        if !files.is_empty() {
+            let _ = writeln!(out, "  changed_files[{}]:", files.len());
+            for file in &files {
+                let status = match (
+                    file["new_file"].as_bool(),
+                    file["deleted_file"].as_bool(),
+                    file["renamed_file"].as_bool(),
+                ) {
+                    (Some(true), _, _) => "A",
+                    (_, Some(true), _) => "D",
+                    (_, _, Some(true)) => "R",
+                    _ => "M",
+                };
+                let _ = writeln!(out, "    {status} {}", text(&file["new_path"]));
+            }
+        }
+    }
+    if let Ok(merge_requests) = get_json(client, &format!("{base}/merge_requests"), &[]).await {
+        let list: Vec<String> = merge_requests
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|mr| {
+                format!(
+                    "mr:{} {} {}",
+                    mr["iid"],
+                    text(&mr["state"]),
+                    text(&mr["title"])
+                )
+            })
+            .collect();
+        if !list.is_empty() {
+            let _ = writeln!(out, "  merge_requests: {}", list.join("; "));
         }
     }
     Ok(out)

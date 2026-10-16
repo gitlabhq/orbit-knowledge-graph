@@ -2,7 +2,6 @@ use std::io::Write;
 
 use self::error::{EXIT_GENERIC, RemoteError};
 
-pub(crate) mod branch;
 pub(crate) mod client;
 pub(crate) mod context;
 pub(crate) mod dsl;
@@ -12,6 +11,7 @@ pub(crate) mod grep;
 pub(crate) mod ontology;
 pub(crate) mod origin;
 pub(crate) mod query;
+pub(crate) mod sdlc;
 pub(crate) mod status;
 pub(crate) mod token;
 pub(crate) mod tools;
