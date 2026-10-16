@@ -77,6 +77,10 @@ stages:
         replace: '(identifier @$T)'
       - match: '(nullable_type $T:identifier)'
         replace: '(identifier @$T)'
+      - match: '(qualified_name qualifier: $O:cs_qualified name: $T:identifier)'
+        replace: '(cs_qualified @$T (__object @$O->__member))'
+      - match: '(qualified_name qualifier: $O:identifier name: $T:identifier)'
+        replace: '(cs_qualified @$T (__object @$O))'
       - match: '(qualified_name name: $T:identifier)'
         replace: '(cs_qualified @$T)'
 
@@ -208,6 +212,8 @@ stages:
         replace: '(__def (__defname @$N) (__enum_variant))'
 
       # Callables
+      - match: '(method_declaration $$$PRE returns: $RT:cs_qualified name: $N:identifier parameters: $P body:? $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT->__member) $$$PRE $P $B)'
       - match: '(method_declaration $$$PRE returns: $RT:identifier name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT)) $B)'
       - match: '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)'
