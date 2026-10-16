@@ -1,0 +1,35 @@
+name: "Java: a wildcard import does not shadow a nested class of the same name"
+
+fixtures:
+  - path: shapes/Category.java
+    content: |
+      package shapes;
+
+      public class Category {
+          public void x() {}
+      }
+
+  - path: app/Main.java
+    content: |
+      package app;
+
+      import shapes.*;
+
+      class Main {
+          static class Category {
+              void x() {}
+          }
+
+          void go() {
+              new Category().x();
+          }
+      }
+
+tests:
+  - name: the call reaches the nested class, not the imported one
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'app.Main.go' AND t.name = 'x'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["app.Main.Category.x"] } }
