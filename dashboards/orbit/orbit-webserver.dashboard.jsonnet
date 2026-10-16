@@ -1,35 +1,23 @@
 // Orbit — Webserver.
 //
-// Layout is story-shaped, not catalog-shaped. The narrative is the
-// path of a single query: a Rails request lands on the Orbit webserver
-// over gRPC, runs the query pipeline (authorize → compile → execute
-// → hydrate), the server returns rows, and Rails redacts before
-// handing the response to the user. Each row of the dashboard is a
-// stop along that path.
+// Opens on the answer to "is the webserver healthy?" without scrolling,
+// following the RED method (rate, errors, duration):
 //
-//   1. Health — four headline numbers for at-a-glance status.
-//   2. Volume — "how many queries / redactions / CH rows in the
-//               dashboard window?" stat tiles.
-//   3. Latency story — Rails-observed gRPC, server pipeline, per
-//               stage breakdown, ClickHouse work, and Rails redaction.
-//               Lets you see where wall-clock time is going.
-//   4. Reliability — server pipeline errors, Rails gRPC errors,
-//               threat counters.
-//   5. Traversal compaction — Rails traversal-ID compaction signals.
-//   6. Content resolution — Gitaly blob fetches.
-//   7. Schema watcher — webserver schema-readiness gate.
-//   8. Resources — pod-level CPU, memory, FS I/O, pressure, OOM,
-//               restarts (mirrors the indexer dashboard).
-//   9. Reference — every metric in every server / query domain,
-//               collapsed by default. Kept as the deep-debug fallback.
+//   1. At a glance — eight small tiles, neutral until a threshold is
+//      crossed, then three charts: latency of successful queries,
+//      server errors by type, and rejected client queries by reason.
+//   2. Latency breakdown — per query type, per pipeline stage, and
+//      ClickHouse work, to find where time goes.
+//   3. Reliability — failure and rejection details.
+//   4. Content resolution, schema watcher, and resources.
+//   5. Reference — every metric in every server and query domain,
+//      collapsed by default.
 
 local o = import 'lib/orbit.libsonnet';
 local ext = import 'lib/external.libsonnet';
 
 local DS = 'ORBIT_DS';
-local RDS = 'RAILS_DS';
 local SEL = o.GKG_WEB_SEL;
-local RAIL = o.RAILS_SEL;
 
 // Catalog lookups. Build aborts if any prom name drifts.
 local pipelineQueries = o.metric('gkg.query.pipeline.queries');
@@ -51,108 +39,172 @@ local contentResolveDur = o.metric('gkg.content.resolve.duration');
 local contentResolveBatch = o.metric('gkg.content.resolve.batch_size');
 local contentGitalyCalls = o.metric('gkg.content.gitaly.calls');
 
-local railsGrpcDur = 'gitlab_knowledge_graph_grpc_duration_seconds';
-local railsGrpcErr = 'gitlab_knowledge_graph_grpc_errors_total';
-local railsRedactDur = 'gitlab_knowledge_graph_redaction_duration_seconds';
-local railsRedactBatch = 'gitlab_knowledge_graph_redaction_batch_size';
-local railsRedactFiltered = 'gitlab_knowledge_graph_redaction_filtered_count';
-local railsJwtDur = 'gitlab_knowledge_graph_jwt_build_duration_seconds';
-local railsAuthCtxDur = 'gitlab_knowledge_graph_auth_context_duration_seconds';
-local railsTraversalIds = 'gitlab_knowledge_graph_traversal_ids_count';
-local railsCompactRatio = 'gitlab_knowledge_graph_compaction_ratio';
-local railsCompactFallback = 'gitlab_knowledge_graph_compaction_fallback_total';
-local railsTraversalThresh = 'gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total';
 
-// 1. Health ---------------------------------------------------------------
-local health = [
-  o.row('Health'),
-  o.gaugeStat(
-    'Rails: gRPC p95 (5m)',
-    'p95 of the user-facing Rails-side gRPC call to Orbit over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.',
-    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
-    RDS, 's', 6,
+// 1. At a glance ----------------------------------------------------------
+// Tiles stay in text color until a threshold is crossed, so only real
+// trouble is coloured. Thresholds follow the latency (5 s, 25 s) and error
+// (99.5%) objectives.
+local Q = pipelineQueries.prom_name;
+local DUR = pipelineDuration.prom_name;
+local VALID = 'status!~"compile_error|security_error", query_type!="unknown"';
+local SERVER_STATUS = 'execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error';
+local COMPILER_FAULT = 'lowering|enforcement|codegen|pipeline|ontology_internal|security';
+local OK = 'status="ok", query_type!="unknown"';
+
+local serverErrors(range) =
+  '(sum(increase(%s{%s, status=~"%s"}[%s])) or vector(0)) + (sum(increase(%s{%s, failure_reason=~"%s"}[%s])) or vector(0))'
+  % [Q, SEL, SERVER_STATUS, range, compilerRejected, SEL, COMPILER_FAULT, range];
+
+local NEUTRAL = [{ color: 'text', value: null }];
+local steps(pairs) = NEUTRAL + [{ color: p[1], value: p[0] } for p in pairs];
+local stepsDown(red, amber) = [
+  { color: 'red', value: null },
+  { color: '#EAB839', value: red },
+  { color: 'green', value: amber },
+];
+
+local tile(title, description, expr, unit, thresholds, decimals=null) =
+  o.stat(title, description, o.target(expr, title, DS), unit, 3, 4) + {
+    fieldConfig+: {
+      defaults+: {
+        color: { mode: 'thresholds' },
+        thresholds: { mode: 'absolute', steps: thresholds },
+        [if decimals != null then 'decimals']: decimals,
+      },
+    },
+    options+: {
+      textMode: 'value',
+      graphMode: 'none',
+      colorMode: 'value',
+      justifyMode: 'center',
+      text: { titleSize: 13, valueSize: 32 },
+    },
+  };
+
+local percentiles(title, description) = o.timeseries(
+  title,
+  description,
+  [
+    o.target('histogram_quantile(%s, sum by (le) (rate(%s_bucket{%s, %s}[30m])))' % [q[0], DUR, SEL, OK], q[1], DS, q[2])
+    for q in [['0.50', 'p50', 'A'], ['0.95', 'p95', 'B'], ['0.99', 'p99', 'C']]
+  ],
+  's', 12, 9,
+  overrides=[
+    { matcher: { id: 'byName', options: n[0] }, properties: [{ id: 'color', value: { mode: 'fixed', fixedColor: n[1] } }] }
+    for n in [['p50', '#3987e5'], ['p95', '#d95926'], ['p99', '#9085e9']]
+  ],
+) + {
+  fieldConfig+: {
+    defaults+: {
+      custom+: { thresholdsStyle: { mode: 'dashed' }, fillOpacity: 0, lineWidth: 2, showPoints: 'never' },
+      color: { mode: 'palette-classic' },
+      thresholds: { mode: 'absolute', steps: [{ color: 'transparent', value: null }, { color: '#EAB839', value: 5 }, { color: 'red', value: 25 }] },
+    },
+  },
+  options+: { legend: { displayMode: 'table', placement: 'bottom', calcs: ['mean', 'max', 'lastNotNull'] } },
+};
+
+local colored(names) = [
+  { matcher: { id: 'byName', options: n[0] }, properties: [{ id: 'color', value: { mode: 'fixed', fixedColor: n[1] } }] }
+  for n in names
+];
+
+local errorBars(title, description, targets, colors) =
+  o.barTimeseries(title, description, targets, 'short', 6, 9, minInterval='10m') + {
+    fieldConfig+: { defaults+: { decimals: 0 }, overrides: colored(colors) },
+    options+: { legend: { displayMode: 'list', placement: 'bottom', calcs: ['sum'] } },
+  };
+
+local glance = [
+  o.row('At a glance · tiles cover the last hour'),
+  tile(
+    'Queries/min',
+    'Valid queries per minute, averaged over the last hour: successful queries and server failures. Excludes rejected client queries and schema calls.',
+    'sum(rate(%s{%s, %s}[1h])) * 60' % [Q, SEL, VALID],
+    'short', NEUTRAL, 1,
   ),
-  o.gaugeStat(
-    'Pipeline: p95 (5m)',
-    'p95 of pipeline duration for successful queries on the Orbit webserver side. Failed queries are excluded because they end early or at a timeout. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
-    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, status="ok"}[5m])))' % [pipelineDuration.prom_name, SEL],
-    DS, 's', 6,
+  tile(
+    'Success',
+    'Share of valid queries in the last hour that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.',
+    '1 - (%s) / sum(increase(%s{%s, %s}[1h]))' % [serverErrors('1h'), Q, SEL, VALID],
+    'percentunit', stepsDown(0.95, 0.995), 2,
   ),
-  o.gaugeStat(
-    'Compiler error rate (1h)',
-    'Share of queries the compiler rejected before execution. compile_error / total. Drives the "client sent a bad query" signal and is independent of server-side reliability.',
-    '(sum(rate(%s{%s, status="compile_error"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
-    DS, 'percentunit', 6,
+  tile(
+    'Server errors',
+    'Queries that failed because of the service in the last hour: execution, timeout, streaming, content resolution, redaction, and compiler faults. See the chart below for the split by type.',
+    serverErrors('1h'),
+    'short', steps([[5, '#EAB839'], [20, 'red']]), 0,
   ),
-  o.gaugeStat(
-    'Pipeline failure rate (1h)',
-    'Share of post-compile pipeline runs that did not return status="ok". Excludes compile rejects from both the numerator and the denominator. This is the server-reliability SLI.',
-    '(sum(rate(%s{%s, status!~"ok|compile_error"}[1h]))) / (sum(rate(%s{%s, status!="compile_error"}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
-    DS, 'percentunit', 6,
+  tile(
+    'Under 5 s',
+    'Share of successful queries in the last hour that finished in 5 seconds or less.',
+    'sum(increase(%s_bucket{%s, %s, le="5.0"}[1h])) / sum(increase(%s_count{%s, %s}[1h]))' % [DUR, SEL, OK, DUR, SEL, OK],
+    'percentunit', stepsDown(0.9, 0.95), 1,
+  ),
+  tile(
+    'p50',
+    'Median duration of successful queries in the last hour.',
+    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[1h])))' % [DUR, SEL, OK],
+    's', NEUTRAL,
+  ),
+  tile(
+    'p95',
+    'p95 duration of successful queries in the last hour. Amber from 5 s, red from 25 s.',
+    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[1h])))' % [DUR, SEL, OK],
+    's', steps([[5, '#EAB839'], [25, 'red']]), 1,
+  ),
+  tile(
+    'p99',
+    'p99 duration of successful queries in the last hour. Amber from 25 s, the long-tail objective (99% of queries within 25 s).',
+    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[1h])))' % [DUR, SEL, OK],
+    's', steps([[25, '#EAB839']]), 1,
+  ),
+  tile(
+    'Rejected',
+    'Share of all queries in the last hour that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.',
+    'sum(increase(%s{%s, status="compile_error"}[1h])) / sum(increase(%s{%s}[1h]))' % [Q, SEL, Q, SEL],
+    'percentunit', NEUTRAL, 1,
+  ),
+  percentiles(
+    'Latency of successful queries',
+    'p50, p95 and p99 of successful queries over 30-minute windows. Dashed lines mark the 5 s and 25 s objectives. Failed queries are excluded because they end early or at a timeout.',
+  ),
+  errorBars(
+    'Server errors by type',
+    'Queries that failed because of the service, by type, per 10 minutes. compiler_fault counts compiler bugs, not invalid client input.',
+    [
+      o.target('sum by (status) (increase(%s{%s, status=~"%s"}[$__interval])) > 0' % [Q, SEL, SERVER_STATUS], '{{status}}', DS, 'A'),
+      o.target('sum(increase(%s{%s, failure_reason=~"%s"}[$__interval])) > 0' % [compilerRejected, SEL, COMPILER_FAULT], 'compiler_fault', DS, 'B'),
+    ],
+    [
+      ['execution_error', '#3987e5'], ['streaming_error', '#d95926'], ['timeout', '#c98500'],
+      ['content_resolution_error', '#199e70'], ['authorization_error', '#d55181'],
+      ['custom_error', '#9085e9'], ['compiler_fault', '#e66767'],
+    ],
+  ),
+  errorBars(
+    'Rejected client queries by reason',
+    'Queries the compiler rejected as invalid client input, by reason, per 10 minutes. A jump usually means a client or agent changed what it sends.',
+    [o.target('sum by (failure_reason) (increase(%s{%s, failure_reason!~"%s"}[$__interval])) > 0' % [compilerRejected, SEL, COMPILER_FAULT], '{{failure_reason}}', DS, 'A')],
+    [
+      ['schema', '#3987e5'], ['parse', '#d95926'], ['ontology', '#199e70'], ['reference', '#c98500'],
+      ['pagination', '#d55181'], ['authorization', '#9085e9'], ['restrict', '#008300'],
+    ],
   ),
 ];
 
-// 2. Volume in window -----------------------------------------------------
-local volume = [
-  o.row('Volume in window'),
-] + o.volumeTiles([
-  {
-    prom: pipelineQueries.prom_name,
-    title: 'Successful queries',
-    desc: 'Queries that returned status="ok" in the dashboard window. Each one sends one gkg_query_executed analytics event, except GQL schema requests (query_type="unknown").',
-    filter: 'status="ok"',
-  },
-  {
-    prom: pipelineQueries.prom_name,
-    title: 'Failed queries',
-    desc: 'Queries that did not return status="ok" in the dashboard window: compile errors, authorization errors, execution errors, timeouts, and content resolution errors. Failed queries send no analytics event.',
-    filter: 'status!="ok"',
-  },
-], DS, SEL, w=12) + o.volumeTiles([
-  {
-    prom: railsGrpcDur + '_count',
-    title: 'gRPC calls (Rails)',
-    desc: 'Rails-side gRPC calls into Orbit in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.',
-    ds_var: RDS,
-    selector: RAIL,
-  },
-  {
-    prom: railsRedactDur + '_count',
-    title: 'Redactions (Rails)',
-    desc: 'Rails-side redaction passes in the dashboard window. Roughly one per successful query.',
-    ds_var: RDS,
-    selector: RAIL,
-  },
-  {
-    prom: pipelineChRows.prom_name,
-    title: 'CH row reads',
-    desc: 'ClickHouse row-read events in the dashboard window. Bytes read tile sits next to it.',
-  },
-], DS, SEL, w=8);
-
-// 3. Latency story --------------------------------------------------------
-// The wall-clock journey of a single query, top-to-bottom:
-//   Rails gRPC (user-facing) > server pipeline > pipeline stages >
-//   ClickHouse work > Rails redaction. The order matches request flow.
+// 2. Latency breakdown ----------------------------------------------------
+// Where time goes: per query type, per pipeline stage, and ClickHouse work.
 local latency = [
-  o.row('Latency story (Rails → Server → ClickHouse → Rails redaction)'),
-  // Rails gRPC, by method — what users actually feel.
+  o.row('Latency breakdown'),
   o.timeseries(
-    'Rails: gRPC duration p95 by method (5m)',
-    'p95 of the Rails-side gRPC call to Orbit, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.',
+    'p95 of successful queries by query type',
+    'p95 duration of successful queries per query type over 10-minute windows. One slow query type can move the overall latency on its own.',
     [o.target(
-      'histogram_quantile(0.95, sum by (method, le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
-      '{{method}}',
-      RDS,
+      'histogram_quantile(0.95, sum by (le, query_type) (rate(%s_bucket{%s, status="ok", query_type!="unknown"}[10m])))' % [pipelineDuration.prom_name, SEL],
+      '{{query_type}}', DS,
     )],
     's', 12, 8,
-  ),
-  // Server pipeline, all-up.
-  o.histogramPercentiles(
-    pipelineDuration,
-    'Server: pipeline duration (p50/p95/p99)',
-    'Orbit-side query pipeline duration percentiles for successful queries. Failed queries are excluded because they end early or at a timeout. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.',
-    DS, SEL, filter='status="ok"', w=12,
   ),
   // Per-stage stacked p95: tells the budget at a glance.
   o.timeseries(
@@ -179,42 +231,6 @@ local latency = [
     'p50/p95/p99 of the hydration stage — graph response shaping after ClickHouse returns. Hydration spike + flat execute means the row count is huge; cross-check the result-set rows panel below.',
     DS, SEL, w=12,
   ),
-  // Rails redaction — the last leg of the user-facing latency.
-  o.timeseries(
-    'Rails: redaction duration p50/p95/p99 (5m)',
-    'p50/p95/p99 of redaction time on the Rails side, after Orbit returns. Adds onto the server pipeline duration to make the total the user sees.',
-    [
-      o.target('histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactDur, RAIL], 'p50', RDS, 'A'),
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactDur, RAIL], 'p95', RDS, 'B'),
-      o.target('histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactDur, RAIL], 'p99', RDS, 'C'),
-    ],
-    's', 12, 8,
-  ),
-  o.timeseries(
-    'Rails: redaction batch size and filtered rows (p95)',
-    'p95 of how many rows redaction sees per request, and how many it filters out. Big batch + low filtered count is fine; small batch + everything filtered is the worst case for the user (lots of work, nothing returned).',
-    [
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactBatch, RAIL], 'batch p95', RDS, 'A'),
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactFiltered, RAIL], 'filtered p95', RDS, 'B'),
-    ],
-    'short', 12, 8,
-  ),
-  // Wall-clock split: Rails total minus server pipeline.
-  o.timeseries(
-    'Rails total p95 vs Server pipeline p95',
-    'Rails-observed gRPC p95 plotted next to the server pipeline p95. The gap is the round-trip wire time plus JWT, auth-context, and redaction. A growing gap with stable server p95 means the slowdown is on the Rails side.',
-    [
-      o.target(
-        'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
-        'rails total p95', RDS, 'A',
-      ),
-      o.target(
-        'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, status="ok"}[5m])))' % [pipelineDuration.prom_name, SEL],
-        'server pipeline p95 (ok)', DS, 'B',
-      ),
-    ],
-    's', 12, 8,
-  ),
   // ClickHouse work indicators.
   o.timeseries(
     'ClickHouse: bytes / rows read per second',
@@ -231,18 +247,6 @@ local latency = [
     'p50/p95/p99 of ClickHouse memory_usage reported per query. A jump here often correlates with execute-stage latency and is the first signal of a query plan regression.',
     DS, SEL, w=12,
   ),
-  // Rails JWT and auth context — the part of "server-side delay" that
-  // happens on Rails before the gRPC call even fires.
-  o.timeseries(
-    'Rails: JWT build and auth-context p95 (5m)',
-    'Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not Orbit.',
-    [
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsJwtDur, RAIL], 'jwt p95', RDS, 'A'),
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsAuthCtxDur, RAIL], 'auth_ctx p95', RDS, 'B'),
-    ],
-    's', 12, 8,
-  ),
-  // Result-set size: useful denominator for the latency panels above.
   o.histogramPercentiles(
     pipelineRows,
     'Server: result-set rows per query (p50/p95/p99)',
@@ -251,7 +255,7 @@ local latency = [
   ),
 ];
 
-// 4. Reliability ----------------------------------------------------------
+// 3. Reliability ----------------------------------------------------------
 local reliability = [
   o.row('Reliability'),
   o.timeseries(
@@ -264,15 +268,6 @@ local reliability = [
       ),
       o.target('vector(0)', 'no failures', DS, 'B'),
     ],
-    'short', 12, 8,
-  ),
-  o.timeseries(
-    'Rails: gRPC errors by code (1h windows)',
-    'Rails-side gRPC error counts in rolling 1h windows, by gRPC status code. Auth or unavailable spikes here often line up with the server reliability panel on the left.',
-    [o.target(
-      'sum by (code) (increase(%s{%s}[1h]))' % [railsGrpcErr, RAIL],
-      '{{code}}', RDS,
-    )],
     'short', 12, 8,
   ),
   o.timeseries(
@@ -295,42 +290,7 @@ local reliability = [
   ),
 ];
 
-// 5. Traversal compaction (Rails) ----------------------------------------
-// Compaction encodes traversal-ID lists into a smaller form before the
-// gRPC call. Useful as a separate row because regressions here show up
-// as Rails-side cost without changing the server pipeline.
-local traversal = [
-  o.row('Traversal compaction (Rails)'),
-  o.timeseries(
-    'Rails: traversal IDs per request (p50/p95)',
-    'Number of traversal IDs Rails attaches to each gRPC call (pre-compaction). p95 climbing means Rails is sending bigger authorization payloads.',
-    [
-      o.target('histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsTraversalIds, RAIL], 'p50', RDS, 'A'),
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsTraversalIds, RAIL], 'p95', RDS, 'B'),
-    ],
-    'short', 12, 8,
-  ),
-  o.timeseries(
-    'Rails: compaction ratio (p50/p95)',
-    'Ratio of compacted size to original. Lower is better — 0.1 means the compaction reduced the payload to 10% of original. Watch for sustained 1.0 (no benefit).',
-    [
-      o.target('histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsCompactRatio, RAIL], 'p50', RDS, 'A'),
-      o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsCompactRatio, RAIL], 'p95', RDS, 'B'),
-    ],
-    'percentunit', 12, 8,
-  ),
-  o.timeseries(
-    'Rails: compaction fallback / threshold-exceeded per minute',
-    'Rate of requests where compaction fell back to the uncompressed form (left) or where the traversal ID list exceeded the threshold (right). Rising fallback often precedes a tail-latency event on the Rails side.',
-    [
-      o.target('sum(rate(%s{%s}[5m])) * 60' % [railsCompactFallback, RAIL], 'fallback/min', RDS, 'A'),
-      o.target('sum(rate(%s{%s}[5m])) * 60' % [railsTraversalThresh, RAIL], 'threshold-exceeded/min', RDS, 'B'),
-    ],
-    'short', 12, 8,
-  ),
-];
-
-// 6. Content resolution (Gitaly) ------------------------------------------
+// 4. Content resolution (Gitaly) ------------------------------------------
 local content = [
   o.row('Content resolution (Gitaly)'),
   o.histogramPercentiles(
@@ -347,12 +307,12 @@ local content = [
   ),
 ] + o.counterPanels(contentGitalyCalls, DS, SEL);
 
-// 7. Schema watcher -------------------------------------------------------
+// 5. Schema watcher -------------------------------------------------------
 local schema = [
   o.row('Schema watcher'),
 ] + o.gaugePanels(o.metric('gkg.webserver.schema.state'), DS, SEL);
 
-// 8. Resources -----------------------------------------------------------
+// 6. Resources -----------------------------------------------------------
 // Mirrors the indexer Resources row exactly. Selector flips to
 // the webserver container. cAdvisor + kube-state-metrics, no app
 // instrumentation needed.
@@ -484,7 +444,7 @@ local resources = [
   ),
 ];
 
-// 9. Reference (collapsed by default) ------------------------------------
+// 7. Reference (collapsed by default) ------------------------------------
 local reference =
   o.externalSection('gRPC transport', ext.GKG_GRPC, DS, SEL)
   + o.sectionCollapsed('Query pipeline (reference)', o.metricsInDomain('query.pipeline'), DS, SEL)
@@ -493,16 +453,12 @@ local reference =
   + o.sectionCollapsed('Schema watcher (reference)', o.metricsInDomain('server.schema_watcher'), DS, SEL)
   + o.sectionCollapsed('Billing events (reference)', o.metricsInDomain('billing.events'), DS, SEL)
   + o.sectionCollapsed('Billing quota (reference)', o.metricsInDomain('billing.quota'), DS, SEL)
-  + o.sectionCollapsed('Circuit breaker (reference)', o.metricsInDomain('resilience.circuit_breaker'), DS, o.GKG_ANY_SEL)
-  + o.externalSection('Rails Orbit — request (reference)', ext.RAILS_KG_REQUEST, RDS, RAIL)
-  + o.externalSection('Rails Orbit — traversal (reference)', ext.RAILS_KG_TRAVERSAL, RDS, RAIL);
+  + o.sectionCollapsed('Circuit breaker (reference)', o.metricsInDomain('resilience.circuit_breaker'), DS, o.GKG_ANY_SEL);
 
 local items =
-  health
-  + volume
+  glance
   + latency
   + reliability
-  + traversal
   + content
   + schema
   + resources
@@ -516,7 +472,7 @@ o.dashboard(
   'orbit-webserver',
   'Orbit — Webserver',
   ['webserver'],
-  'Orbit webserver dashboard. Top rows tell the latency story: a Rails request lands on Orbit over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).',
+  'Orbit webserver dashboard. The top section answers whether the service is healthy: throughput, success rate, latency of successful queries, and errors by type. Lower rows break down latency, reliability, and resources. The per-domain catalog reference is collapsed at the bottom.',
   items,
   annotations,
 )
