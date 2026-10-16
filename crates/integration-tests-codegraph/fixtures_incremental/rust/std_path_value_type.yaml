@@ -1,0 +1,80 @@
+name: "Rust: a value built by a std path call takes no type from a same-named local constructor"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod marks;
+
+  - path: src/marks.rs
+    content: |
+      use std::time::SystemTime;
+
+      #[derive(Default)]
+      pub struct Mark {
+          accessed: Option<SystemTime>,
+      }
+
+      impl Mark {
+          pub fn new() -> Self {
+              Self::default()
+          }
+
+          pub fn set_accessed(mut self, t: SystemTime) -> Self {
+              self.accessed = Some(t);
+              self
+          }
+
+          pub fn set_modified(self, _t: SystemTime) -> Self {
+              self
+          }
+
+          pub fn plain(self) -> std::fs::FileTimes {
+              let mut times = std::fs::FileTimes::new();
+              times = times.set_accessed(SystemTime::now());
+              times = times.set_modified(SystemTime::now());
+              times
+          }
+
+          pub fn guarded(self) -> std::fs::FileTimes {
+              let mut times = std::fs::FileTimes::new();
+              if let Some(accessed) = self.accessed {
+                  times = times.set_accessed(accessed);
+              }
+              if let Some(modified) = self.accessed {
+                  times = times.set_modified(modified);
+              }
+              times
+          }
+
+          pub fn local(self) -> Mark {
+              let mark = Mark::new();
+              mark.set_accessed(SystemTime::now())
+          }
+      }
+
+tests:
+  - name: "the std value calls none of the local methods"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['plain', 'guarded']
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 0 }
+
+  - name: "a local constructor still types its value"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'local'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: new } }
+      - { row: { callee: set_accessed } }
