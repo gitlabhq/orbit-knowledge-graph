@@ -25,6 +25,7 @@ struct SetupTexts {
     #[serde(default)]
     remote: BTreeMap<String, String>,
     nudge_search: String,
+    nudge_gitlab: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -123,6 +124,13 @@ pub(crate) fn instructions_text() -> &'static str {
 
 pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
+}
+
+static RENDERED_NUDGE_GITLAB: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.nudge_gitlab.trim_end(), launcher()));
+
+pub(crate) fn gitlab_nudge_text() -> &'static str {
+    &RENDERED_NUDGE_GITLAB
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,7 +360,7 @@ mod tests {
                     "{launcher}: {rendered}"
                 );
                 assert!(rendered.contains(" mr:42;") == remote, "{launcher}");
-                let budget = if remote { 110 } else { 90 };
+                let budget = if remote { 120 } else { 90 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }

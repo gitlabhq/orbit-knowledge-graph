@@ -1496,7 +1496,8 @@ mod tests {
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
         assert!(
-            settings.contains("\"orbit hook-guard search\""),
+            settings.contains("\"orbit hook-guard search\"")
+                || settings.contains("\"orbit hook-guard search --gitlab\""),
             "{settings}"
         );
         assert!(!settings.contains("--mode"));

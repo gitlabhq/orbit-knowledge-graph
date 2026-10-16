@@ -616,6 +616,10 @@ enum Commands {
 
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
+
+        /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
+        #[arg(long, hide = true)]
+        gitlab: bool,
     },
     /// Sends one command event; `hook-guard` runs it detached so hooks never wait on telemetry.
     #[command(hide = true)]
@@ -727,9 +731,9 @@ async fn main() -> Result<()> {
     };
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
     match &cli.command {
-        Commands::HookGuard { kind, .. } => {
+        Commands::HookGuard { kind, gitlab, .. } => {
             let started = Instant::now();
-            if commands::hook_guard::run(*kind) {
+            if commands::hook_guard::run(*kind, *gitlab) {
                 telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
             }
             return Ok(());
@@ -950,8 +954,9 @@ async fn dispatch(
             kind,
             graph_first: _,
             mode: _,
+            gitlab,
         } => {
-            commands::hook_guard::run(kind);
+            commands::hook_guard::run(kind, gitlab);
             Ok(())
         }
         Commands::SendEvent { .. } => Ok(()),
