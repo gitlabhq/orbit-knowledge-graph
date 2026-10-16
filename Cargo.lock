@@ -4165,6 +4165,7 @@ dependencies = [
  "orbit-analytics",
  "orbit-arrow",
  "orbit-migrations",
+ "orbit-observability",
  "orbit-server",
  "orbit-server-config",
  "orbit-utils",

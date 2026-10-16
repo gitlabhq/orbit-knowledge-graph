@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,6 +12,7 @@ use opentelemetry_sdk::metrics::data::{
     AggregatedMetrics, MetricData, ResourceMetrics, SumDataPoint,
 };
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+use orbit_observability::query::pipeline as spec;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::InMemoryAnalyticsTracker;
 use orbit_server::auth::Claims;
@@ -464,6 +466,15 @@ impl Server {
             ),
             [[status, outcome]]
         );
+        for metric in [&spec::QUERIES, &spec::PIPELINE_DURATION] {
+            let declared: BTreeSet<String> = metric.labels.iter().map(|l| l.to_string()).collect();
+            assert_eq!(
+                emitted_label_keys(&metrics, metric.otel_name),
+                declared,
+                "{}",
+                metric.otel_name
+            );
+        }
         // The failed metric keeps coarse reasons; compile rejections are on the compiler metric.
         let failed = match (status, failure_reason) {
             ("compile_error", _) => None,
@@ -477,6 +488,28 @@ impl Server {
             failed.map(|reason| [reason]).as_slice()
         );
     }
+}
+
+fn emitted_label_keys(metrics: &[ResourceMetrics], name: &str) -> BTreeSet<String> {
+    let latest = metrics
+        .iter()
+        .rev()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .find(|metric| metric.name() == name)
+        .unwrap_or_else(|| panic!("{name} not recorded"));
+    let keys: Vec<String> = match latest.data() {
+        AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+            .data_points()
+            .flat_map(|point| point.attributes().map(|kv| kv.key.to_string()))
+            .collect(),
+        AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
+            .data_points()
+            .flat_map(|point| point.attributes().map(|kv| kv.key.to_string()))
+            .collect(),
+        _ => panic!("{name} has an unexpected metric type"),
+    };
+    keys.into_iter().collect()
 }
 
 fn metric_labels(metrics: &[ResourceMetrics], name: &str, keys: &[&str]) -> Vec<Vec<String>> {
