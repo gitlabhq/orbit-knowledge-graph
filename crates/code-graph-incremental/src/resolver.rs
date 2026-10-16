@@ -2095,7 +2095,7 @@ fn destructure_calls<'a>(
         .flat_map(|(slot, component)| {
             call_edges(
                 from,
-                method_up(ctx, class, component.sym(), fi, Role::Value),
+                method_up(ctx, class, component.sym(), fi, Role::Callable),
                 Some(slot.index()),
             )
         })
