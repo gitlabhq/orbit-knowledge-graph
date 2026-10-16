@@ -1,0 +1,153 @@
+name: "Python: a decorator links its member and the calls in its arguments"
+
+fixtures:
+  - path: lib.py
+    content: |
+      class Library:
+          def filter(self, name=None):
+              pass
+
+          def tag(self, name=None):
+              pass
+
+  - path: tools.py
+    content: |
+      def display(ordering=None):
+          pass
+
+
+      def root_validator(pre=False):
+          pass
+
+  - path: main.py
+    content: |
+      from lib import Library
+      import tools
+      from tools import root_validator
+
+      register = Library()
+
+
+      class Local:
+          def inclusion_tag(self, name):
+              pass
+
+
+      local = Local()
+
+
+      def parametrize(*args, **kwargs):
+          pass
+
+
+      def a():
+          pass
+
+
+      def b():
+          pass
+
+
+      def helper():
+          pass
+
+
+      @register.filter(name="x")
+      def filtered():
+          pass
+
+
+      @register.tag
+      def tagged():
+          pass
+
+
+      @local.inclusion_tag("row")
+      def included():
+          pass
+
+
+      @tools.display(ordering="order")
+      def displayed():
+          pass
+
+
+      @parametrize("x", [a(), b()])
+      def test_args():
+          pass
+
+
+      @parametrize("x", [helper()])
+      def test_param(helper):
+          pass
+
+
+      class Model:
+          @root_validator(pre=True)
+          def root_validator(cls, values):
+              pass
+
+tests:
+  - name: a member decorator on an instance names the method, not the class
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'filtered'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "lib.Library.filter" } }
+
+  - name: a bare member decorator on an instance names the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'tagged'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "lib.Library.tag" } }
+
+  - name: a member decorator on a local class instance names the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'included'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Local.inclusion_tag" } }
+
+  - name: a module attribute decorator names the function in the module
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'displayed'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "tools.display" } }
+
+  - name: calls inside decorator arguments link from the decorated def
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'test_args'
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["main.a", "main.b", "main.parametrize"] } }
+
+  - name: a call in a decorator argument resolves before the parameter of the same name binds
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'test_param' AND callee.name = 'helper'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a decorator named like the method it decorates still names the import
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.Model.root_validator'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "tools.root_validator" } }

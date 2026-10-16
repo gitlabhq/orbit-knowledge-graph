@@ -582,6 +582,10 @@ impl<'t> Fold<'t> {
         let Some(callee) = c.child(C::Callee) else {
             return;
         };
+        let decorator = c.parent().is_some_and(|p| p.is(C::Decorator));
+        if decorator && callee.is_bare_name() {
+            return;
+        }
         if c.has(C::Property) && self.chain_is_class(callee) {
             return;
         }
@@ -669,6 +673,9 @@ impl<'t> Fold<'t> {
         for edge in &mut self.edges[first..] {
             edge.site = Some(c.index());
         }
+        if decorator {
+            self.retarget_own_def(first);
+        }
     }
 
     fn handle_standalone_member(&mut self, c: Cursor<'t>) {
@@ -678,23 +685,28 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
-            let owner = self.enclosing();
-            if c.enclosing(|p| p.is(C::Decorator)).is_some()
-                && self.edges[first..].iter().any(|edge| edge.to_node == owner)
-            {
-                let previous = self.previous_def_named(owner);
-                let tail = self.edges.split_off(first);
-                self.edges.extend(tail.into_iter().filter_map(|mut edge| {
-                    if edge.to_node == owner {
-                        edge.to_node = previous?;
-                    }
-                    Some(edge)
-                }));
+            if c.enclosing(|p| p.is(C::Decorator)).is_some() {
+                self.retarget_own_def(first);
             }
             for edge in &mut self.edges[first..] {
                 edge.call_resolution = crate::tree::CallResolution::Reference;
             }
         }
+    }
+
+    fn retarget_own_def(&mut self, first: usize) {
+        let owner = self.enclosing();
+        if !self.edges[first..].iter().any(|edge| edge.to_node == owner) {
+            return;
+        }
+        let previous = self.previous_def_named(owner);
+        let tail = self.edges.split_off(first);
+        self.edges.extend(tail.into_iter().filter_map(|mut edge| {
+            if edge.to_node == owner {
+                edge.to_node = previous?;
+            }
+            Some(edge)
+        }));
     }
 
     fn link_reference(&mut self, reference: Cursor<'t>) {
@@ -1547,7 +1559,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     for dn in f.defs.clone() {
         f.run.check().and_then(|()| f.file.check())?;
         for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
-            for target in f.lookup_chain(c) {
+            let Some(head) = c.decorator_head() else {
+                continue;
+            };
+            for target in f.lookup_chain(head) {
                 match target {
                     Value::LocalDef(target) => {
                         f.edges.push(Edge::local(dn, target, EdgeKind::Calls))

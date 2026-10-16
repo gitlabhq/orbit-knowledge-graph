@@ -77,6 +77,15 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn member(self) -> Option<Self> {
         self.child(C::Callee)?.child(C::Member)
     }
+    pub fn is_bare_name(self) -> bool {
+        self.sym_opt().is_some() && !self.has(C::Member) && !self.has(C::Ivar)
+    }
+    pub fn decorator_head(self) -> Option<Self> {
+        match self.child(C::Call) {
+            None => Some(self),
+            Some(call) => call.child(C::Callee).filter(|callee| callee.is_bare_name()),
+        }
+    }
     pub fn chain_root(self) -> Self {
         std::iter::successors(Some(self), |node| node.child(C::Member)?.child(C::Object))
             .last()
