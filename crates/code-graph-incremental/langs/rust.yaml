@@ -80,6 +80,8 @@ stages:
         replace: '(__obj $$$F)'
       - match: '(field_expression value: $O:__ivar field: $F)'
         replace: '(__member @$F (__object $O))'
+      - match: '(field_expression value: $O:call_expression field: $F)'
+        replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F)'
         replace: '(__member @$F (__object @$O))'
 
