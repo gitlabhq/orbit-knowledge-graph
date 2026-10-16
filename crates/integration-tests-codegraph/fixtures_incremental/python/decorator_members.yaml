@@ -101,6 +101,19 @@ fixtures:
           def x(self):
               pass
 
+
+      def deco(arg):
+          pass
+
+
+      def foo():
+          pass
+
+
+      @deco(foo())
+      def foo():
+          pass
+
 tests:
   - name: a member decorator on an instance names the method, not the class
     query: |
@@ -175,3 +188,14 @@ tests:
       - { row_count: 2 }
       - { row: { from: 74, to: 70 } }
       - { row: { from: 78, to: 74 } }
+
+  - name: an argument call that names the decorated def links the previous def, not the def itself
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.foo'
+      RETURN callee.fqn AS callee, callee.start_line AS to
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "main.deco", to: 82 } }
+      - { row: { callee: "main.foo", to: 86 } }

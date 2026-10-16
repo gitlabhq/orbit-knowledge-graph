@@ -83,14 +83,16 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_named_decorator(self) -> bool {
         self.sym_opt().is_some() || self.has(C::Member)
     }
+    pub fn in_decorator(self) -> bool {
+        self.enclosing(|p| p.is(C::Decorator)).is_some()
+    }
     pub fn decorator_head(self) -> Option<Self> {
         if self.is_named_decorator() {
             return Some(self);
         }
-        match self.child(C::Call) {
-            None => Some(self),
-            Some(call) => call.child(C::Callee).filter(|callee| callee.is_bare_name()),
-        }
+        self.child(C::Call)?
+            .child(C::Callee)
+            .filter(|callee| callee.is_bare_name())
     }
     pub fn chain_root(self) -> Self {
         std::iter::successors(Some(self), |node| node.child(C::Member)?.child(C::Object))

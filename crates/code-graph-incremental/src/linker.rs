@@ -582,10 +582,10 @@ impl<'t> Fold<'t> {
         let Some(callee) = c.child(C::Callee) else {
             return;
         };
-        let decorator = c
+        let head = c
             .parent()
             .is_some_and(|p| p.is(C::Decorator) && !p.is_named_decorator());
-        if decorator && callee.is_bare_name() {
+        if head && callee.is_bare_name() {
             return;
         }
         if c.has(C::Property) && self.chain_is_class(callee) {
@@ -650,9 +650,7 @@ impl<'t> Fold<'t> {
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
-            let fallback =
-                (callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar))
-                    .then(|| Rc::clone(&self.wildcards));
+            let fallback = callee.is_bare_name().then(|| Rc::clone(&self.wildcards));
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -675,7 +673,7 @@ impl<'t> Fold<'t> {
         for edge in &mut self.edges[first..] {
             edge.site = Some(c.index());
         }
-        if decorator {
+        if c.in_decorator() {
             self.retarget_own_def(first);
         }
     }
@@ -687,7 +685,7 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
-            if c.enclosing(|p| p.is(C::Decorator)).is_none() {
+            if !c.in_decorator() {
                 for edge in &mut self.edges[first..] {
                     edge.call_resolution = crate::tree::CallResolution::Reference;
                 }
