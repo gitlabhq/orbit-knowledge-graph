@@ -37,8 +37,9 @@ pub struct ImportAlias {
 
 pub type RootId = u32;
 
-/// How far a file lies from the one that looks it up: in its own source
-/// root, one that encloses it, or one below it; or in any other root.
+/// Whether a file lies in the source root of the one that looks it up, in a
+/// root that encloses it, or in one nested below it (`Own`), or in any other
+/// root (`Other`). Tree order decides between two files of one group.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Distance {
     Own,

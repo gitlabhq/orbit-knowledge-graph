@@ -98,12 +98,14 @@ pub struct ResolveConfig {
     /// all and an inner clause's names shadow an outer clause's. True for
     /// Scala, where `package a` then `package b` means `a.b`.
     pub nested_packages: bool,
-    /// The order in which names claim a file's scope; a later entry never
-    /// replaces an earlier one, and an entry outside the list replaces
-    /// nothing. Empty means `[own_def, nested_def]`: a def always wins over
-    /// an import, as a Java class member does over a static import. Rust
-    /// puts `named_import` before `nested_def`: a `use` at module level wins
-    /// over a same-named item inside an inline `mod`.
+    /// Whether an import may replace a def of the file in that file's scope:
+    /// an import entry listed before a def entry replaces it, and an entry
+    /// outside the list replaces nothing. Two imports keep their order of
+    /// arrival; the list does not rank them. Empty means
+    /// `[own_def, nested_def]`: a def always wins over an import, as a Java
+    /// class member does over a static import. Rust puts `named_import`
+    /// before `nested_def`: a `use` at module level wins over a same-named
+    /// item inside an inline `mod`.
     pub precedence: Vec<ExportVia>,
 }
 

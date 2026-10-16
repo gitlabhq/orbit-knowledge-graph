@@ -323,21 +323,27 @@ Loading rebuilds the file index from saved trees and manifests before edits appl
 
 One lookup answers every import path, in the first pass and in the stale
 check. It tries five steps in order. First, an alias from the project tree.
-Second, the path in the importer's own source root, then in another root.
+Second, the path in the importer's own source root, a root that encloses
+it, or one nested below it. Then the same path in any other root. Tree
+order decides inside each group.
 Third, the path plus an imported name. Fourth, the import that binds a
 segment of the path in the file at its head, followed to its source. Fifth,
 one def per trailing segment inside the file the head names. A reindex asks
 that lookup again for every retained import. It resolves the importer again
 when a target is gone. It also does so when a glob gains a file that declares
-a name the importer mentions and that can win in its scope. Import discovery
+a name the importer mentions and no own def holds. A removed file re-resolves
+only the importers that mention a name it declared, because its names leave
+their scopes with it. A target that moves away keeps its names in the scopes
+of the other importers, so each of them resolves again. Import discovery
 scans retained files only when the file index gains keys. Dirty files and
 those importers seed one reverse-dependency traversal with a shared visited
 set. Each affected file resolves once, including when dependency paths
 overlap or cycle.
 
-A name enters a file's scope by precedence. A def of the file comes before an
-import, unless the language's `resolve.precedence` list says otherwise. Rust
-puts a module-level `use` before an item nested in an inline module. Among
+A def of the file comes before an import in that file's scope, unless the
+language's `resolve.precedence` list puts the import first. Rust puts a
+module-level `use` before an item nested in an inline module. Two imports
+keep their order of arrival; the list does not rank them. Among
 imports, an inner package clause beats an outer one where the language nests
 root package clauses (`resolve.nested_packages`, as Scala does). Two other
 claims on one name make it ambiguous. A package glob keeps the files of every

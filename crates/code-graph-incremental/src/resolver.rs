@@ -191,8 +191,12 @@ impl Resolver {
     }
 
     /// The files whose cross-file pass must run again: the dirty ones, every
-    /// importer whose import answers changed, importers of files that first
-    /// resolve now, and their dependents.
+    /// importer that lost a target, every importer that gained one declaring
+    /// a name it mentions, importers of files that first resolve now, and
+    /// their dependents. A lost target that still exists keeps the names it
+    /// exported in the scopes of its other importers, so every importer
+    /// re-resolves; a removed target's names leave those scopes in `remap`,
+    /// so only the importers that mention one re-resolve.
     fn invalidate(
         &self,
         previous_index: &FileIndex,
@@ -251,12 +255,7 @@ impl Resolver {
                             .collect::<Vec<_>>()
                     })
                     .collect();
-                if !gained_names.is_empty()
-                    && trees[fi as usize]
-                        .root()
-                        .descendants()
-                        .any(|node| gained_names.contains(&node.sym()))
-                {
+                if mentions(&trees[fi as usize], &gained_names) {
                     invalidated.insert(fi);
                 }
             }
@@ -297,22 +296,26 @@ impl Resolver {
         invalidated
     }
 
-    /// Renumbers the resolver's memory after files left the graph. Returns
-    /// the retained files that lost a visible name, whatever brought it in:
-    /// an import or a `visible_from` directive. They must resolve again.
+    /// Renumbers the resolver's memory after files left the graph. Returns,
+    /// per retained file, the visible names it lost, whatever brought them
+    /// in: an import or a `visible_from` directive. A file that mentions one
+    /// of them must resolve again.
     pub fn remap(
         &mut self,
         old_labels: &[String],
         label_to_fi: &FxHashMap<&str, u32>,
-    ) -> FxHashSet<u32> {
+    ) -> FxHashMap<u32, FxHashSet<u32>> {
         if self.visible.is_empty() {
-            return label_to_fi.values().copied().collect();
+            return label_to_fi
+                .values()
+                .map(|&fi| (fi, FxHashSet::default()))
+                .collect();
         }
         let n = label_to_fi.len();
         let mut remapped: VisibleMap = (0..n)
             .map(|_| FxHashMap::with_capacity_and_hasher(16, Default::default()))
             .collect();
-        let mut lost_a_name = FxHashSet::default();
+        let mut lost_a_name: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
         for (old_fi, names) in self.visible.iter().enumerate() {
             let Some(&new_fi) = old_labels
                 .get(old_fi)
@@ -330,7 +333,7 @@ impl Resolver {
                             .insert(sym, Loc::new(target_new_fi as usize, loc.node));
                     }
                     None => {
-                        lost_a_name.insert(new_fi);
+                        lost_a_name.entry(new_fi).or_default().insert(sym);
                     }
                 }
             }
@@ -894,6 +897,16 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
     names
 }
 
+/// Whether any node of the file carries one of `names`. An empty set
+/// matches nothing, so a file that lost or gained no name stays put.
+pub(crate) fn mentions(tree: &Tree, names: &FxHashSet<u32>) -> bool {
+    !names.is_empty()
+        && tree
+            .root()
+            .descendants()
+            .any(|node| names.contains(&node.sym()))
+}
+
 fn gather_imports_for(
     trees: &[Tree],
     paths: &PathLookup,
@@ -964,7 +977,6 @@ struct Hit {
 /// the same question and get the same answer.
 struct PathLookup<'a> {
     trees: &'a [Tree],
-    env: &'a Env,
     lang: &'a Lang,
     config: &'a ResolveConfig,
     file_index: &'a FileIndex,
@@ -973,6 +985,7 @@ struct PathLookup<'a> {
     tags: ReservedTags,
     wildcard_sym: u32,
     stdlib_prefixes: Vec<String>,
+    same_path_same_type: Vec<bool>,
 }
 
 impl<'a> PathLookup<'a> {
@@ -992,7 +1005,6 @@ impl<'a> PathLookup<'a> {
             .collect();
         Self {
             trees,
-            env,
             lang: &env.lang,
             config: &env.resolve.config,
             file_index,
@@ -1001,11 +1013,22 @@ impl<'a> PathLookup<'a> {
             tags: ReservedTags::new(&env.lang),
             wildcard_sym: env.lang.syms.intern(WILDCARD),
             stdlib_prefixes,
+            same_path_same_type: trees
+                .iter()
+                .map(|tree| {
+                    env.rules_for(&tree.label)
+                        .config
+                        .resolve
+                        .same_path_same_type
+                })
+                .collect(),
         }
     }
 
     /// Every target an import of file `fi` names, found by the first step
-    /// that answers: alias, direct, submodule, import hop, then def climb.
+    /// that answers: alias, direct, submodule, import hop, then def climb. A
+    /// path a standard-library entry names stops after the submodule step:
+    /// the entry only narrows the roots it may resolve in.
     fn resolve(&self, fi: u32, import: Cursor) -> Vec<Hit> {
         let tree = &self.trees[fi as usize];
         let Some(source_sym) = import
@@ -1058,7 +1081,7 @@ impl<'a> PathLookup<'a> {
                 hits(found, &submodule, Route::Submodule)
             })
             .collect();
-        if !submodules.is_empty() {
+        if !submodules.is_empty() || stdlib {
             return submodules;
         }
         if let Some((bound, found)) = self.follow_bindings(fi, &path, prefixes) {
@@ -1103,33 +1126,48 @@ impl<'a> PathLookup<'a> {
         found
     }
 
-    /// Every match of `path` from `fi`, nearest root first and a file before
-    /// a def, with the importer's own file still in the list. Says whether
-    /// the path was a glob.
+    /// Every match of `path` from `fi`, with the importer's own file still in
+    /// the list. A match in the importer's own root, one that encloses it, or
+    /// one nested below it comes before a match in any other root; inside a
+    /// group a file comes before a def, and tree order decides the rest. A
+    /// named path stops at the first own-root file, which nothing outranks.
+    /// Says whether the path was a glob.
     fn matches(&self, fi: u32, path: &str, prefixes: &[String]) -> (bool, Vec<Loc>) {
-        let keyed = |key: &str| -> Vec<Loc> {
-            std::iter::once(key.to_owned())
-                .chain(
-                    prefixes
-                        .iter()
-                        .filter(|prefix| !prefix.is_empty())
-                        .map(|prefix| format!("{prefix}{PATH_SEP}{key}")),
-                )
-                .flat_map(|key| self.file_index.get(&key).to_vec())
-                .collect()
-        };
         let glob = path
             .strip_suffix(WILDCARD)
             .map(|dir| dir.trim_end_matches(PATH_SEP));
-        let mut found: Vec<Loc> = match glob {
-            Some(dir) => std::iter::once(dir.to_owned())
-                .chain(prefixes.iter().map(|p| format!("{p}{PATH_SEP}{dir}")))
-                .filter_map(|dir| self.file_index.dirs.get(&dir))
-                .flatten()
-                .map(|&fi| Loc { fi, node: 0 })
-                .collect(),
-            None => keyed(path),
+        let own_file = |loc: &Loc| {
+            loc.fi != fi && loc.node == 0 && self.roots.distance(fi, loc.fi) == Distance::Own
         };
+        let mut key = String::new();
+        let mut found: Vec<Loc> = Vec::new();
+        let prefixes = prefixes.iter().filter(|prefix| !prefix.is_empty());
+        'forms: for prefix in std::iter::once("").chain(prefixes.map(String::as_str)) {
+            key.clear();
+            if !prefix.is_empty() {
+                key.push_str(prefix);
+                key.push_str(PATH_SEP);
+            }
+            key.push_str(glob.unwrap_or(path));
+            match glob {
+                Some(_) => found.extend(
+                    self.file_index
+                        .dirs
+                        .get(&key)
+                        .into_iter()
+                        .flatten()
+                        .map(|&fi| Loc { fi, node: 0 }),
+                ),
+                None => {
+                    for &loc in self.file_index.get(&key) {
+                        found.push(loc);
+                        if own_file(&loc) {
+                            break 'forms;
+                        }
+                    }
+                }
+            }
+        }
         found = found.into_iter().unique().collect();
         found.sort_by_key(|loc| (self.roots.distance(fi, loc.fi), loc.node != 0));
         if glob.is_none() {
@@ -1144,12 +1182,7 @@ impl<'a> PathLookup<'a> {
         found.retain(|loc| {
             self.roots.distance(fi, loc.fi) == Distance::Own
                 || !own.contains(rel(loc.fi))
-                || !self
-                    .env
-                    .rules_for(&self.trees[loc.fi as usize].label)
-                    .config
-                    .resolve
-                    .same_path_same_type
+                || !self.same_path_same_type[loc.fi as usize]
         });
         (true, found)
     }
@@ -1197,9 +1230,14 @@ impl<'a> PathLookup<'a> {
     /// segment: the file at the head of the path imports a name that equals
     /// the next segment, so the path goes on from that import's source.
     fn bind_once(&self, fi: u32, path: &str, prefixes: &[String]) -> Option<(String, (u32, u32))> {
-        let segments: Vec<&str> = path.split(PATH_SEP).collect();
-        (0..segments.len()).rev().find_map(|i| {
-            let segment = segments[i];
+        let mut heads: Vec<(&str, &str)> = Vec::new();
+        let mut rest = path;
+        while let Some((head, segment)) = rest.rsplit_once(PATH_SEP) {
+            heads.push((head, segment));
+            rest = head;
+        }
+        heads.push(("", rest));
+        heads.into_iter().find_map(|(head, segment)| {
             if segment.is_empty() || segment == WILDCARD {
                 return None;
             }
@@ -1207,12 +1245,9 @@ impl<'a> PathLookup<'a> {
             if name == 0 {
                 return None;
             }
-            let file = match i {
-                0 => self.root_file(fi, prefixes),
-                _ => self
-                    .files(fi, &segments[..i].join(PATH_SEP), prefixes)
-                    .into_iter()
-                    .next(),
+            let file = match head.is_empty() {
+                true => self.root_file(fi, prefixes),
+                false => self.files(fi, head, prefixes).into_iter().next(),
             }
             .filter(|loc| loc.node == 0)?;
             let tree = &self.trees[file.fi as usize];
@@ -1231,8 +1266,11 @@ impl<'a> PathLookup<'a> {
                 .syms
                 .resolve(tree.get_tag(import.index(), self.tags.resolved_source)?);
             let mut next = self.rooted(file.fi, source);
-            let rest = segments[i + 1..].iter().copied();
-            for part in std::iter::once(self.lang.syms.resolve(original)).chain(rest) {
+            let tail = path[head.len()..]
+                .trim_start_matches(PATH_SEP)
+                .split_once(PATH_SEP)
+                .map(|(_, tail)| tail);
+            for part in std::iter::once(self.lang.syms.resolve(original)).chain(tail) {
                 if !next.is_empty() {
                     next.push_str(PATH_SEP);
                 }
@@ -1368,7 +1406,11 @@ fn propagate_reexports(
     let mut names: usize = visible.iter().map(FxHashMap::len).sum();
     let mut too_many_names = None;
     let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), scope.owners);
-    let config = |fi: usize| &scope.env.rules_for(&trees[fi].label).config.resolve;
+    let configs: Vec<&ResolveConfig> = trees
+        .iter()
+        .map(|tree| &scope.env.rules_for(&tree.label).config.resolve)
+        .collect();
+    let config = |fi: usize| configs[fi];
 
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
@@ -2679,7 +2721,10 @@ mod remap_tests {
 
         let lost = resolver.remap(&old_labels, &label_to_fi);
 
-        assert_eq!(lost, FxHashSet::from_iter([0]));
+        assert_eq!(
+            lost,
+            FxHashMap::from_iter([(0, FxHashSet::from_iter([name]))])
+        );
         assert_eq!(resolver.visible[1].get(&name), Some(&Loc::new(0, 0)));
     }
 }
