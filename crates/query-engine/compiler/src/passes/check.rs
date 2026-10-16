@@ -13,11 +13,10 @@ use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
-use crate::passes::lower::{LoweredMetadata, NodeBinding};
+use crate::passes::lower::LoweredMetadata;
 use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
-use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 pub fn check_ast(
     node: &Node,
@@ -83,88 +82,39 @@ fn check_redaction_node(
     redaction: &crate::passes::enforce::RedactionNode,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    let auth_id = model
-        .entity_auth()
-        .get(&redaction.entity_type)
-        .map(|auth| auth.auth_id_column.as_str())
-        .unwrap_or(DEFAULT_PRIMARY_KEY);
-    let (authorization_id, primary_key) = match metadata.nodes.get(&redaction.alias) {
-        Some(NodeBinding::Values {
-            identity,
-            table_alias,
-            ..
-        }) => (
-            Some(if auth_id == DEFAULT_PRIMARY_KEY {
-                identity.clone()
-            } else {
-                Expr::col(table_alias.as_deref().unwrap_or(&redaction.alias), auth_id)
-            }),
-            (auth_id != DEFAULT_PRIMARY_KEY).then(|| identity.clone()),
-        ),
-        Some(NodeBinding::Projected { .. }) => (
-            (auth_id != DEFAULT_PRIMARY_KEY).then(|| Expr::col(&redaction.alias, auth_id)),
-            None,
-        ),
-        _ => {
-            return Err(authorization_error(format!(
-                "node '{}' has no lowered authorization identity",
-                redaction.alias
-            )));
-        }
-    };
-    let entity_type = Expr::string(&redaction.entity_type);
-    let mut expected = vec![
-        (
-            "authorization ID",
-            redaction.id_column.as_str(),
-            authorization_id.as_ref(),
-        ),
-        (
-            "authorization type",
-            redaction.type_column.as_str(),
-            Some(&entity_type),
-        ),
-    ];
-    if auth_id != DEFAULT_PRIMARY_KEY {
-        expected.push((
-            "primary key",
-            redaction.pk_column.as_str(),
-            primary_key.as_ref(),
-        ));
-    }
-    for (kind, column, expected) in expected {
-        let actual = output_expressions(query, column).ok_or_else(|| {
+    let outputs = metadata
+        .nodes
+        .get(&redaction.alias)
+        .and_then(|binding| redaction.expected_outputs(binding, model))
+        .ok_or_else(|| {
             authorization_error(format!(
-                "node '{}' is missing {kind} column '{column}'",
+                "node '{}' has no lowered authorization identity",
                 redaction.alias
             ))
         })?;
-        if expected.is_some_and(|expected| !actual.iter().all(|value| *value == expected)) {
-            return Err(authorization_error(format!(
-                "node '{}' {kind} does not match its expected identity",
+    for (column, expected) in outputs {
+        let actual = query.output_expressions(column).ok_or_else(|| {
+            authorization_error(format!(
+                "node '{}' is missing result column '{column}'",
                 redaction.alias
+            ))
+        })?;
+        if expected
+            .as_ref()
+            .is_some_and(|expected| !actual.iter().all(|value| *value == expected))
+        {
+            return Err(authorization_error(format!(
+                "node '{}' result column '{column}' has the wrong identity",
+                redaction.alias,
             )));
         }
     }
     Ok(())
 }
 
-fn output_expressions<'a>(query: &'a Query, alias: &str) -> Option<Vec<&'a Expr>> {
-    if query.select.iter().any(|select| select.expr == Expr::Star) {
-        let TableRef::Subquery { query, .. } = &query.from else {
-            return None;
-        };
-        return output_expressions(query, alias);
-    }
-    let mut expressions = vec![query.selected(alias)?];
-    for arm in &query.union_all {
-        expressions.extend(output_expressions(arm, alias)?);
-    }
-    Some(expressions)
-}
-
 fn require_output(query: &Query, alias: &str) -> Result<()> {
-    output_expressions(query, alias)
+    query
+        .output_expressions(alias)
         .is_some()
         .then_some(())
         .ok_or_else(|| authorization_error(format!("result is missing dynamic column '{alias}'")))
@@ -286,6 +236,7 @@ mod tests {
     use crate::constants::{
         TRAVERSAL_PATH_COLUMN, primary_key_column, redaction_id_column, redaction_type_column,
     };
+    use crate::passes::lower::NodeBinding;
     use query_data_model::OrbitQueryModel;
 
     fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {

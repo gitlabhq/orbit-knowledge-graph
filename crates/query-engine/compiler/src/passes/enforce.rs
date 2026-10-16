@@ -22,6 +22,50 @@ pub struct RedactionNode {
     pub type_column: String,
 }
 
+impl RedactionNode {
+    pub(crate) fn expected_outputs<'a>(
+        &'a self,
+        binding: &NodeBinding,
+        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    ) -> Option<Vec<(&'a str, Option<Expr>)>> {
+        let auth_id = model
+            .entity_auth()
+            .get(&self.entity_type)
+            .map(|auth| auth.auth_id_column.as_str())
+            .unwrap_or(DEFAULT_PRIMARY_KEY);
+        let (id, pk) = match binding {
+            NodeBinding::Values {
+                identity,
+                table_alias,
+                ..
+            } => (
+                Some(if auth_id == DEFAULT_PRIMARY_KEY {
+                    identity.clone()
+                } else {
+                    Expr::col(table_alias.as_deref().unwrap_or(&self.alias), auth_id)
+                }),
+                (auth_id != DEFAULT_PRIMARY_KEY).then(|| identity.clone()),
+            ),
+            NodeBinding::Projected { .. } => (
+                (auth_id != DEFAULT_PRIMARY_KEY).then(|| Expr::col(&self.alias, auth_id)),
+                None,
+            ),
+            NodeBinding::Filtered => return None,
+        };
+        let mut outputs = vec![
+            (self.id_column.as_str(), id),
+            (
+                self.type_column.as_str(),
+                Some(Expr::string(&self.entity_type)),
+            ),
+        ];
+        if auth_id != DEFAULT_PRIMARY_KEY {
+            outputs.push((self.pk_column.as_str(), pk));
+        }
+        Some(outputs)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EdgeMeta {
     pub column_prefix: String,
