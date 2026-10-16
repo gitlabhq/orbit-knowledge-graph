@@ -679,9 +679,11 @@ impl<'t> Fold<'t> {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
             let owner = self.enclosing();
-            if c.enclosing(|p| p.is(C::Decorator)).is_some()
-                && self.edges[first..].iter().any(|edge| edge.to_node == owner)
-            {
+            if c.enclosing(|p| p.is(C::Decorator)).is_none() {
+                for edge in &mut self.edges[first..] {
+                    edge.call_resolution = crate::tree::CallResolution::Reference;
+                }
+            } else if self.edges[first..].iter().any(|edge| edge.to_node == owner) {
                 let previous = self.previous_def_named(owner);
                 let tail = self.edges.split_off(first);
                 self.edges.extend(tail.into_iter().filter_map(|mut edge| {
@@ -690,9 +692,6 @@ impl<'t> Fold<'t> {
                     }
                     Some(edge)
                 }));
-            }
-            for edge in &mut self.edges[first..] {
-                edge.call_resolution = crate::tree::CallResolution::Reference;
             }
         }
     }
