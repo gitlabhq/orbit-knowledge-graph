@@ -501,7 +501,7 @@ mod tests {
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use orbit_server_config::AppConfig;
-    use std::collections::HashSet;
+    use std::collections::{HashSet, VecDeque};
     use std::sync::Mutex;
 
     fn simple_plan(name: &str) -> Plan {
@@ -789,7 +789,7 @@ mod tests {
     }
 
     struct PagesDatalake {
-        pages: Mutex<Vec<Vec<RecordBatch>>>,
+        pages: Mutex<VecDeque<Vec<RecordBatch>>>,
     }
 
     #[async_trait]
@@ -809,7 +809,7 @@ mod tests {
             _params: Value,
             _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            Ok(self.pages.lock().unwrap().pop().unwrap_or_default())
+            Ok(self.pages.lock().unwrap().pop_front().unwrap_or_default())
         }
     }
 
@@ -818,7 +818,10 @@ mod tests {
         let plan = simple_plan_with_batch_size("Test", 10);
         let pipeline = Pipeline::new(
             Arc::new(PagesDatalake {
-                pages: Mutex::new(vec![vec![test_batch_range(11, 5)], vec![test_batch(10)]]),
+                pages: Mutex::new(VecDeque::from([
+                    vec![test_batch(10)],
+                    vec![test_batch_range(11, 5)],
+                ])),
             }),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
