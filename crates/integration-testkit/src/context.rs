@@ -66,7 +66,7 @@ impl TestContext {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
+            ..AppConfig::embedded_defaults().graph
         };
 
         Self {
@@ -232,7 +232,7 @@ impl TestContext {
                 session_settings: std::collections::HashMap::new(),
                 replicated: false,
                 insert_settings: std::collections::HashMap::new(),
-                profiling: AppConfig::embedded_defaults().graph.profiling,
+                ..AppConfig::embedded_defaults().graph
             },
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),

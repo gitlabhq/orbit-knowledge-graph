@@ -290,6 +290,13 @@
           },
           "default": {}
         },
+        "query_timeout_secs": {
+          "description": "Bound on one executed statement (DDL, `INSERT ... SELECT`, `INSERT\nVALUES`) from the request to the server's answer. A hung connection\nfails the statement instead of holding its task open. 0 turns the\nbound off. Keep it above the longest statement these paths run; the\ntable cleanup caps its mutations at 7,200 s on the server.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 7200
+        },
         "profiling": {
           "$ref": "#/$defs/ProfilingConfig"
         }

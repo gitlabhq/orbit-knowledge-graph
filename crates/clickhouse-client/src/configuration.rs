@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use orbit_server_config::ClickHouseConfiguration;
 
@@ -28,6 +29,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             service,
         )
         .with_replicated(self.replicated)
+        .with_query_timeout(Duration::from_secs(self.query_timeout_secs))
     }
 }
 
@@ -102,7 +104,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
+            ..AppConfig::embedded_defaults().graph
         };
 
         assert!(config.validate().is_ok());
@@ -118,7 +120,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
+            ..AppConfig::embedded_defaults().graph
         };
 
         let result = config.validate();
@@ -135,7 +137,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
+            ..AppConfig::embedded_defaults().graph
         };
 
         let result = config.validate();
@@ -152,7 +154,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
+            ..AppConfig::embedded_defaults().graph
         };
 
         let result = config.validate();
@@ -289,7 +291,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
+            ..AppConfig::embedded_defaults().graph
         };
 
         let client = config.build_client("graph");

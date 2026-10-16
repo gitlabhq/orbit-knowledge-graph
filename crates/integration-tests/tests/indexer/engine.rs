@@ -244,9 +244,7 @@ impl TestContext {
                 session_settings: std::collections::HashMap::new(),
                 replicated: false,
                 insert_settings: std::collections::HashMap::new(),
-                profiling: orbit_server_config::AppConfig::embedded_defaults()
-                    .graph
-                    .profiling,
+                ..orbit_server_config::AppConfig::embedded_defaults().graph
             }
             .build_client("graph"),
             Arc::new(EngineMetrics::default()),

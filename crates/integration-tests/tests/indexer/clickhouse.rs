@@ -174,9 +174,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         session_settings: std::collections::HashMap::new(),
         replicated: false,
         insert_settings: std::collections::HashMap::new(),
-        profiling: orbit_server_config::AppConfig::embedded_defaults()
-            .graph
-            .profiling,
+        ..orbit_server_config::AppConfig::embedded_defaults().graph
     }
 }
 
@@ -329,9 +327,7 @@ async fn connection_failure_returns_error() {
         session_settings: std::collections::HashMap::new(),
         replicated: false,
         insert_settings: std::collections::HashMap::new(),
-        profiling: orbit_server_config::AppConfig::embedded_defaults()
-            .graph
-            .profiling,
+        ..orbit_server_config::AppConfig::embedded_defaults().graph
     };
 
     let writer = ClickHouseWriter::new(

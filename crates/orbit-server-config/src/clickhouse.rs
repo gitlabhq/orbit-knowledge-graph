@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_QUERY_TIMEOUT_SECS: u64 = 7200;
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ClickHouseConfiguration {
@@ -22,7 +24,18 @@ pub struct ClickHouseConfiguration {
     /// part creation when many small or concurrent writes hit the same tables.
     #[serde(default)]
     pub insert_settings: HashMap<String, String>,
+    /// Bound on one executed statement (DDL, `INSERT ... SELECT`, `INSERT
+    /// VALUES`) from the request to the server's answer. A hung connection
+    /// fails the statement instead of holding its task open. 0 turns the
+    /// bound off. Keep it above the longest statement these paths run; the
+    /// table cleanup caps its mutations at 7,200 s on the server.
+    #[serde(default = "default_query_timeout_secs")]
+    pub query_timeout_secs: u64,
     pub profiling: ProfilingConfig,
+}
+
+fn default_query_timeout_secs() -> u64 {
+    DEFAULT_QUERY_TIMEOUT_SECS
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

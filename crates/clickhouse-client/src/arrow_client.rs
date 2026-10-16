@@ -13,6 +13,7 @@ use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use orbit_observability::resilience::MetricsObserver;
+use orbit_server_config::clickhouse::DEFAULT_QUERY_TIMEOUT_SECS;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
@@ -86,6 +87,7 @@ pub struct ArrowClickHouseClient {
     base_url: String,
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
+    query_timeout: Option<Duration>,
     quorum_writes: bool,
     replicated: bool,
     circuit_breaker: CircuitBreaker,
@@ -125,6 +127,7 @@ impl ArrowClickHouseClient {
             base_url: url.to_string(),
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
+            query_timeout: Some(Duration::from_secs(DEFAULT_QUERY_TIMEOUT_SECS)),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
             circuit_breaker: CircuitBreaker::new(
@@ -146,6 +149,11 @@ impl ArrowClickHouseClient {
         self
     }
 
+    pub fn with_query_timeout(mut self, timeout: Duration) -> Self {
+        self.query_timeout = (!timeout.is_zero()).then_some(timeout);
+        self
+    }
+
     pub fn database(&self) -> &str {
         &self.database
     }
@@ -162,6 +170,7 @@ impl ArrowClickHouseClient {
     pub fn query(&self, sql: &str) -> ArrowQuery {
         ArrowQuery {
             inner: self.client.query(sql),
+            timeout: self.query_timeout,
             retry_quorum_conflicts: self.quorum_writes,
             circuit_breaker: self.circuit_breaker.clone(),
         }
@@ -433,8 +442,20 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 
 pub struct ArrowQuery {
     pub(crate) inner: Query,
+    timeout: Option<Duration>,
     retry_quorum_conflicts: bool,
     circuit_breaker: CircuitBreaker,
+}
+
+async fn execute_within(query: Query, timeout: Option<Duration>) -> Result<(), ClickHouseError> {
+    let run = query.execute();
+    let outcome = match timeout {
+        Some(timeout) => tokio::time::timeout(timeout, run)
+            .await
+            .unwrap_or(Err(clickhouse::error::Error::TimedOut)),
+        None => run.await,
+    };
+    outcome.map_err(ClickHouseError::Query)
 }
 
 type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
@@ -479,16 +500,10 @@ impl ArrowQuery {
         breaker
             .call_transient(|| async {
                 if !self.retry_quorum_conflicts {
-                    return self.inner.execute().await.map_err(ClickHouseError::Query);
+                    return execute_within(self.inner, self.timeout).await;
                 }
-                retry_quorum_conflicts(true, || async {
-                    self.inner
-                        .clone()
-                        .execute()
-                        .await
-                        .map_err(ClickHouseError::Query)
-                })
-                .await
+                retry_quorum_conflicts(true, || execute_within(self.inner.clone(), self.timeout))
+                    .await
             })
             .await
     }
@@ -695,6 +710,60 @@ mod tests {
     use circuit_breaker::CircuitBreakableError;
     use futures::future::BoxFuture;
     use std::collections::HashMap;
+
+    #[test]
+    fn a_zero_query_timeout_turns_the_bound_off() {
+        let client = client_with_insert_settings(HashMap::new());
+        assert_eq!(
+            client.query_timeout,
+            Some(Duration::from_secs(DEFAULT_QUERY_TIMEOUT_SECS))
+        );
+        let off = client.clone().with_query_timeout(Duration::ZERO);
+        assert_eq!(off.query_timeout, None);
+        let bounded = client.with_query_timeout(Duration::from_secs(5));
+        assert_eq!(bounded.query_timeout, Some(Duration::from_secs(5)));
+    }
+
+    #[tokio::test]
+    async fn a_statement_the_server_never_answers_fails_on_the_query_timeout() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let mut sink = [0u8; 4096];
+                    while socket.read(&mut sink).await.is_ok_and(|n| n > 0) {}
+                });
+            }
+        });
+        let client = ArrowClickHouseClient::new(
+            &url,
+            "db",
+            "default",
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            "test",
+        )
+        .with_query_timeout(Duration::from_millis(200));
+
+        let statement = client.execute("INSERT INTO t SELECT 1");
+        let outcome = tokio::time::timeout(Duration::from_secs(10), statement).await;
+
+        let error = outcome
+            .expect("the statement must end on its own timeout, not on the test bound")
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ClickHouseError::Query(clickhouse::error::Error::TimedOut)
+            ),
+            "{error}"
+        );
+    }
 
     fn client_with_insert_settings(
         insert_settings: HashMap<String, String>,
