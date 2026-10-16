@@ -48,13 +48,13 @@ cases:
     physical:
       clickhouse:
         planned:
+          bind:
+            - (CTE $ids (Distinct (Project _id_source.target_id AS id (_))))
           expect:
             - (Join ON mr.id = _orbit_edge_0.target_id (_) (_))
             - (Scan Table(gl_edge) AS _orbit_edge_0)
             - (Scan Table(gl_merge_request) AS mr)
-            - (CTE _orbit_relation_0 (_))
-            - (CTE _orbit_relation_1 (Distinct (Project _frontier_source.target_id AS id (_))))
-            - (Filter mr.id IN _orbit_relation_1.id, ... (_))
+            - (Filter mr.id IN $ids.id, ... (_))
 
   - name: Relationship filters remain on their edge relation
     query:
