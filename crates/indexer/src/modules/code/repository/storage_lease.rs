@@ -117,7 +117,7 @@ impl ArchiveLeases {
                 let acquired = LockGuard::acquire(Arc::clone(&self.locks), &key, self.settings.ttl)
                     .await
                     .map_err(|e| LeaseError::Backend(e.to_string()))?;
-                if let Some(guard) = acquired {
+                if let Ok(guard) = acquired {
                     debug!(storage = scope, key, "archive lease acquired");
                     return Ok(guard);
                 }
