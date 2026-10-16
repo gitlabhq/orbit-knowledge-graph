@@ -301,9 +301,12 @@ async fn a_file_larger_than_the_in_flight_budget_is_indexed_with_the_rest() {
     );
     let handler = deps.code_indexing_task_handler();
 
-    let outcome = handler
-        .handle(handler_context(), envelope(OVERSIZE, 1))
-        .await;
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        handler.handle(handler_context(), envelope(OVERSIZE, 1)),
+    )
+    .await
+    .expect("the oversize file was not admitted within 300 s");
     assert!(outcome.is_ok(), "{outcome:?}");
     handler.flush().await.expect("flush");
     assert!(indexed(&clickhouse, OVERSIZE).await);
