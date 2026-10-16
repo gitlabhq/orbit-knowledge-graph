@@ -349,6 +349,13 @@ on a binding, as on a bounded type parameter, adds that binding to those items.
 A `__qualifier` binding declares that item only. The linker does not walk its
 right-hand side, so a language rule must not put a call under such a binding.
 
+A def's header runs in the enclosing scope, before the def's own name is bound
+and before its body. The header is the supertypes, the decorators, and the
+default values of the parameters. A call in a decorator or a default value gets
+an edge from the decorated def. A name in the header resolves outside the body,
+as Python, Java and TypeScript resolve it. A decorator that names the def itself
+names the previous def of that name in the same owner, as `@x.setter` does.
+
 A `__ssa_loop` has one header shape. The loop variable is a `__binding` with a
 `__declaration` that the loop rule places directly under the loop. The children
 before it are the header, evaluated once before the loop. A bare `__declaration`

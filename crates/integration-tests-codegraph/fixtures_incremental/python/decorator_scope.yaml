@@ -1,0 +1,192 @@
+name: "Python: decorators, annotations and defaults are evaluated in the enclosing scope"
+
+fixtures:
+  - path: main.py
+    content: |
+      def patch(target):
+          return target
+
+
+      class Node:
+          def m(self):
+              pass
+
+
+      def helper():
+          pass
+
+
+      class Tests:
+          @patch("x")
+          def test_x(self, patch):
+              patch.assert_called()
+
+
+      def make(Node) -> Node:
+          return Node
+
+
+      def use():
+          n = make(1)
+          n.m()
+
+
+      def make_plain(x) -> Node:
+          return x
+
+
+      def use_plain():
+          n = make_plain(1)
+          n.m()
+
+
+      def f(helper=helper):
+          helper()
+
+
+      def g(helper, cb=helper):
+          cb()
+
+
+      def h(cb=lambda: helper()):
+          cb()
+
+
+      def k(cb=lambda helper: 1):
+          helper()
+
+
+      class Reg:
+          def hook(self, fn):
+              return fn
+
+
+      reg = Reg()
+
+
+      class T:
+          @reg.hook
+          def t0(self):
+              pass
+
+          @reg.hook
+          def t1(self, reg):
+              pass
+
+
+      class Prop:
+          @property
+          def x(self):
+              return 1
+
+          @x.setter
+          def x(self, value):
+              pass
+
+      def again():
+          pass
+
+
+      @again
+      def again():
+          pass
+
+tests:
+  - name: a call decorator names the top-level function, not the parameter of the same name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'test_x'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.patch" } }
+
+  - name: a return annotation names the class, not the parameter of the same name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Node.m" } }
+
+  - name: a default value names the top-level function, not the parameter it initializes
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a return annotation resolves when no parameter shares its name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_plain' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Node.m" } }
+
+  - name: a default value names the top-level function when an earlier parameter shadows it
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'g'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a lambda default value keeps its body, so its call belongs to the def
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'h'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a property setter decorator names the getter, never the setter itself
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.Prop.x' AND callee.fqn = 'main.Prop.x'
+      RETURN caller.start_line AS setter, callee.start_line AS getter
+    assert:
+      - { row_count: 1 }
+      - { row: { setter: 78, getter: 74 } }
+
+  - name: a lambda parameter in a default value does not shadow the module function in the body
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'k'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.helper" } }
+
+  - name: a member decorator on an instance gives one row to the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.T.t0'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Reg.hook" } }
+
+  - name: a member decorator whose root is also a parameter still names the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.T.t1'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Reg.hook" } }
+
+  - name: a bare decorator that names the function itself links the previous def of that name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.again'
+      RETURN callee.fqn AS callee, callee.start_line AS to
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.again", to: 81 } }

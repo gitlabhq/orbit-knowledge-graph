@@ -1,0 +1,142 @@
+name: "Python: a method is a def that takes self, not a def that mentions self"
+
+fixtures:
+  - path: main.py
+    content: |
+      class A:
+          def m(self):
+              return self
+
+          def typed(self: "A"):
+              return self
+
+          @staticmethod
+          def s(x):
+              return x
+
+          @classmethod
+          def c(cls):
+              return cls
+
+          def stub(self: "A") -> "A": ...
+
+          def default(self=None):
+              return self
+
+
+      def outer():
+          def inner(self):
+              return self
+          return inner
+
+
+      def wraps_model():
+          class Model:
+              def serialize(self, handler):
+                  return handler(self)
+          return Model
+
+
+      def free(self):
+          return self
+
+
+      def names_self():
+          self = 1
+          return self
+
+tests:
+  - name: a def in a class with self as its parameter is a Method
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.A.m'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Method" } }
+
+  - name: a typed self parameter keeps the Method type
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.A.typed'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Method" } }
+
+  - name: a stub method with a typed self and no body is a Method
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.A.stub'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Method" } }
+
+  - name: a method whose self has a default value is a Method
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.A.default'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Method" } }
+
+  - name: a staticmethod is a Function
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.A.s'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Function" } }
+
+  - name: a classmethod is a Function
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.A.c'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Function" } }
+
+  - name: a function with a nested def that takes self is a Function
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.outer'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Function" } }
+
+  - name: a function that defines a class with methods is a Function, and the method stays a Method
+    query: |
+      MATCH (d:Definition) WHERE d.name IN ['wraps_model', 'serialize']
+      RETURN d.name AS name, d.definition_type AS dt
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "wraps_model", dt: "Function" } }
+      - { row: { name: "serialize", dt: "Method" } }
+
+  - name: a function that binds a local named self is a Function
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.names_self'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Function" } }
+
+  - name: a module-level function with a self parameter is a Function
+    # Known gap: the rule anchors on the parameter list, not on the class body, so a def
+    # outside a class that takes `self` keeps the Method type.
+    skip: true
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.free'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Function" } }
+
+  - name: a nested function with a self parameter is a Function
+    # Known gap: the same anchor, so `inner(self)` inside a function keeps the Method type.
+    skip: true
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'inner'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Function" } }

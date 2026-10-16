@@ -1367,9 +1367,11 @@ fn wildcard_uses<'a>(
                 edges.push(call_edge(from, target, Some(call.index())));
             }
         }
-        let headers = from
-            .children_of(C::SuperType)
-            .chain(from.children_of(C::Decorator));
+        let headers = from.children_of(C::SuperType).chain(
+            from.children()
+                .filter(|c| c.is(C::Decorator))
+                .filter_map(|dec| dec.decorator_head()),
+        );
         for target in headers.filter_map(|h| chain(ctx, h, &root)) {
             import(target, &mut edges);
         }
@@ -2016,11 +2018,15 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
             continue;
         };
         if node.is(C::Def) {
-            for dec in node.children_of(C::Decorator) {
-                match resolve_chain(ctx, dec) {
-                    Some(t) if cross(t) => out.push(node.edge_to(t, EdgeKind::Calls)),
-                    Some(_) => {}
-                    None => out.extend(unbound(node, dec.sym())),
+            for dec in node
+                .children()
+                .filter(|c| c.is(C::Decorator))
+                .filter_map(|dec| dec.decorator_head())
+            {
+                match (resolve_chain(ctx, dec), dec.sym_opt()) {
+                    (Some(t), _) if cross(t) => out.push(node.edge_to(t, EdgeKind::Calls)),
+                    (None, Some(sym)) => out.extend(unbound(node, sym)),
+                    _ => {}
                 }
             }
             let parents: Vec<Cursor> = node

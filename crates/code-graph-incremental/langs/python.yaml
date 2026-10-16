@@ -74,9 +74,13 @@ stages:
       - match: '(lambda $$$C)'
         replace: '(__lambda $$$C)'
 
-      # Hoist decorators onto the inner def/class
+      # Hoist decorators onto the inner def/class; a member or call decorator is a call
       - match: '(decorator $N:identifier)'
         replace: '(__decorator @$N)'
+      - match: '(decorator $A:attribute)'
+        replace: '(__decorator (__call (__callee $A)))'
+      - match: '(decorator $C:call)'
+        replace: '(__decorator $C)'
       - match: '(decorated_definition $$$DECOS:__decorator definition: $D)'
         replace: '$D { $$$DECOS }'
 
@@ -165,10 +169,20 @@ stages:
         replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
+      - match: '(typed_parameter $C:__binding type: (type $T))'
+        replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(default_parameter name: $N:identifier value: $V)'
         replace: '(__binding @$N (__rhs @$V))'
+      - match: '(default_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(list_splat_pattern $C:identifier)'
+        replace: '(__binding @$C)'
+      - match: '(dictionary_splat_pattern $C:identifier)'
+        replace: '(__binding @$C)'
       - match: '(lambda_parameters $$$P:identifier|__binding)'
         replace: '(lambda_parameters $$$P->__binding)'
+      - match: '(parameters $$$P:identifier|__binding)'
+        replace: '(parameters $$$P->__binding)'
 
       # Bindings — RHS wrapped in __rhs for canonical containment
       - match: '(assignment left: $N:__ivar right: $R:__call)'
@@ -226,20 +240,20 @@ stages:
       - match: '(generator_expression $$$BODY)'
         replace: '(__ssa_loop $$$BODY)'
 
-      # Methods — has self parameter (before generic function rule)
-      - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+      # Methods — self is the first parameter (before generic function rule)
+      - match: '(function_definition name: $N parameters: (parameters $S:(__binding "self") $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $S $$$P $B)'
         tag: { flavor: self_method }
 
       # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
 
-      # Classes — variadic before body captures __supertype/__decorator
-      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'
-        replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $B)'
-      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
-        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
+      # Classes — supertypes come before the body, decorators after it
+      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")) $$$DECOS:__decorator)'
+        replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $$$DECOS $B)'
+      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B $$$DECOS:__decorator)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $$$DECOS $B)'
 
   - name: ssa-cleanup
     rules:

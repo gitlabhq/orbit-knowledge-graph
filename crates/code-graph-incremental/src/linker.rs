@@ -112,6 +112,7 @@ struct Fold<'t> {
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
     loop_receivers: Vec<LoopReceiver>,
+    header_values: FxHashMap<u32, Vec<Value>>,
     shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
@@ -558,6 +559,7 @@ impl<'t> Fold<'t> {
             })
             .collect::<Vec<_>>();
         self.supertypes.insert(idx, supers.clone());
+        self.walk_header(c);
         self.declare(c, name);
         let parent_block = self.cur;
         self.cur = self.ssa.add_sealed_successor(parent_block);
@@ -580,10 +582,75 @@ impl<'t> Fold<'t> {
                 .map(|node| node.index());
             stack.extend(
                 c.children_rev()
-                    .filter(|node| Some(node.index()) != initializer)
+                    .filter(|node| Some(node.index()) != initializer && !node.is(C::Decorator))
                     .map(|node| WorkItem::Visit(node.index())),
             );
         }
+    }
+
+    /// Decorators and default values run in the enclosing scope, before the
+    /// def's own name is bound, with the def as the edge source. A header
+    /// edge that still lands on the def itself names a predeclared def, so it
+    /// goes to the previous def of that name in the same owner.
+    fn walk_header(&mut self, c: Cursor<'t>) {
+        let first = self.edges.len();
+        self.def_stack.push(c.index());
+        for decorator in c.children().filter(|node| node.is(C::Decorator)) {
+            self.handle_inline_imports(decorator);
+            let before = self.edges.len();
+            if let Some(sym) = decorator.sym_opt() {
+                let targets = self.lookup(sym);
+                self.emit_targets(&targets, c.index());
+            }
+            self.walk_children(decorator);
+            for edge in &mut self.edges[before..] {
+                if edge.kind == EdgeKind::Imports && edge.site.is_none() {
+                    edge.site = Some(decorator.index());
+                }
+            }
+        }
+        for binding in c.children().filter(|node| Self::is_header_binding(*node)) {
+            if let Some(rhs) = binding.bare_rhs() {
+                let values = self.lookup(rhs.sym());
+                self.header_values.insert(binding.index(), values);
+            } else if let Some(rhs) = binding.child(C::Rhs) {
+                self.walk_children(rhs);
+            }
+        }
+        self.def_stack.pop();
+        self.retarget_own_def(c.index(), first);
+    }
+
+    /// A parameter: a named binding the def rule places directly under the
+    /// def. A binding lifted out of the body block is a statement.
+    fn is_header_binding(node: Cursor<'_>) -> bool {
+        node.is(C::Binding)
+            && node.sym_opt().is_some()
+            && !node.lifted()
+            && node.parent().is_some_and(|parent| parent.is(C::Def))
+    }
+
+    fn previous_def_named(&self, dn: u32) -> Option<u32> {
+        let def = self.tree.cursor(dn);
+        let name = def.child_sym(C::DefName)?;
+        let owner = def.parent().map(|parent| parent.index());
+        self.defs_named(name)
+            .filter(|&d| d < dn && self.tree.cursor(d).parent().map(|p| p.index()) == owner)
+            .max()
+    }
+
+    fn retarget_own_def(&mut self, owner: u32, first: usize) {
+        if !self.edges[first..].iter().any(|edge| edge.to_node == owner) {
+            return;
+        }
+        let previous = self.previous_def_named(owner);
+        let tail = self.edges.split_off(first);
+        self.edges.extend(tail.into_iter().filter_map(|mut edge| {
+            if edge.to_node == owner {
+                edge.to_node = previous?;
+            }
+            Some(edge)
+        }));
     }
 
     fn predeclare(&mut self, scope: Cursor<'t>) {
@@ -800,7 +867,9 @@ impl<'t> Fold<'t> {
         );
         if let Some(branch) = branch {
             Self::handle_branch(branch, Some(lhs), stack);
-        } else if let Some(rhs) = rhs {
+        } else if let Some(rhs) = rhs
+            && !Self::is_header_binding(c)
+        {
             Self::push_children(rhs, stack);
         }
         true
@@ -855,15 +924,22 @@ impl<'t> Fold<'t> {
                 }
             }
             let tail = rhs.map(Cursor::tail_expr);
+            let header = self.header_values.remove(&c.index());
             let mut val = if c.has(C::SsaTyped)
                 || tail.is_some_and(|tail| tail.is(C::Member) && self.field_slot(tail).is_none())
             {
                 Value::Call(c.index())
+            } else if let Some([value]) = header.as_deref() {
+                match *value {
+                    Value::LocalDef(node) if self.tree.cursor(node).is_class() => Value::Type(node),
+                    ref value => value.clone(),
+                }
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
             if let Some(rhs) = c.bare_rhs() {
-                for value in self.lookup(rhs.sym()) {
+                let values = header.unwrap_or_else(|| self.lookup(rhs.sym()));
+                for value in values {
                     match value {
                         Value::ImportRef(node) => {
                             val = Value::Call(c.index());
@@ -1678,6 +1754,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
         loop_receivers: Vec::new(),
+        header_values: FxHashMap::default(),
         shadowed_calls: FxHashSet::default(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, Vec::new())],
@@ -1714,25 +1791,6 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         f.emit_targets(&targets, from);
         for edge in &mut f.edges[first..] {
             edge.site = Some(site);
-        }
-    }
-
-    f.cur = entry;
-    for dn in f.defs.clone() {
-        f.run.check().and_then(|()| f.file.check())?;
-        for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
-            for target in f.lookup_chain(c) {
-                match target {
-                    Value::LocalDef(target) => {
-                        f.edges.push(Edge::local(dn, target, EdgeKind::Calls))
-                    }
-                    Value::ImportRef(target) => f.edges.push(Edge {
-                        site: Some(c.index()),
-                        ..Edge::local(dn, target, EdgeKind::Imports)
-                    }),
-                    _ => {}
-                }
-            }
         }
     }
 

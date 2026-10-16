@@ -1,0 +1,108 @@
+name: "Python: a class decorator links from the class like a function decorator"
+
+fixtures:
+  - path: lib.py
+    content: |
+      class Library:
+          def tag(self, name=None):
+              pass
+
+  - path: decos.py
+    content: |
+      def dataclass(cls=None, frozen=False):
+          pass
+
+
+      def deco(*args):
+          pass
+
+
+      def make():
+          pass
+
+  - path: main.py
+    content: |
+      from decos import dataclass, deco, make
+      from lib import Library
+
+      register = Library()
+
+
+      class Base:
+          pass
+
+
+      @deco
+      class B:
+          pass
+
+
+      @dataclass(frozen=True)
+      class D(Base):
+          x: int = 1
+
+
+      @register.tag
+      class K:
+          pass
+
+
+      @deco(make())
+      class M:
+          pass
+
+
+      def Named():
+          pass
+
+
+      @Named
+      class Named:
+          pass
+
+tests:
+  - name: a bare class decorator names the function
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'B'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "decos.deco" } }
+
+  - name: a call decorator with arguments on a class names the function
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'D'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "decos.dataclass" } }
+
+  - name: a member decorator on a class names the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'K'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "lib.Library.tag" } }
+
+  - name: calls inside a class decorator's arguments link from the class
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'M'
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["decos.deco", "decos.make"] } }
+
+  - name: a class decorator that names the class links the previous def of that name, not the class
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.Named' AND caller.definition_type = 'Class'
+      RETURN callee.fqn AS callee, callee.definition_type AS kind, callee.start_line AS to
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Named", kind: "Function", to: 31 } }

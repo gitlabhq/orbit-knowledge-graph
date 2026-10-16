@@ -1,0 +1,217 @@
+name: "Python: a plain parameter shadows a same-named top-level def"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Foo:
+          def bar(self):
+              pass
+
+          def baz(self, make):
+              x = make()
+              x.bar()
+
+          @classmethod
+          def build(cls, make):
+              x = make()
+              x.bar()
+
+      def make():
+          return Foo()
+
+      def f(make):
+          x = make()
+          x.bar()
+
+      def g(make=None):
+          x = make()
+          x.bar()
+
+      def h(*make):
+          x = make()
+          x.bar()
+
+      def k(**make):
+          x = make()
+          x.bar()
+
+      def p(a, /, make, *, c):
+          x = make()
+          x.bar()
+
+      def q(a, /, *, c):
+          x = make()
+          x.bar()
+
+      def ts(**make: dict):
+          x = make()
+          x.bar()
+
+      def lam_default():
+          made = lambda make=None: make()
+          made()
+
+      def lam_splat():
+          made = lambda *make: make()
+          made()
+
+      def lam_plain():
+          made = lambda make: make()
+          made()
+
+      def lam_shadow():
+          cb = lambda make=make: make()
+          x = make()
+          x.bar()
+
+      def run(cb):
+          cb()
+
+      def lam_arg():
+          run(lambda make=None: make())
+          x = make()
+          x.bar()
+
+      def a():
+          pass
+
+      def m(a, cls):
+          a()
+
+      def caller():
+          x = make()
+          x.bar()
+
+tests:
+  - name: a plain parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'f'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a default parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'g'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a list splat parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'h'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a dictionary splat parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'k'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a typed splat parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'ts'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a plain parameter between separators hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'p'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: separators alone do not hide the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'q'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
+  - name: a plain parameter after self hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'baz'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a plain parameter after cls hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'build'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: only the functions without a make parameter call make
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE t.name = 'make'
+      RETURN c.name AS caller
+    assert:
+      - { column_values: { field: caller, values: ["caller", "cb", "lam_arg", "lam_shadow", "q"] } }
+
+  - name: a lambda passed as an argument does not shadow make for the rest of the enclosing function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'lam_arg'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["bar", "make", "run"] } }
+
+  - name: a plain parameter before cls hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'm'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a lambda parameter does not shadow make for the rest of the enclosing function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'lam_shadow'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
+  - name: a function without the parameter still calls make and Foo.bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'caller'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
+  - name: methods with plain parameters after self stay methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ["bar", "baz"] } }
+
+  - name: functions with plain parameters stay functions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['make', 'f', 'g', 'h', 'k', 'p', 'q', 'ts', 'caller']
+      RETURN d.definition_type AS kind
+    assert:
+      - { row_count: 9 }
+      - { column_values: { field: kind, values: ["Function"] } }
