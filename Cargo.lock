@@ -1518,7 +1518,6 @@ dependencies = [
 name = "compiler"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "compiler-pipeline-macros",
  "jsonschema",
  "ontology",
