@@ -320,9 +320,23 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             .expr
             .clone()
     });
+    let output = |column: String| {
+        query
+            .output_expressions(&column)
+            .unwrap_or_default()
+            .into_iter()
+            .cloned()
+            .collect()
+    };
+    let authorization_ids = output(redaction_id_column(center_alias));
+    let primary_keys = output(primary_key_column(center_alias));
     Ok((
         Node::Query(Box::new(query)),
-        NodeBinding::Projected { role_identity },
+        NodeBinding::Projected {
+            role_identity,
+            authorization_ids,
+            primary_keys,
+        },
     ))
 }
 

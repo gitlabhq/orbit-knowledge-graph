@@ -34,6 +34,8 @@ pub enum NodeBinding {
     },
     Projected {
         role_identity: Option<Expr>,
+        authorization_ids: Vec<Expr>,
+        primary_keys: Vec<Expr>,
     },
 }
 
@@ -53,7 +55,7 @@ impl NodeBinding {
                 table_alias: None,
                 ..
             } => Some(identity),
-            Self::Projected { role_identity } => role_identity.as_ref(),
+            Self::Projected { role_identity, .. } => role_identity.as_ref(),
             Self::Filtered => {
                 return Err(QueryError::Lowering(
                     "protected filtered node requires a visible identity".into(),

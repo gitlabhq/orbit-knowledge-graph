@@ -39,8 +39,7 @@ pub fn check_authorization(
     let Node::Query(query) = node else {
         return Ok(());
     };
-    let grouped: std::collections::HashSet<_> =
-        crate::input::node_group_ids(&input.aggregation.group_by).collect();
+    let grouped = input.aggregation_row_nodes(model);
     let expected: std::collections::BTreeMap<_, _> = input
         .nodes
         .iter()
@@ -99,10 +98,7 @@ fn check_redaction_node(
                 redaction.alias
             ))
         })?;
-        if expected
-            .as_ref()
-            .is_some_and(|expected| !actual.iter().all(|value| *value == expected))
-        {
+        if !expected.matches(&actual) {
             return Err(authorization_error(format!(
                 "node '{}' result column '{column}' has the wrong identity",
                 redaction.alias,
@@ -351,6 +347,8 @@ mod tests {
             "p".into(),
             NodeBinding::Projected {
                 role_identity: None,
+                authorization_ids: vec![Expr::col("p", "project_id")],
+                primary_keys: vec![],
             },
         );
         assert!(check_authorization(&input, &wrong, &projected, &result, model.as_ref()).is_err());

@@ -27,7 +27,7 @@ impl RedactionNode {
         &'a self,
         binding: &NodeBinding,
         model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ) -> Option<Vec<(&'a str, Option<Expr>)>> {
+    ) -> Option<Vec<(&'a str, ExpectedOutput)>> {
         let auth_id = model
             .entity_auth()
             .get(&self.entity_type)
@@ -39,16 +39,21 @@ impl RedactionNode {
                 table_alias,
                 ..
             } => (
-                Some(if auth_id == DEFAULT_PRIMARY_KEY {
+                ExpectedOutput::Repeated(if auth_id == DEFAULT_PRIMARY_KEY {
                     identity.clone()
                 } else {
                     Expr::col(table_alias.as_deref().unwrap_or(&self.alias), auth_id)
                 }),
-                (auth_id != DEFAULT_PRIMARY_KEY).then(|| identity.clone()),
+                (auth_id != DEFAULT_PRIMARY_KEY)
+                    .then(|| ExpectedOutput::Repeated(identity.clone())),
             ),
-            NodeBinding::Projected { .. } => (
-                (auth_id != DEFAULT_PRIMARY_KEY).then(|| Expr::col(&self.alias, auth_id)),
-                None,
+            NodeBinding::Projected {
+                authorization_ids,
+                primary_keys,
+                ..
+            } => (
+                ExpectedOutput::Exact(authorization_ids.clone()),
+                (!primary_keys.is_empty()).then(|| ExpectedOutput::Exact(primary_keys.clone())),
             ),
             NodeBinding::Filtered => return None,
         };
@@ -56,13 +61,27 @@ impl RedactionNode {
             (self.id_column.as_str(), id),
             (
                 self.type_column.as_str(),
-                Some(Expr::string(&self.entity_type)),
+                ExpectedOutput::Repeated(Expr::string(&self.entity_type)),
             ),
         ];
         if auth_id != DEFAULT_PRIMARY_KEY {
-            outputs.push((self.pk_column.as_str(), pk));
+            outputs.push((self.pk_column.as_str(), pk?));
         }
         Some(outputs)
+    }
+}
+
+pub(crate) enum ExpectedOutput {
+    Repeated(Expr),
+    Exact(Vec<Expr>),
+}
+
+impl ExpectedOutput {
+    pub(crate) fn matches(&self, actual: &[&Expr]) -> bool {
+        match self {
+            Self::Repeated(expected) => actual.iter().all(|value| *value == expected),
+            Self::Exact(expected) => actual.iter().copied().eq(expected),
+        }
     }
 }
 
