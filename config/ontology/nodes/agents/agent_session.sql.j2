@@ -33,5 +33,5 @@ WHERE startsWith(traversal_path, {traversal_path:String})
   -- invoker-private sessions are never written to this table by Rails.
   -- A tombstone may not carry project_id or source, so it must not be filtered out.
   AND ((source = 0 AND project_id IS NOT NULL) OR {{deleted_column}}) {{filters}}
-ORDER BY traversal_path, id
+ORDER BY traversal_path, session_started_at, id
 LIMIT {{batch_size}}
