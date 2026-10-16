@@ -866,6 +866,7 @@ fn resolve_node_flags(
                 &hop.from_node
             };
             hop.max_hops == 1
+                && hop.direction != Direction::Both
                 && nodes
                     .get(partner)
                     .is_some_and(NodePlan::has_selective_filters)
