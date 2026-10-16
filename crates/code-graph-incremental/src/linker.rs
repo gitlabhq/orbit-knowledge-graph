@@ -584,7 +584,7 @@ impl<'t> Fold<'t> {
         };
         let decorator = c
             .parent()
-            .is_some_and(|p| p.is(C::Decorator) && p.sym_opt().is_none());
+            .is_some_and(|p| p.is(C::Decorator) && p.sym_opt().is_none() && !p.has(C::Member));
         if decorator && callee.is_bare_name() {
             return;
         }
