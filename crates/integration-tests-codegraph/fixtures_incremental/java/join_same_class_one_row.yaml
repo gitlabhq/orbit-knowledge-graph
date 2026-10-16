@@ -29,6 +29,12 @@ fixtures:
               }
               f.bar();
           }
+
+          void twoSites(String s) {
+              Foo f = Foo.fromString(s);
+              f.bar();
+              f.bar();
+          }
       }
 
 tests:
@@ -39,6 +45,7 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { row: { callee: "Main.Foo.bar" } }
 
   - name: a receiver assigned twice from the same constructor gives one row for bar
     query: |
@@ -47,3 +54,13 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { row: { callee: "Main.Foo.bar" } }
+
+  - name: two call sites in one method keep one row per site
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'twoSites' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "Main.Foo.bar" } }

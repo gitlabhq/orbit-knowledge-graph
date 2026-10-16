@@ -1568,7 +1568,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
     let mut seen = FxHashSet::default();
     f.edges
-        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution as u8)));
+        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
     Ok((f.edges, f.limited))
 }
 
