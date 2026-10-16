@@ -458,6 +458,8 @@ impl Resolver {
             extensions: &extensions,
             declared_members: &declared_members,
             chains: trees.iter().map(|_| Default::default()).collect(),
+            producer_classes: trees.iter().map(|_| Default::default()).collect(),
+            site_classes: trees.iter().map(|_| Default::default()).collect(),
             exporters: &exporters,
             imports: &imports,
         };
@@ -686,6 +688,12 @@ fn expand(
                     .or_insert(e.to());
             }
         }
+        for memo in &mut ctx.producer_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        for memo in &mut ctx.site_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
         wave = wave
             .par_iter()
             .flat_map(|ce| resolve_type_edges(ctx, ce))
@@ -726,6 +734,8 @@ struct ResolveCtx<'a> {
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     declared_members: &'a [MemberCache],
     chains: Vec<ChainMemo>,
+    producer_classes: Vec<ClassMemo>,
+    site_classes: Vec<SiteMemo>,
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -1431,17 +1441,9 @@ fn dispatch(
             let call = ctx.corpus.jump(usage.from_tree, usage.site?);
             let reaching = ctx.producers.get(&(usage.from_tree, usage.site?));
             let class = match reaching {
-                Some(reaching) if reaching.len() > 1 => lub(
-                    ctx,
-                    reaching.iter().map(|e| {
-                        let reached = ctx.corpus.follow(e);
-                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
-                            true => class,
-                            false => producer_class(ctx, reached),
-                        }
-                    }),
-                )
-                .or(class),
+                Some(reaching) if reaching.len() > 1 => {
+                    site_class(ctx, usage, reaching, producer, class).or(class)
+                }
                 _ => class,
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
@@ -1504,7 +1506,56 @@ enum Owner<'a> {
     External((u32, u32)),
 }
 
+fn site_class<'a>(
+    ctx: &'a ResolveCtx,
+    usage: &Edge,
+    reaching: &[&Edge],
+    producer: Cursor<'a>,
+    class: Option<Cursor<'a>>,
+) -> Option<Cursor<'a>> {
+    let id = |c: Cursor| (c.fi(), c.index());
+    let class_id = class.map(id);
+    let key = match class_id == producer_class(ctx, producer).map(id) {
+        true => (usage.site?, None, None),
+        false => (usage.site?, Some(id(producer)), class_id),
+    };
+    let memo = &ctx.site_classes[usage.from_tree as usize];
+    if let Some(&found) = memo.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return found.map(|(fi, node)| ctx.corpus.jump(fi, node));
+    }
+    let found = lub(
+        ctx,
+        reaching.iter().map(|e| {
+            let reached = ctx.corpus.follow(e);
+            match id(reached) == id(producer) {
+                true => class,
+                false => producer_class(ctx, reached),
+            }
+        }),
+    );
+    memo.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, found.map(id));
+    found
+}
+
 fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
+    let memo = &ctx.producer_classes[producer.fi() as usize];
+    if let Some(&(fi, node)) = memo
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&producer.index())
+    {
+        return Some(ctx.corpus.jump(fi, node));
+    }
+    let class = producer_class_uncached(ctx, producer)?;
+    memo.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(producer.index(), (class.fi(), class.index()));
+    Some(class)
+}
+
+fn producer_class_uncached<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
     if producer.typed().is_none()
         && let Some(rhs) = producer.bare_rhs()
     {
@@ -1560,6 +1611,9 @@ thread_local! {
 }
 
 type ChainMemo = std::sync::Mutex<FxHashMap<u32, Option<(u32, u32)>>>;
+type ClassMemo = std::sync::Mutex<FxHashMap<u32, (u32, u32)>>;
+type SiteKey = (u32, Option<(u32, u32)>, Option<(u32, u32)>);
+type SiteMemo = std::sync::Mutex<FxHashMap<SiteKey, Option<(u32, u32)>>>;
 
 struct Resolving((u32, u32));
 
