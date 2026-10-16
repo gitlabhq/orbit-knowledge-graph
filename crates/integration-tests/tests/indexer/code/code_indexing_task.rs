@@ -5,8 +5,10 @@ use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::handler::Handler;
+use indexer::locking::LockService;
 use indexer::modules::code::{
     ClickHouseStaleDataCleaner, CodeCheckpointStore, StaleDataCleaner, config::CodeTableNames,
+    project_lock_key,
 };
 use indexer::testkit::MockLockService;
 use indexer::topic::CodeIndexingTaskRequest;
@@ -1068,7 +1070,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
 }
 
 #[tokio::test]
-async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
+async fn small_jobs_wait_for_the_natural_flush_and_share_one_part() {
     let project_id: i64 = 61;
     let traversal_path = "1/61/";
 
@@ -1088,28 +1090,188 @@ async fn handle_returns_after_the_rows_land_and_well_before_the_buffer_tick() {
         )],
     );
 
-    let config = indexer::testkit::test_pipeline_configuration();
-    let buffer_tick = config.write_buffer_age();
-    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, config);
-    let handler = deps.code_indexing_task_handler();
+    let other_project: i64 = 62;
+    let other_traversal = "1/62/";
+    mock.add_project(
+        other_project,
+        "main",
+        &[(
+            "src/Other.java",
+            "public class Other { public void keep() {} }",
+        )],
+    );
 
-    let started = std::time::Instant::now();
-    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
-    handler
-        .handle(handler_context(), envelope)
-        .await
-        .expect("indexing succeeds");
-    let elapsed = started.elapsed();
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, never_flushing());
+    let handler = Arc::new(deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL));
+
+    let (first, first_slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
+    released(&first_slot).await;
+    let (second, second_slot) = spawn_with_work_slot(&handler, other_project, other_traversal);
+    released(&second_slot).await;
+    assert_eq!(
+        active_parts(&clickhouse, &t("gl_file")).await,
+        0,
+        "a finished job must not force a flush below the floor"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+
+    clickhouse
+        .execute(&format!("SYSTEM STOP MERGES {}", t("gl_file")))
+        .await;
+    deps.pipeline.flush().await.expect("flush");
+    first.await.expect("join").expect("first job indexes");
+    second.await.expect("join").expect("second job indexes");
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_file_is_active(&clickhouse, other_project, "src/Other.java").await;
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "the checkpoint must be written before the handler returns"
     );
+    assert_eq!(
+        active_parts(&clickhouse, &t("gl_file")).await,
+        1,
+        "both jobs' rows must land in the one part the flush writes"
+    );
+}
+
+const LONG_LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+fn never_flushing() -> orbit_server_config::CodeIndexingPipelineConfig {
+    let mut config = indexer::testkit::test_pipeline_configuration();
+    config.write_buffer_age_secs = 3600;
+    config.write_min_flush_rows = 1_000_000;
+    config.write_max_flush_age_secs = 3600;
+    config
+}
+
+fn spawn_with_work_slot(
+    handler: &Arc<indexer::modules::code::CodeIndexingTaskHandler>,
+    project_id: i64,
+    traversal_path: &'static str,
+) -> (
+    tokio::task::JoinHandle<Result<(), indexer::handler::HandlerError>>,
+    Arc<tokio::sync::Semaphore>,
+) {
+    let slot = Arc::new(tokio::sync::Semaphore::new(1));
+    let permit = Arc::clone(&slot)
+        .try_acquire_owned()
+        .expect("a fresh slot has its permit");
+    let context = handler_context().with_work_slot(Some(permit));
+    let handler = Arc::clone(handler);
+    let task = tokio::spawn(async move {
+        handler
+            .handle(
+                context,
+                code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+            )
+            .await
+    });
+    (task, slot)
+}
+
+async fn released(slot: &tokio::sync::Semaphore) {
+    slot.acquire().await.expect("slot stays open").forget();
+}
+
+async fn active_parts(clickhouse: &integration_testkit::TestContext, table: &str) -> i64 {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT toInt64(count()) FROM system.parts \
+             WHERE database = '{}' AND table = '{table}' AND active",
+            clickhouse.config.database
+        ))
+        .await;
+    i64::extract_column(&result, 0).expect("part count")[0]
+}
+
+#[tokio::test]
+async fn the_extraction_tree_is_deleted_before_the_job_waits_for_durability() {
+    let project_id: i64 = 63;
+    let traversal_path = "1/63/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, never_flushing());
+    let handler = Arc::new(deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL));
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+
+    let (indexed, slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
+    released(&slot).await;
+
+    let left: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
     assert!(
-        elapsed < buffer_tick,
-        "the job must flush its own rows instead of waiting {buffer_tick:?} for the tick; took {elapsed:?}"
+        left.is_empty(),
+        "the extraction tree must be gone while the job waits for its rows to land, found: {left:?}"
+    );
+
+    deps.pipeline.flush().await.expect("flush");
+    indexed.await.expect("join").expect("indexing succeeds");
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
+async fn a_shutdown_flushes_a_waiting_job_without_the_age_cap() {
+    let project_id: i64 = 64;
+    let traversal_path = "1/64/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, never_flushing());
+    let handler = Arc::new(deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL));
+
+    let (indexed, slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
+    released(&slot).await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+
+    deps.shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(60), indexed)
+        .await
+        .expect("a shutdown must flush the waiting job instead of waiting for the age cap")
+        .expect("join")
+        .expect("indexing succeeds");
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1)
     );
 }
 
@@ -1223,6 +1385,158 @@ async fn a_lost_lock_does_not_refund_over_the_new_holders_attempt() {
         attempts(&clickhouse, traversal_path, project_id).await,
         [7],
         "a run that lost its lock must not refund over the new holder's checkpoint"
+    );
+}
+
+async fn a_held_lock_defers_the_delivery(project_id: i64, attempt: u32) {
+    let traversal_path = format!("1/{project_id}/");
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let lock_ttl = std::time::Duration::from_secs(3);
+    let renew_interval = lock_ttl / 3;
+    let handler = deps.code_indexing_task_handler_with_lock_ttl(lock_ttl);
+    let held_for = std::time::Duration::from_secs(2);
+    let locks = Arc::new(MockLockService::new());
+    locks.set_lock_for(&project_lock_key(project_id, "main"), held_for);
+
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, &traversal_path);
+    envelope.attempt = attempt;
+    let error = handler
+        .handle(handler_context_with_lock_service(locks), envelope)
+        .await
+        .expect_err("a held lock defers the delivery");
+
+    let indexer::handler::HandlerError::Deferred { delay, .. } = error else {
+        panic!("a held lock must defer delivery {attempt}, got {error}");
+    };
+    assert!(
+        delay >= renew_interval && delay <= held_for + renew_interval,
+        "delivery {attempt} waits out the rest of the lease plus one renew interval, got {delay:?}"
+    );
+    assert!(
+        attempts(&clickhouse, &traversal_path, project_id)
+            .await
+            .is_empty(),
+        "a deferred delivery starts no attempt"
+    );
+}
+
+#[tokio::test]
+async fn a_held_lock_defers_a_first_delivery() {
+    a_held_lock_defers_the_delivery(68, 1).await;
+}
+
+#[tokio::test]
+async fn a_held_lock_defers_a_redelivery() {
+    a_held_lock_defers_the_delivery(71, 2).await;
+}
+
+#[tokio::test]
+async fn a_deferred_delivery_runs_once_the_lock_frees() {
+    let project_id: i64 = 69;
+    let traversal_path = "1/69/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler =
+        deps.code_indexing_task_handler_with_lock_ttl(std::time::Duration::from_millis(900));
+    let key = project_lock_key(project_id, "main");
+    let locks = Arc::new(MockLockService::new());
+    locks.set_lock_for(&key, std::time::Duration::from_secs(60));
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let error = handler
+        .handle(
+            handler_context_with_lock_service(Arc::clone(&locks)),
+            envelope,
+        )
+        .await
+        .expect_err("a held lock defers the delivery");
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Deferred { .. }),
+        "a held lock must defer the delivery, got {error}"
+    );
+
+    locks.release(&key).await.expect("release");
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    envelope.attempt = 2;
+    handler
+        .handle(handler_context_with_lock_service(locks), envelope)
+        .await
+        .expect("the delivery after the lease expires runs");
+    handler.flush().await.expect("flush");
+
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
+async fn a_transient_renew_error_still_refunds_a_redelivered_attempt() {
+    let project_id: i64 = 70;
+    let traversal_path = "1/70/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main {}")],
+    );
+    mock.set_archive_status(
+        project_id,
+        Some(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+    );
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    let locks = Arc::new(MockLockService::new());
+    locks.fail_renews_transiently();
+
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let error = handler
+        .handle(handler_context_with_lock_service(locks), envelope)
+        .await
+        .expect_err("the archive endpoint fails");
+
+    assert!(
+        matches!(error, indexer::handler::HandlerError::Processing(_)),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        attempts(&clickhouse, traversal_path, project_id).await,
+        [0],
+        "only a lost lock keeps the attempt; a backend error on renew does not prove another holder"
     );
 }
 
