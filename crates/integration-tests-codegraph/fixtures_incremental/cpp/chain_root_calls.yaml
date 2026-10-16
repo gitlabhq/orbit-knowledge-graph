@@ -12,6 +12,18 @@ fixtures:
           int count() { return 0; }
       };
 
+      struct Other {
+          int count() { return 1; }
+      };
+
+      namespace ns {
+      namespace detail {
+      Other make(Items x) { return Other(); }
+      }
+      }
+
+      Items get_items() { return Items(); }
+
       Items make_items() { return Items(); }
 
       Items* make_items_ptr() { return nullptr; }
@@ -26,6 +38,10 @@ fixtures:
 
       void chain_through_pointer() {
           make_items_ptr()->first().touch();
+      }
+
+      void lifted_root() {
+          ns::detail::make(get_items()).count();
       }
 
       void chain_in_loop() {
@@ -60,7 +76,7 @@ tests:
       - { row: { caller: chain_in_decl, callee: count } }
 
   - name: "the methods on a chain through a pointer-returning root call resolve"
-    # Known gap: the return type Items* keeps its pointer, so the receiver of first() has no class; the root call itself links.
+    # Known gap: a pointer-returning function gets no return type (the pointer-declarator function rule emits none), so the receiver of first() has no class; the root call itself links.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -70,6 +86,18 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["first", "touch"] } }
+
+  - name: "a two-level qualified root call types its member, not the call in its arguments"
+    # Known gap (G56): the call stage retags five callee shapes and ns::detail::make is not one of them, so the raw call is pruned and get_items lifts to the root; count then types through Items instead of Other.
+    skip: true
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "lifted_root" AND callee.name = "count"
+      RETURN owner.name AS owner
+    assert:
+      - { row_count: 1 }
+      - { row: { owner: Other } }
+      - { not: true, row: { owner: Items } }
 
   - name: "the call at the root of a chain in a for condition links"
     # Known gap: the C++ for rule keeps only the body, so a call in the condition is not walked; the chain root itself is handled.
