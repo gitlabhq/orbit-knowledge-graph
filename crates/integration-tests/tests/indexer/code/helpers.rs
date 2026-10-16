@@ -129,6 +129,14 @@ impl CodeIndexingDeps {
         self.handler_with_writer_and_lock_ttl(writer, std::time::Duration::from_secs(60))
     }
 
+    /// A long lock lease, so a test can hold the job's inserts without the heartbeat losing the lock.
+    pub fn gated_handler(&self, gate: &GatedClickHouse) -> CodeIndexingTaskHandler {
+        self.handler_with_writer_and_lock_ttl(
+            gate.writer(&self.clickhouse_config),
+            std::time::Duration::from_secs(600),
+        )
+    }
+
     fn handler_with_writer_and_lock_ttl(
         &self,
         writer: Arc<indexer::clickhouse::ClickHouseWriter>,
@@ -197,6 +205,101 @@ pub fn writer_for(
         config.build_client("graph"),
         Arc::new(indexer::metrics::EngineMetrics::new()),
     ))
+}
+
+/// Holds every ClickHouse request until `open`, so a test can observe a job whose rows are in flight.
+pub struct GatedClickHouse {
+    url: String,
+    open: tokio::sync::watch::Sender<bool>,
+    arrivals: Arc<tokio::sync::Semaphore>,
+}
+
+struct GateState {
+    upstream: String,
+    client: reqwest::Client,
+    open: tokio::sync::watch::Receiver<bool>,
+    arrivals: Arc<tokio::sync::Semaphore>,
+}
+
+impl GatedClickHouse {
+    pub async fn start(upstream: &str) -> Self {
+        let (open, opened) = tokio::sync::watch::channel(false);
+        let arrivals = Arc::new(tokio::sync::Semaphore::new(0));
+        let state = Arc::new(GateState {
+            upstream: upstream.trim_end_matches('/').to_string(),
+            client: reqwest::Client::new(),
+            open: opened,
+            arrivals: Arc::clone(&arrivals),
+        });
+        Self {
+            url: serve(Router::new().fallback(hold_then_forward).with_state(state)).await,
+            open,
+            arrivals,
+        }
+    }
+
+    pub fn writer(
+        &self,
+        config: &orbit_server_config::ClickHouseConfiguration,
+    ) -> Arc<indexer::clickhouse::ClickHouseWriter> {
+        writer_for(orbit_server_config::ClickHouseConfiguration {
+            url: self.url.clone(),
+            ..config.clone()
+        })
+    }
+
+    pub async fn insert_arrived(&self) {
+        self.arrivals
+            .acquire()
+            .await
+            .expect("gate stays open")
+            .forget();
+    }
+
+    pub fn open(&self) {
+        self.open.send_replace(true);
+    }
+}
+
+async fn hold_then_forward(
+    State(state): State<Arc<GateState>>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    let (parts, body) = request.into_parts();
+    let body = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .expect("request body");
+    state.arrivals.add_permits(1);
+    let mut open = state.open.clone();
+    while !*open.borrow_and_update() {
+        open.changed().await.expect("gate owner alive");
+    }
+
+    let target = format!(
+        "{}{}",
+        state.upstream,
+        parts.uri.path_and_query().map_or("/", |p| p.as_str())
+    );
+    let mut upstream = state.client.request(parts.method, target).body(body);
+    for (name, value) in &parts.headers {
+        if !matches!(
+            name.as_str(),
+            "host" | "content-length" | "transfer-encoding"
+        ) {
+            upstream = upstream.header(name, value);
+        }
+    }
+    let response = upstream.send().await.expect("upstream ClickHouse");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.bytes().await.expect("upstream body");
+    let mut out = (status, body).into_response();
+    for (name, value) in &headers {
+        if !matches!(name.as_str(), "content-length" | "transfer-encoding") {
+            out.headers_mut().insert(name, value.clone());
+        }
+    }
+    out
 }
 
 async fn serve(app: Router) -> String {

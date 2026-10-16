@@ -1069,6 +1069,240 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
 }
 
 #[tokio::test]
+async fn a_finished_job_acks_without_a_flush_timer() {
+    let project_id: i64 = 61;
+    let traversal_path = "1/61/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let production = orbit_server_config::CodeIndexingPipelineConfig {
+        small_indexing_slots: Some(indexer::testkit::TEST_SMALL_INDEXING_SLOTS),
+        big_indexing_slots: Some(indexer::testkit::TEST_BIG_INDEXING_SLOTS),
+        ..orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline
+    };
+    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, production);
+    let handler = deps.code_indexing_task_handler();
+
+    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        handler.handle(handler_context(), envelope),
+    )
+    .await
+    .expect("a job acks once its own rows land, not after a flush timer")
+    .expect("indexing succeeds");
+
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1)
+    );
+}
+
+fn spawn_with_work_slot(
+    handler: &Arc<indexer::modules::code::CodeIndexingTaskHandler>,
+    project_id: i64,
+    traversal_path: &'static str,
+) -> (
+    tokio::task::JoinHandle<Result<(), indexer::handler::HandlerError>>,
+    Arc<tokio::sync::Semaphore>,
+) {
+    let slot = Arc::new(tokio::sync::Semaphore::new(1));
+    let permit = Arc::clone(&slot)
+        .try_acquire_owned()
+        .expect("a fresh slot has its permit");
+    let context = handler_context().with_work_slot(Some(permit));
+    let handler = Arc::clone(handler);
+    let task = tokio::spawn(async move {
+        handler
+            .handle(
+                context,
+                code_indexing_task_envelope(project_id, "commit1", 1, traversal_path),
+            )
+            .await
+    });
+    (task, slot)
+}
+
+async fn released(slot: &tokio::sync::Semaphore) {
+    slot.acquire().await.expect("slot stays open").forget();
+}
+
+#[tokio::test]
+async fn a_job_frees_its_tree_and_slot_but_acks_only_after_its_rows_land() {
+    let project_id: i64 = 63;
+    let traversal_path = "1/63/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let gate = GatedClickHouse::start(&clickhouse.config.url).await;
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = Arc::new(deps.gated_handler(&gate));
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+
+    let (mut job, slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
+    gate.insert_arrived().await;
+    released(&slot).await;
+
+    let left: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        left.is_empty(),
+        "the extraction tree must be gone while the job waits for its rows to land, found: {left:?}"
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), &mut job)
+            .await
+            .is_err(),
+        "the job must not ack before ClickHouse has its rows"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+
+    gate.open();
+    job.await.expect("join").expect("indexing succeeds");
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
+    let project_id: i64 = 64;
+    let traversal_path = "1/64/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let (_nats, nats_url) = super::super::common::dispatch::start_nats().await;
+    let broker = Arc::new(
+        indexer::nats::NatsBroker::connect(&orbit_server_config::NatsConfiguration {
+            url: nats_url,
+            ..orbit_server_config::AppConfig::embedded_defaults().nats
+        })
+        .await
+        .expect("nats"),
+    );
+    broker
+        .ensure_kv_bucket_exists(
+            indexer::locking::INDEXING_LOCKS_BUCKET,
+            indexer::nats::KvBucketConfig::default(),
+        )
+        .await
+        .expect("locks bucket");
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let gate = GatedClickHouse::start(&clickhouse.config.url).await;
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.gated_handler(&gate);
+    let (engine, configuration) = indexer::testkit::TestEngineBuilder::new(Arc::clone(&broker))
+        .with_handler(Box::new(handler))
+        .build();
+
+    let request = CodeIndexingTaskRequest {
+        task_id: 1,
+        project_id,
+        branch: Some("main".to_string()),
+        commit_sha: Some("commit1".to_string()),
+        traversal_path: TraversalPath::new_unchecked(traversal_path),
+        dispatch_id: uuid::Uuid::new_v4(),
+        campaign_id: None,
+    };
+    broker
+        .ensure_streams(&[CodeIndexingTaskRequest::subscription()])
+        .await
+        .expect("stream");
+    broker
+        .publish(
+            &request.publish_subscription(),
+            &Envelope::new(&request).expect("envelope"),
+        )
+        .await
+        .expect("publish");
+
+    let mut running = tokio::spawn({
+        let engine = Arc::clone(&engine);
+        async move { engine.run(&configuration).await }
+    });
+    gate.insert_arrived().await;
+    engine.stop();
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), &mut running)
+            .await
+            .is_err(),
+        "a stopped engine must keep running until the in-flight job lands its rows"
+    );
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
+    );
+
+    gate.open();
+    tokio::time::timeout(std::time::Duration::from_secs(60), running)
+        .await
+        .expect("the engine stops once the job lands")
+        .expect("join")
+        .expect("engine run");
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1),
+        "the checkpoint is saved before the listener returns"
+    );
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
 async fn a_persistent_handled_failure_parks_the_project_at_the_sweep_threshold() {
     let project_id: i64 = 64;
     let traversal_path = "1/64/";
