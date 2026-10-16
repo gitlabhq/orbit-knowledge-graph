@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_wildcard_keeps_intermediate_hops_unconstrained
 description: Wildcard rel_types traverses User -> Group -> Project unconstrained
 
 query:

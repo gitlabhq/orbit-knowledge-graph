@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_sum_with_restricted_path
 description: Sum with path restricted to 1/100/ excludes groups 101 and 102
 
 config:

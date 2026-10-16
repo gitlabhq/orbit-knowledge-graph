@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_four_hop_pages_cover_all_edges
 description: Four-hop traversal pages cover all 13 edges in 3 pages
 
 query:
@@ -23,9 +22,36 @@ query:
 
 expect:
   all_pages:
+    node_ids:
+      User: [1, 2, 3]
+      WorkItem: [4000, 4001, 4002, 4003]
+      Group: [100, 101, 102]
+      Project: [1000, 1001, 1002, 1003, 1004]
     edge_count: 13
     page_count: 3
+    matches_unpaginated: true
   pages:
-    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - node_count: 8
+      nodes:
+        User: { ids: [1] }
+        WorkItem: { ids: [4000, 4002], absent: [4010] }
+        Group: { ids: [100, 101] }
+        Project: { ids: [1000, 1001, 1002] }
+      edge_count: { AUTHORED: 2, IN_GROUP: 2, CONTAINS: 3 }
+      has_more: true
+    - node_count: 9
+      nodes:
+        User: { ids: [1, 2] }
+        WorkItem: { ids: [4001, 4002], absent: [4010] }
+        Group: { ids: [100, 101] }
+        Project: { ids: [1000, 1002, 1003] }
+      edge_count: { AUTHORED: 2, IN_GROUP: 2, CONTAINS: 3 }
+      has_more: true
+    - node_count: 4
+      nodes:
+        User: { ids: [3] }
+        WorkItem: { ids: [4003], absent: [4010] }
+        Group: { ids: [102] }
+        Project: { ids: [1004] }
+      edge_count: { AUTHORED: 1, IN_GROUP: 1, CONTAINS: 1 }
+      has_more: false

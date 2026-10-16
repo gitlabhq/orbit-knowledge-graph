@@ -282,6 +282,7 @@ impl CodeIndexer {
         table_names: Arc<CodeTableNames>,
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> Self {
         let fc = pipeline_config.fetch_concurrency;
         let small = pipeline_config.small_indexing_slots();
@@ -296,6 +297,7 @@ impl CodeIndexer {
                 max_age: pipeline_config.write_max_flush_age(),
                 max_concurrent: pipeline_config.write_max_concurrent,
             },
+            shutdown,
         );
         Self {
             resolver,
@@ -411,11 +413,8 @@ impl CodeIndexer {
         };
         drop(memory);
 
+        drop(repository);
         context.work.release();
-        self.writer
-            .start_flush(run.commit.clone())
-            .await
-            .map_err(|e| IndexError::Failed(HandlerError::Processing(e.to_string())))?;
         run.commit.durable().await.map_err(IndexError::Failed)?;
         Ok(IndexOutcome::Indexed {
             rows_written: run.rows_written,

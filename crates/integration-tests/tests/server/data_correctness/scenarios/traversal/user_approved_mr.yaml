@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_user_approved_mr_returns_correct_edges
 description: User-MergeRequest APPROVED traversal returns correct edges and node properties
 
 query:

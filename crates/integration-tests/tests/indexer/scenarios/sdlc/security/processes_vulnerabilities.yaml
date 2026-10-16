@@ -17,5 +17,6 @@ expect:
         - { id: 1, title: SQL Injection in login, state: confirmed, severity: critical, report_type: sast }
         - { id: 2, title: XSS in comments, state: detected, severity: medium, report_type: sarif }
   edges:
+    - { kind: IN_PROJECT, from: Vulnerability, to: Project, traversal_path: "1/100/", count: 2 }
     - { kind: IN_PROJECT, traversal_path: "1/100/", count: 2 }
     - { kind: AUTHORED, from: User, to: Vulnerability, traversal_path: "1/100/", count: 2 }

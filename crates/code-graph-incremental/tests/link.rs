@@ -190,3 +190,57 @@ fn a_branch_arm_ending_in_a_member_of_deeply_nested_calls_links_on_a_small_stack
     assert!(tree.root().descendants().count() > 2 * levels);
     assert_eq!(graph.dirty.len(), 1);
 }
+
+fn link_nested(source: String, file_link_ms: u64) -> Result<(), String> {
+    use code_graph_incremental::pipeline::SourceFile;
+    use code_graph_incremental::{Sentinel, templates};
+
+    std::thread::Builder::new()
+        .stack_size(templates::WORKER_STACK_BYTES)
+        .spawn(move || {
+            let env = Env::with_limits(
+                SupportLang::JavaScript,
+                Limits {
+                    file_link_ms,
+                    ..Limits::UNLIMITED
+                },
+            )
+            .unwrap();
+            let free = Sentinel::disabled();
+            let file = SourceFile::from(("deep.js".to_string(), source));
+            let parsed = Parse.run(&env, &free, file).unwrap();
+            let rewritten = Rewrite.run(&env, &free, parsed).unwrap();
+            let canonical = Canonicalize.run(&env, &free, rewritten).unwrap();
+            Link.run(&env, &free, canonical)
+                .map(|_| ())
+                .map_err(|killed| killed.to_string())
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+#[test]
+fn linking_deeply_nested_blocks_stays_within_the_link_budget() {
+    let levels = 8_000;
+    let mut source = String::from("function f(x) {\nlet y = 0;\n");
+    for i in 0..levels {
+        source += &format!("if (x) {{\nlet v{i} = {i};\ny = y + 1;\n");
+    }
+    source += &"}\n".repeat(levels);
+    source += "return y;\n}\n";
+    assert_eq!(link_nested(source, 3_000), Ok(()));
+}
+
+#[test]
+fn linking_deeply_nested_loops_stays_within_the_link_budget() {
+    let levels = 3_000;
+    let mut source = String::from("function a() {}\nfunction f(c) {\n");
+    for i in 0..levels {
+        source += &format!("while (c) {{\nlet x{i} = c;\n");
+    }
+    source += "a();\n";
+    source += &"}\n".repeat(levels);
+    source += "}\n";
+    assert_eq!(link_nested(source, 1_000), Ok(()));
+}

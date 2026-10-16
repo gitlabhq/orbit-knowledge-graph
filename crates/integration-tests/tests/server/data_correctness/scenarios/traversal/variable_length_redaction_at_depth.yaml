@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_variable_length_with_redaction_at_depth
 description: Redacting an intermediate group in a variable-length path denies all rows through it
 
 config:

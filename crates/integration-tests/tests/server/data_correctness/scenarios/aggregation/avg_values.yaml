@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_avg_produces_correct_values
 description: Average of user IDs per group
 
 config:

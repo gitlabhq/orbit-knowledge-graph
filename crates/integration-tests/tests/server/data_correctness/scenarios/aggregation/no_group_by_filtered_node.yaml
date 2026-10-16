@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_no_group_by_with_filtered_other_node
 description: Ungrouped aggregation with node_ids filter on the non-aggregated node
 
 config:

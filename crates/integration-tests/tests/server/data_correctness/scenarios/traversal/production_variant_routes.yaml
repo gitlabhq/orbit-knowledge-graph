@@ -1,0 +1,641 @@
+config:
+  security: admin
+  redaction:
+    allow:
+      project: [1000, 3000]
+      user: [1]
+      ci_pipeline: [1101, 1102, 3101, 3102]
+      ci_stage: [1201, 3201]
+      ci_build: [1301, 3301]
+      vulnerability: [1401, 3401]
+      security_finding: [1501, 4501]
+      vulnerability_identifier: [1601, 4601]
+      security_scan: [1701, 3701]
+      deployment: [1801, 3801]
+      environment: [1901, 3901]
+      merge_request: [2500, 2501, 3500, 4500]
+      vulnerability_scanner: [2101, 4101]
+      vulnerability_occurrence: [2201, 4201]
+      package: [2301, 4301]
+      package_file: [2401, 4401]
+  extra_seed:
+    gl_project:
+      - { id: 1000, name: Route Project, full_path: route/project, visibility_level: public, traversal_path: "1/100/1000/" }
+      - { id: 3000, name: Other Route Project, full_path: other/project, visibility_level: public, traversal_path: "2/200/3000/" }
+    gl_user:
+      - { id: 1, username: router, name: Route User, state: active }
+    gl_pipeline:
+      - { id: 1101, project_id: 1000, status: success, source: push, traversal_path: "1/100/1000/" }
+      - { id: 1102, project_id: 1000, status: success, source: parent_pipeline, traversal_path: "1/100/1000/" }
+      - { id: 3101, project_id: 3000, status: success, source: push, traversal_path: "2/200/3000/" }
+      - { id: 3102, project_id: 3000, status: success, source: parent_pipeline, traversal_path: "2/200/3000/" }
+    gl_stage:
+      - { id: 1201, name: route-stage, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 3201, name: route-stage, status: success, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_job:
+      - { id: 1301, name: route-job, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 3301, name: route-job, status: success, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_vulnerability:
+      - { id: 1401, title: Route Vulnerability, state: detected, severity: critical, report_type: sast, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 3401, title: Route Vulnerability, state: detected, severity: critical, report_type: sast, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_finding:
+      - { id: 1501, uuid: route-finding, name: Route Finding, severity: critical, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 4501, uuid: other-route-finding, name: Route Finding, severity: critical, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_vulnerability_identifier:
+      - { id: 1601, external_type: cve, external_id: CVE-ROUTE, name: Route Identifier, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 4601, external_type: cve, external_id: CVE-OTHER, name: Route Identifier, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_security_scan:
+      - { id: 1701, scan_type: sast, status: succeeded, project_id: 1000, build_id: 1301, traversal_path: "1/100/1000/" }
+      - { id: 3701, scan_type: sast, status: succeeded, project_id: 3000, build_id: 1301, traversal_path: "2/200/3000/" }
+    gl_deployment:
+      - { id: 1801, iid: 1, project_id: 1000, status: success, environment_id: 1901, traversal_path: "1/100/1000/" }
+      - { id: 3801, iid: 1, project_id: 3000, status: success, environment_id: 3901, traversal_path: "2/200/3000/" }
+    gl_environment:
+      - { id: 1901, project_id: 1000, name: route-env, slug: route-env, traversal_path: "1/100/1000/" }
+      - { id: 3901, project_id: 3000, name: route-env, slug: route-env, traversal_path: "2/200/3000/" }
+    gl_merge_request:
+      - { id: 2500, iid: 2, title: Default Route MR, state: opened, project_id: 1000, author_id: 1, head_pipeline_id: 1101, traversal_path: "1/100/1000/" }
+      - { id: 2501, iid: 1, title: Route MR, state: opened, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 3500, iid: 1, title: Other Route MR, state: opened, project_id: 3000, author_id: 1, head_pipeline_id: 3101, traversal_path: "2/200/3000/" }
+      - { id: 4500, iid: 2, title: Route MR, state: opened, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_merge_request_diff:
+      - { id: 20001, merge_request_id: 2501, project_id: 1000, state: collected, traversal_path: "1/100/1000/" }
+      - { id: 40001, merge_request_id: 4500, project_id: 3000, state: collected, traversal_path: "2/200/3000/" }
+    gl_merge_request_diff_file:
+      - { id: 20002, merge_request_id: 2501, merge_request_diff_id: 20001, project_id: 1000, old_path: old.rs, new_path: new.rs, traversal_path: "1/100/1000/" }
+      - { id: 40002, merge_request_id: 4500, merge_request_diff_id: 40001, project_id: 3000, old_path: old.rs, new_path: new.rs, traversal_path: "2/200/3000/" }
+    gl_vulnerability_scanner:
+      - { id: 2101, external_id: route-scanner, name: Route Scanner, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 4101, external_id: other-route-scanner, name: Route Scanner, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_vulnerability_occurrence:
+      - { id: 2201, uuid: route-occurrence, name: Route Occurrence, severity: critical, report_type: sast, detection_method: gitlab_security_report, project_id: 1000, scanner_id: 2101, primary_identifier_id: 1601, traversal_path: "1/100/1000/" }
+      - { id: 4201, uuid: other-route-occurrence, name: Route Occurrence, severity: critical, report_type: sast, detection_method: gitlab_security_report, project_id: 3000, scanner_id: 4101, primary_identifier_id: 4601, traversal_path: "2/200/3000/" }
+    gl_package:
+      - { id: 2301, name: route-package, version: "1.0", package_type: npm, status: default, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 4301, name: route-package, version: "1.0", package_type: npm, status: default, project_id: 3000, traversal_path: "2/200/3000/" }
+    gl_package_file:
+      - { id: 2401, file_name: route.tgz, status: default, project_id: 1000, package_id: 2301, traversal_path: "1/100/1000/" }
+      - { id: 4401, file_name: route.tgz, status: default, project_id: 3000, package_id: 4301, traversal_path: "2/200/3000/" }
+    gl_branch:
+      - { id: 2601, project_id: 1000, name: main, traversal_path: "1/100/1000/" }
+      - { id: 3601, project_id: 3000, name: main, traversal_path: "2/200/3000/" }
+    gl_directory:
+      - { id: 2701, project_id: 1000, branch: main, path: src, name: src, traversal_path: "1/100/1000/" }
+      - { id: 2702, project_id: 1000, branch: main, path: src/nested, name: nested, traversal_path: "1/100/1000/" }
+      - { id: 4701, project_id: 3000, branch: main, path: src, name: src, traversal_path: "2/200/3000/" }
+      - { id: 4702, project_id: 3000, branch: main, path: src/nested, name: nested, traversal_path: "2/200/3000/" }
+    gl_file:
+      - { id: 2801, project_id: 1000, branch: main, path: root.rs, name: root.rs, traversal_path: "1/100/1000/" }
+      - { id: 2802, project_id: 1000, branch: main, path: src/nested.rs, name: nested.rs, traversal_path: "1/100/1000/" }
+      - { id: 4801, project_id: 3000, branch: main, path: root.rs, name: root.rs, traversal_path: "2/200/3000/" }
+      - { id: 4802, project_id: 3000, branch: main, path: src/nested.rs, name: nested.rs, traversal_path: "2/200/3000/" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1101, source_kind: Pipeline, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1201, source_kind: Stage, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1301, source_kind: Job, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1801, source_kind: Deployment, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1901, source_kind: Environment, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1101, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 1102, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 2301, source_kind: Package, relationship_kind: BUILT_BY, target_id: 1101, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 2401, source_kind: PackageFile, relationship_kind: BUILT_BY, target_id: 1101, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 2500, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 1101, target_kind: Pipeline }
+      - { traversal_path: "2/200/3000/", source_id: 3101, source_kind: Pipeline, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 3500, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 3101, target_kind: Pipeline }
+      - { traversal_path: "2/200/3000/", source_id: 3201, source_kind: Stage, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 3301, source_kind: Job, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 3801, source_kind: Deployment, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 3901, source_kind: Environment, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 3102, source_kind: Pipeline, relationship_kind: CHILD_OF, target_id: 3101, target_kind: Pipeline }
+      - { traversal_path: "2/200/3000/", source_id: 4301, source_kind: Package, relationship_kind: BUILT_BY, target_id: 3101, target_kind: Pipeline }
+      - { traversal_path: "2/200/3000/", source_id: 4401, source_kind: PackageFile, relationship_kind: BUILT_BY, target_id: 3101, target_kind: Pipeline }
+    gl_sec_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1401, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1501, source_kind: Finding, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1601, source_kind: VulnerabilityIdentifier, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1701, source_kind: SecurityScan, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 2101, source_kind: VulnerabilityScanner, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 2201, source_kind: VulnerabilityOccurrence, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: CONFIRMED_BY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: RESOLVED_BY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: DISMISSED_BY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 2501, source_kind: MergeRequest, relationship_kind: FIXES, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "1/100/1000/", source_id: 2301, source_kind: Package, relationship_kind: HAS_VULNERABILITY, target_id: 1401, target_kind: Vulnerability }
+      - { traversal_path: "2/200/3000/", source_id: 3701, source_kind: SecurityScan, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 3401, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 4501, source_kind: Finding, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 4601, source_kind: VulnerabilityIdentifier, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 4101, source_kind: VulnerabilityScanner, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 4201, source_kind: VulnerabilityOccurrence, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3401, target_kind: Vulnerability }
+      - { traversal_path: "2/200/3000/", source_id: 1, source_kind: User, relationship_kind: CONFIRMED_BY, target_id: 3401, target_kind: Vulnerability }
+      - { traversal_path: "2/200/3000/", source_id: 1, source_kind: User, relationship_kind: RESOLVED_BY, target_id: 3401, target_kind: Vulnerability }
+      - { traversal_path: "2/200/3000/", source_id: 1, source_kind: User, relationship_kind: DISMISSED_BY, target_id: 3401, target_kind: Vulnerability }
+      - { traversal_path: "2/200/3000/", source_id: 4500, source_kind: MergeRequest, relationship_kind: FIXES, target_id: 3401, target_kind: Vulnerability }
+      - { traversal_path: "2/200/3000/", source_id: 4301, source_kind: Package, relationship_kind: HAS_VULNERABILITY, target_id: 3401, target_kind: Vulnerability }
+    gl_diff_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2500, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 20001, target_kind: MergeRequestDiff }
+      - { traversal_path: "1/100/1000/", source_id: 20001, source_kind: MergeRequestDiff, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 20002, source_kind: MergeRequestDiffFile, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 40001, source_kind: MergeRequestDiff, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 40002, source_kind: MergeRequestDiffFile, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2601, source_kind: Branch, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 2601, target_kind: Branch }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2601, source_kind: Branch, relationship_kind: CONTAINS, target_id: 2701, target_kind: Directory }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2601, source_kind: Branch, relationship_kind: CONTAINS, target_id: 2801, target_kind: File }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2701, source_kind: Directory, relationship_kind: CONTAINS, target_id: 2702, target_kind: Directory }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 2701, source_kind: Directory, relationship_kind: CONTAINS, target_id: 2802, target_kind: File }
+      - { traversal_path: "2/200/3000/", project_id: 3000, branch: main, source_id: 3000, source_kind: Project, relationship_kind: CONTAINS, target_id: 3601, target_kind: Branch }
+      - { traversal_path: "2/200/3000/", project_id: 3000, branch: main, source_id: 3601, source_kind: Branch, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", project_id: 3000, branch: main, source_id: 3601, source_kind: Branch, relationship_kind: CONTAINS, target_id: 4701, target_kind: Directory }
+      - { traversal_path: "2/200/3000/", project_id: 3000, branch: main, source_id: 3601, source_kind: Branch, relationship_kind: CONTAINS, target_id: 4801, target_kind: File }
+      - { traversal_path: "2/200/3000/", project_id: 3000, branch: main, source_id: 4701, source_kind: Directory, relationship_kind: CONTAINS, target_id: 4702, target_kind: Directory }
+      - { traversal_path: "2/200/3000/", project_id: 3000, branch: main, source_id: 4701, source_kind: Directory, relationship_kind: CONTAINS, target_id: 4802, target_kind: File }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 2500, target_kind: MergeRequest }
+      - { traversal_path: "1/100/1000/", source_id: 2500, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "2/200/3000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3500, target_kind: MergeRequest }
+      - { traversal_path: "2/200/3000/", source_id: 3500, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 3000, target_kind: Project }
+
+cases:
+  - name: IN_PROJECT returns every specialized route
+    description: Incoming IN_PROJECT scopes directly authorizable variants across every physical table
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"project","entity":"Project","node_ids":[1000,3000]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]}}
+      gql: |
+        MATCH (project:Project)<-[:IN_PROJECT]-(neighbor) WHERE project.id IN [1000, 3000] RETURN project, neighbor
+    expect:
+      node_count: 14
+      nodes:
+        Pipeline: { ids: [1101] }
+        Stage: { ids: [1201] }
+        Job: { ids: [1301] }
+        Vulnerability: { ids: [1401] }
+        Finding: { ids: [1501] }
+        VulnerabilityIdentifier: { ids: [1601] }
+        SecurityScan: { ids: [1701] }
+        Deployment: { ids: [1801] }
+        Environment: { ids: [1901] }
+        VulnerabilityScanner: { ids: [2101] }
+        VulnerabilityOccurrence: { ids: [2201] }
+        MergeRequest: { ids: [2500] }
+        Branch: { ids: [2601] }
+        Project: { ids: [1000] }
+      total_edge_count: 13
+      edge_exists:
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+          - { from: Stage, from_id: 1201, to: Project, to_id: 1000 }
+          - { from: Job, from_id: 1301, to: Project, to_id: 1000 }
+          - { from: Vulnerability, from_id: 1401, to: Project, to_id: 1000 }
+          - { from: Finding, from_id: 1501, to: Project, to_id: 1000 }
+          - { from: VulnerabilityIdentifier, from_id: 1601, to: Project, to_id: 1000 }
+          - { from: SecurityScan, from_id: 1701, to: Project, to_id: 1000 }
+          - { from: Deployment, from_id: 1801, to: Project, to_id: 1000 }
+          - { from: Environment, from_id: 1901, to: Project, to_id: 1000 }
+          - { from: VulnerabilityScanner, from_id: 2101, to: Project, to_id: 1000 }
+          - { from: VulnerabilityOccurrence, from_id: 2201, to: Project, to_id: 1000 }
+          - { from: MergeRequest, from_id: 2500, to: Project, to_id: 1000 }
+          - { from: Branch, from_id: 2601, to: Project, to_id: 1000 }
+      referential_integrity: true
+      sql_contains: [gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge]
+
+  - name: MergeRequestDiff IN_PROJECT preserves indirect authorization and scope
+    description: Exact traversal routes through gl_diff_edge and excludes the same variant in another organization
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"diff","entity":"MergeRequestDiff","node_ids":[20001,40001]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"diff","to":"project","filters":{"target_id":1000}}]}
+      gql: |
+        MATCH (diff:MergeRequestDiff)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE diff.id IN [20001, 40001] RETURN diff, project
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequestDiff: { ids: [20001], absent: [40001] }
+        Project: { ids: [1000], absent: [3000] }
+      total_edge_count: 1
+      edge_exists:
+        IN_PROJECT:
+          - { from: MergeRequestDiff, from_id: 20001, to: Project, to_id: 1000 }
+      edge_count: { CONTAINS: 0 }
+      referential_integrity: true
+      sql_contains: [gl_diff_edge]
+
+  - name: MergeRequestDiffFile IN_PROJECT preserves indirect authorization and scope
+    description: Exact traversal routes through gl_diff_edge and excludes the same variant in another organization
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"file","entity":"MergeRequestDiffFile","node_ids":[20002,40002]},{"id":"project","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"file","to":"project","filters":{"target_id":1000}}]}
+      gql: |
+        MATCH (file:MergeRequestDiffFile)-[:IN_PROJECT {target_id: 1000}]->(project:Project) WHERE file.id IN [20002, 40002] RETURN file, project
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequestDiffFile: { ids: [20002], absent: [40002] }
+        Project: { ids: [1000], absent: [3000] }
+      total_edge_count: 1
+      edge_exists:
+        IN_PROJECT:
+          - { from: MergeRequestDiffFile, from_id: 20002, to: Project, to_id: 1000 }
+      referential_integrity: true
+      sql_contains: [gl_diff_edge]
+
+  - name: Vulnerability neighbors return every security route
+    description: Vulnerability neighbors read every newly specialized security relationship from gl_sec_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"vulnerability","entity":"Vulnerability","node_ids":[1401]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","CONFIRMED_BY","RESOLVED_BY","DISMISSED_BY","FIXES","HAS_VULNERABILITY"]}}
+      gql: |
+        MATCH (vulnerability:Vulnerability {id: 1401})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY|FIXES|HAS_VULNERABILITY]-(neighbor) RETURN vulnerability, neighbor
+    expect:
+      node_count: 4
+      nodes:
+        Vulnerability: { ids: [1401] }
+        User: { ids: [1] }
+        MergeRequest: { ids: [2501] }
+        Package: { ids: [2301] }
+      total_edge_count: 6
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        CONFIRMED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        RESOLVED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        DISMISSED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        FIXES:
+          - { from: MergeRequest, from_id: 2501, to: Vulnerability, to_id: 1401 }
+        HAS_VULNERABILITY:
+          - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
+      sql_contains: [gl_sec_edge]
+
+  - name: Global user lifecycle routes exclude another namespace
+    description: Split AUTHORED and vulnerability lifecycle routes prune to the authorized target namespace
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"user","entity":"User","node_ids":[1]}],"neighbors":{"direction":"outgoing","rel_types":["AUTHORED","CONFIRMED_BY","RESOLVED_BY","DISMISSED_BY"]}}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED|CONFIRMED_BY|RESOLVED_BY|DISMISSED_BY]->(neighbor) RETURN user, neighbor
+    expect:
+      node_count: 3
+      nodes:
+        User: { ids: [1] }
+        Vulnerability: { ids: [1401] }
+        MergeRequest: { ids: [2500] }
+      total_edge_count: 5
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        CONFIRMED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        RESOLVED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+        DISMISSED_BY:
+          - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
+      sql_contains: [gl_edge, gl_sec_edge]
+
+  - name: FIXES excludes another namespace through endpoint authorization
+    description: The unscoped FIXES route retains only the merge request and vulnerability in the authorized namespace
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2501,4500]},{"id":"vulnerability","entity":"Vulnerability"}],"relationships":[{"type":"FIXES","from":"mr","to":"vulnerability"}]}
+      gql: |
+        MATCH (mr:MergeRequest)-[:FIXES]->(vulnerability:Vulnerability) WHERE mr.id IN [2501, 4500] RETURN mr, vulnerability
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [2501], absent: [4500] }
+        Vulnerability: { ids: [1401], absent: [3401] }
+      total_edge_count: 1
+      edge_exists:
+        FIXES:
+          - { from: MergeRequest, from_id: 2501, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
+      sql_contains: [gl_sec_edge]
+
+  - name: Pipeline neighbors return every CI route
+    description: Pipeline neighbors read CHILD_OF and both BUILT_BY variants from gl_ci_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]}],"neighbors":{"direction":"both","rel_types":["CHILD_OF","BUILT_BY"]}}
+      gql: |
+        MATCH (pipeline:Pipeline)-[:CHILD_OF|BUILT_BY]-(neighbor) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, neighbor
+    expect:
+      node_count: 4
+      nodes:
+        Pipeline: { ids: [1101, 1102] }
+        Package: { ids: [2301] }
+        PackageFile: { ids: [2401] }
+      total_edge_count: 3
+      edge_exists:
+        CHILD_OF:
+          - { from: Pipeline, from_id: 1101, to: Pipeline, to_id: 1102 }
+        BUILT_BY:
+          - { from: Package, from_id: 2301, to: Pipeline, to_id: 1101 }
+          - { from: PackageFile, from_id: 2401, to: Pipeline, to_id: 1101 }
+      referential_integrity: true
+      sql_contains: [gl_ci_edge]
+      sql_not_contains: [gl_edge]
+
+  - name: Branch neighbors return bridge and root containment routes
+    description: Branch neighbors read Project, Directory, and File CONTAINS variants from gl_code_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"branch","entity":"Branch","node_ids":[2601,3601]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}
+      gql: |
+        MATCH (branch:Branch)-[:CONTAINS]-(neighbor) WHERE branch.id IN [2601, 3601] RETURN branch, neighbor
+    expect:
+      node_count: 4
+      nodes:
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+        Directory: { ids: [2701] }
+        File: { ids: [2801] }
+      total_edge_count: 3
+      edge_exists:
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+          - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
+          - { from: Branch, from_id: 2601, to: File, to_id: 2801 }
+      referential_integrity: true
+      sql_contains: [gl_code_edge]
+      sql_not_contains: [gl_edge]
+
+  - name: Directory neighbors return nested containment routes
+    description: Directory neighbors read Branch, Directory, and File CONTAINS variants from gl_code_edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"directory","entity":"Directory","node_ids":[2701,4701]}],"neighbors":{"direction":"both","rel_types":["CONTAINS"]}}
+      gql: |
+        MATCH (directory:Directory)-[:CONTAINS]-(neighbor) WHERE directory.id IN [2701, 4701] RETURN directory, neighbor
+    expect:
+      node_count: 4
+      nodes:
+        Branch: { ids: [2601] }
+        Directory: { ids: [2701, 2702] }
+        File: { ids: [2802] }
+      total_edge_count: 3
+      edge_exists:
+        CONTAINS:
+          - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
+          - { from: Directory, from_id: 2701, to: Directory, to_id: 2702 }
+          - { from: Directory, from_id: 2701, to: File, to_id: 2802 }
+      referential_integrity: true
+      sql_contains: [gl_code_edge]
+      sql_not_contains: [gl_edge]
+
+  - name: HAS_VULNERABILITY excludes another namespace
+    description: The same-namespace security route retains only the package and vulnerability in the authorized namespace
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"package","entity":"Package","node_ids":[2301,4301]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_VULNERABILITY"]}}
+      gql: |
+        MATCH (package:Package)-[:HAS_VULNERABILITY]->(neighbor) WHERE package.id IN [2301, 4301] RETURN package, neighbor
+    expect:
+      node_count: 2
+      nodes:
+        Package: { ids: [2301], absent: [4301] }
+        Vulnerability: { ids: [1401], absent: [3401] }
+      total_edge_count: 1
+      edge_exists:
+        HAS_VULNERABILITY:
+          - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
+      referential_integrity: true
+      sql_contains: [gl_sec_edge]
+
+  - name: Merge request pipeline branch chain crosses three edge tables
+    description: A four-hop chain composes default, CI, and code edge tables without losing joins
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
+    expect:
+      node_count: 5
+      nodes:
+        User: { ids: [1] }
+        MergeRequest: { ids: [2500] }
+        Pipeline: { ids: [1101] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+      total_edge_count: 4
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        HAS_HEAD_PIPELINE:
+          - { from: MergeRequest, from_id: 2500, to: Pipeline, to_id: 1101 }
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
+      sql_contains: [gl_edge, gl_ci_edge, gl_code_edge]
+
+  - name: Merge request diff branch chain crosses three edge tables
+    description: A four-hop chain composes default, diff, and code edge tables without losing joins
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_DIFF","from":"mr","to":"diff"},{"type":"IN_PROJECT","from":"diff","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, diff, project, branch
+    expect:
+      node_count: 5
+      nodes:
+        User: { ids: [1] }
+        MergeRequest: { ids: [2500] }
+        MergeRequestDiff: { ids: [20001] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+      total_edge_count: 4
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        HAS_DIFF:
+          - { from: MergeRequest, from_id: 2500, to: MergeRequestDiff, to_id: 20001 }
+        IN_PROJECT:
+          - { from: MergeRequestDiff, from_id: 20001, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
+      sql_contains: [gl_edge, gl_diff_edge, gl_code_edge]
+
+  - name: Security scan directory chain crosses security and code tables
+    description: A three-hop chain composes security and code edge tables without losing joins
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1701]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"},{"id":"directory","entity":"Directory"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"},{"type":"CONTAINS","from":"branch","to":"directory"}]}
+      gql: |
+        MATCH (scan:SecurityScan {id: 1701})-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch)-[:CONTAINS]->(directory:Directory) RETURN scan, project, branch, directory
+    expect:
+      node_count: 4
+      nodes:
+        SecurityScan: { ids: [1701] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+        Directory: { ids: [2701] }
+      total_edge_count: 3
+      edge_exists:
+        IN_PROJECT:
+          - { from: SecurityScan, from_id: 1701, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+          - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
+      referential_integrity: true
+      sql_contains: [gl_sec_edge, gl_code_edge]
+
+  - name: Merge request alternatives union default CI and diff tables
+    description: Relationship alternatives return every authorized row across three physical tables and exclude another namespace
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2500,3500]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE","HAS_DIFF"]}}
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT|HAS_HEAD_PIPELINE|HAS_DIFF]->(target) WHERE mr.id IN [2500, 3500] RETURN mr, target
+    expect:
+      node_count: 4
+      nodes:
+        MergeRequest: { ids: [2500], absent: [3500] }
+        Project: { ids: [1000] }
+        Pipeline: { ids: [1101] }
+        MergeRequestDiff: { ids: [20001] }
+      total_edge_count: 3
+      edge_exists:
+        IN_PROJECT:
+          - { from: MergeRequest, from_id: 2500, to: Project, to_id: 1000 }
+        HAS_HEAD_PIPELINE:
+          - { from: MergeRequest, from_id: 2500, to: Pipeline, to_id: 1101 }
+        HAS_DIFF:
+          - { from: MergeRequest, from_id: 2500, to: MergeRequestDiff, to_id: 20001 }
+      referential_integrity: true
+      sql_contains: [gl_edge, gl_ci_edge, gl_diff_edge]
+
+  - name: Cross-table chain excludes another namespace
+    description: Scope filtering excludes an otherwise valid default-CI-code chain in another organization
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"user","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipeline","entity":"Pipeline"},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"AUTHORED","from":"user","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipeline"},{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (user:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) RETURN user, mr, pipeline, project, branch
+    expect:
+      node_count: 5
+      nodes:
+        User: { ids: [1] }
+        MergeRequest: { ids: [2500], absent: [3500] }
+        Pipeline: { ids: [1101], absent: [3101] }
+        Project: { ids: [1000], absent: [3000] }
+        Branch: { ids: [2601], absent: [3601] }
+      total_edge_count: 4
+      edge_exists:
+        AUTHORED:
+          - { from: User, from_id: 1, to: MergeRequest, to_id: 2500 }
+        HAS_HEAD_PIPELINE:
+          - { from: MergeRequest, from_id: 2500, to: Pipeline, to_id: 1101 }
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
+      sql_contains: [gl_edge, gl_ci_edge, gl_code_edge]
+
+  - name: Specialized routes exclude another namespace
+    description: Security and code tables preserve namespace scope across their join
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"scan","entity":"SecurityScan","node_ids":[1701,3701]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"IN_PROJECT","from":"scan","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}]}
+      gql: |
+        MATCH (scan:SecurityScan)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) WHERE scan.id IN [1701, 3701] RETURN scan, project, branch
+    expect:
+      node_count: 3
+      nodes:
+        SecurityScan: { ids: [1701], absent: [3701] }
+        Project: { ids: [1000], absent: [3000] }
+        Branch: { ids: [2601], absent: [3601] }
+      total_edge_count: 2
+      edge_exists:
+        IN_PROJECT:
+          - { from: SecurityScan, from_id: 1701, to: Project, to_id: 1000 }
+        CONTAINS:
+          - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
+      referential_integrity: true
+      sql_contains: [gl_sec_edge, gl_code_edge]
+
+  - name: Cross-table shortest path excludes another namespace
+    description: A multi-table path frontier returns the authorized project and excludes the same path in another organization
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]},{"id":"branch","entity":"Branch","node_ids":[2601,3601]}],"path":{"type":"shortest","from":"pipeline","to":"branch","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]}}
+      gql: |
+        MATCH path = ANY SHORTEST (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*1..2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] AND branch.id IN [2601, 3601] RETURN path
+    expect:
+      path_count: 1
+      nodes:
+        Pipeline: { ids: [1101] }
+        Project: { ids: [1000] }
+        Branch: { ids: [2601] }
+      path_destinations:
+        Branch: [2601]
+      path_edges:
+        - [{ from: Pipeline, from_id: 1101, type: IN_PROJECT, to: Project, to_id: 1000, step: 0 }, { from: Project, from_id: 1000, type: CONTAINS, to: Branch, to_id: 2601, step: 1 }]
+      referential_integrity: true
+      sql_contains: [gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge]
+
+  - name: Variable traversal excludes another namespace
+    description: A two-hop variable traversal across CI and code tables returns only the authorized branch
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]},{"id":"branch","entity":"Branch"}],"relationships":[{"type":["IN_PROJECT","CONTAINS"],"from":"pipeline","to":"branch","hops":[2,2]}]}
+      gql: |
+        MATCH (pipeline:Pipeline)-[:IN_PROJECT|CONTAINS*2]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN pipeline, branch
+    expect:
+      node_count: 2
+      nodes:
+        Pipeline: { ids: [1101], absent: [3101] }
+        Branch: { ids: [2601], absent: [3601] }
+      total_edge_count: 1
+      edge_exists:
+        IN_PROJECT:
+          - { from: Pipeline, from_id: 1101, to: Branch, to_id: 2601 }
+      edge_count: { CONTAINS: 0 }
+      referential_integrity: true
+      sql_contains: [gl_ci_edge, gl_code_edge, gl_edge]
+
+  - name: Mixed-table aggregation excludes another namespace
+    description: Aggregation across CI and code tables counts only the branch in the authorized namespace
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 50 }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"pipeline","entity":"Pipeline","node_ids":[1101,3101]},{"id":"project","entity":"Project"},{"id":"branch","entity":"Branch"}],"relationships":[{"type":"IN_PROJECT","from":"pipeline","to":"project"},{"type":"CONTAINS","from":"project","to":"branch"}],"aggregations":[{"count":"branch","as":"n"}],"limit":10}
+      gql: |
+        MATCH (pipeline:Pipeline)-[:IN_PROJECT]->(project:Project)-[:CONTAINS]->(branch:Branch) WHERE pipeline.id IN [1101, 3101] RETURN count(branch) AS n LIMIT 10
+    expect:
+      skip_requirements: [node_ids]
+      row_count: 1
+      row_values: [{ n: 1 }]
+      sql_contains: [gl_ci_edge, gl_code_edge]

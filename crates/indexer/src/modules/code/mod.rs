@@ -28,7 +28,7 @@ use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
 pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
-pub use handler::CodeIndexingTaskHandler;
+pub use handler::{CodeIndexingTaskHandler, project_lock_key};
 pub use memory::{Cgroup, MemoryWatchdog};
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
@@ -49,6 +49,10 @@ pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "handler wiring takes each collaborator explicitly"
+)]
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
@@ -57,6 +61,7 @@ pub async fn register_handlers(
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
     resources: &orbit_server_config::ContainerResources,
+    shutdown: tokio_util::sync::CancellationToken,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -105,6 +110,7 @@ pub async fn register_handlers(
         table_names,
         Arc::new(ontology.clone()),
         pipeline_config,
+        shutdown,
     ));
 
     let policy = code_indexing_task_topic_policy()

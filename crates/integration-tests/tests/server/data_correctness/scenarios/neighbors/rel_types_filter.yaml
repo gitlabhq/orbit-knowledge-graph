@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_rel_types_filter_works
 description: Outgoing CONTAINS neighbors from Group 100
 
 query:

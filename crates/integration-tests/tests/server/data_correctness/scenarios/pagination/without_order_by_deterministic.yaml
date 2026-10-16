@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_without_order_by_is_deterministic
 description: First page without order_by is deterministic across runs
 
 query:
@@ -15,4 +14,6 @@ query:
 expect:
   repeat_count: 2
   node_count: 3
+  nodes:
+    User: { order: [1, 2, 3] }
   has_more: true

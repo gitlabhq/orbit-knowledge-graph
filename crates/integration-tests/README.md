@@ -100,15 +100,22 @@ See the [integration-testkit README](../integration-testkit/README.md) for the
 
 ### Rust-only data correctness tests
 
-A small number of tests remain in the Rust modules because they need
-capabilities the YAML harness cannot express:
+Four tests remain in [retained.rs](tests/server/data_correctness/retained.rs).
+They check internal execution contracts or comparisons that YAML does not express:
 
 | Test | Reason |
 |------|--------|
-| `cursor_after_token_with_sql_metacharacters_is_parameterized` | Constructs a cursor token via internal `cursor::encode()`. YAML covers this with a snapshotted token but the Rust test remains as the source of truth for the encoding. |
-| `long_node_text_is_excerpted_only_on_wide_pages` | Compares text length across two queries with different `limit` values. Each variant has a YAML fixture, but the cross-query comparison stays in Rust. |
+| `cursor_after_token_with_sql_metacharacters_is_parameterized` | Uses the current encoder to build an injection token, then checks that the user table remains intact. |
+| `long_node_text_is_excerpted_only_on_wide_pages` | Checks exact narrow-page text and requires the wide-page excerpt to be shorter than the original text. |
+| `path_finding_code_filtered_endpoints_stay_on_same_traversal_path` | Inspects raw path rows before redaction and hydration, and excludes a cross-project decoy. |
+| `semantic_aggregate_and_nested_cte_codegen_execute` | Executes a constructed compiler AST to check conditional counts, nested CTEs, and UNION arms. |
 
-When removing the legacy Rust modules, keep these tests.
+The first three share the seeded `data_correctness` test. The codegen test uses
+its own table. Both entrypoints and the YAML scenarios run with
+`mise test:integration:data`.
+
+Add new query correctness cases as YAML scenarios. Extend the harness when a
+response assertion is missing.
 
 ### Compiler tests
 

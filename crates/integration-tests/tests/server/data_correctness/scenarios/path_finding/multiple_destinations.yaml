@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_multiple_destinations_returns_distinct_paths
 description: Multiple destination node_ids return distinct paths to each project
 
 query:

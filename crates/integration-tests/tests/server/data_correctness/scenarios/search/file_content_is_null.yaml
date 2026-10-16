@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_is_null_matches_binary
 description: File content is_null filter matches binary files with no text content
 
 query:
@@ -22,7 +21,8 @@ expect:
   nodes:
     File:
       ids: [13003]
-      prop_present: [path]
+      rows:
+        - { id: 13003, path: assets/logo.png }
       prop_absent: [content]
       filters:
         project_id: { eq: 1000 }

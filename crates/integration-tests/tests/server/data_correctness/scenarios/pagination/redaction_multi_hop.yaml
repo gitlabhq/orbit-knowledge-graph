@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_multi_hop_with_redaction_covers_authorized_edges
 description: Multi-hop traversal with redaction pages cover authorized edges only
 
 config:
@@ -29,10 +28,53 @@ query:
     MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p PAGE 3
 
 expect:
+  all_pages:
+    node_ids:
+      User: [1, 2, 4, 6]
+      Group: [100, 102]
+      Project: [1000, 1002, 1004]
+    edge_count: 8
+    page_count: 6
+    matches_unpaginated: true
   pages:
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
-    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF", "relationship:CONTAINS"]
+    - node_count: 6
+      nodes:
+        User: { ids: [1] }
+        Group: { ids: [100, 102], absent: [101] }
+        Project: { ids: [1000, 1002, 1004], absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 2, CONTAINS: 3 }
+      has_more: true
+    - node_count: 4
+      nodes:
+        User: { ids: [2] }
+        Group: { ids: [100], absent: [101] }
+        Project: { ids: [1000, 1002], absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 2 }
+      has_more: true
+    - node_count: 0
+      nodes:
+        Group: { absent: [101] }
+        Project: { absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 0, CONTAINS: 0 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        User: { ids: [4] }
+        Group: { ids: [102], absent: [101] }
+        Project: { ids: [1004], absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        User: { ids: [6] }
+        Group: { ids: [100], absent: [101] }
+        Project: { ids: [1000], absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        User: { ids: [6] }
+        Group: { ids: [100], absent: [101] }
+        Project: { ids: [1002], absent: [1001, 1003] }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+      has_more: false

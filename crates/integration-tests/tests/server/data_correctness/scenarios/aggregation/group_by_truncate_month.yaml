@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_group_by_property_truncate_month
 description: Group by truncated month produces date-bucketed counts
 
 config:

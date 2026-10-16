@@ -26,8 +26,6 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
-        settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -53,8 +51,6 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, project_id, branch]
-        settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
@@ -81,8 +77,6 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
-        settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -105,8 +99,6 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
-        settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -129,8 +121,6 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
-        settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}

@@ -177,7 +177,7 @@ pub fn run_yaml_suite(yaml: &str) {
     pipeline_ctx.tracer.dump(&suite.name);
 
     let db = client.lock().unwrap();
-    let failures = run_suite(&suite, &db, &ontology);
+    let failures = run_suite(&suite, &db, &ontology, false);
     drop(db);
     report(&suite, &failures);
 }

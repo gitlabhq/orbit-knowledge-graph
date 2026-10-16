@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_empty_security_context_rejects_at_compile
 description: Empty traversal_paths rejects at compile time
 
 config:

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_three_versions_returns_latest
 description: Three versions collapse to latest
 
 config:

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_neighbors_pages_cover_all_edges
 description: Neighbor pages cover all edges from Group 100
 
 query:
@@ -13,12 +12,55 @@ query:
     MATCH (g:Group {id: 100})--(n) RETURN g, n PAGE 2
 
 expect:
+  all_pages:
+    node_ids:
+      User: [1, 2, 6]
+      Group: [100, 200]
+      Project: [1000, 1002]
+      WorkItem: [4000, 4001]
+    edge_count: 8
+    page_count: 4
+    no_duplicate_edges: true
+    matches_unpaginated: true
   pages:
-    - has_more: true
-      skip_requirements: [node_count, cursor, neighbors, node_ids]
-    - has_more: true
-      skip_requirements: [node_count, cursor, neighbors, node_ids]
-    - has_more: true
-      skip_requirements: [node_count, cursor, neighbors, node_ids]
-    - has_more: false
-      skip_requirements: [node_count, cursor, neighbors, node_ids]
+    - node_count: 3
+      nodes:
+        User: { ids: [1, 2] }
+        Group: { ids: [100] }
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 1, to: Group, to_id: 100 }
+          - { from: User, from_id: 2, to: Group, to_id: 100 }
+      edge_count: { MEMBER_OF: 2 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        User: { ids: [6] }
+        Group: { ids: [100, 200] }
+      edge_exists:
+        MEMBER_OF:
+          - { from: User, from_id: 6, to: Group, to_id: 100 }
+        CONTAINS:
+          - { from: Group, from_id: 100, to: Group, to_id: 200 }
+      edge_count: { MEMBER_OF: 1, CONTAINS: 1 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        Group: { ids: [100] }
+        Project: { ids: [1000, 1002] }
+      edge_exists:
+        CONTAINS:
+          - { from: Group, from_id: 100, to: Project, to_id: 1000 }
+          - { from: Group, from_id: 100, to: Project, to_id: 1002 }
+      edge_count: { CONTAINS: 2 }
+      has_more: true
+    - node_count: 3
+      nodes:
+        Group: { ids: [100] }
+        WorkItem: { ids: [4000, 4001] }
+      edge_exists:
+        IN_GROUP:
+          - { from: WorkItem, from_id: 4000, to: Group, to_id: 100 }
+          - { from: WorkItem, from_id: 4001, to: Group, to_id: 100 }
+      edge_count: { IN_GROUP: 2 }
+      has_more: false

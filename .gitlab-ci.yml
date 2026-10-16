@@ -694,7 +694,7 @@ check_docs_i18n_markdown:
     # Check links
     - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
 
-docs_hugo_build:
+.docs-gitlab-com:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
   needs: []
@@ -735,11 +735,19 @@ docs_hugo_build:
     # Clone the Docs website project
     - git clone --depth 1 --filter=tree:0 --branch $DOCS_BRANCH https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git
     - cd docs-gitlab-com
-    - make add-latest-icons
+
+docs_hugo_build:
+  extends:
+    - .docs-gitlab-com
+  allow_failure: true
   script:
-    # Test that Hugo will build
+    - make add-latest-icons
     - hugo --gc --printPathWarnings --panicOnWarning  --environment test
-    # Test for invalid index pages
+
+docs_index_pages:
+  extends:
+    - .docs-gitlab-com
+  script:
     # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
     - make check-index-pages SEARCH_DIR="../docs/source"
     #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added

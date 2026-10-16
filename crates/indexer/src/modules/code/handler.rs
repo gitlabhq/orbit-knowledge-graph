@@ -56,13 +56,13 @@ fn memory_failure(attempt: u32, kill: MemoryKill) -> HandlerError {
     policy.global_failure(attempt, message)
 }
 
-fn project_lock_key(project_id: i64, branch: &str) -> String {
+pub fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
     let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
     format!("project.{project_id}.{encoded_branch}")
 }
 
-/// Heartbeat lives in this future (not a spawned task), so it can't leak; it only ticks during the parse because that parse is on `spawn_blocking`.
+/// Heartbeat lives in this future (not a spawned task), so it can't leak; it ticks whenever `work` is pending, through the blocking parse and the wait for the rows to land.
 async fn run_with_heartbeat<T>(
     work: impl std::future::Future<Output = T>,
     progress: &ProgressNotifier,
@@ -291,18 +291,18 @@ impl CodeIndexingTaskHandler {
             .await;
 
         let outcome = match &result {
-            Ok(Some(label)) => label,
-            Ok(None) => "skipped_lock",
+            Ok(label) => label,
+            Err(HandlerError::Deferred { .. }) => "skipped_lock",
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        if matches!(&result, Ok(Some(_))) {
+        if result.is_ok() {
             self.metrics.record_repository_indexed(outcome);
         }
         self.metrics.record_handler_duration(started_at);
 
         match &result {
-            Ok(_) => observer.finish(),
+            Ok(_) | Err(HandlerError::Deferred { .. }) => observer.finish(),
             Err(e) => {
                 observer.record_error(&e.to_string());
                 observer.finish();
@@ -322,6 +322,27 @@ impl CodeIndexingTaskHandler {
                 "failed to refund the attempt"
             );
         }
+    }
+
+    async fn acquire_lock(
+        &self,
+        context: &HandlerContext,
+        key: &str,
+        heartbeat_interval: Duration,
+    ) -> Result<LockGuard, HandlerError> {
+        let held = match LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
+        {
+            Ok(guard) => return Ok(guard),
+            Err(held) => held,
+        };
+        let delay = held.time_left.unwrap_or(self.lock_ttl) + heartbeat_interval;
+        warn!(lock_key = %key, ?delay, "code indexing deferred: lock held by another indexer");
+        Err(HandlerError::Deferred {
+            reason: format!("lock {key} held by another indexer"),
+            delay,
+        })
     }
 
     #[allow(
@@ -346,7 +367,7 @@ impl CodeIndexingTaskHandler {
         mut checkpoint: CodeCheckpoint,
         attempt: u32,
         observer: &mut dyn IndexingObserver,
-    ) -> Result<Option<&'static str>, HandlerError> {
+    ) -> Result<&'static str, HandlerError> {
         let Some(namespace_id) = request.traversal_path.top_level_namespace_id() else {
             return Err(HandlerError::Processing(format!(
                 "traversal_path {:?} has no namespace_id",
@@ -358,22 +379,8 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
-        {
-            Some(guard) => guard,
-            None => {
-                warn!(
-                    task_id = request.task_id,
-                    project_id,
-                    branch = %branch,
-                    lock_key = %key,
-                    "code indexing skipped: lock held by another indexer"
-                );
-                return Ok(None);
-            }
-        };
+        let heartbeat_interval = self.lock_ttl / 3;
+        let guard = self.acquire_lock(context, &key, heartbeat_interval).await?;
 
         checkpoint.start_attempt();
         self.checkpoint_store
@@ -390,7 +397,6 @@ impl CodeIndexingTaskHandler {
             checkpoint: checkpoint.clone(),
         };
         let cancel = CancellationToken::new();
-        let heartbeat_interval = self.lock_ttl / 3;
         let indexing = self.pipeline.index_project(
             context,
             &indexing_request,
@@ -464,16 +470,25 @@ impl CodeIndexingTaskHandler {
         if redelivered {
             match guard.renew(self.lock_ttl).await {
                 Ok(()) => self.refund_attempt(&mut checkpoint).await,
-                Err(error) => warn!(
+                Err(error @ LockError::Lost) => warn!(
                     project_id,
                     branch = %branch,
                     %error,
                     "lock not held at the end of the run; the attempt stays counted"
                 ),
+                Err(error) => {
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        %error,
+                        "lock renew failed transiently at the end of the run; refunding the attempt"
+                    );
+                    self.refund_attempt(&mut checkpoint).await;
+                }
             }
         }
 
-        result.map(Some)
+        result
     }
 }
 
@@ -548,6 +563,7 @@ mod tests {
                 table_names,
                 Arc::new(ontology),
                 crate::testkit::builders::test_pipeline_configuration(),
+                tokio_util::sync::CancellationToken::new(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -611,11 +627,6 @@ mod tests {
             let mut checkpoint = CodeCheckpoint::new(traversal_path.clone(), project_id, branch);
             checkpoint.complete(last_task_id, Some("abc".to_string()), Utc::now());
             self.mock_checkpoints.save(&checkpoint).await.unwrap();
-        }
-
-        fn set_lock(&self, project_id: i64, branch: &str) {
-            let key = project_lock_key(project_id, branch);
-            self.mock_locks.set_lock(&key);
         }
 
         fn lock_exists(&self, project_id: i64, branch: &str) -> bool {
@@ -688,17 +699,6 @@ mod tests {
             .await
             .unwrap();
         assert!(saved.is_none(), "no attempt row may replace the stored one");
-    }
-
-    #[tokio::test]
-    async fn skips_when_lock_already_held() {
-        let ctx = TestContext::new();
-        ctx.set_lock(123, "main");
-
-        let envelope = TestContext::make_request(100, 123, "main");
-        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
-
-        assert!(result.is_ok());
     }
 
     #[tokio::test]

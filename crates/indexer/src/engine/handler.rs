@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::{Mutex, RwLock};
@@ -59,6 +60,10 @@ pub enum HandlerError {
     #[error("backpressure: {0}")]
     Backpressure(String),
 
+    /// Another holder owns the work; redelivered after `delay` without spending an attempt.
+    #[error("deferred for {delay:?}: {reason}")]
+    Deferred { reason: String, delay: Duration },
+
     /// A deterministic failure that will never succeed on retry.
     #[error("permanent failure: {message}")]
     Permanent {
@@ -81,6 +86,7 @@ impl HandlerError {
         match self {
             HandlerError::Processing(_) => "processing",
             HandlerError::Backpressure(_) => "backpressure",
+            HandlerError::Deferred { .. } => "deferred",
             HandlerError::Permanent { .. } => "permanent",
             HandlerError::Deserialization(_) => "deserialization",
         }
