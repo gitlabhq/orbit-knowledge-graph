@@ -26,6 +26,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
         &bound.filter,
         bound.data_type.as_ref(),
         bound.in_sort_key,
+        bound.use_text_index,
     )
 }
 
@@ -35,6 +36,7 @@ pub(crate) fn filter_expression(
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
     in_sort_key: bool,
+    use_text_index: bool,
 ) -> Expr {
     let col = Expr::col(alias, prop);
 
@@ -48,6 +50,13 @@ pub(crate) fn filter_expression(
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
     match filter.op.unwrap_or(FilterOp::Eq) {
+        FilterOp::Eq if use_text_index && !in_sort_key => Expr::and(
+            comparison(col.clone(), FilterOp::Eq, typed(val())).expect("comparison operator"),
+            Expr::eq(
+                Expr::func(Function::Lower, vec![col]),
+                Expr::func(Function::Lower, vec![typed(val())]),
+            ),
+        ),
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
