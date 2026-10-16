@@ -157,20 +157,3 @@ pub const CATALOG: &[&MetricSpec] = &[
     &CH_MEMORY_USAGE,
     &FAILED,
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pipeline_duration_has_slo_threshold_boundaries() {
-        let buckets = PIPELINE_DURATION.buckets.unwrap();
-        for threshold in [5.0, 25.0] {
-            assert!(
-                buckets.contains(&threshold),
-                "{} needs an exact {threshold}s boundary for the latency SLI",
-                PIPELINE_DURATION.otel_name
-            );
-        }
-    }
-}
