@@ -16,19 +16,10 @@ fixtures:
   - path: alpha/src/lib.rs
     content: |
       pub mod link;
-      pub mod store;
 
   - path: alpha/src/link/mod.rs
     content: |
       pub fn open() {}
-
-  - path: alpha/src/store.rs
-    content: |
-      use crate::link::*;
-
-      pub fn start() {
-          open();
-      }
 
   - path: beta/Cargo.toml
     content: |
@@ -40,17 +31,26 @@ fixtures:
   - path: beta/src/lib.rs
     content: |
       pub mod link;
+      pub mod store;
 
   - path: beta/src/link/mod.rs
     content: |
       pub fn open() {}
 
+  - path: beta/src/store.rs
+    content: |
+      use crate::link::*;
+
+      pub fn start() {
+          open();
+      }
+
 tests:
-  - name: "start calls alpha's open only"
+  - name: "start calls beta's open only"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'start'
       RETURN callee.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { file: alpha/src/link/mod.rs } }
+      - { row: { file: beta/src/link/mod.rs } }
