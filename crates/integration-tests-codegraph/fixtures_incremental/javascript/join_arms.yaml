@@ -75,8 +75,6 @@ tests:
       - { column_values: { field: callee, values: ["Foo::bar", "make"] } }
 
   - name: a receiver reassigned in a loop body reaches both bar methods
-    # Known gap: a loop-carried phi gives the use inside the loop no producer, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'loopPhi'

@@ -44,8 +44,6 @@ fixtures:
 
 tests:
   - name: a loop variable over three constructors reaches all three methods
-    # Known gap: a loop variable bound from a tuple of calls gets no type, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'loop_over_constructors'
@@ -54,8 +52,6 @@ tests:
       - { column_values: { field: callee, values: ["main.A", "main.A.m", "main.B", "main.B.m", "main.C", "main.C.m"] } }
 
   - name: a receiver reassigned in a loop body reaches both methods
-    # Known gap: a loop-carried phi gives the use inside the loop no producer, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'loop_reassigned'

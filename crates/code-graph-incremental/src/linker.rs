@@ -109,6 +109,7 @@ struct Fold<'t> {
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
+    loop_receivers: Vec<(Value, u32, u32, u32, u32)>,
     shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
@@ -210,6 +211,9 @@ impl<'t> Fold<'t> {
                 WorkItem::ExitLoop(header) => {
                     self.loops.pop();
                     self.cur = self.ssa.finish_loop(header, self.cur);
+                    if self.loops.is_empty() {
+                        self.resolve_loop_receivers();
+                    }
                 }
                 WorkItem::ExitBinding {
                     binding,
@@ -645,6 +649,7 @@ impl<'t> Fold<'t> {
                 if obj.child(C::Member).is_some() {
                     self.flow_chain_root(obj, from);
                 }
+                self.defer_loop_receiver(obj, m.sym(), from, c.index());
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
             if let Some(cls) = self.enclosing_class(from) {
@@ -712,6 +717,15 @@ impl<'t> Fold<'t> {
         }
 
         let rhs = c.child(C::Rhs);
+        if rhs.is_none()
+            && let Some(elements) = self.loop_elements(c)
+        {
+            self.bind_elements(lhs, &elements);
+            if declaration {
+                self.bind(c.sym(), lhs);
+            }
+            return true;
+        }
         if rhs.is_none() && c.child_sym(C::Declaration).is_some() {
             return true;
         }
@@ -729,6 +743,33 @@ impl<'t> Fold<'t> {
             Self::push_children(rhs, stack);
         }
         true
+    }
+
+    fn loop_elements(&self, c: Cursor<'t>) -> Option<Vec<u32>> {
+        let parent = c.parent().filter(|parent| parent.is(C::SsaLoop))?;
+        let value = parent
+            .children()
+            .take_while(|node| node.index() != c.index())
+            .find(|node| node.is(C::Arr))?;
+        let elements: Vec<u32> = value
+            .children()
+            .filter(|element| element.is(C::Call))
+            .map(|element| element.index())
+            .collect();
+        (!elements.is_empty()).then_some(elements)
+    }
+
+    fn bind_elements(&mut self, lhs: u32, elements: &[u32]) {
+        let pre = self.cur;
+        let arms: Vec<BlockId> = elements
+            .iter()
+            .map(|&element| {
+                let arm = self.ssa.add_sealed_successor(pre);
+                self.ssa.write_variable(lhs, arm, Value::Call(element));
+                arm
+            })
+            .collect();
+        self.cur = self.ssa.add_sealed_join(arms);
     }
 
     fn exit_binding(
@@ -1157,7 +1198,39 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32) {
-        for r in self.lookup_chain(obj) {
+        let values = self.lookup_chain(obj);
+        self.resolve_values(obj, method, from, values);
+    }
+
+    fn defer_loop_receiver(&mut self, obj: Cursor, method: u32, from: u32, site: u32) {
+        if self.loops.is_empty()
+            || obj.children().next().is_some()
+            || !self.lookup(obj.sym()).is_empty()
+        {
+            return;
+        }
+        let value = self
+            .ssa
+            .read_variable_internal(self.binding(obj.sym()), self.cur);
+        if matches!(value, Value::Phi(_)) {
+            self.loop_receivers
+                .push((value, obj.index(), method, from, site));
+        }
+    }
+
+    fn resolve_loop_receivers(&mut self) {
+        for (value, obj, method, from, site) in std::mem::take(&mut self.loop_receivers) {
+            let first = self.edges.len();
+            let values = self.ssa.resolve_value(&value);
+            self.resolve_values(self.tree.cursor(obj), method, from, values);
+            for edge in &mut self.edges[first..] {
+                edge.site = Some(site);
+            }
+        }
+    }
+
+    fn resolve_values(&mut self, obj: Cursor, method: u32, from: u32, values: Vec<Value>) {
+        for r in values {
             match r {
                 Value::Type(node) => self.push_calls(from, self.find_method_in(node, method)),
                 Value::LocalDef(node) => {
@@ -1483,6 +1556,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
+        loop_receivers: Vec::new(),
         shadowed_calls: FxHashSet::default(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, Vec::new())],

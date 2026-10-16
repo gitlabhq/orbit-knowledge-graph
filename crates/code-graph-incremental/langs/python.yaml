@@ -192,6 +192,12 @@ stages:
         replace: '(__ssa_branch)'
 
       # Loops
+      - match: '(for_statement left: $N:identifier right: (tuple $$$E) body: $B)'
+        replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
+      - match: '(for_statement left: $N:identifier right: (list $$$E) body: $B)'
+        replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
+      - match: '(for_statement left: $N:identifier right: $V body: $B)'
+        replace: '(__ssa_loop $V (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement body: $B)'
         replace: '(__ssa_loop $B)'
       - match: '(while_statement body: $B)'
