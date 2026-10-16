@@ -21,7 +21,7 @@ tests:
   - name: a call of a function-typed member property keeps the property next to the extension function of its name
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
-      WHERE c.name = 'useLen'
+      WHERE c.name = 'useLen' AND t.name = 'len'
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { row: { callee: "Box.len", kind: "Property" } }
