@@ -1,0 +1,44 @@
+name: "C#: a using directive does not shadow a nested class declared after its use"
+
+fixtures:
+  - path: Shapes/Holder.cs
+    content: |
+      namespace Shapes;
+
+      public class Holder
+      {
+          public class Category
+          {
+              public Category() {}
+
+              public void X() {}
+          }
+      }
+
+  - path: App/Main.cs
+    content: |
+      using Shapes;
+
+      namespace App;
+
+      class Main
+      {
+          void Go()
+          {
+              new Category().X();
+          }
+
+          class Category
+          {
+              public void X() {}
+          }
+      }
+
+tests:
+  - name: the call reaches the nested class, not the one the using directive brings in
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'App.Main.Go' AND t.name = 'X'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["App.Main.Category.X"] } }
