@@ -131,6 +131,11 @@ impl MemoryWatchdog {
         })
     }
 
+    /// Jobs that hold a lane and can be cancelled.
+    pub fn candidates(&self) -> usize {
+        self.jobs().len()
+    }
+
     pub fn hold(&self) -> Hold {
         self.holding.fetch_add(1, Ordering::AcqRel);
         Hold(self.holding.clone())

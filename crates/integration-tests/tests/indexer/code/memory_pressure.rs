@@ -129,21 +129,6 @@ async fn a_job_killed_under_pressure_is_retried_then_dead_lettered_and_a_small_j
     assert!(!indexed(&clickhouse, BIG).await);
 }
 
-fn nested_repository(files: usize, depth: usize) -> Vec<(String, String)> {
-    (0..files)
-        .map(|file| {
-            (
-                format!("nested/n{file}.py"),
-                format!(
-                    "def f{file}():\n    wrap({}0{})\n",
-                    "wrap(".repeat(depth),
-                    ")".repeat(depth)
-                ),
-            )
-        })
-        .collect()
-}
-
 fn refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
     files
         .iter()
@@ -162,16 +147,10 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
     ])
     .await;
     let mock = MockGitlabServer::start().await;
-    let parsing = nested_repository(40, 4_000);
+    let parsing = big_repository(60);
     mock.add_project(PARSING, BRANCH, &refs(&parsing));
-    let waiting = big_repository(20);
+    let waiting = big_repository(70);
     mock.add_project_with_slow_archive_files(WAITING, BRANCH, &refs(&waiting));
-    let parsing_bytes: usize = parsing.iter().map(|(_, c)| c.len()).sum();
-    let waiting_bytes: usize = waiting.iter().map(|(_, c)| c.len()).sum();
-    assert!(
-        waiting_bytes > parsing_bytes,
-        "the waiter must be the larger repository"
-    );
     let cgroup = tempfile::tempdir().expect("cgroup dir");
     fake_cgroup(cgroup.path(), 1000, 500);
     let watchdog = MemoryWatchdog::new(
@@ -185,14 +164,13 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
         CodeIndexingPipelineConfig {
             small_repo_max_files: 0,
             big_indexing_slots: Some(1),
-            max_tree_depth: 0,
             per_file_timeout_ms: 0,
             per_file_parse_timeout_ms: 0,
             per_file_walk_timeout_ms: 0,
             per_file_ssa_timeout_ms: 0,
             ..indexer::testkit::test_pipeline_configuration()
         },
-        watchdog,
+        watchdog.clone(),
     );
     let first = deps.code_indexing_task_handler();
     let second = deps.code_indexing_task_handler();
@@ -201,7 +179,15 @@ async fn a_lane_waiter_is_never_the_victim_while_a_job_parses() {
     let waiting_job =
         tokio::spawn(async move { second.handle(handler_context(), envelope(WAITING, 1)).await });
 
-    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+    let started = std::time::Instant::now();
+    while mock.archive_downloads(WAITING) == 0 || watchdog.candidates() == 0 {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "the waiter never fetched"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     fake_cgroup(cgroup.path(), 1000, 950);
     let parsed = parsing_job.await.expect("join");
     fake_cgroup(cgroup.path(), 1000, 500);

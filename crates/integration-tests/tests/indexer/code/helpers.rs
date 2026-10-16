@@ -226,6 +226,7 @@ struct ProjectData {
     /// projects that lack repository content. `u32::MAX` means always.
     empty_archive_responses: u32,
     slow_archive: bool,
+    archive_downloads: u32,
     archive_status: Option<StatusCode>,
 }
 
@@ -278,6 +279,14 @@ impl MockGitlabServer {
         self.insert_project(project_id, default_branch, files, false);
     }
 
+    pub fn archive_downloads(&self, project_id: i64) -> u32 {
+        self.state
+            .projects
+            .lock()
+            .get(&project_id)
+            .map_or(0, |p| p.archive_downloads)
+    }
+
     pub fn add_project_with_slow_archive_files(
         &self,
         project_id: i64,
@@ -305,6 +314,7 @@ impl MockGitlabServer {
                 archive_files,
                 empty_archive_responses: 0,
                 slow_archive,
+                archive_downloads: 0,
                 archive_status: None,
             },
         );
@@ -322,6 +332,7 @@ impl MockGitlabServer {
                 )],
                 empty_archive_responses: 0,
                 slow_archive: true,
+                archive_downloads: 0,
                 archive_status: None,
             },
         );
@@ -338,6 +349,7 @@ impl MockGitlabServer {
                 archive_files: Vec::new(),
                 empty_archive_responses: u32::MAX,
                 slow_archive: false,
+                archive_downloads: 0,
                 archive_status: None,
             },
         );
@@ -411,6 +423,9 @@ async fn handle_download_archive(
         tokio::time::sleep(SLOW_ARCHIVE_DELAY).await;
     }
     let mut projects = state.projects.lock();
+    if let Some(project) = projects.get_mut(&project_id) {
+        project.archive_downloads += 1;
+    }
     match projects.get_mut(&project_id) {
         Some(ProjectData {
             archive_status: Some(status),
