@@ -607,7 +607,7 @@
           "minimum": 0
         },
         "max_tree_depth": {
-          "description": "Syntax tree depth above which the incremental engine skips a file as\ndeeply nested. 0 = no limit.",
+          "description": "Syntax tree depth at which the incremental engine cuts a file: it drops\nthe deeper nodes, indexes the rest, and reports the file as limited\n(deeply_nested). A left-nested chain of one operator adds no depth.\n0 = no limit.",
           "type": "integer",
           "format": "uint",
           "minimum": 0

@@ -1,0 +1,22 @@
+name: "C: a file whose parse ends in an error root still gets a File row"
+
+fixtures:
+  - path: w.c
+    content: |2-
+            union {
+      	struct {
+      	  Bits Flag_Bit : 1;
+      #if !defined(OPT_A) && !defined(OPT_B) && defined(OPT_C)
+          void *_call _peek(void);
+      #ifdef __arch__
+      #define CurrentBlock() ((struct _BLK *)_peek())
+      #define CurrentFrame() (((PFRAME)CurrentBlock())->Field)
+
+tests:
+  - name: "the file has a File row that defines its field"
+    query: |
+      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      WHERE d.name = 'Flag_Bit'
+      RETURN f.path AS path, d.name AS name
+    assert:
+      - { row: { path: w.c, name: Flag_Bit } }

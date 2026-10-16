@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use code_graph_incremental::pipeline::{Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, Envelope, Limits, Pipeline, Scalar, State, templates};
+use code_graph_incremental::{
+    Context, Env, Envelope, Killed, Limits, Pipeline, Scalar, State, templates,
+};
 use ontology::Ontology;
 
 struct FixturePolicy;
@@ -61,10 +63,14 @@ fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
 }
 
 fn suite_limits(suite: &TestSuite) -> Limits {
-    match suite.limits.as_deref() {
+    let limits = match suite.limits.as_deref() {
         None | Some("unlimited") => Limits::UNLIMITED,
         Some("default") => default_limits(),
         Some(other) => panic!("suite {:?}: unknown limits {other:?}", suite.name),
+    };
+    Limits {
+        max_tree_depth: suite.max_tree_depth.unwrap_or(limits.max_tree_depth),
+        ..limits
     }
 }
 
@@ -124,7 +130,13 @@ fn index_and_check(yaml: &str) {
     );
     let graph =
         templates::index(Context::new(&env, repository)).expect("suite exceeded the total budget");
-    let (mut state, mut failures) = check(graph, &ontology, &suite.tests, &suite.skipped);
+    let (mut state, mut failures) = check(
+        graph,
+        &ontology,
+        &suite.tests,
+        &suite.skipped,
+        &suite.limited,
+    );
     let mut env = env;
 
     for step in &suite.steps {
@@ -154,7 +166,7 @@ fn index_and_check(yaml: &str) {
         );
         let graph = templates::reindex(Context::new(&env, changes), state, step.remove.clone())
             .expect("suite exceeded the total budget");
-        let (next, step_failures) = check(graph, &ontology, &step.tests, &[]);
+        let (next, step_failures) = check(graph, &ontology, &step.tests, &[], &[]);
         state = next;
         failures.extend(step_failures);
     }
@@ -168,27 +180,11 @@ fn check(
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
     skipped: &[SkippedFile],
+    limited: &[SkippedFile],
 ) -> (State, Vec<Failure>) {
-    {
-        let mut expected: Vec<&SkippedFile> = skipped.iter().collect();
-        expected.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-        let mut found: Vec<(&str, &str)> = graph
-            .context()
-            .report
-            .skipped
-            .iter()
-            .map(|killed| (killed.path.as_str(), killed.label.as_ref()))
-            .collect();
-        found.sort_unstable();
-        let matched = found.len() == expected.len()
-            && found.iter().zip(&expected).all(|((path, label), file)| {
-                *path == file.path && file.label.as_deref().is_none_or(|want| want == *label)
-            });
-        assert!(
-            matched,
-            "files the budgets skipped: {found:?}, expected {expected:?}"
-        );
-    }
+    let report = &graph.context().report;
+    assert_files("skipped", &report.skipped, skipped);
+    assert_files("limited", &report.limited, limited);
     let envelope = Envelope::new([
         ("project_id", Scalar::Int(1)),
         ("branch", Scalar::Str("main")),
@@ -210,9 +206,31 @@ fn check(
         fixture_dir: None,
         trace: false,
         limits: None,
+        max_tree_depth: None,
         skipped: Vec::new(),
+        limited: Vec::new(),
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
     (displayed.state, run_suite(&suite, &db, ontology, true))
+}
+
+/// Fails unless the files the budgets `kind` (skipped or limited) are the
+/// `expected` ones, each with its label when the suite names one.
+fn assert_files(kind: &str, found: &[Killed], expected: &[SkippedFile]) {
+    let mut expected: Vec<&SkippedFile> = expected.iter().collect();
+    expected.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    let mut found: Vec<(&str, &str)> = found
+        .iter()
+        .map(|killed| (killed.path.as_str(), killed.label.as_ref()))
+        .collect();
+    found.sort_unstable();
+    let matched = found.len() == expected.len()
+        && found.iter().zip(&expected).all(|((path, label), file)| {
+            *path == file.path && file.label.as_deref().is_none_or(|want| want == *label)
+        });
+    assert!(
+        matched,
+        "files the budgets {kind}: {found:?}, expected {expected:?}"
+    );
 }
