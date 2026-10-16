@@ -1,0 +1,102 @@
+name: "C++: a call in a loop header or a range-for range links"
+
+fixtures:
+  - path: loops.cpp
+    content: |
+      struct Item {
+          void touch() {}
+      };
+
+      struct Items {
+          Item* begin() { return nullptr; }
+          Item* end() { return nullptr; }
+          int count() { return 0; }
+      };
+
+      Items make_items() { return Items(); }
+
+      int start() { return 0; }
+
+      int limit() { return 3; }
+
+      int step(int i) { return i + 1; }
+
+      void header_calls() {
+          for (int i = start(); i < limit(); i = step(i)) {
+          }
+      }
+
+      void header_chain() {
+          for (int i = start(); i < make_items().count(); i = step(i)) {
+          }
+      }
+
+      void range_for_auto() {
+          for (auto item : make_items()) {
+              item.touch();
+          }
+      }
+
+      void range_for_typed() {
+          for (Item item : make_items()) {
+              item.touch();
+          }
+      }
+
+      void while_header() {
+          int i = 0;
+          while (i < limit()) {
+              i = step(i);
+          }
+      }
+
+tests:
+  - name: "calls in the init, condition and update of a for loop link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "header_calls"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["limit", "start", "step"] } }
+
+  - name: "a method chain in a for condition links its root call"
+    # Known gap on main: the C++ field rule labels a call object with its text; the chain-root rule of G50 (c-cpp-chain-root) makes make_items and count link.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "header_chain" AND callee.name IN ["make_items", "count"]
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["count", "make_items"] } }
+
+  - name: "the range of a range-for with auto links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "range_for_auto" AND callee.name = "make_items"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "control: a typed range-for keeps its range and types the variable"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "range_for_typed"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["make_items", "touch"] } }
+
+  - name: "a call in a while condition links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "while_header"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["limit", "step"] } }
