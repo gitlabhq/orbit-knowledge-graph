@@ -11,9 +11,9 @@ description: >-
   including another indexed checkout that owns the ID. GitLab references return
   entity context after the local output: description, comments and review
   threads, and for merge requests the changed files and failed CI jobs.
-  `--branch NAME` reads the merge request of a branch, named exactly or by words
-  from its name, or its latest pipeline and failed job logs when it has no merge
-  request. With no value, or with no targets at all, it reads the current branch. Files return compact definition maps with every followable
+  `Branch:<name>` reads the merge request of that branch, or its latest pipeline
+  and failed job logs when it has no merge request. With no targets at all it
+  reads the current branch. Files return compact definition maps with every followable
   ID and up to ten connections per section, with omitted counts. Line ranges
   return those numbered lines with the definitions they touch; directories list
   indexed files with definition counts. Choose a Definition ID for complete source and its indexed

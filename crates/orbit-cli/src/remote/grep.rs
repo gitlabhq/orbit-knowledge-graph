@@ -16,7 +16,9 @@ pub(crate) const SCOPES: &[(&str, &str)] = &[
     ("User", "users"),
     ("Project", "projects"),
     ("Group", "groups"),
+    ("Branch", "branches"),
 ];
+const BRANCHES: &str = "branches";
 const PROJECT_SCOPES: &[&str] = &[
     "work_items",
     "merge_requests",
@@ -196,18 +198,27 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             wait.as_secs().max(1)
         ));
     }
-    let tasks: Vec<_> = request
-        .keywords
+    let api_scopes: Vec<&str> = request
+        .scopes
+        .iter()
+        .copied()
+        .filter(|scope| *scope != BRANCHES)
+        .collect();
+    let keywords = match api_scopes.is_empty() {
+        true => &[][..],
+        false => &request.keywords[..],
+    };
+    let tasks: Vec<_> = keywords
         .iter()
         .map(|keywords| {
             let client = client.clone();
-            let limit = (PER_SCOPE * request.scopes.len()).clamp(1, MAX_LIMIT);
+            let limit = (PER_SCOPE * api_scopes.len()).clamp(1, MAX_LIMIT);
             let params = vec![
                 ("search", keywords.clone()),
                 scope.clone(),
                 ("limit", limit.to_string()),
                 ("per_scope", PER_SCOPE.to_string()),
-                ("scopes", request.scopes.join(",")),
+                ("scopes", api_scopes.join(",")),
             ];
             tokio::spawn(async move { client.get_grep(&params).await })
         })
@@ -235,13 +246,30 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .iter()
         .find_map(|response| response.target.as_ref())
         .map(|target| target.full_path.clone())
-        .unwrap_or(scope.1);
-    render(
-        &format!("{api_host}/{shown}"),
-        &query,
-        &request.keywords,
-        &responses,
-    )
+        .unwrap_or_else(|| scope.1.clone());
+    let shown = format!("{api_host}/{shown}");
+    let mut found = Vec::new();
+    if !responses.is_empty()
+        && let Outcome::Found(text) = render(&shown, &query, &request.keywords, &responses)
+    {
+        found.push(text);
+    }
+    if request.scopes.contains(&BRANCHES) {
+        if !matches!(scope.0, "full_path" | "project_id") {
+            return Outcome::Skipped("branches belong to a project; name one".into());
+        }
+        let wanted = request.keywords.join(" ");
+        match super::branch::search_text(&client, &shown, &scope.1, &wanted).await {
+            Ok(Some(text)) => found.push(text),
+            Ok(None) => {}
+            Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
+            Err(_) => {}
+        }
+    }
+    match found.is_empty() {
+        true => Outcome::Empty,
+        false => Outcome::Found(found.join("\n")),
+    }
 }
 
 fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {

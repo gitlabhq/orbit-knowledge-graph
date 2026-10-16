@@ -500,9 +500,12 @@ fn grep_backs_off_after_a_rate_limit() {
 }
 
 #[test]
-fn context_posts_gitlab_tokens_without_a_local_index() {
-    let response = "orbit_context version=1.1.0 entities=3\n- MergeRequest[42] type=MergeRequest id=42 found=true\n";
-    let (base_url, handle) = serve_once(response, "text/plain");
+fn context_posts_one_request_per_gitlab_token() {
+    let (base_url, handle) = serve_routes(vec![
+        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
+        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
+        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
+    ]);
     let dir = tempfile::tempdir().expect("tempdir");
 
     let output = run_orbit_with_data(
@@ -516,22 +519,35 @@ fn context_posts_gitlab_tokens_without_a_local_index() {
             "Issue[5]",
         ],
     );
-    let request = handle.join().expect("join mock");
+    let requests = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(request.request_line, "POST /api/v4/orbit/context HTTP/1.1");
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&request.body).unwrap(),
-        serde_json::json!({
-            "tokens": ["MergeRequest[42]", "gitlab-org/gitlab#7", "Issue[5]"],
-            "response_format": "llm",
+    let mut tokens: Vec<serde_json::Value> = requests
+        .iter()
+        .map(|request| {
+            assert_eq!(request.request_line, "POST /api/v4/orbit/context HTTP/1.1");
+            let body: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+            assert_eq!(body["response_format"], "llm");
+            body["tokens"].clone()
         })
+        .collect();
+    tokens.sort_by_key(|token| token.to_string());
+    assert_eq!(
+        tokens,
+        vec![
+            serde_json::json!(["Issue[5]"]),
+            serde_json::json!(["MergeRequest[42]"]),
+            serde_json::json!(["gitlab-org/gitlab#7"]),
+        ]
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), response);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "orbit_context version=1.1.0 entities=1\n".repeat(3)
+    );
 }
 
 #[cfg(unix)]
@@ -692,13 +708,14 @@ fn setup_leaves_gitlab_out_when_orbit_does_not_answer() {
     assert!(!instructions.contains("GitLab"), "{instructions}");
 }
 
-fn serve_sequence(bodies: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
+fn serve_routes(
+    routes: Vec<(&'static str, &'static str)>,
+) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
     let handle = thread::spawn(move || {
-        bodies
-            .into_iter()
-            .map(|response_body| {
+        (0..routes.len())
+            .map(|_| {
                 let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
                 let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
                 let mut request_line = String::new();
@@ -719,6 +736,10 @@ fn serve_sequence(bodies: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<
                 }
                 let mut body = vec![0u8; content_length];
                 reader.read_exact(&mut body).expect("read request body");
+                let response_body = routes
+                    .iter()
+                    .find(|(pattern, _)| request_line.contains(pattern))
+                    .map_or("[]", |(_, body)| body);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
                     response_body.len()
@@ -737,11 +758,13 @@ fn serve_sequence(bodies: Vec<&'static str>) -> (String, thread::JoinHandle<Vec<
 }
 
 #[test]
-fn context_branch_reads_the_merge_request_of_that_branch() {
-    let (base_url, handle) = serve_sequence(vec![
-        r#"[{"name":"fix-ci"}]"#,
-        r#"[{"id":41,"state":"merged"},{"id":42,"state":"opened"}]"#,
-        "orbit_context version=1.1.0 entities=1\n",
+fn context_branch_target_reads_the_merge_request_of_that_branch() {
+    let (base_url, handle) = serve_routes(vec![
+        (
+            "merge_requests?",
+            r#"[{"id":41,"state":"merged"},{"id":42,"state":"opened"}]"#,
+        ),
+        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
     ]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
@@ -751,7 +774,7 @@ fn context_branch_reads_the_merge_request_of_that_branch() {
         clone.path(),
         data.path(),
         &base_url,
-        &["context", "--branch", "fix-ci"],
+        &["context", "Branch:fix-ci"],
     );
     let requests = handle.join().expect("join mock");
 
@@ -762,22 +785,15 @@ fn context_branch_reads_the_merge_request_of_that_branch() {
     );
     assert!(
         requests[0].request_line.starts_with(
-            "GET /api/v4/projects/my-group%2Fmy-project/repository/branches?search=%5Efix-ci%24 "
+            "GET /api/v4/projects/my-group%2Fmy-project/merge_requests?source_branch=fix-ci&state=all"
         ),
         "{}",
         requests[0].request_line
     );
     assert!(
-        requests[1]
-            .request_line
-            .contains("merge_requests?source_branch=fix-ci&state=all"),
+        requests[1].body.contains("MergeRequest[42]"),
         "{}",
-        requests[1].request_line
-    );
-    assert!(
-        requests[2].body.contains("MergeRequest[42]"),
-        "{}",
-        requests[2].body
+        requests[1].body
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
@@ -787,12 +803,17 @@ fn context_branch_reads_the_merge_request_of_that_branch() {
 
 #[test]
 fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
-    let (base_url, handle) = serve_sequence(vec![
-        r#"[{"name":"ci-fix"}]"#,
-        "[]",
-        r#"[{"id":7,"status":"failed","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
-        r#"[{"id":9,"name":"unit","stage":"test","failure_reason":"script_failure","allow_failure":false,"web_url":"https://localhost/p/-/jobs/9"}]"#,
-        "ok\n--- FAIL: TestX\n",
+    let (base_url, handle) = serve_routes(vec![
+        ("merge_requests?", "[]"),
+        (
+            "pipelines?ref",
+            r#"[{"id":7,"status":"failed","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
+        ),
+        (
+            "pipelines/7/jobs",
+            r#"[{"id":9,"name":"unit","stage":"test","failure_reason":"script_failure","allow_failure":false,"web_url":"https://localhost/p/-/jobs/9"}]"#,
+        ),
+        ("jobs/9/trace", "ok\n--- FAIL: TestX\n"),
     ]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
@@ -813,9 +834,9 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        requests[4].request_line.contains("/jobs/9/trace"),
+        requests[3].request_line.contains("/jobs/9/trace"),
         "{}",
-        requests[4].request_line
+        requests[3].request_line
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
@@ -825,5 +846,63 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
          unit (test, script_failure) https://localhost/p/-/jobs/9\n    \
          | ok\n    \
          | --- FAIL: TestX\n"
+    );
+}
+
+#[test]
+fn grep_kind_branch_lists_matching_branches_with_their_merge_requests() {
+    let (base_url, handle) = serve_routes(vec![
+        (
+            "search=approval&",
+            r#"[{"name":"aa/show-approval-rules"},{"name":"fix-approvals"}]"#,
+        ),
+        ("search=rules&", r#"[{"name":"aa/show-approval-rules"}]"#),
+        (
+            "source_branch=aa%2Fshow-approval-rules",
+            r#"[{"id":42,"state":"opened"}]"#,
+        ),
+        (
+            "ref=aa%2Fshow-approval-rules",
+            r#"[{"id":7,"status":"failed"}]"#,
+        ),
+        ("source_branch=fix-approvals", "[]"),
+        ("ref=fix-approvals", "[]"),
+    ]);
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let data = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        clone.path(),
+        data.path(),
+        &base_url,
+        &["grep", "approval rules", "--kind", "Branch"],
+    );
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        requests[0]
+            .request_line
+            .contains("/repository/branches?search=approval&per_page=100"),
+        "{}",
+        requests[0].request_line
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with(
+            "GitLab branches matching \"approval rules\" in localhost/my-group/my-project:\n\
+             aa/show-approval-rules  MergeRequest[42] opened  pipeline failed\n\
+             fix-approvals  no merge request\n"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("context Branch:aa/show-approval-rules\n"),
+        "{stdout}"
     );
 }

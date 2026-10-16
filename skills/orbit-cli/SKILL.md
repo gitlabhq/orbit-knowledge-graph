@@ -72,7 +72,8 @@ behind `origin` for work items, merge requests, commits, notes, and milestones.
 Those results print after the local ones as tokens such as `MergeRequest[42]`.
 Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
 project or group, including its code when there is no local checkout;
-`--kind MergeRequest,WorkItem` searches GitLab only.
+`--kind MergeRequest,WorkItem` searches GitLab only, and `--kind Branch` finds
+branches with their merge requests and pipelines.
 
 ```shell
 orbit grep "rate limit" gitlab-org/gitlab --kind MergeRequest
@@ -82,7 +83,7 @@ orbit context MergeRequest[42] gitlab-org/gitlab#7 src/lib.rs:120-180
 Pass names as printed by `grep`, paths, ranges, directories, or GitLab tokens
 to `context`. GitLab tokens return entity context after the local output:
 description, comments, and for merge requests the changed files and failed CI
-jobs. `--branch NAME` reads a branch's merge request, or its latest pipeline and
+jobs. `Branch:<name>` reads a branch's merge request, or its latest pipeline and
 failed job logs; bare `orbit context` reads the current branch. A `Definition:<id>` from another indexed checkout reads that checkout.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
