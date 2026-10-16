@@ -40,6 +40,10 @@ pub(crate) fn card(title: impl Display, body: impl Display) -> Result<()> {
     Ok(cliclack::note(title, body)?)
 }
 
+pub(crate) fn warning(message: impl Display) {
+    let _ = cliclack::log::warning(message);
+}
+
 pub(crate) fn error(message: impl Display) {
     let _ = cliclack::log::error(message);
 }
