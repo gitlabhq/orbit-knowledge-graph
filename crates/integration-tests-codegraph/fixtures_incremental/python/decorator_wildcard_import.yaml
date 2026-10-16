@@ -1,0 +1,44 @@
+name: "Python: a decorator imported through a wildcard links once"
+
+fixtures:
+  - path: tools.py
+    content: |
+      def deco(fn):
+          return fn
+
+
+      def deco_call(count):
+          return deco
+
+  - path: main.py
+    content: |
+      from tools import *
+
+
+      @deco
+      def leaf():
+          pass
+
+
+      @deco_call(1)
+      def called():
+          pass
+
+tests:
+  - name: a bare decorator from a wildcard import gives one row
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'leaf'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "tools.deco" } }
+
+  - name: a call decorator from a wildcard import gives one row
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'called'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "tools.deco_call" } }

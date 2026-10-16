@@ -80,8 +80,11 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_bare_name(self) -> bool {
         self.sym_opt().is_some() && !self.has(C::Member) && !self.has(C::Ivar)
     }
+    pub fn is_named_decorator(self) -> bool {
+        self.sym_opt().is_some() || self.has(C::Member)
+    }
     pub fn decorator_head(self) -> Option<Self> {
-        if self.sym_opt().is_some() || self.has(C::Member) {
+        if self.is_named_decorator() {
             return Some(self);
         }
         match self.child(C::Call) {

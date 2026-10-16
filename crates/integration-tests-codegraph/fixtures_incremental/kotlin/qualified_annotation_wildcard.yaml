@@ -1,0 +1,88 @@
+name: "Kotlin: a qualified annotation resolves through a wildcard import and guesses nothing when it cannot"
+
+fixtures:
+  - path: a/Outer.kt
+    content: |
+      package a
+
+      class Outer {
+          annotation class Inner
+      }
+
+  - path: a/Other.kt
+    content: |
+      package a
+
+      annotation class Other
+
+  - path: c/Helper.kt
+    content: |
+      package c
+
+      class Helper
+
+  - path: d/Wild.kt
+    content: |
+      package d
+
+      import a.*
+      import c.*
+
+      class Wild {
+          @Outer.Inner
+          fun wild() {}
+
+          @Other
+          fun plain() {}
+
+          @Missing.Thing
+          fun unresolved() {}
+
+          @Nowhere
+          fun lost() {}
+      }
+
+tests:
+  - name: a qualified annotation reaches the nested annotation type through the wildcard import
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'wild'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "a.Outer.Inner" } }
+
+  - name: a resolved qualified annotation takes no wildcard import as a guess
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.name = 'wild'
+      RETURN symbol.import_path AS path
+    assert:
+      - { row_count: 0 }
+
+  - name: a plain annotation reaches its type through the wildcard import
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'plain'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "a.Other" } }
+
+  - name: an unresolved qualified annotation takes no wildcard import as a guess
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.name = 'unresolved'
+      RETURN symbol.import_path AS path
+    assert:
+      - { row_count: 0 }
+
+  - name: an unresolved plain annotation keeps one guess per wildcard import
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.name = 'lost'
+      RETURN symbol.import_path AS path
+      ORDER BY path
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: path, values: ["a", "c"] } }
