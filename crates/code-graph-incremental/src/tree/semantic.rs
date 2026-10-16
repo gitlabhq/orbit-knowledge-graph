@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use super::{Cursor, Edge, EdgeKind, Node, Step, Storage};
+use super::{Cursor, Edge, EdgeKind, Node, Storage};
 use crate::canonical::Canonical as C;
 use crate::resolver::CLASS_LIKE;
 
@@ -267,27 +267,6 @@ pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberInde
         }
     }
     index
-}
-
-pub fn find_method_in<'a, S: Storage<Node = Node>>(
-    class: Cursor<'a, S>,
-    name: u32,
-    role: Role,
-    callable: u32,
-) -> Option<Cursor<'a, S>> {
-    class.descend(|node| {
-        if node.is(C::Def)
-            && node.index() != class.index()
-            && node.child_sym(C::DefName) == Some(name)
-            && node.fills(role, callable)
-        {
-            return Step::Out(node);
-        }
-        if node.is_class() && !node.has(C::ImplBlock) {
-            return Step::Over;
-        }
-        Step::Into
-    })
 }
 
 pub fn members_by_level<N, I, T>(
