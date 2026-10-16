@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use sysinfo::{MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
+use sysinfo::{
+    CGroupLimits, MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid,
+};
 use tracing::info;
 
 use crate::engine::{EngineConfiguration, IndexerModule};
@@ -159,20 +161,22 @@ fn read_memory_ceiling_bytes() -> Option<u64> {
 
 pub fn cgroup_memory() -> Option<MemoryPressure> {
     let mut system = System::new();
-    let pid = get_current_pid().ok()?;
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        false,
-        ProcessRefreshKind::nothing(),
-    );
-    let limits = system
-        .process(pid)
-        .and_then(|process| process.cgroup_limits())
-        .or_else(|| system.cgroup_limits())?;
     system.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
-    (limits.total_memory < system.total_memory()).then_some(MemoryPressure {
-        used: limits.rss,
-        limit: limits.total_memory,
+    let total_ram = system.total_memory();
+    let limited = |limits: CGroupLimits| {
+        (limits.total_memory < total_ram).then_some(MemoryPressure {
+            used: limits.rss,
+            limit: limits.total_memory,
+        })
+    };
+    system.cgroup_limits().and_then(limited).or_else(|| {
+        let pid = get_current_pid().ok()?;
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            false,
+            ProcessRefreshKind::nothing(),
+        );
+        system.process(pid)?.cgroup_limits().and_then(limited)
     })
 }
 

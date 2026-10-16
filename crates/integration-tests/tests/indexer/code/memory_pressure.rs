@@ -281,3 +281,30 @@ async fn a_kill_while_another_job_is_in_flight_does_not_spend_an_attempt() {
     assert!(indexed(&clickhouse, OTHER).await);
     assert!(!indexed(&clickhouse, LARGER).await);
 }
+
+#[tokio::test]
+async fn a_file_larger_than_the_in_flight_budget_is_indexed_with_the_rest() {
+    const OVERSIZE: i64 = 4306;
+    enable_incremental(&traversal_path(OVERSIZE));
+    let clickhouse = clickhouse().await;
+    let mock = MockGitlabServer::start().await;
+    let mut files = big_repository(50);
+    files.push((
+        "big.py".to_string(),
+        format!("'''{}'''\n", "x".repeat(4_200_000)),
+    ));
+    add_project(&mock, OVERSIZE, &files);
+    let deps = CodeIndexingDeps::new_with_pipeline_config(
+        &mock,
+        &clickhouse,
+        indexer::testkit::test_pipeline_configuration(),
+    );
+    let handler = deps.code_indexing_task_handler();
+
+    let outcome = handler
+        .handle(handler_context(), envelope(OVERSIZE, 1))
+        .await;
+    assert!(outcome.is_ok(), "{outcome:?}");
+    handler.flush().await.expect("flush");
+    assert!(indexed(&clickhouse, OVERSIZE).await);
+}
