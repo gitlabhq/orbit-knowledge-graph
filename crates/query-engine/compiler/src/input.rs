@@ -87,7 +87,8 @@ pub struct Input {
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
-    pub cursor: Option<InputCursor>,
+    #[serde(skip)]
+    pub skip: Option<u32>,
     pub order_by: Option<InputOrderBy>,
     #[serde(default)]
     pub options: QueryOptions,
@@ -123,7 +124,7 @@ impl Input {
     /// Rows to fetch from ClickHouse: the page window plus one probe row that
     /// proves `has_more` without being returned.
     pub fn fetch_limit(&self) -> u32 {
-        self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
+        self.limit + 1
     }
 }
 
@@ -137,7 +138,7 @@ impl Default for Input {
             path: None,
             neighbors: None,
             limit: default_limit(),
-            cursor: None,
+            skip: None,
             order_by: None,
             options: QueryOptions::default(),
             predicates: Vec::new(),
@@ -148,15 +149,6 @@ impl Default for Input {
 
 fn default_limit() -> u32 {
     30
-}
-
-/// Keyset pagination cursor: `after` is an opaque token from the previous
-/// page's `pagination.next_cursor`, anchored on the last scanned SQL row so
-/// redaction can only shorten a page, never strand it.
-#[derive(Debug, Clone, Deserialize)]
-pub struct InputCursor {
-    pub page_size: u32,
-    pub after: Option<String>,
 }
 
 #[derive(

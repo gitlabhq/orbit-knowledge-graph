@@ -1,17 +1,8 @@
-description: Cursor with active-only filter pages through 6 active users
+description: SKIP pages with an active-only filter cover 6 active users
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username", "state"],
-                 "filters": {"state": "active"}}],
-      "order_by": "u.id",
-      "cursor": {"page_size": 2}
-    }
   gql: |
-    MATCH (u:User {state: 'active'}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state ORDER BY u.id PAGE 2
+    MATCH (u:User {state: 'active'}) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.state ORDER BY u.id SKIP 0 LIMIT 2
 
 expect:
   all_pages:

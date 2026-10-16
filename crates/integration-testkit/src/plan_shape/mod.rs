@@ -241,7 +241,7 @@ fn check<M: OrbitQueryModel>(
             scenario.name
         );
         let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
+            "json" => frontend::json_dsl::parse(raw, model),
             "gql" => frontend::gql::parse(raw),
             _ => {
                 failures.push(format!("{label}: unknown frontend"));

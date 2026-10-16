@@ -10,22 +10,8 @@ config:
       group: [101]
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        {"id": "g", "entity": "Group"},
-        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
-      ],
-      "relationships": [
-        {"type": "MEMBER_OF", "from": "u", "to": "g"},
-        {"type": "CONTAINS", "from": "g", "to": "p"}
-      ],
-      "cursor": {"page_size": 3}
-    }
   gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p PAGE 3
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p SKIP 0 LIMIT 3
 
 expect:
   all_pages:

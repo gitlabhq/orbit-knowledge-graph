@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use format::ExpectedIndex;
 use futures::FutureExt;
-use pagination::{PageCollection, next_page, with_after, without_cursor};
+use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use query_engine::compiler::passes::codegen::clickhouse::cte_statements;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
@@ -28,7 +28,7 @@ use query_engine::pipeline::{
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
 use response::{
-    assert_compilation, assert_cursor, assert_output, assert_repeated_response, repeat_count,
+    assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
 };
 
@@ -111,7 +111,7 @@ pub async fn run_query(
         redaction,
     )
     .await;
-    assert_cursor(&output, "run_query");
+    assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.input, response)
 }
@@ -513,12 +513,11 @@ async fn run_pages(
     expect: &QueryExpect,
     label: &str,
 ) {
-    let mut query_str = base_query.trim_end().to_owned();
-
     let mut collected = PageCollection::default();
 
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
+        let query_str = page_query(frontend, base_query, i);
 
         let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
             .await
@@ -536,15 +535,13 @@ async fn run_pages(
         let response = assert_output(&output, frontend, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
-        if let Some(cursor) = next_page(&response, i, expect.pages.len(), &page_label) {
-            query_str = with_after(frontend, base_query, &cursor);
-        }
+        assert_page_bounds(&response, i, expect.pages.len(), &page_label);
     }
 
     if let Some(all_pages) = &expect.all_pages {
         collected.assert_expect(all_pages, label);
         if all_pages.matches_unpaginated {
-            let query = without_cursor(frontend, base_query);
+            let query = unpaginated(frontend, base_query);
             let compiled = compile_like_server(&query, frontend, (data_model, ontology), security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
@@ -557,7 +554,7 @@ async fn run_pages(
                 redaction,
             )
             .await;
-            assert_cursor(&output, label);
+            assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.input, GraphFormatter.format(&output), label);
             collected.assert_matches(&response, label);
@@ -664,7 +661,6 @@ fn pipeline_output(
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
-        &compiled.pagination,
     ));
     PipelineOutput {
         row_count: query_result.authorized_count(),
@@ -1213,7 +1209,7 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "node_ids" => Some(Requirement::NodeIds),
         "node_count" => Some(Requirement::NodeCount),
         "order_by" => Some(Requirement::OrderBy),
-        "cursor" => Some(Requirement::Cursor),
+        "skip" => Some(Requirement::Skip),
         "aggregation" => Some(Requirement::Aggregation),
         "aggregation_sort" => Some(Requirement::AggregationSort),
         "neighbors" => Some(Requirement::Neighbors),

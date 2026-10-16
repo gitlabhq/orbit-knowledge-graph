@@ -1,0 +1,9 @@
+description: SKIP extends the sort with compiler tie-breakers and lowers to an OFFSET past the probe row
+
+query:
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 4 LIMIT 2
+
+expect:
+  compile_only: true
+  sql_contains: ["ORDER BY u.id ASC", "LIMIT 3 OFFSET 4"]
