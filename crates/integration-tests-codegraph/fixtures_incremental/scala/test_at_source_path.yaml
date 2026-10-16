@@ -1,0 +1,30 @@
+name: "Scala: a test file at the same path as the class it tests still imports that class"
+
+fixtures:
+  - path: library/scala/acme/Tree.scala
+    content: |
+      package acme
+
+      object Tree {
+        def min(): Int = 0
+      }
+
+  - path: test/scala/acme/Tree.scala
+    content: |
+      package acme.treetest
+
+      import acme.Tree
+
+      object TreeSpec {
+        def run(): Int = Tree.min()
+      }
+
+tests:
+  - name: "the test calls the library class"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'min'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: min, file: library/scala/acme/Tree.scala } }

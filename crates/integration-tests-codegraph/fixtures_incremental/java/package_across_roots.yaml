@@ -1,0 +1,51 @@
+name: "Java: a package that spans two source roots keeps the classes of both roots"
+
+fixtures:
+  - path: core/src/com/acme/base/Checks.java
+    content: |
+      package com.acme.base;
+
+      public class Checks {
+          public static void checkState(boolean ok) {}
+      }
+
+  - path: extra/src/com/acme/base/StrictChecks.java
+    content: |
+      package com.acme.base;
+
+      public class StrictChecks extends Checks {
+          void verify() {
+              checkState(true);
+          }
+      }
+
+  - path: tests/src/com/acme/base/ChecksTest.java
+    content: |
+      package com.acme.base;
+
+      import com.acme.base.*;
+
+      public class ChecksTest {
+          void run() {
+              Checks.checkState(true);
+          }
+      }
+
+tests:
+  - name: "a class in another root of the package is its parent"
+    query: |
+      MATCH (d:Definition)-[:EXTENDS]->(parent:Definition)
+      WHERE d.name = 'StrictChecks'
+      RETURN parent.name AS parent, parent.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: Checks, file: core/src/com/acme/base/Checks.java } }
+
+  - name: "a test in a third root calls the class of the package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'checkState'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: core/src/com/acme/base/Checks.java } }

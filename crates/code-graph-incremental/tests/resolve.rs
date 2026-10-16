@@ -438,3 +438,49 @@ fn file_stats_keep_files_killed_by_the_resolve_budget() {
     assert!(skipped.iter().all(|killed| killed.label == "resolve"));
     assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
+
+#[test]
+fn an_edit_far_from_two_package_copies_resolves_only_the_edited_file() {
+    let repo = tempfile::tempdir().unwrap();
+    let checks = "package com.acme.base;\npublic final class Checks { public static void checkState(boolean ok) {} }\n";
+    let lists = "package com.acme.coll;\nimport com.acme.base.*;\npublic class Lists { void set() { Checks.checkState(true); } }\n";
+    for side in ["lib", "android/lib"] {
+        for dir in ["base", "coll", "misc"] {
+            std::fs::create_dir_all(repo.path().join(format!("{side}/src/com/acme/{dir}")))
+                .unwrap();
+        }
+    }
+    write_all(
+        repo.path(),
+        &[
+            ("lib/src/com/acme/base/Checks.java", checks),
+            ("lib/src/com/acme/coll/Lists.java", lists),
+            ("android/lib/src/com/acme/base/Checks.java", checks),
+            ("android/lib/src/com/acme/coll/Lists.java", lists),
+            (
+                "lib/src/com/acme/misc/Other.java",
+                "package com.acme.misc;\npublic class Other {}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Java, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    write_all(
+        repo.path(),
+        &[(
+            "lib/src/com/acme/misc/Other.java",
+            "package com.acme.misc;\npublic class Other { void ping() {} }\n",
+        )],
+    );
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["lib/src/com/acme/misc/Other.java".into()],
+    });
+    let (_, resolved) = templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+        .unwrap()
+        .finish();
+    assert_eq!(
+        resolved_paths(&resolved),
+        ["lib/src/com/acme/misc/Other.java"]
+    );
+}

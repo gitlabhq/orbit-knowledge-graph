@@ -906,13 +906,31 @@ fn gather_imports_for(
                         None => raw_path.to_owned(),
                     };
                     let prefer_own = |path: String, mut hits: Vec<Loc>| {
-                        hits.retain(|loc| loc.fi != fi);
-                        let Some((root, prefix)) = own_prefix.as_ref().filter(|_| !hits.is_empty())
-                        else {
+                        let Some((root, prefix)) = own_prefix.as_ref() else {
+                            hits.retain(|loc| loc.fi != fi);
                             return (path, hits);
                         };
                         let inside =
                             |loc: &Loc| trees[loc.fi as usize].label.starts_with(prefix.as_str());
+                        let below_root = |loc: &Loc| {
+                            let tree = &trees[loc.fi as usize];
+                            root_of(tree)
+                                .and_then(|hit_root| tree.label.strip_prefix(hit_root))
+                                .unwrap_or(tree.label.as_str())
+                        };
+                        let dedupe = |path: &str, hits: Vec<Loc>| -> Vec<Loc> {
+                            let glob = path.ends_with(WILDCARD);
+                            let own: FxHashSet<&str> = hits
+                                .iter()
+                                .filter(|loc| inside(loc) && (glob || loc.fi != fi))
+                                .map(below_root)
+                                .collect();
+                            hits.into_iter()
+                                .filter(|loc| {
+                                    loc.fi != fi && (inside(loc) || !own.contains(below_root(loc)))
+                                })
+                                .collect()
+                        };
                         let sibling = |loc: &Loc| {
                             root_of(&trees[loc.fi as usize]).is_some_and(|hit_root| {
                                 !hit_root.is_empty()
@@ -921,16 +939,16 @@ fn gather_imports_for(
                                         .is_none_or(|rest| !rest.starts_with(PATH_SEP))
                             })
                         };
-                        if path.starts_with(prefix.as_str()) || hits.iter().any(inside) {
-                            hits.retain(inside);
-                        } else if mapped.is_none() && hits.iter().all(sibling) {
+                        let hits = dedupe(&path, hits);
+                        if mapped.is_none()
+                            && !hits.is_empty()
+                            && !hits.iter().any(inside)
+                            && hits.iter().all(sibling)
+                        {
                             let local = format!("{prefix}{path}");
-                            let found = resolve_glob(&local, file_index, &[]);
+                            let found = dedupe(&local, resolve_glob(&local, file_index, prefixes));
                             if !found.is_empty() {
-                                return (
-                                    local,
-                                    found.into_iter().filter(|loc| loc.fi != fi).collect(),
-                                );
+                                return (local, found);
                             }
                         }
                         (path, hits)
