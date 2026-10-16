@@ -44,11 +44,7 @@ impl PipelineStage for OutputStage {
             .unwrap_or_default();
 
         let mut query_result = input.query_result;
-        let pagination = Some(crate::types::paginate(
-            &mut query_result,
-            &compiled.input,
-            &compiled.pagination,
-        ));
+        let pagination = Some(crate::types::paginate(&mut query_result, &compiled.input));
 
         Ok(PipelineOutput {
             row_count: query_result.authorized_count(),

@@ -1,0 +1,10 @@
+description: SKIP 0 keeps the tie-breaker order of later windows without emitting an OFFSET
+
+query:
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 2
+
+expect:
+  compile_only: true
+  sql_contains: ["ORDER BY u.id ASC", "LIMIT 3"]
+  sql_not_contains: ["OFFSET"]

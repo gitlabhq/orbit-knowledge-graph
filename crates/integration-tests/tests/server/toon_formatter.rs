@@ -153,23 +153,6 @@ async fn toon_and_raw_agree_on_node_and_edge_counts(ctx: &TestContext) {
     );
 }
 
-async fn pagination_cursor_pages_forward(ctx: &TestContext) {
-    let json = r#"{"query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}}"#;
-    let page1 = toon(&run_pipeline(ctx, json).await);
-    assert_eq!(page1["pagination"]["has_more"], true);
-    assert_eq!(page1["pagination"]["truncated"], true);
-    let after = page1["pagination"]["next_cursor"].as_str().unwrap();
-
-    let mut next: Value = serde_json::from_str(json).unwrap();
-    next["cursor"]["after"] = json!(after);
-    let page2 = toon(&run_pipeline(ctx, &next.to_string()).await);
-    assert_eq!(page2["nodes"]["User"][0]["username"], "unicode");
-    assert_eq!(page2["pagination"]["has_more"], false);
-}
-
 async fn empty_result_omits_nodes_and_edges(ctx: &TestContext) {
     let output = run_pipeline(ctx, r#"{"query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
@@ -285,7 +268,6 @@ async fn toon_formatter_e2e() {
         format_stamped_returns_toon_name_and_version,
         traversal_groups_nodes_by_type_into_tables,
         toon_and_raw_agree_on_node_and_edge_counts,
-        pagination_cursor_pages_forward,
         empty_result_omits_nodes_and_edges,
         strings_and_booleans_round_trip,
         path_edges_carry_path_and_step,

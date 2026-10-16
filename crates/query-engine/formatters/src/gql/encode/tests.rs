@@ -52,7 +52,6 @@ fn output(
             },
             hydration: HydrationPlan::None,
             input,
-            pagination: Default::default(),
             has_virtual_columns: false,
         }),
         query_result,
@@ -117,11 +116,10 @@ fn empty_results_keep_the_header_and_report_more_pages() {
     let page = PaginationMeta {
         has_more: true,
         truncated: true,
-        next_cursor: Some("abc".into()),
     };
     assert_eq!(
         render(&cells(&["n"]), &[], Some(&page)),
-        "+---+\n| n |\n+---+\n+---+\n\n0 rows, more available\nnext_cursor: \"abc\"\n"
+        "+---+\n| n |\n+---+\n+---+\n\n0 rows, more available\n"
     );
     assert!(render(&cells(&["n"]), &[cells(&["1"])], None).ends_with("\n1 row\n"));
 }
@@ -152,7 +150,6 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
     let page = PaginationMeta {
         has_more: true,
         truncated: true,
-        next_cursor: Some("abc".into()),
     };
     let output = output(
         json!({"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}, {"id": "g", "entity": "Group"}]}),
@@ -175,8 +172,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
          | (:User {id: 1, username: \"root\"}) | (:Group {id: 22}) |\n\
          +-------------------------------------------------------+\n\
          \n\
-         2 rows, more available\n\
-         next_cursor: \"abc\"\n"
+         2 rows, more available\n"
     );
 }
 

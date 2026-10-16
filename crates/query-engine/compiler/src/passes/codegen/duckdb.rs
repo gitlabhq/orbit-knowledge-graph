@@ -206,6 +206,10 @@ impl Context {
             parts.push(format!("LIMIT {limit}"));
         }
 
+        if include_limit && let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
+        }
+
         Ok(parts.join(" "))
     }
 

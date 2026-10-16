@@ -1,4 +1,4 @@
-description: Cursor with redaction pages through only authorized users
+description: SKIP counts redacted rows, so pages shrink instead of shifting and cover only authorized users
 
 config:
   redaction:
@@ -8,16 +8,8 @@ config:
       user: [2, 4, 6, 7]
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                 "columns": ["username"]}],
-      "order_by": "u.id",
-      "cursor": {"page_size": 2}
-    }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id SKIP 0 LIMIT 2
 
 expect:
   all_pages:

@@ -8,10 +8,10 @@ use query_engine::compiler::{CompiledQueryContext, Frontend, compile_local, gene
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::shared::PipelineOutput;
 
-use super::pagination::{PageCollection, next_page, with_after, without_cursor};
+use super::pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
 use super::{
-    assert_compilation, assert_cursor, assert_output, assert_repeated_response, pipeline_output,
-    read_scenarios, repeat_count, seed_preset, validate_response,
+    assert_compilation, assert_output, assert_pagination, assert_repeated_response,
+    pipeline_output, read_scenarios, repeat_count, seed_preset, validate_response,
 };
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Seed, discover};
@@ -63,11 +63,10 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
                 continue;
             }
             let mut collected = PageCollection::default();
-            let mut page_query = query.clone();
             for (index, page_expect) in expect.pages.iter().enumerate() {
                 let page_label = format!("{label} page {}", index + 1);
                 let compiled = Arc::new(
-                    compile_local(&page_query, frontend, &ontology)
+                    compile_local(&page_query(frontend, query, index), frontend, &ontology)
                         .unwrap_or_else(|error| panic!("{page_label}: compile failed: {error}")),
                 );
                 let output = execute(&database, &compiled, &page_label);
@@ -75,20 +74,18 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
                 let response =
                     serde_json::from_value(response).expect("response should deserialize");
                 collected.push(&response);
-                if let Some(token) = next_page(&response, index, expect.pages.len(), &page_label) {
-                    page_query = with_after(frontend, query, &token);
-                }
+                assert_page_bounds(&response, index, expect.pages.len(), &page_label);
             }
             if let Some(all_pages) = &expect.all_pages {
                 collected.assert_expect(all_pages, &label);
                 if all_pages.matches_unpaginated {
-                    let query = without_cursor(frontend, query);
+                    let query = unpaginated(frontend, query);
                     let compiled =
                         Arc::new(compile_local(&query, frontend, &ontology).unwrap_or_else(
                             |error| panic!("{label}: unpaginated compile failed: {error}"),
                         ));
                     let output = execute(&database, &compiled, &label);
-                    assert_cursor(&output, &label);
+                    assert_pagination(&output, &label);
                     let response =
                         validate_response(&compiled.input, GraphFormatter.format(&output), &label);
                     collected.assert_matches(&response, &label);

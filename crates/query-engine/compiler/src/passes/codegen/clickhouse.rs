@@ -186,7 +186,10 @@ impl Context {
         // unparenthesized UNION ALL, not the whole union. Wrap so they apply
         // to the combined result.
         if !q.union_all.is_empty()
-            && (q.limit.is_some() || q.limit_by.is_some() || !q.order_by.is_empty())
+            && (q.limit.is_some()
+                || q.offset.is_some()
+                || q.limit_by.is_some()
+                || !q.order_by.is_empty())
         {
             let body = std::mem::take(&mut parts).join(" ");
             parts.push(format!("SELECT * FROM ({body})"));
@@ -211,6 +214,10 @@ impl Context {
 
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
+        }
+
+        if let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
         }
 
         Ok(parts.join(" "))

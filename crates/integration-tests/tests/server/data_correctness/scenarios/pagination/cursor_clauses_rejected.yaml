@@ -1,0 +1,8 @@
+description: The removed PAGE ... AFTER cursor clauses no longer parse
+
+query:
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER 'token'
+
+expect:
+  compile_error: "expected end of query, SKIP, LIMIT, or DEBUG"

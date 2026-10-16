@@ -23,8 +23,6 @@ pub struct ProfilerOutput {
 pub struct PaginationInfo {
     pub has_more: bool,
     pub truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -127,7 +125,6 @@ pub fn build_output(
         pagination: output.pagination.as_ref().map(|p| PaginationInfo {
             has_more: p.has_more,
             truncated: p.truncated,
-            next_cursor: p.next_cursor.clone(),
         }),
         instance_health,
         response,

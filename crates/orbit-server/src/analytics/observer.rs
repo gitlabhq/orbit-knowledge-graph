@@ -215,7 +215,6 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            pagination: Default::default(),
             has_virtual_columns: false,
         });
         obs.compiled(Duration::from_millis(5));

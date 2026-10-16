@@ -291,11 +291,8 @@ fn render(columns: &[String], rows: &[Vec<String>], page: Option<&PaginationMeta
         "{border}\n\n{count} row{}",
         if count == 1 { "" } else { "s" }
     );
-    if let Some(page) = page.filter(|page| page.has_more) {
+    if page.is_some_and(|page| page.has_more) {
         out += ", more available";
-        if let Some(cursor) = &page.next_cursor {
-            let _ = write!(out, "\nnext_cursor: {}", quote_escaped(cursor));
-        }
     }
     out + "\n"
 }

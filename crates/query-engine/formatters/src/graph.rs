@@ -97,9 +97,6 @@ pub struct GroupColumnDescriptor {
 pub struct PaginationResponse {
     pub has_more: bool,
     pub truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "testutils", serde(default))]
-    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,7 +223,6 @@ impl GraphFormatter {
         let pagination = output.pagination.as_ref().map(|p| PaginationResponse {
             has_more: p.has_more,
             truncated: p.truncated,
-            next_cursor: p.next_cursor.clone(),
         });
 
         GraphResponse {
@@ -679,7 +675,6 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
-                pagination: Default::default(),
                 has_virtual_columns: false,
             }),
             query_result: qr,
@@ -732,7 +727,6 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
-                pagination: Default::default(),
                 has_virtual_columns: false,
             }),
             query_result: qr,
@@ -923,7 +917,6 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
-                pagination: Default::default(),
                 has_virtual_columns: false,
             }),
             query_result: qr,
@@ -1055,7 +1048,6 @@ mod tests {
                     "limit": 5
                 }))
                 .unwrap(),
-                pagination: Default::default(),
                 has_virtual_columns: false,
             }),
             query_result: qr,
@@ -1153,7 +1145,6 @@ mod tests {
                     "limit": 5
                 }))
                 .unwrap(),
-                pagination: Default::default(),
                 has_virtual_columns: false,
             }),
             query_result: qr,

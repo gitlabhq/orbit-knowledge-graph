@@ -135,7 +135,6 @@ fn apply_metrics(
         q.node_count = Some(input.nodes.len() as i64);
         q.relationship_count = Some(input.relationships.len() as i64);
         q.is_search = Some(input.is_search());
-        q.has_cursor = Some(input.cursor.is_some());
         q.has_order_by = Some(input.order_by.is_some());
         q.limit = Some(input.limit as i64);
         q.group_by_count = Some(input.aggregation.group_by.len() as i64);

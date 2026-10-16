@@ -134,11 +134,8 @@ fn exact_null_and_string_properties_do_not_accept_missing_or_other_types() {
 }
 
 #[test]
-fn pages_check_exhaustion_and_global_node_order_on_both_frontends() {
-    let query = json!({
-        "json": json!({"query_type": "traversal", "nodes": [{"id": "d", "entity": "Definition", "columns": ["name"]}], "order_by": "d.id", "cursor": {"page_size": 2}}).to_string(),
-        "gql": "MATCH (d:Definition) RETURN d.name ORDER BY d.id PAGE 2",
-    });
+fn pages_check_exhaustion_and_global_node_order() {
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name ORDER BY d.id SKIP 0 LIMIT 2"});
     let pages = "pages:\n  - {node_count: 2, nodes: {Definition: {order: [1, 2]}}}\n  - {node_count: 2, nodes: {Definition: {order: [3, 4]}}}";
     run_suite(
         query.clone(),
@@ -160,7 +157,7 @@ fn pages_check_exhaustion_and_global_node_order_on_both_frontends() {
 
 #[test]
 fn page_uniqueness_checks_group_nodes_and_typed_edges() {
-    let grouped = json!({"gql": "MATCH (d:Definition {id: 2})-[:CALLS]->(t:Definition) RETURN d, t, count(t) AS total PAGE 1"});
+    let grouped = json!({"gql": "MATCH (d:Definition {id: 2})-[:CALLS]->(t:Definition) RETURN d, t, count(t) AS total SKIP 0 LIMIT 1"});
     let pages = "pages:\n  - {groups: {d: {entity: Definition, ids: [2], count: 1}, t: {entity: Definition, ids: [3]}}}\n  - {groups: {d: {entity: Definition, ids: [2], count: 1}, t: {entity: Definition, ids: [4]}}}";
     run_suite(
         grouped.clone(),
@@ -172,7 +169,7 @@ fn page_uniqueness_checks_group_nodes_and_typed_edges() {
         "duplicate d:Definition IDs",
     );
 
-    let traversal = json!({"gql": "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a.name, b.name, c.name PAGE 1"});
+    let traversal = json!({"gql": "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a.name, b.name, c.name SKIP 0 LIMIT 1"});
     let pages = "pages:\n  - {node_count: 3, nodes: {Definition: {ids: [1, 2, 3]}}, edges: {CALLS: [[1, 2], [2, 3]]}}\n  - {node_count: 3, nodes: {Definition: {ids: [1, 2, 4]}}, edges: {CALLS: [[1, 2], [2, 4]]}}";
     run_suite(
         traversal.clone(),
@@ -253,7 +250,7 @@ fn repeated_nodes_preserve_order_within_each_entity_type() {
 
 #[test]
 fn page_expectations_reject_fields_that_are_not_executed() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name PAGE 2"});
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.name SKIP 0 LIMIT 2"});
     for field in [
         "repeat_count: 2",
         "sql_contains: [SELECT]",
@@ -396,47 +393,8 @@ fn numeric_metric_assertions_reject_numeric_strings() {
 }
 
 #[test]
-fn full_result_comparison_rejects_missing_groups_even_when_page_counts_match() {
-    let mut query = json!({
-        "query_type": "aggregation",
-        "nodes": [{"id": "d", "entity": "Definition"}],
-        "group_by": ["d.name"],
-        "aggregations": [{"count": "d", "as": "total"}],
-        "cursor": {"page_size": 3},
-    });
-    let compiled = query_engine::compiler::compile_local(
-        &query.to_string(),
-        query_engine::compiler::Frontend::JsonDsl,
-        &std::sync::Arc::new(crate::load_unprefixed_ontology()),
-    )
-    .unwrap();
-    let hash = compiled.pagination.query_hash;
-    query["cursor"]["after"] = Value::String(query_engine::compiler::passes::cursor::encode(
-        hash,
-        &[Some("alpha".into())],
-    ));
-    let query = json!({"json": query.to_string()});
-    let pages =
-        "pages: [{row_count: 3, row_values: [{d_name: beta}, {d_name: delta}, {d_name: gamma}]}]";
-    run_suite(
-        query.clone(),
-        &format!("{pages}\nall_pages: {{page_count: 1, no_duplicate_ids: true}}"),
-    );
-    rejects(
-        query,
-        &format!("{pages}\nall_pages: {{matches_unpaginated: true}}"),
-        "paginated grouped rows differ from unpaginated result",
-    );
-}
-
-#[test]
 fn path_pages_compare_complete_signatures_against_unpaginated_output() {
-    let query = json!({"json": json!({
-        "query_type": "path_finding",
-        "nodes": [{"id": "source", "entity": "Definition", "node_ids": [1]}, {"id": "destination", "entity": "Definition", "node_ids": [3, 4]}],
-        "path": {"type": "shortest", "from": "source", "to": "destination", "max_depth": 3, "rel_types": ["CALLS"]},
-        "cursor": {"page_size": 1},
-    }).to_string()});
+    let query = json!({"gql": "MATCH path = ANY SHORTEST (source:Definition {id: 1})-[:CALLS*1..3]->(destination:Definition) WHERE destination.id IN [3, 4] RETURN path SKIP 0 LIMIT 1"});
     run_suite(
         query,
         "pages:\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [3]}}\n  - {node_count: 3, path_count: 1, path_destinations: {Definition: [4]}}\nall_pages: {matches_unpaginated: true, edge_count: 3}",
