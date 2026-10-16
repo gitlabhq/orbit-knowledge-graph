@@ -377,6 +377,15 @@
         ],
         "query": "gprd,gstg",
         "type": "custom"
+      },
+      {
+        "hide": 2,
+        "label": "Rails datasource",
+        "name": "RAILS_DS",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "/^Mimir - Gitlab ${rails_env}$/i",
+        "type": "datasource"
       }
     ]
   },
