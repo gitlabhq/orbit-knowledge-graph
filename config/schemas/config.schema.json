@@ -1324,14 +1324,6 @@
           "format": "uint32",
           "minimum": 0,
           "writeOnly": true
-        },
-        "materialized_ctes_enabled": {
-          "description": "Materialize CTEs that a query references more than once (ClickHouse 26.3+).\nExcluded from ClickHouse SETTINGS (app-level only).",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "writeOnly": true
         }
       },
       "additionalProperties": false

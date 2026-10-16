@@ -315,6 +315,57 @@ fn path_finding_query() {
 }
 
 #[test]
+fn shared_ctes_materialize_and_single_reference_ctes_do_not() {
+    let ontology = crate::compiler::setup::embedded_ontology();
+    let shared = compile_pair(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "a", "entity": "Definition", "node_ids": [12000], "columns": ["id"]},
+                {"id": "b", "entity": "Definition", "filters": {"name": "helper"}, "columns": ["id"]},
+                {"id": "c", "entity": "Definition", "columns": ["id"]}
+            ],
+            "relationships": [
+                {"type": "CALLS", "from": "a", "to": "b"},
+                {"type": "CALLS", "from": "b", "to": "c"}
+            ]
+        }"#,
+        "MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition {name: 'helper'})-[:CALLS]->(c:Definition) RETURN a.id, b.id, c.id",
+        &ontology,
+        &test_ctx(),
+    )
+    .unwrap()
+    .base
+    .sql;
+    assert_eq!(shared.matches("FROM _filter_b)").count(), 2, "{shared}");
+    assert!(shared.contains("_filter_b AS MATERIALIZED ("), "{shared}");
+    assert!(shared.contains("enable_materialized_cte = 1"), "{shared}");
+
+    let single = compile_pair(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"iid": 1}},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+            "limit": 10
+        }"#,
+        "MATCH (mr:MergeRequest {iid: 1})-[:HAS_NOTE]->(n:Note) RETURN mr, n LIMIT 10",
+        &ontology,
+        &test_ctx(),
+    )
+    .unwrap()
+    .base
+    .sql;
+    assert!(
+        single.contains("_filter_mr AS (") && !single.contains("MATERIALIZED"),
+        "{single}"
+    );
+    assert!(!single.contains("enable_materialized_cte"), "{single}");
+}
+
+#[test]
 fn path_finding_depth_control() {
     let shallow = r#"{
         "query_type": "path_finding",

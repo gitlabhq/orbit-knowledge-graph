@@ -432,9 +432,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
 
     let mut node = require(ctx.take_node(), "node")?;
     if let Node::Query(q) = &mut node {
-        if config.materialized_ctes_enabled == Some(true) {
-            settings::materialize_shared_ctes(q)?;
-        }
+        settings::materialize_shared_ctes(q)?;
         let derived = &mut config.compiler_derived;
         derived.null_in_is_unknown = input.has_negation();
         visit_queries(q, &mut |query| {

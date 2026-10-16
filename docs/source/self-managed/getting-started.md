@@ -33,7 +33,7 @@ The remaining setup steps require all three systems to exist and be reachable.
 - GitLab 19.2.2 or later.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
-- ClickHouse 26.2 or later, set up for GitLab.
+- ClickHouse 26.4 or later, set up for GitLab.
 - Kubernetes 1.33 or later.
 - NATS with JetStream turned on.
 
@@ -52,10 +52,9 @@ Steps 1 to 3 do not depend on GitLab Orbit. You can verify each one on its own.
 
 ## ClickHouse
 
-GitLab Orbit requires ClickHouse 26.2 or later, because the graph uses full-text indexes introduced in that
-release. GitLab supports any 25.x or 26.x release, so a 25.x release serves the rest of GitLab but not GitLab
-Orbit. Materialized common table expressions need ClickHouse 26.4 or later. GitLab Orbit uses them only when
-`query.default.materialized_ctes_enabled` is on. All other GitLab requirements for ClickHouse are unchanged.
+GitLab Orbit requires ClickHouse 26.4 or later, because the graph uses full-text indexes and materialized
+common table expressions. GitLab supports any 25.x or 26.x release, so an older release serves the rest of
+GitLab but not GitLab Orbit. All other GitLab requirements for ClickHouse are unchanged.
 
 Set up ClickHouse for GitLab first. For more information, see
 [ClickHouse](https://docs.gitlab.com/integration/clickhouse/). Complete every step on that page, including
