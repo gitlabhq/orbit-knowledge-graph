@@ -166,13 +166,11 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     }
 }
 
-/// A callee text that can match an imported name: a plain name or a path,
-/// not a call, an index, a dereference or a template.
 pub fn is_name_text(text: &str) -> bool {
     !text.is_empty()
         && !text
             .chars()
-            .any(|c| c.is_whitespace() || "()[]{}<>*&,;'\"=+/%^|~#".contains(c))
+            .any(|c| c.is_whitespace() || "()[]{}<>*&,;'\"=+/%^|~".contains(c))
 }
 
 pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<u32> {
