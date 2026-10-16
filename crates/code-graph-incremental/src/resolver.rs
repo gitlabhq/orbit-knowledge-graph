@@ -1353,7 +1353,8 @@ fn wildcard_uses<'a>(
             }
         }
         let headers = from.children_of(C::SuperType).chain(
-            from.children_of(C::Decorator)
+            from.children()
+                .filter(|c| c.is(C::Decorator))
                 .filter_map(|dec| dec.decorator_head()),
         );
         for target in headers.filter_map(|h| chain(ctx, h, &root)) {
@@ -1945,7 +1946,8 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
         };
         if node.is(C::Def) {
             for dec in node
-                .children_of(C::Decorator)
+                .children()
+                .filter(|c| c.is(C::Decorator))
                 .filter_map(|dec| dec.decorator_head())
             {
                 match resolve_chain(ctx, dec) {
