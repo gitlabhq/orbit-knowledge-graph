@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Lefthook entry point for comment_check.py.
 #
 # Only the checker's "comments flagged" exit code (3) blocks the commit. uv or
