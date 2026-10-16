@@ -1493,6 +1493,7 @@ e2e:
         tail -3 e2e-image-build.log
       fi
     - bash e2e/scripts/test.sh
+    - bash e2e/scripts/reindex.sh
   after_script:
     - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"

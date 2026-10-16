@@ -18,6 +18,7 @@ pub enum Mode {
     DispatchIndexing,
     HealthCheck,
     Indexer,
+    Reindex,
     Webserver,
 }
 
@@ -29,6 +30,7 @@ impl Mode {
             Self::DispatchIndexing => "gkg-dispatcher",
             Self::HealthCheck => "gkg-healthcheck",
             Self::ClickhouseSetup => "gkg-clickhouse-setup",
+            Self::Reindex => "gkg-reindex",
         }
     }
 }

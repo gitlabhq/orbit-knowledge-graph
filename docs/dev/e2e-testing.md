@@ -153,6 +153,19 @@ other suite runs in a parallel worker pool.
   changes, tagged by its content hash. Local runs default to
   `python:3.14-slim` and install Robot Framework at pod startup.
 
+## Reindex check
+
+After the suites pass, `scripts/reindex.sh` runs the reindex operator job the way an operator does.
+It pauses the dispatcher, waits until the indexer queue is empty, and starts the job with
+`kubectl create job --from=cronjob/orbit-reindex`. Before the job, it writes a stale title and a
+phantom work item into the graph. After the dispatcher promotes the schema version again, the
+script compares every graph table in the enabled namespaces with a snapshot from before the job.
+The check passes when the tables match and the corrupted rows are gone.
+
+The e2e datalake replicates only the `main` database, so the script first creates empty datalake
+tables from `fixtures/siphon.sql` for the other sources. Without them, the completion gate never
+opens. The script skips when the Orbit chart has no `operatorJobs`.
+
 ## Setup phases
 
 `setup.sh` runs these steps in sequence:

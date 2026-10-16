@@ -13,7 +13,8 @@ use crate::locking::{LockError, LockGuard, LockService};
 use orbit_migrations::ledger::MigrationLedger;
 use orbit_migrations::version::{
     SCHEMA_VERSION, SchemaVersionError, mark_version_active, mark_version_migrating,
-    promote_version, read_active_version, table_prefix, version_tables_complete,
+    promote_version, read_active_version, read_migrating_version, table_prefix,
+    version_tables_complete,
 };
 
 pub use orbit_migrations::execute::CHECKPOINT_TABLE;
@@ -36,6 +37,11 @@ pub enum DispatcherMigrationError {
 
     #[error("migration lock held by another pod after {seconds}s; giving up")]
     LockTimeout { seconds: u64 },
+
+    #[error(
+        "active schema v{active} is newer than this binary's v{embedded}; deploy v{active} to reindex"
+    )]
+    NewerActiveVersion { active: u32, embedded: u32 },
 }
 
 pub async fn run_if_needed(
@@ -51,6 +57,14 @@ pub async fn run_if_needed(
         .map_err(MigrationError::from)?;
 
     match active {
+        None if read_migrating_version(graph).await? == Some(*SCHEMA_VERSION) => {
+            info!(
+                version = *SCHEMA_VERSION,
+                "reindex in progress — leaving promotion to the completion checker"
+            );
+            campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
+            metrics.record("complete", "reindex_resumed");
+        }
         None => {
             info!(
                 version = *SCHEMA_VERSION,
@@ -109,6 +123,54 @@ pub async fn run_if_needed(
         }
     }
 
+    Ok(())
+}
+
+pub async fn reset_for_reindex(
+    graph: &ArrowClickHouseClient,
+    credentials: &DictionaryCredentials,
+    lock_service: &Arc<dyn LockService>,
+    ontology: &ontology::Ontology,
+    metrics: &MigrationMetrics,
+) -> Result<(), DispatcherMigrationError> {
+    let schema = GraphSchema::from_ontology_replicated(ontology, graph.is_replicated())
+        .map_err(MigrationError::from)?;
+    let guard = acquire_migration_lock(lock_service, metrics).await?;
+    let result = rebuild_empty_version(graph, credentials, &schema, &guard).await;
+    let _ = guard.release().await;
+    result
+}
+
+// Marking migrating before the drop means a crash at any later step leaves no
+// active version, so nothing serves or promotes a half-emptied table set.
+async fn rebuild_empty_version(
+    graph: &ArrowClickHouseClient,
+    credentials: &DictionaryCredentials,
+    schema: &GraphSchema,
+    guard: &LockGuard,
+) -> Result<(), DispatcherMigrationError> {
+    if let Some(active) = read_active_version(graph).await?
+        && active > *SCHEMA_VERSION
+    {
+        return Err(DispatcherMigrationError::NewerActiveVersion {
+            active,
+            embedded: *SCHEMA_VERSION,
+        });
+    }
+
+    warn!(
+        version = *SCHEMA_VERSION,
+        "reindex requested — emptying every table of this version"
+    );
+    mark_version_migrating(graph, *SCHEMA_VERSION).await?;
+    execute::drop_all_version_entities(graph, *SCHEMA_VERSION).await?;
+    guard.renew(MIGRATION_LOCK_TTL).await?;
+    let prefix = table_prefix(*SCHEMA_VERSION);
+    execute::create_all_versioned_tables(graph, schema, credentials, &prefix).await?;
+    info!(
+        version = *SCHEMA_VERSION,
+        "reindex reset complete — the dispatcher backfills and promotes once the completion gate passes"
+    );
     Ok(())
 }
 

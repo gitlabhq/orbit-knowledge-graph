@@ -1015,3 +1015,67 @@ async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() 
         .expect("reconciler task panicked")
         .expect("reconciler run returned an error");
 }
+
+#[tokio::test]
+async fn unfinished_messages_counts_queued_and_unacknowledged_work() {
+    use async_nats::jetstream::consumer::pull;
+
+    let (_container, url) = start_nats_container().await;
+    let client = nats_client::NatsClient::connect(&default_config(&url))
+        .await
+        .expect("connect");
+    let stream = client
+        .create_or_update_stream(
+            "unfinished",
+            vec!["unfinished.>".into()],
+            None,
+            nats_client::SubjectDedup::KeepAll,
+        )
+        .await
+        .expect("create stream");
+    for subject in ["unfinished.a", "unfinished.b"] {
+        client
+            .jetstream()
+            .publish(subject, Bytes::from_static(b"{}"))
+            .await
+            .expect("publish")
+            .await
+            .expect("publish ack");
+    }
+    let consumer = stream
+        .create_consumer(pull::Config {
+            durable_name: Some("worker".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("create consumer");
+    let mut batch = consumer
+        .fetch()
+        .max_messages(1)
+        .messages()
+        .await
+        .expect("fetch");
+    let in_flight = batch.next().await.expect("one message").expect("message");
+
+    assert_eq!(
+        client
+            .unfinished_messages("unfinished")
+            .await
+            .expect("count"),
+        2
+    );
+
+    in_flight.ack().await.expect("ack");
+    let settled = tokio::time::timeout(RECEIVE_TIMEOUT, async {
+        while client
+            .unfinished_messages("unfinished")
+            .await
+            .expect("count")
+            != 1
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(settled.is_ok(), "an acknowledged message is finished");
+}

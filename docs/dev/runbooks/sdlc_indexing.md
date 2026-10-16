@@ -150,23 +150,44 @@ DELETE WHERE key LIKE 'global.%';
 
 ### Full reindex (all namespaces, all entities)
 
-1. Truncate graph tables:
+Use the `reindex` operator job. Do not truncate the tables of the active version: queries read
+from them. The job empties every table of the running schema version and the dispatcher promotes
+the version again when the rebuild completes. Queries return `unavailable` until then. See
+[Rebuilding the running version](../../design-documents/schema_management.md#rebuilding-the-running-version).
 
-   ```sql
-   SELECT 'TRUNCATE TABLE `<gkg-database>`.' || name || ';'
-   FROM system.tables
-   WHERE database = '<gkg-database>';
+Set `operatorJobs.reindex.enabled: true` in the Helm values, then:
+
+1. Pause the dispatcher, so that no new indexing requests arrive:
+
+   ```shell
+   kubectl -n <namespace> scale deployment <release>-dispatcher --replicas=0
    ```
 
-   Run the generated statements.
+2. Let the indexers drain the indexer stream. Keep the indexers running. Wait until the stream has
+   no messages:
 
-2. Clear all checkpoints:
-
-   ```sql
-   TRUNCATE TABLE `<gkg-database>`.checkpoint;
+   ```shell
+   nats stream info GKG_INDEXER_V<release> --json | jq .state.messages
    ```
 
-3. Trigger the dispatcher to re-publish all requests.
+3. Start the job and wait for it to complete:
+
+   ```shell
+   kubectl -n <namespace> create job --from=cronjob/<release>-reindex <release>-reindex-$(date +%s)
+   kubectl -n <namespace> wait --for=condition=complete job/<release>-reindex-<timestamp> --timeout=15m
+   ```
+
+   The job fails if the indexer stream still has messages. Wait for the indexers to drain it, then
+   start a new job.
+
+4. Resume the dispatcher:
+
+   ```shell
+   kubectl -n <namespace> scale deployment <release>-dispatcher --replicas=1
+   ```
+
+5. Monitor the rebuild with `gkg_schema_version`. The version changes from `migrating` to
+   `active` when every enabled namespace is indexed.
 
 ### Replay from a specific point in time
 

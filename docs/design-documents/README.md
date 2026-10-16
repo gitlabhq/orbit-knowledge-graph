@@ -6,7 +6,7 @@ This repository implements both Orbit Remote and Orbit Local. They share the Rus
 
 Today, the repository includes the following major components:
 
-- Orbit Remote's `gkg-server` binary, which runs in five modes: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`, and `ClickhouseSetup`.
+- Orbit Remote's `gkg-server` binary, which runs in six modes: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`, `ClickhouseSetup`, and `Reindex`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
 - Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [Orbit query frontend](querying/orbit_query_frontend.md) compiles it into parameterized ClickHouse SQL.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
@@ -30,6 +30,7 @@ A secure query layer on top of the graph lets developers and AI agents query tha
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle, including ontology archive publication.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
   - **`ClickhouseSetup`** (`gkg-server --mode clickhouse-setup`): Runs once as a ClickHouse administrator before install and upgrade. It applies `config/clickhouse-setup.sql`, which creates the graph database, the Orbit users, their roles, and their grants, and then exits.
+  - **`Reindex`** (`gkg-server --mode reindex`): Runs once when an operator starts it. It empties every graph table of the running schema version, so the dispatcher rebuilds the graph from the datalake. See [Rebuilding the running version](schema_management.md#rebuilding-the-running-version).
 - **The `orbit` CLI**, which exposes one flat command tree. Local commands parse repositories, store code graphs in DuckDB, accept read-only DuckDB SQL, and serve MCP tools over stdio; hosted commands query Orbit Remote. `glab orbit` installs and runs this binary.
 - **UI and product experiences**, which consume Orbit Remote through GitLab APIs and the GitLab Duo Agent Platform.
 

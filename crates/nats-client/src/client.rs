@@ -176,6 +176,17 @@ impl NatsClient {
         Ok(stream)
     }
 
+    /// Queued plus in-flight messages: streams here use WorkQueue retention, which
+    /// removes a message only when a consumer acknowledges it.
+    pub async fn unfinished_messages(&self, stream_name: &str) -> Result<u64, NatsError> {
+        let mut stream = self.get_stream(stream_name).await?;
+        let info = stream.info().await.map_err(|e| NatsError::StreamInfo {
+            stream: stream_name.to_string(),
+            message: e.to_string(),
+        })?;
+        Ok(info.state.messages)
+    }
+
     pub async fn ensure_kv_bucket_exists(
         &self,
         bucket: &str,

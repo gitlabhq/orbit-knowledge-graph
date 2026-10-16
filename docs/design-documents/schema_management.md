@@ -552,6 +552,32 @@ rollback. Case 1 is cheap and reversible. The newer version's tables are only re
 dropped. So rolling forward again within the retention window is another instant pointer swap.
 Case 2 re-indexes from scratch, at the same cost as a forward migration.
 
+### Rebuilding the running version
+
+Use `gkg-server --mode reindex` when the graph is no longer consistent with the datalake. Examples
+are a datalake failover or a datalake backup restore. A checkpoint reset alone is not sufficient for
+these cases. Rows from the lost timeline stay in the graph, and `ReplacingMergeTree` can keep a stale
+row that has a higher `_version`.
+
+The mode takes the migration lock and marks `v<SCHEMA_VERSION>` `migrating`. Then it drops every
+`v<SCHEMA_VERSION>_*` object and creates the table set again with no data. It removes the
+`active_version` mirror, so the webserver returns `unavailable` until promotion. After the mode exits,
+the dispatcher sweeps every enabled namespace from an empty checkpoint table.
+`MigrationCompletionChecker` promotes the version when the completion gate passes. The ledger has no
+entries for early versions, so the scope from no active version is always full.
+
+The version is marked `migrating` before the drop, so a failed run leaves no active version. Run the
+job again to finish the reset. While no version is active and the embedded version is `migrating`, a
+dispatcher restart keeps the version `migrating`. It does not take the fresh-install path, which
+would activate the version and skip the completion gate.
+
+The mode does not run while the indexer stream has messages. A handler that read its checkpoint
+before the reset would write that checkpoint into the empty table, and a partial pass would count
+as complete. The stream has WorkQueue retention, so its message count includes queued and
+unacknowledged messages. Pause the dispatcher, so that no new messages arrive, and let the indexers
+drain the stream before the run. The indexers can keep running: an idle indexer has nothing to
+pull. The Helm chart ships the mode as a suspended CronJob (`operatorJobs.reindex`).
+
 ### Configuration
 
 The migration completion checker runs every minute by default:

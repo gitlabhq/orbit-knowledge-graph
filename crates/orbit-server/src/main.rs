@@ -87,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
+        Mode::Reindex => orbit_server::reindex::run(&config, &ontology).await,
         Mode::DispatchIndexing => {
             config.schema.validate()?;
             let archive = ontology::archive::OntologyArchive::from_bytes(

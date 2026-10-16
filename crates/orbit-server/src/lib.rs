@@ -19,6 +19,7 @@ pub mod pipeline;
 pub mod probes;
 pub mod proto;
 pub mod redaction;
+pub mod reindex;
 pub mod shutdown;
 pub mod skills;
 mod status_query;

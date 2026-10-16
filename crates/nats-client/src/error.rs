@@ -69,6 +69,9 @@ pub enum NatsError {
         message: String,
     },
 
+    #[error("stream info failed for '{stream}': {message}")]
+    StreamInfo { stream: String, message: String },
+
     #[error("circuit open for service {service}")]
     CircuitOpen { service: &'static str },
 }
@@ -88,7 +91,8 @@ impl CircuitBreakableError for NatsError {
             | Self::KvPut { .. }
             | Self::KvDelete { .. }
             | Self::KvKeys { .. }
-            | Self::KvWatch { .. } => true,
+            | Self::KvWatch { .. }
+            | Self::StreamInfo { .. } => true,
 
             Self::StreamNotFound { source, .. } => matches!(
                 source.kind(),

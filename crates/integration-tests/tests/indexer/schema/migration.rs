@@ -684,6 +684,178 @@ async fn lock_released_after_rollback_rebuild() {
     );
 }
 
+async fn version_statuses(ctx: &TestContext, version: u32) -> Vec<String> {
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {version}"
+        ))
+        .await;
+    String::extract_column(&result, 0).unwrap()
+}
+
+async fn row_count(ctx: &TestContext, table: &str) -> i64 {
+    let result = ctx
+        .query(&format!("SELECT toInt64(count()) FROM {table}"))
+        .await;
+    i64::extract_column(&result, 0).unwrap()[0]
+}
+
+async fn install_current_version(ctx: &TestContext, ontology: &ontology::Ontology) {
+    migration::run_if_needed(
+        &ctx.create_client(),
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        ontology,
+        &MigrationMetrics::new(),
+        &campaign(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn reindex_empties_every_table_and_waits_for_the_completion_gate() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    install_current_version(&ctx, &ontology).await;
+    let checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    insert_completed_checkpoint(&ctx, &checkpoint, "ns.1.Project", "2026-01-01 00:00:00").await;
+
+    migration::reset_for_reindex(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(read_active_version(&client).await.unwrap(), None);
+    assert_eq!(
+        version_statuses(&ctx, *SCHEMA_VERSION).await,
+        vec!["migrating"]
+    );
+    assert_eq!(row_count(&ctx, &checkpoint).await, 0);
+    let expected = test_schema(&ontology).prefixed_table_names(&table_prefix(*SCHEMA_VERSION));
+    let result = ctx
+        .query("SELECT name FROM system.tables WHERE database = 'test'")
+        .await;
+    let created = String::extract_column(&result, 0).unwrap();
+    for name in &expected {
+        assert!(created.contains(name), "reindex must recreate '{name}'");
+    }
+}
+
+#[tokio::test]
+async fn reindex_on_a_lost_graph_creates_tables_without_activating() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    migration::reset_for_reindex(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(read_active_version(&client).await.unwrap(), None);
+    assert_eq!(
+        version_statuses(&ctx, *SCHEMA_VERSION).await,
+        vec!["migrating"]
+    );
+    let checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    assert_eq!(row_count(&ctx, &checkpoint).await, 0);
+}
+
+#[tokio::test]
+async fn dispatcher_restart_during_reindex_does_not_skip_the_completion_gate() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    install_current_version(&ctx, &ontology).await;
+    migration::reset_for_reindex(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+    )
+    .await
+    .unwrap();
+
+    let campaign = campaign();
+    migration::run_if_needed(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(read_active_version(&client).await.unwrap(), None);
+    assert_eq!(
+        version_statuses(&ctx, *SCHEMA_VERSION).await,
+        vec!["migrating"]
+    );
+    assert_eq!(
+        campaign.current(),
+        Some(indexer::campaign::campaign_id_for_version(*SCHEMA_VERSION))
+    );
+}
+
+#[tokio::test]
+async fn reindex_refuses_when_the_active_version_is_newer_than_the_binary() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    mark_version_active(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let result = migration::reset_for_reindex(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+    )
+    .await;
+
+    assert!(result.is_err());
+    assert_eq!(
+        read_active_version(&client).await.unwrap(),
+        Some(*SCHEMA_VERSION + 1)
+    );
+    assert!(version_statuses(&ctx, *SCHEMA_VERSION).await.is_empty());
+}
+
+#[tokio::test]
+async fn lock_released_after_reindex() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    install_current_version(&ctx, &ontology).await;
+    let mock = Arc::new(MockLockService::new());
+    let lock_svc: Arc<dyn LockService> = mock.clone();
+
+    migration::reset_for_reindex(
+        &client,
+        &dictionary_credentials(&ctx.config),
+        &lock_svc,
+        &ontology,
+        &metrics,
+    )
+    .await
+    .unwrap();
+
+    assert!(!mock.is_held("schema_migration"), "lock should be released");
+}
+
 #[tokio::test]
 async fn read_active_version_returns_none_on_empty_table() {
     let ctx = TestContext::new(&[]).await;

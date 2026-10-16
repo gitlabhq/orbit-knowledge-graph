@@ -210,6 +210,45 @@ pub async fn run(
     result
 }
 
+pub async fn run_reindex_reset(
+    config: &DispatcherConfig,
+    ontology: &ontology::Ontology,
+) -> Result<(), DispatcherError> {
+    let graph = ClickHouseClients::new(&config.graph, &config.datalake).graph;
+    schema::version::init(&graph).await?;
+    let services = orchestrator::scheduled::connect(&config.nats).await?;
+    // A handler that read its checkpoint before the reset would write it into the
+    // emptied table and mark a partial pass as complete.
+    let unfinished = services
+        .nats_client
+        .unfinished_messages(&nats::versioning::NATS_VERSIONER.stream(topic::INDEXER_STREAM))
+        .await?;
+    if unfinished > 0 {
+        return Err(DispatcherError::UnfinishedWork(unfinished));
+    }
+    let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
+    schema::migration::reset_for_reindex(
+        &graph,
+        &dictionary_credentials(config),
+        &services.lock_service,
+        ontology,
+        &schema::metrics::MigrationMetrics::new(),
+    )
+    .await?;
+    catalog.sync_active_version(&graph).await?;
+    Ok(())
+}
+
+fn dictionary_credentials(
+    config: &DispatcherConfig,
+) -> orbit_migrations::schema::DictionaryCredentials {
+    orbit_migrations::schema::DictionaryCredentials {
+        database: config.graph.database.clone(),
+        user: config.graph.username.clone(),
+        password: config.graph.password.clone(),
+    }
+}
+
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     archive: &ontology::archive::OntologyArchive,
@@ -251,14 +290,9 @@ pub async fn run_dispatcher(
 
     let migration_metrics = schema::metrics::MigrationMetrics::new();
     info!("running schema migration check");
-    let dictionary_credentials = orbit_migrations::schema::DictionaryCredentials {
-        database: config.graph.database.clone(),
-        user: config.graph.username.clone(),
-        password: config.graph.password.clone(),
-    };
     schema::migration::run_if_needed(
         &graph,
-        &dictionary_credentials,
+        &dictionary_credentials(config),
         &lock_service,
         &ontology,
         &migration_metrics,

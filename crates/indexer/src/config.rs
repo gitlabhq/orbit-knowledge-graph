@@ -107,4 +107,12 @@ pub enum DispatcherError {
 
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::DispatcherMigrationError),
+
+    #[error("NATS error: {0}")]
+    Nats(#[from] nats_client::NatsError),
+
+    #[error(
+        "{0} indexer messages are not finished; pause the dispatcher, let the indexers drain the queue, then run the reindex again"
+    )]
+    UnfinishedWork(u64),
 }
