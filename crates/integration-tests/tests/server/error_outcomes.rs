@@ -53,6 +53,7 @@ async fn unparsable_datetime_filter_is_a_caller_error() {
         let error = server.run(project_query(filters)).await.unwrap_err();
 
         assert_eq!(error.code, "execution_error");
+        assert!(error.message.contains("filter values"), "{}", error.message);
         server
             .assert_recorded(
                 "execution_error",
@@ -125,6 +126,11 @@ async fn clickhouse_server_memory_limit_is_a_server_error() {
     let error = server.run(project_query(json!({}))).await.unwrap_err();
 
     assert_eq!(error.code, "execution_error");
+    assert!(
+        error.message.contains("too much memory"),
+        "{}",
+        error.message
+    );
     server
         .assert_recorded(
             "execution_error",
@@ -205,22 +211,25 @@ async fn dropping_the_call_during_redaction_is_a_caller_error() {
 async fn content_for_more_rows_than_the_resolver_cap_is_a_caller_error() {
     let mut server = Server::start().await;
 
-    let error = server
-        .run(file_content_query(RESOLVER_CAP + 1))
-        .await
-        .unwrap_err();
+    let over_cap = RESOLVER_CAP + 1;
+    for paging in [
+        json!({"limit": over_cap}),
+        json!({"cursor": {"page_size": over_cap}}),
+    ] {
+        let error = server.run(file_content_query(paging)).await.unwrap_err();
 
-    assert_eq!(error.code, "compile_error");
-    assert!(
-        error
-            .message
-            .contains(&format!("at most {RESOLVER_CAP} rows")),
-        "{}",
-        error.message
-    );
-    server
-        .assert_recorded("compile_error", "caller_error", Some("limit"))
-        .await;
+        assert_eq!(error.code, "compile_error");
+        assert!(
+            error
+                .message
+                .contains(&format!("at most {RESOLVER_CAP} rows")),
+            "{}",
+            error.message
+        );
+        server
+            .assert_recorded("compile_error", "caller_error", Some("limit"))
+            .await;
+    }
 }
 
 // Hydration resolves every pinned node_id regardless of limit, so 4 rows reach the resolver.
@@ -230,7 +239,7 @@ async fn content_batch_over_the_cap_with_limit_at_the_cap_is_a_server_error() {
     let mut server = Server::start().await;
 
     let error = server
-        .run(file_content_query(RESOLVER_CAP))
+        .run(file_content_query(json!({"limit": RESOLVER_CAP})))
         .await
         .unwrap_err();
 
@@ -436,12 +445,16 @@ fn project_query(filters: Value) -> ExecuteQueryRequest {
     }))
 }
 
-fn file_content_query(limit: usize) -> ExecuteQueryRequest {
-    request(json!({
+fn file_content_query(paging: Value) -> ExecuteQueryRequest {
+    let mut query = json!({
         "query_type": "traversal",
         "nodes": [{
             "id": "f", "entity": "File", "node_ids": [5001, 5002, 5003, 5004], "columns": ["path", "content"]
-        }],
-        "limit": limit
-    }))
+        }]
+    });
+    query
+        .as_object_mut()
+        .unwrap()
+        .extend(paging.as_object().unwrap().clone());
+    request(query)
 }
