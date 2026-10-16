@@ -53,7 +53,8 @@ async fn keyset_paging() {
     run_subtests!(
         &ctx,
         keyset_paging::agent_sessions_page_by_sort_key_without_skips_or_duplicates,
-        keyset_paging::agent_sessions_resume_from_a_rfc3339_checkpoint_cursor,
+        keyset_paging::agent_sessions_resume_from_a_saved_cursor,
+        keyset_paging::agent_sessions_restart_when_the_saved_cursor_has_the_old_sort_key_arity,
     );
 }
 

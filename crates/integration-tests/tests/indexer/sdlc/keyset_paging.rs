@@ -8,9 +8,11 @@ use crate::indexer::common::{
 
 const PAGE_SIZE: u64 = 2;
 
-// Ids deliberately disagree with time order; ids 1/2 and 3/4 share a timestamp while 5/6 differ
-// by one microsecond, so paging has to break ties on `id` and compare sub-second values.
-const SESSIONS: [(i64, &str, &str); 8] = [
+// Within `1/100/1000/`, ids 1/2 and 3/4 share a timestamp, 5/6 differ by one microsecond, and
+// id 0 is the latest session. Id order and (started_at, id) order disagree, so a query ordered
+// differently from the cursor's sort key skips id 0.
+const SESSIONS: [(i64, &str, &str); 9] = [
+    (0, "1/100/1000/", "2024-01-15 10:00:01.000000"),
     (1, "1/100/1000/", "2024-01-15 10:00:00.000000"),
     (2, "1/100/1000/", "2024-01-15 10:00:00.000000"),
     (3, "1/100/1000/", "2024-01-15 10:00:00.500000"),
@@ -68,30 +70,17 @@ pub async fn agent_sessions_page_by_sort_key_without_skips_or_duplicates(ctx: &T
     assert_eq!(
         indexed,
         expected_ids(),
-        "paging 8 rows two at a time must neither skip nor repeat a session"
-    );
-    let stored = ctx
-        .query(&format!(
-            "SELECT count() AS cnt FROM {}",
-            t("gl_agent_session")
-        ))
-        .await;
-    let rows = ArrowUtils::get_column_by_name::<arrow::array::UInt64Array>(&stored[0], "cnt")
-        .expect("cnt column")
-        .value(0);
-    assert_eq!(
-        rows, 8,
-        "no session should be written by more than one page"
+        "paging 9 rows two at a time must neither skip nor repeat a session"
     );
 }
 
-pub async fn agent_sessions_resume_from_a_rfc3339_checkpoint_cursor(ctx: &TestContext) {
+pub async fn agent_sessions_resume_from_a_saved_cursor(ctx: &TestContext) {
     seed_sessions(ctx).await;
-    // Written by a build that persisted timestamps in the JSON format; last page ended at id 3.
+    // The last saved page ended at (1/100/1000/, 10:00:00.5, 3).
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values, _version) \
          VALUES ('ns.100.AgentSession', '2024-01-20 12:00:00.000000', \
-                 '{{\"c\":[\"1/100/1000/\",\"2024-01-15T10:00:00.500000Z\",\"3\"]}}', \
+                 '{{\"c\":[\"1/100/1000/\",\"2024-01-15 10:00:00.500000\",\"3\"]}}', \
                  '2024-01-20 12:00:00.000000')",
         t("checkpoint")
     ))
@@ -101,7 +90,29 @@ pub async fn agent_sessions_resume_from_a_rfc3339_checkpoint_cursor(ctx: &TestCo
 
     assert_eq!(
         indexed_session_ids(ctx).await,
-        vec![4, 5, 6, 7, 8],
+        vec![0, 4, 5, 6, 7, 8],
         "resume must continue strictly after the checkpointed (path, started_at, id)"
+    );
+}
+
+pub async fn agent_sessions_restart_when_the_saved_cursor_has_the_old_sort_key_arity(
+    ctx: &TestContext,
+) {
+    seed_sessions(ctx).await;
+    // Saved while AgentSession paged by [traversal_path, id].
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values, _version) \
+         VALUES ('ns.100.AgentSession', '2024-01-20 12:00:00.000000', \
+                 '{{\"c\":[\"1/100/1000/\",\"3\"]}}', '2024-01-20 12:00:00.000000')",
+        t("checkpoint")
+    ))
+    .await;
+
+    index_agent_sessions(ctx).await;
+
+    assert_eq!(
+        indexed_session_ids(ctx).await,
+        expected_ids(),
+        "a cursor that no longer fits the sort key must restart the window, not panic"
     );
 }

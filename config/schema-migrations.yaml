@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 108
+  scope: none
+  note: >-
+    AgentSession pages by its table sort key (traversal_path, session_started_at,
+    id) instead of (traversal_path, id); only extract page order changes, so every
+    indexed row is byte-identical.
 - version: 107
   scope: "*"
   note: >-
