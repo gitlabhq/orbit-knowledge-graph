@@ -977,6 +977,7 @@ struct PathLookup<'a> {
     lookup: &'a LookupConfig,
     roots: &'a Roots,
     tags: ReservedTags,
+    wildcard_sym: u32,
     stdlib_prefixes: Vec<String>,
 }
 
@@ -1003,6 +1004,7 @@ impl<'a> PathLookup<'a> {
             lookup,
             roots,
             tags: ReservedTags::new(&env.lang),
+            wildcard_sym: env.lang.syms.intern(WILDCARD),
             stdlib_prefixes,
         }
     }
@@ -1052,11 +1054,9 @@ impl<'a> PathLookup<'a> {
         if !direct.is_empty() {
             return hits(direct, &path, Route::Direct);
         }
-        if stdlib {
-            return Vec::new();
-        }
         let submodules: Vec<Hit> = names
             .iter()
+            .filter(|&&name| !stdlib || name != self.wildcard_sym)
             .flat_map(|&name| {
                 let submodule = format!("{path}{PATH_SEP}{}", self.lang.syms.resolve(name));
                 let found = self.files(fi, &submodule, prefixes);

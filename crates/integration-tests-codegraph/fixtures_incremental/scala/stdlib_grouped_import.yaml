@@ -1,0 +1,42 @@
+name: "Scala: a grouped or aliased import from a stdlib package that the repo defines reaches its object"
+
+fixtures:
+  - path: src/library/scala/acme/Tree.scala
+    content: |
+      package scala.acme
+
+      object Tree {
+        def min(): Int = 0
+      }
+
+  - path: src/library/scala/other/Aliased.scala
+    content: |
+      package scala.other
+
+      import scala.acme.{Tree => T}
+
+      object Aliased {
+        def run(): Int = T.min()
+      }
+
+  - path: src/library/scala/other/Named.scala
+    content: |
+      package scala.other
+
+      import scala.acme.Tree
+
+      object Named {
+        def run(): Int = Tree.min()
+      }
+
+tests:
+  - name: "an aliased and a named import both reach the object"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'min'
+      RETURN caller.file_path AS caller, callee.file_path AS file
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: src/library/scala/other/Aliased.scala, file: src/library/scala/acme/Tree.scala } }
+      - { row: { caller: src/library/scala/other/Named.scala, file: src/library/scala/acme/Tree.scala } }
