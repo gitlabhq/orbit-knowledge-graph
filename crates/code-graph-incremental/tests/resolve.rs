@@ -484,3 +484,52 @@ fn an_edit_far_from_two_package_copies_resolves_only_the_edited_file() {
         ["lib/src/com/acme/misc/Other.java"]
     );
 }
+
+#[test]
+fn an_own_copy_added_later_moves_the_importer_off_the_other_copy() {
+    let repo = tempfile::tempdir().unwrap();
+    let checks = "package com.acme.base;\npublic final class Checks { public static void checkState(boolean ok) {} }\n";
+    let lists = "package com.acme.coll;\nimport com.acme.base.*;\npublic class Lists { void set() { Checks.checkState(true); } }\n";
+    for dir in [
+        "lib/src/com/acme/base",
+        "lib/src/com/acme/coll",
+        "android/lib/src/com/acme/base",
+    ] {
+        std::fs::create_dir_all(repo.path().join(dir)).unwrap();
+    }
+    write_all(
+        repo.path(),
+        &[
+            ("android/lib/src/com/acme/base/Checks.java", checks),
+            ("lib/src/com/acme/coll/Lists.java", lists),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Java, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [pair(
+            "lib/src/com/acme/coll/Lists.java:set",
+            "android/lib/src/com/acme/base/Checks.java:checkState"
+        )]
+    );
+    write_all(
+        repo.path(),
+        &[("lib/src/com/acme/base/Checks.java", checks)],
+    );
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["lib/src/com/acme/base/Checks.java".into()],
+    });
+    let (_, resolved) = templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+        .unwrap()
+        .finish();
+    assert!(resolved_paths(&resolved).contains(&"lib/src/com/acme/coll/Lists.java"));
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [pair(
+            "lib/src/com/acme/coll/Lists.java:set",
+            "lib/src/com/acme/base/Checks.java:checkState"
+        )]
+    );
+}

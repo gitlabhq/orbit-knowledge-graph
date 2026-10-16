@@ -210,8 +210,11 @@ impl Resolver {
             .keys()
             .any(|key| !previous_index.keys.contains_key(key));
         if added_keys || self.lookup != *lookup {
-            let known_imports: FxHashSet<_> =
-                self.reqs.iter().map(|req| (req.fi, req.node)).collect();
+            let known_imports: FxHashSet<_> = self
+                .reqs
+                .iter()
+                .map(|req| (req.fi, req.node, req.target_fi, req.anchor))
+                .collect();
             let discovery_files = (0..trees.len() as u32)
                 .filter(|fi| !dirty_fis.contains(fi))
                 .collect();
@@ -226,7 +229,9 @@ impl Resolver {
             invalidated.extend(
                 discovered
                     .iter()
-                    .filter(|req| !known_imports.contains(&(req.fi, req.node)))
+                    .filter(|req| {
+                        !known_imports.contains(&(req.fi, req.node, req.target_fi, req.anchor))
+                    })
                     .map(|req| req.fi),
             );
         }
