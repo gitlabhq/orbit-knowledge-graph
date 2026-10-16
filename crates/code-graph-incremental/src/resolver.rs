@@ -1045,17 +1045,18 @@ fn defs_on_path(
         let (found, head_path) = direct_targets(trees, lang, file_index, prefixes, origin, head);
         if !found.is_empty() {
             let rest = &target_path[head.len()..];
+            let head_name = lang
+                .syms
+                .lookup(head.rsplit_once(PATH_SEP).map_or(head, |(_, last)| last));
             return found
                 .into_iter()
                 .filter_map(|loc| {
                     let mut node = trees[loc.fi as usize].cursor(loc.node);
+                    if loc.node == 0 {
+                        node = node.child_def(head_name).unwrap_or(node);
+                    }
                     for &name in tail.iter().rev() {
-                        let named =
-                            |d: &Cursor| d.is(C::Def) && d.child_sym(C::DefName) == Some(name);
-                        node = node
-                            .children()
-                            .find(named)
-                            .or_else(|| node.descendants().find(named))?;
+                        node = node.child_def(name)?;
                     }
                     if origin
                         .imported
@@ -1420,16 +1421,27 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             continue;
         };
         let exports = req.exports(ctx.trees, ctx.visible);
-        let target_file = name_target(ctx, req, name)
+        let named = name_target(ctx, req, name);
+        let member = named
+            .filter(|target| req.anchor != 0 && target.node != 0)
+            .and_then(|target| {
+                members_of(ctx, ctx.corpus.jump(target.fi, target.node))
+                    .get(&m.sym())
+                    .map(|&node| ctx.corpus.jump(target.fi, node))
+            });
+        let target_file = named
             .filter(|target| target.node == 0)
             .map_or(tfi, |target| target.fi as usize);
-        let target = if target_file == tfi {
-            exports.get(&m.sym())
-        } else {
-            ctx.visible[target_file].get(&m.sym())
-        }
-        .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
-        .filter(|tgt| tgt.has_tag(ctx.tags.callable));
+        let target = member
+            .or_else(|| {
+                if target_file == tfi {
+                    exports.get(&m.sym())
+                } else {
+                    ctx.visible[target_file].get(&m.sym())
+                }
+                .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
+            })
+            .filter(|tgt| tgt.has_tag(ctx.tags.callable));
         if let Some(target) = target {
             if namespace_alias(ctx.wildcard_sym, name).is_some() {
                 edges.push(name.edge_to(target, EdgeKind::Imports));

@@ -463,7 +463,7 @@ impl<'t> Fold<'t> {
                     _ => None,
                 })?;
         for segment in segments {
-            module = child_def(module, self.syms.lookup(segment))?;
+            module = module.child_def(self.syms.lookup(segment))?;
         }
         Some(module)
     }
@@ -477,7 +477,8 @@ impl<'t> Fold<'t> {
                 .filter(|d| d.is(C::Def))
                 .filter_map(|d| Some((d.child_sym(C::DefName)?, d.index())))
                 .collect(),
-            false => child_def(module, name.sym())
+            false => module
+                .child_def(name.sym())
                 .map(|d| (local, d.index()))
                 .into_iter()
                 .collect(),
@@ -1613,10 +1614,4 @@ fn is_name(value: &Value) -> bool {
         value,
         Value::LocalDef(_) | Value::ImportRef(_) | Value::Type(_)
     )
-}
-
-fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
-    module
-        .children()
-        .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
 }

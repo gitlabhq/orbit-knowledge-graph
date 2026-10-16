@@ -139,6 +139,10 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn has(self, kind: C) -> bool {
         self.child(kind).is_some()
     }
+    pub fn child_def(self, name: u32) -> Option<Self> {
+        self.children()
+            .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
+    }
     pub fn names(self) -> impl Iterator<Item = Self> + 'a {
         self.children_of(C::Name)
     }
