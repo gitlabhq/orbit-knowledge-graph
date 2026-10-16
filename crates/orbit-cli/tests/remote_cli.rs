@@ -689,7 +689,7 @@ fn setup_mentions_gitlab_when_orbit_answers_for_origin() {
         request.request_line
     );
     assert!(
-        instructions.contains("GitLab issues, MRs"),
+        instructions.contains("GitLab too: `is:issue`"),
         "{instructions}"
     );
 }

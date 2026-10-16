@@ -113,7 +113,7 @@ pub(super) fn route(
             .collect();
         let reason = format!(
             "GitLab search of {} needs a plain search: literal terms without -l, -c, -q, -v, \
-             -g, -t, or a code --kind",
+             -g, -t, or a code is: kind",
             named.join(", ")
         );
         anyhow::ensure!(named.is_empty() || !route.local.is_empty(), "{reason}");

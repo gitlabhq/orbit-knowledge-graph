@@ -360,7 +360,7 @@ mod tests {
             }
         }
         let local = render_instructions(DIRECT_LAUNCHER, false);
-        assert!(local.contains("or `--kind`.\n"), "{local}");
+        assert!(local.contains("or `is:def`/`file:x`.\n"), "{local}");
         assert!(
             local.contains("in one call, plus independent searches: `orbit context a.rs:10-40; orbit grep 'x'`."),
             "{local}"

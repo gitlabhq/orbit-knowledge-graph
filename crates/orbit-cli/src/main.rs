@@ -160,7 +160,7 @@ struct GrepArgs {
     )]
     paths: Vec<String>,
 
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
+    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP, hide = true)]
     kind: Option<Kinds>,
 
     /// Read a specific revision DuckDB file.
