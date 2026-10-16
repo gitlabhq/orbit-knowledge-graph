@@ -1683,7 +1683,18 @@ impl<'t> Fold<'t> {
         }
     }
 
+    fn owner_type(&self, def: u32) -> u32 {
+        let c = self.tree.cursor(def);
+        if c.is_class() {
+            return def;
+        }
+        c.enclosing(|node| node.is(C::Def))
+            .filter(|owner| owner.child_sym(C::DefName) == c.child_sym(C::DefName))
+            .map_or(def, |owner| owner.index())
+    }
+
     fn find_method_in(&self, container: u32, name: u32) -> Vec<u32> {
+        let container = self.owner_type(container);
         let wrappers = |dn: u32| {
             let c = self.tree.cursor(dn);
             let same_name = c

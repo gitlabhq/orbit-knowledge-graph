@@ -1,0 +1,42 @@
+name: "Java: a local built with new is typed by the class that the constructor builds"
+
+fixtures:
+  - path: com/example/Proxy.java
+    content: |
+      package com.example;
+
+      public class Proxy extends Base {
+          private int slot;
+
+          public static Proxy create() {
+              Proxy proxy = new Proxy();
+              proxy.slot = 1;
+              proxy.helper();
+              proxy.inherited();
+              return proxy;
+          }
+
+          private Proxy() {}
+
+          void helper() {}
+      }
+
+  - path: com/example/Base.java
+    content: |
+      package com.example;
+
+      public class Base {
+          void inherited() {}
+      }
+
+tests:
+  - name: new Proxy() inside Proxy names the constructor, and the local reaches a field, a sibling, and an inherited member
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'create'
+      RETURN t.fqn AS target
+    assert:
+      - { row: { target: "com.example.Proxy.Proxy" } }
+      - { row: { target: "com.example.Proxy.slot" } }
+      - { row: { target: "com.example.Proxy.helper" } }
+      - { row: { target: "com.example.Base.inherited" } }

@@ -1,0 +1,37 @@
+name: "C#: a local built with new is typed by the class that a later constructor builds"
+
+fixtures:
+  - path: W.cs
+    content: |
+      namespace N
+      {
+          class Base
+          {
+              public void Free() {}
+          }
+
+          class W : Base
+          {
+              internal static void Analyze()
+              {
+                  var w = new W(1);
+                  w.Analyze2();
+                  w.Free();
+              }
+
+              internal W(int x) {}
+
+              void Analyze2() {}
+          }
+      }
+
+tests:
+  - name: new W(1) inside W names the constructor, and the local reaches a sibling and an inherited member
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'Analyze'
+      RETURN t.fqn AS target
+    assert:
+      - { row: { target: "N.W.W" } }
+      - { row: { target: "N.W.Analyze2" } }
+      - { row: { target: "N.Base.Free" } }
