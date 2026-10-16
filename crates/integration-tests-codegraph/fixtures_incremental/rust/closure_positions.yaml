@@ -1,4 +1,4 @@
-name: "Rust: a closure in a branch arm, a tuple, a return, or a constructor argument keeps its calls"
+name: "Rust: a closure or an array of calls keeps its calls in a branch arm, a tuple, a return, an argument, a struct literal, a field or self assignment, an array, and a direct call"
 
 fixtures:
   - path: main.rs
@@ -47,6 +47,21 @@ fixtures:
 
       struct Holder {
           cb: fn(i32) -> i32,
+          xs: [i32; 2],
+      }
+
+      impl Holder {
+          fn assigned_to_ivar(&mut self) {
+              self.cb = |x| other(x);
+          }
+
+          fn array_to_ivar(&mut self) {
+              self.xs = [helper(1), other(2)];
+          }
+      }
+
+      fn array_to_field(holder: &mut Holder) {
+          holder.xs = [helper(1), other(2)];
       }
 
       fn in_struct_literal() -> Holder {
@@ -84,8 +99,13 @@ tests:
       RETURN caller.name AS caller, callee.name AS callee
       ORDER BY caller, callee
     assert:
-      - { row_count: 15 }
+      - { row_count: 20 }
+      - { row: { caller: "array_to_field", callee: "helper" } }
+      - { row: { caller: "array_to_field", callee: "other" } }
+      - { row: { caller: "array_to_ivar", callee: "helper" } }
+      - { row: { caller: "array_to_ivar", callee: "other" } }
       - { row: { caller: "assigned_to_field", callee: "other" } }
+      - { row: { caller: "assigned_to_ivar", callee: "other" } }
       - { row: { caller: "boxed", callee: "plain" } }
       - { row: { caller: "called_at_once", callee: "helper" } }
       - { row: { caller: "in_array", callee: "helper" } }
