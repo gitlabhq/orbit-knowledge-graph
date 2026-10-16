@@ -87,7 +87,20 @@ later add entries and need no new field. `expansion` is `null` when expansion
 was not requested or the token was not found. Those two cases take precedence
 over every error. For a found token whose type has no expansion query,
 `expansion` is `{"error": {"code": "expansion_unsupported_type"}}`. Otherwise it
-is `{"result": ...}` with the deduplicated graph, or `{"error": {"code": ...}}`. An expansion failure never fails the summaries.
+is `{"result": ...}` with the deduplicated graph, or `{"error": {"code": ...}}`.
+An expansion failure never fails the summaries.
+
+**Query echo.** Whenever the type has an expansion query, `expansion` also
+carries `query: {name, parameters: {node_ids, limit}}`. It appears on a result.
+It also appears on every error where a query ran or would run:
+`expansion_unavailable`, `outside_graph_scope`, `billing_namespace_required`,
+`quota_exhausted`, `timeout` and `execution_error`.
+`expansion_unsupported_type` has no `query`. The
+value is the exact payload Rails sends to GKG, and `POST /api/v4/orbit/query/:name`
+accepts `name` and `parameters` unchanged. The caller can therefore see the one
+query that is billed, and can rerun it itself when `expansion_unavailable` says
+Rails will not. This replaces the `fallback` field that an earlier draft listed
+as future work. It is additive, so the response stays at version 1.1.0.
 
 **Transport.** The expansion is an ordinary named query, so the contract does
 not depend on the transport. Rails resolves and authorizes the token, builds
@@ -97,7 +110,7 @@ merge logic, so `expand` runs only on the Rails path, behind
 `expand: true` still returns the summaries, with
 `expansion: {"error": {"code": "expansion_unavailable"}}`. The client can call
 the named query itself through `/api/v4/orbit/query/:name`, which runs on
-Workhorse. The trade-off is that `expand` rollout follows #1381.
+Workhorse, using the echoed `query`. The trade-off is that `expand` rollout follows #1381.
 In return, the merge and the error mapping stay in Ruby, and no Go change is
 needed. If #1381 slips, the fallback is Workhorse merge logic for a single
 stream. The contract stays the same.
@@ -145,11 +158,21 @@ explicit MCP tool and agent command are deferred.
 - `tokens` is always an array of one string. There is no object keyed by token.
 - `response_format` is `raw` or `llm`, and defaults to `raw`. `gql` is out of
   scope and returns a validation error.
-- Token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs, `path!iid`
-  and `path#iid`. Group-level work items are in scope.
+- Token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs, `path!iid`,
+  `path#iid` and the epic forms below. Group-level work items are in scope.
 - Supported types are `MergeRequest` and `WorkItem`. `Issue` is an alias that
-  resolves, is reported, and expands as `WorkItem`. Other types return
-  `unsupported_type`.
+  resolves, is reported, and expands as `WorkItem`. `Epic` is an alias in the
+  same way: an epic resolves to its work item, because GKG models epics as
+  `WorkItem`. The entity has `type: "WorkItem"`, the ID of the work item and
+  `work_item_type: "epic"` in the summary, and expands with `expand_work_item`.
+  Other types return `unsupported_type`.
+- Epic forms: `Epic[id]` and `gid://gitlab/Epic/<id>`, which take the epic ID
+  and not the work item ID. An epic URL (`/groups/<path>/-/epics/<iid>`) follows
+  the host, scheme, port and relative-root rules of other URLs. The short
+  reference is `group/path&iid`. Lookup uses the group-level work item path and the
+  same readability rules, so a missing, confidential, unlicensed, unreadable or
+  wrong-group epic returns the same `not_found`. Malformed text is rejected
+  before any lookup. A project-scoped `/-/epics/` URL is `invalid_token`.
 - Resolution applies both the per-resource ability (for example
   `read_work_item`) and the fine-grained token boundary. Group-level work items
   pass their group as the boundary. A fine-grained token therefore needs
@@ -174,7 +197,8 @@ explicit MCP tool and agent command are deferred.
   `from_id`) or (`to`, `to_id`), because IDs are per type.
 - `expansion.error.code` is one of these:
   - `expansion_unavailable`: expansion is not enabled for the user yet.
-  - `expansion_unsupported_type`: the type has no expand query.
+  - `expansion_unsupported_type`: the type has no expand query. This is the only
+    code without an `expansion.query`.
   - `outside_graph_scope`: the record is outside the user's graph scope.
   - A code that the Rails handler maps from the query path:
     `billing_namespace_required`, `quota_exhausted`, `timeout` or
@@ -197,7 +221,9 @@ A found token:
                   {"type": "MergeRequest", "id": "42", "token": "MergeRequest[42]",
                    "relation": "CLOSES", "...": "..."}],
                 "truncated": [], "...": "..."},
-    "expansion": {"result": {"nodes": ["..."], "edges": ["..."]}}}]}
+    "expansion": {"query": {"name": "expand_work_item",
+                            "parameters": {"node_ids": [196910643], "limit": 100}},
+                  "result": {"nodes": ["..."], "edges": ["..."]}}}]}
 ```
 
 An unfound token:
@@ -271,10 +297,8 @@ Raw results carry `format_version`. TOON output carries its own version
   envelope.
   Whether `Type:ID` is an accepted token form is open.
 - Future work, not decided here:
-  - A `fallback` field on `expansion_unavailable` that names the query and its
-    parameters.
-  - Epic tokens, an `expansion.query` echo, and more types (Note, Milestone,
-    User, Project, Group) through the generic `expand_neighbors` query.
+  - More types (Note, Milestone, User, Project, Group) through the generic
+    `expand_neighbors` query.
   - File and Definition tokens resolved from the graph, never Gitaly, from a
     blob URL (project, path, commit SHA, line range) with `expand_file` and
     `expand_definition` queries. The code token forms are reserved: the blob
