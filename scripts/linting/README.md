@@ -18,6 +18,7 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 | `yaml_lint.py` | Layout linter for the YAML test suites: Prettier plus a blank-line rule. PEP 723 script (`uv run`, PyYAML only). Modes: `FILE...`, no files for every suite, `--fix`. |
 | `yaml_lint_test.py` | Unit tests for the YAML layout linter (`mise run lint:yaml:test`). |
 | `comment_check.py` | Flags comments added or changed in a diff, found with tree-sitter. PEP 723 script with one pinned wheel per language, so it needs no download at run time. Modes: `--staged`, `--range BASE HEAD`. |
+| `comment_check_hook.sh` | Lefthook entry point: maps the checker's exit code 3 to a blocked commit and lets every other failure through. |
 | `comment_check_test.py` | Unit tests for the comment check (`mise run lint:comments:test`). |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
 
@@ -63,7 +64,7 @@ mise run lint:prose:test
 
 ## Comment check
 
-`CONTRIBUTING.md:50` says "Comments explain why. Do not narrate what the code
+`CONTRIBUTING.md` ("Engineering conventions") says "Comments explain why. Do not narrate what the code
 shows." The check lists every comment a diff adds or changes, so the author
 confirms each one is worth keeping. It covers `.rs`, `.yaml`, `.yml`, `.toml`,
 `.sh`, `.py`, `.js`, `.mjs`, `.ts`, `.rb`, and `.css`.
@@ -89,8 +90,14 @@ COMMENTS_OK=<digest> git commit ...
 The digest hashes the flagged paths and comment text, so a different set of
 comments needs a new digest. To skip the check, set `COMMENTS_CHECK=0`, which
 also works for the CI script. For the hook alone, lefthook's own
-`LEFTHOOK_EXCLUDE=comments` skips the job too. The checker fails open: any
-internal error, such as a missing wheel, prints a note and exits 0.
+`LEFTHOOK_EXCLUDE=comments` skips the job too.
+
+Exit codes of `comment_check.py`: 0 clean, acknowledged, or skipped; 3 comments
+flagged; 2 internal error in `--range` mode (CI shows the job as failed, not
+green). The hook runs `comment_check_hook.sh`, which blocks the commit only on
+exit 3. Any other failure, including `uv` or `mise` not starting (no network
+with a cold cache, an untrusted worktree) or an internal error in the
+checker, prints a note and lets the commit through.
 
 Known gaps: a rewrapped comment counts as changed, and shell comments inside
 YAML block scalars are not seen, because the YAML grammar treats them as text.

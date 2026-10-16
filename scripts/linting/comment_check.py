@@ -20,8 +20,10 @@ Modes:
   comment_check.py --staged           index vs HEAD (pre-commit)
   comment_check.py --range BASE HEAD  two revisions (CI)
 
-Exit: 0 clean, acknowledged, skipped, or internal error (the check fails open);
-1 when comments are flagged.
+Exit: 0 clean, acknowledged, or skipped; 3 when comments are flagged; 2 on an
+internal error in --range mode, so CI does not report a check that never ran
+as clean. In --staged mode an internal error exits 0. Failures before this
+script starts (uv or mise) are handled by comment_check_hook.sh.
 
 Environment:
   COMMENTS_CHECK=0      skip the check entirely
@@ -65,12 +67,15 @@ DIRECTIVE = re.compile(
     re.I,
 )
 RUSTDOC = re.compile(r"^(///(?!/)|//!|/\*\*(?![*/])|/\*!)")
-GENERATED_MARKER = b"@generated"
+GENERATED_MARKER = b"@" + b"generated"  # split so this file does not skip itself
 GENERATED_SCAN_BYTES = 2048
 LINE_MARKER = re.compile(r"//[/!]?|#")
 
+EXIT_ERROR = 2
+EXIT_FLAGGED = 3
+
 RULE = "Comments explain why. Do not narrate what the code shows."
-RULE_LINK = "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/CONTRIBUTING.md#L50"
+RULE_LINK = "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/CONTRIBUTING.md#engineering-conventions"
 
 _parsers: dict = {}
 
@@ -206,15 +211,23 @@ def digest(findings: list[tuple[str, int, str]]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:8]
 
 
+def first_content_line(text: str) -> str:
+    for line in text.splitlines():
+        if line.strip().strip("/#*!"):
+            return line.strip()
+    return text.strip()
+
+
 def report(findings: list[tuple[str, int, str]], code: str) -> None:
     print(f"comment check: {len(findings)} added/changed comment(s):\n")
     for path, line, text in findings:
-        print(f"  {path}:{line}  {text.splitlines()[0][:100]}")
+        print(f"  {path}:{line}  {first_content_line(text)[:100]}")
     print(
-        f'\nCONTRIBUTING.md:50: "{RULE}"\n{RULE_LINK}\n'
+        f'\nCONTRIBUTING.md, "Engineering conventions": "{RULE}"\n{RULE_LINK}\n'
         "For each comment above: delete it if the code or a better name says the same\n"
         "thing; keep it only for a constraint, invariant, gotcha, or workaround.\n"
-        f"When only essential comments remain, re-run with COMMENTS_OK={code}\n"
+        f"If every comment above is essential, re-run with COMMENTS_OK={code}\n"
+        "If you delete any, commit again to get a new digest.\n"
         "To skip this check: COMMENTS_CHECK=0, or LEFTHOOK_EXCLUDE=comments for the hook."
     )
 
@@ -239,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         findings = scan(base, head)
     except Exception as error:
         print(f"comment check: skipped, internal error: {error}", file=sys.stderr)
-        return 0
+        return 0 if args.staged else EXIT_ERROR
     if not findings:
         return 0
     code = digest(findings)
@@ -247,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"comment check: acknowledged {len(findings)} comment(s) ({code})")
         return 0
     report(findings, code)
-    return 1
+    return EXIT_FLAGGED
 
 
 if __name__ == "__main__":

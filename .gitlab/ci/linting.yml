@@ -91,9 +91,12 @@ lint:comments:
   script:
     - apk add --no-cache git
     - uv run --quiet scripts/linting/comment_check_test.py
+    # In a merged-results pipeline HEAD is the merge into the target tip, so the
+    # target SHA, not the old merge base, bounds the MR's own changes.
     - |
-      git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2>/dev/null || git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1
-      uv run --quiet scripts/linting/comment_check.py --range "$CI_MERGE_REQUEST_DIFF_BASE_SHA" HEAD
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1
+      uv run --quiet scripts/linting/comment_check.py --range "$BASE" HEAD
 
 lint:yaml:
   stage: lint
