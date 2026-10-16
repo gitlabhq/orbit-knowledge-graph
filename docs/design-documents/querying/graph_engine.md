@@ -183,7 +183,7 @@ Ungrouped aggregations can still elide targets used only as filters.
 | 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
-| 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
+| 12 | `check` | Verifies traversal-path security and the authorization metadata and hidden result columns required for final redaction ([Security](../security.md)) |
 | 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |

@@ -83,14 +83,14 @@ This layer limits queries to data within the traversal paths that Rails authoriz
 **How It's Enforced**:
 
 - **At the ClickHouse Storage Layer**: the indexer writes each row with a `traversal_path` column. That column encodes the full namespace hierarchy, starting with the organization ID as the first path segment.
-- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every path column on a namespaced `gl_*` table has a role-scoped `startsWith` predicate or a fail-closed false predicate. The `org_id` on `SecurityContext` is metadata (the user's home organization), not a security boundary. Access control comes from the traversal paths themselves.
+- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` verifies those predicates and the result identity metadata needed for final redaction. The `org_id` on `SecurityContext` is metadata (the user's home organization), not a security boundary. Access control comes from the traversal paths themselves.
 - **User-Supplied Traversal Path Filters**: Queries may filter `traversal_path` with exact, `in`, or prefix predicates. Before SQL generation, `RestrictPass` verifies each requested path is a descendant of a JWT traversal path that meets the target entity's `required_role` floor. Relationship `traversal_path` filters use the Reporter floor. Unsupported substring/suffix/comparison predicates are rejected, so user input can only narrow the Rails-granted scope.
 - **Cross-Org Queries Supported**: A user may hold traversal paths spanning multiple organizations (e.g., personal groups under a different org). `SecurityContext` accepts all paths that Rails authorizes, regardless of the user's home `organization_id`. Each query is scoped to exactly the set of paths granted by Rails.
 - **Parameterization**: All traversal path values are bound as parameters, never concatenated into SQL strings.
 
 **Code Review Requirements**:
 
-- The compiler's `SecurityPass` runs on all query types (search, traversal, aggregation, path-finding, neighbors). The `CheckPass` rejects any query where a namespaced path column lacks a valid role-scoped `startsWith` filter or a fail-closed false predicate.
+- The compiler's `SecurityPass` runs on all query types (search, traversal, aggregation, path-finding, neighbors). The `CheckPass` rejects missing traversal-path filters, incomplete result authorization metadata, and missing or incorrect hidden redaction columns.
 - Tests that add `traversal_path` as a user-facing filter must cover node filters, relationship filters, out-of-scope paths, invalid path formats, and role floors above Reporter.
 - Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
 - Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
