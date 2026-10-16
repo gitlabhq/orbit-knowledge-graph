@@ -917,18 +917,29 @@ fn gather_imports_for(
                             root_of(tree)
                                 .and_then(|hit_root| tree.label.strip_prefix(hit_root))
                                 .unwrap_or(tree.label.as_str())
+                                .trim_start_matches(PATH_SEP)
                         };
-                        let dedupe = |path: &str, hits: Vec<Loc>| -> Vec<Loc> {
+                        let dedupe = |path: &str, mut hits: Vec<Loc>| -> Vec<Loc> {
+                            if !config.same_path_same_type || hits.iter().all(inside) {
+                                hits.retain(|loc| loc.fi != fi);
+                                return hits;
+                            }
                             let glob = path.ends_with(WILDCARD);
-                            let own: FxHashSet<&str> = hits
-                                .iter()
-                                .filter(|loc| inside(loc) && (glob || loc.fi != fi))
-                                .map(below_root)
+                            let keyed: Vec<_> = hits
+                                .into_iter()
+                                .map(|loc| (loc, below_root(&loc)))
                                 .collect();
-                            hits.into_iter()
-                                .filter(|loc| {
-                                    loc.fi != fi && (inside(loc) || !own.contains(below_root(loc)))
+                            let own: FxHashSet<&str> = keyed
+                                .iter()
+                                .filter(|(loc, _)| inside(loc) && (glob || loc.fi != fi))
+                                .map(|&(_, rel)| rel)
+                                .collect();
+                            keyed
+                                .into_iter()
+                                .filter(|(loc, rel)| {
+                                    loc.fi != fi && (inside(loc) || !own.contains(rel))
                                 })
+                                .map(|(loc, _)| loc)
                                 .collect()
                         };
                         let sibling = |loc: &Loc| {

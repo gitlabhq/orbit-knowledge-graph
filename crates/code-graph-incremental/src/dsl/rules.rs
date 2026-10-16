@@ -90,6 +90,9 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
+    /// A file at the same path below another source root holds the same
+    /// type. True for Java, where the file name is the public class name.
+    pub same_path_same_type: bool,
 }
 
 impl ResolveConfig {
@@ -115,6 +118,7 @@ impl ResolveConfig {
             }
         }
         self.merge_same_named_types |= other.merge_same_named_types;
+        self.same_path_same_type |= other.same_path_same_type;
     }
 }
 
@@ -149,6 +153,8 @@ struct ResolveSettingsSection {
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+    #[serde(default)]
+    same_path_same_type: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -294,6 +300,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .map(parse_file)
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
+        same_path_same_type: r.same_path_same_type,
     };
     Ok(Config { link, resolve })
 }
