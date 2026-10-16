@@ -422,7 +422,8 @@ fn assign_node_access(
             .order_by
             .as_ref()
             .is_some_and(|order| order.node == node.alias);
-        let local_predicate = condition_nodes.contains(&node.alias);
+        let local_predicate = condition_nodes.contains(&node.alias)
+            && !node_is_foreign_key_holder(&node.alias, relations);
         let uncovered_filter = node_has_uncovered_filter(node, relations, denormalized, model);
         let filter_only = input.query_type == QueryType::Aggregation
             && uncovered_filter
@@ -503,7 +504,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         self.bindings.iter().find(|binding| binding.node == node)
     }
 
-    fn set_binding(&mut self, node: &str, alias: &str, column: &str, joined: bool) {
+    fn set_binding(
+        &mut self,
+        node: &str,
+        alias: &str,
+        column: &str,
+        property_source: Option<&str>,
+        traversal_path: Option<Column>,
+    ) {
         if let Some(binding) = self
             .bindings
             .iter_mut()
@@ -511,13 +519,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         {
             binding.alias = alias.to_string();
             binding.column = column.to_string();
-            binding.joined = joined;
+            binding.property_source = property_source.map(str::to_string);
+            binding.traversal_path = traversal_path;
         } else {
             self.bindings.push(BindingSource {
                 node: node.to_string(),
                 alias: alias.to_string(),
                 column: column.to_string(),
-                joined,
+                property_source: property_source.map(str::to_string),
+                traversal_path,
             });
         }
     }
@@ -525,6 +535,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     fn add_edge(&mut self, index: usize, relation: &EdgeRelation) -> Result<()> {
         let alias = &relation.alias;
         let mut physical_relation = relation.clone();
+        let provides_holder_properties =
+            physical_relation
+                .foreign_key
+                .as_ref()
+                .is_some_and(|foreign_key| {
+                    self.binding(&foreign_key.holder)
+                        .is_none_or(|binding| binding.property_source.is_none())
+                });
         let frontiers: Vec<_> = [&relation.from_node, &relation.to_node]
             .into_iter()
             .filter_map(|node| {
@@ -594,7 +612,13 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
 
         let mut source = if let Some(foreign_key) = &physical_relation.foreign_key {
-            foreign_key_source(self.facts, &physical_relation, foreign_key)?.filter(predicates)
+            foreign_key_source(
+                self.facts,
+                &physical_relation,
+                foreign_key,
+                provides_holder_properties,
+            )?
+            .filter(predicates)
         } else if relation.max_hops > 1 {
             multi_hop(self.facts, &physical_relation, alias).filter(predicates)
         } else if self.facts.aggregate() && self.facts.relations.len() == 1 {
@@ -625,12 +649,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 || self.source.is_none() && relation_is_selective(self.facts, relation));
         if should_reuse {
             let id = SubplanId(self.subplans.len());
+            let mut outputs = edge_relation_outputs(alias);
+            if provides_holder_properties && let Some(foreign_key) = &physical_relation.foreign_key
+            {
+                outputs.extend(foreign_key_relation_outputs(self.facts, alias, foreign_key));
+            }
             self.subplans.push(Subplan {
                 id,
-                plan: PhysicalPlan::Project {
-                    source,
-                    outputs: edge_relation_outputs(alias),
-                },
+                plan: PhysicalPlan::Project { source, outputs },
                 materialized: true,
             });
             source = PhysicalSource::Use {
@@ -680,9 +706,38 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         } else {
             self.source = Some(source);
         }
+        if let Some(foreign_key) = &physical_relation.foreign_key
+            && provides_holder_properties
+        {
+            self.outputs.extend(node_outputs_from_foreign_key(
+                &self.facts.nodes[&foreign_key.holder],
+                alias,
+            ));
+            let traversal_path = self.facts.nodes[&foreign_key.holder]
+                .has_traversal_path
+                .then(|| Column::new(alias, holder_traversal_path(alias)));
+            if let Some(binding) = self
+                .bindings
+                .iter_mut()
+                .find(|binding| binding.node == foreign_key.holder)
+            {
+                binding.property_source = Some(alias.clone());
+                binding.traversal_path = traversal_path;
+            } else {
+                self.set_binding(
+                    &foreign_key.holder,
+                    alias,
+                    relation
+                        .endpoint_column(&foreign_key.holder)
+                        .expect("FK holder endpoint"),
+                    Some(alias),
+                    traversal_path,
+                );
+            }
+        }
         for (node, column) in endpoints {
             if self.binding(node).is_none() {
-                self.set_binding(node, alias, column, false);
+                self.set_binding(node, alias, column, None, None);
             }
         }
         self.push_edge_outputs(index, relation, alias);
@@ -749,7 +804,10 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     }
 
     fn ensure_node(&mut self, alias: &str) -> Result<()> {
-        if self.binding(alias).is_some_and(|binding| binding.joined) {
+        if self
+            .binding(alias)
+            .is_some_and(|binding| binding.property_source.is_some())
+        {
             return Ok(());
         }
         let mut node = self.facts.nodes[alias].clone();
@@ -782,7 +840,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             (None, _) => scan,
         });
         self.outputs.extend(outputs);
-        self.set_binding(alias, alias, DEFAULT_PRIMARY_KEY, true);
+        self.set_binding(
+            alias,
+            alias,
+            DEFAULT_PRIMARY_KEY,
+            Some(alias),
+            node.has_traversal_path
+                .then(|| Column::new(alias, TRAVERSAL_PATH_COLUMN)),
+        );
         Ok(())
     }
 
@@ -874,6 +939,7 @@ fn foreign_key_source<M: OrbitQueryModel + ?Sized>(
     facts: &PlanningContext<'_, M>,
     relation: &EdgeRelation,
     foreign_key: &ForeignKeyEdge,
+    include_holder_properties: bool,
 ) -> Result<PhysicalSource> {
     let alias = &relation.alias;
     let (source_node, target_node) = match relation.direction {
@@ -899,6 +965,13 @@ fn foreign_key_source<M: OrbitQueryModel + ?Sized>(
         .iter()
         .map(|(property, filter)| property_filter(alias, property, filter))
         .collect::<Vec<_>>();
+    predicates.extend(
+        holder
+            .predicates
+            .iter()
+            .cloned()
+            .map(|predicate| predicate_at_source(predicate, &foreign_key.holder, alias)),
+    );
     predicates.push(live(alias));
     let scan = PhysicalSource::Scan {
         table: foreign_key.table.clone(),
@@ -907,7 +980,7 @@ fn foreign_key_source<M: OrbitQueryModel + ?Sized>(
         relationship: Some(relation.input_index),
     }
     .filter(predicates);
-    let outputs = vec![
+    let mut outputs = vec![
         Projection::new(OutputValue::Column(source_id), SOURCE_ID_COLUMN),
         Projection::new(OutputValue::Text(source_kind), SOURCE_KIND_COLUMN),
         Projection::new(
@@ -921,11 +994,153 @@ fn foreign_key_source<M: OrbitQueryModel + ?Sized>(
         Projection::new(OutputValue::EmptyTextArray, TARGET_TAGS_COLUMN),
         Projection::new(OutputValue::Null, DELETED_COLUMN),
     ];
+    if include_holder_properties {
+        outputs.extend(
+            required_fk_holder_columns(facts, &foreign_key.holder)
+                .into_iter()
+                .map(|column| Projection::col(alias, &column)),
+        );
+    }
+    if include_holder_properties && holder.has_traversal_path {
+        outputs.push(Projection::new(
+            OutputValue::Column(Column::new(alias, TRAVERSAL_PATH_COLUMN)),
+            holder_traversal_path(alias),
+        ));
+    }
     Ok(PhysicalSource::Project {
         alias: alias.clone(),
         outputs,
         input: Box::new(scan),
     })
+}
+
+fn required_fk_holder_columns<M: OrbitQueryModel + ?Sized>(
+    facts: &PlanningContext<'_, M>,
+    holder: &str,
+) -> Vec<String> {
+    let node = &facts.nodes[holder];
+    let mut columns = if node.emit_select {
+        super::helpers::requested_columns(&node.columns)
+    } else {
+        Vec::new()
+    };
+    columns.extend(
+        facts
+            .input
+            .conditions()
+            .flat_map(Condition::node_properties)
+            .filter(|(alias, _)| *alias == holder)
+            .map(|(_, property)| property.to_string()),
+    );
+    columns.extend(
+        crate::input::property_groups(&facts.input.aggregation.group_by)
+            .filter(|(alias, _)| *alias == holder)
+            .map(|(_, property)| property.to_string()),
+    );
+    if crate::input::node_group_ids(&facts.input.aggregation.group_by).any(|alias| alias == holder)
+    {
+        columns.push(DEFAULT_PRIMARY_KEY.into());
+    }
+    columns.extend(
+        facts
+            .input
+            .aggregation
+            .metrics
+            .iter()
+            .filter(|metric| metric.expr.node() == holder)
+            .filter_map(|metric| metric.expr.property().map(str::to_string)),
+    );
+    if let Some(order) = &facts.input.order_by
+        && order.node == holder
+    {
+        columns.push(order.property.clone());
+    }
+    if node.redaction_id_column != DEFAULT_PRIMARY_KEY {
+        columns.push(node.redaction_id_column.clone());
+    }
+    columns.sort_unstable();
+    columns.dedup();
+    columns.retain(|column| column != TRAVERSAL_PATH_COLUMN);
+    columns
+}
+
+fn holder_traversal_path(alias: &str) -> String {
+    format!("{alias}_{TRAVERSAL_PATH_COLUMN}")
+}
+
+fn node_outputs_from_foreign_key(node: &NodePlan, alias: &str) -> Vec<Projection> {
+    if !node.emit_select {
+        return Vec::new();
+    }
+    super::helpers::requested_columns(&node.columns)
+        .into_iter()
+        .map(|column| {
+            let source_column = if column == TRAVERSAL_PATH_COLUMN {
+                holder_traversal_path(alias)
+            } else {
+                column.clone()
+            };
+            Projection::new(
+                OutputValue::Column(Column::new(alias, source_column)),
+                format!("{}_{column}", node.alias),
+            )
+        })
+        .collect()
+}
+
+fn foreign_key_relation_outputs<M: OrbitQueryModel + ?Sized>(
+    facts: &PlanningContext<'_, M>,
+    alias: &str,
+    foreign_key: &ForeignKeyEdge,
+) -> Vec<Projection> {
+    let mut outputs: Vec<_> = required_fk_holder_columns(facts, &foreign_key.holder)
+        .into_iter()
+        .filter(|column| !EDGE_RESERVED_COLUMNS.contains(&column.as_str()))
+        .filter(|column| column != SOURCE_TAGS_COLUMN && column != TARGET_TAGS_COLUMN)
+        .map(|column| Projection::col(alias, &column))
+        .collect();
+    if facts.nodes[&foreign_key.holder].has_traversal_path {
+        outputs.push(Projection::col(alias, &holder_traversal_path(alias)));
+    }
+    outputs
+}
+
+fn predicate_at_source(predicate: Predicate, source: &str, replacement: &str) -> Predicate {
+    match predicate {
+        Predicate::Boolean(expression) => Predicate::Boolean(
+            expression
+                .try_map(&mut |predicate| {
+                    Ok::<_, std::convert::Infallible>(Box::new(predicate_at_source(
+                        *predicate,
+                        source,
+                        replacement,
+                    )))
+                })
+                .expect("infallible predicate mapping"),
+        ),
+        Predicate::Property {
+            mut column,
+            mut filter,
+            data_type,
+            in_sort_key,
+        } => {
+            if column.source == source {
+                column.source = replacement.into();
+            }
+            if let Some((alias, _)) = &mut filter.rhs_column
+                && alias == source
+            {
+                *alias = replacement.into();
+            }
+            Predicate::Property {
+                column,
+                filter,
+                data_type,
+                in_sort_key,
+            }
+        }
+        predicate => predicate,
+    }
 }
 
 fn edge_relation_outputs(alias: &str) -> Vec<Projection> {
@@ -1023,6 +1238,15 @@ fn node_has_uncovered_filter(
             denormalized,
             model,
         )
+    })
+}
+
+fn node_is_foreign_key_holder(alias: &str, relations: &[EdgeRelation]) -> bool {
+    relations.iter().any(|relation| {
+        relation
+            .foreign_key
+            .as_ref()
+            .is_some_and(|foreign_key| foreign_key.holder == alias)
     })
 }
 
@@ -1302,7 +1526,13 @@ fn bind_condition(
         && bindings.is_some()
         && let Some(tag) = edge_tag(&column.source, &bound, relations, denormalized)
     {
-        return Ok(tag);
+        return Ok(match resolve_column(bindings, column) {
+            Ok(column) => Predicate::Boolean(BooleanExpression::And(vec![
+                BooleanExpression::Leaf(Box::new(bound.at(column))),
+                BooleanExpression::Leaf(Box::new(tag)),
+            ])),
+            Err(_) => tag,
+        });
     }
     let column = if node {
         resolve_column(bindings, column)?

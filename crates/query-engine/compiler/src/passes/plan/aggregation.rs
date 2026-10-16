@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::OrbitQueryModel;
 
 use super::helpers::requested_columns;
@@ -87,7 +88,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     ..
                 } => {
                     let group = Group {
-                        column: Column::new(node, property),
+                        column: execution.property(node, property),
                         truncate: *truncate,
                     };
                     plan.group_outputs.push((group.clone(), alias));
@@ -99,7 +100,27 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     if let Some(metadata) = self.nodes.get(node.as_str()) {
                         for column in requested_columns(&metadata.columns) {
                             let group = Group {
-                                column: Column::new(node, column),
+                                column: execution.property(node, &column),
+                                truncate: None,
+                            };
+                            if !plan.groups.contains(&group) {
+                                plan.groups.push(group);
+                            }
+                        }
+                        for column in [DEFAULT_PRIMARY_KEY, metadata.redaction_id_column.as_str()] {
+                            let column = if column == DEFAULT_PRIMARY_KEY {
+                                execution
+                                    .bindings
+                                    .iter()
+                                    .find(|binding| binding.node == *node)
+                                    .and_then(|binding| binding.property_source.as_ref())
+                                    .map(|source| Column::new(source, column))
+                                    .unwrap_or_else(|| execution.property(node, column))
+                            } else {
+                                execution.property(node, column)
+                            };
+                            let group = Group {
+                                column,
                                 truncate: None,
                             };
                             if !plan.groups.contains(&group) {
@@ -116,13 +137,13 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     .property
                     .as_ref()
                     .filter(|_| self.nodes.get(&target.node).is_some_and(|node| node.joined))
-                    .map(|property| Column::new(&target.node, property)),
+                    .map(|property| execution.property(&target.node, property)),
                 AggExpr::Sum(property)
                 | AggExpr::Avg(property)
                 | AggExpr::Min(property)
                 | AggExpr::Max(property)
                 | AggExpr::Collect(property) => {
-                    Some(Column::new(&property.node, &property.property))
+                    Some(execution.property(&property.node, &property.property))
                 }
             };
             plan.measures.push(Measure {

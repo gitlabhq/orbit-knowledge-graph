@@ -1234,8 +1234,6 @@ pub(super) async fn aggregation_vulnerability_property_grouping_security_manager
     resp.assert_row_value_i64(0, "vuln_count", 1);
 }
 
-/// Catches a future lowering change that selects `v.severity` but accidentally
-/// skips the SecurityPass filter on the Vulnerability alias.
 pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_reporter_paths(
     ctx: &TestContext,
 ) {
@@ -1263,12 +1261,12 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
 
     let sql = &compiled.base.sql;
     assert!(
-        sql.contains("v.severity AS v_severity"),
-        "property group key must be selected from Vulnerability alias, got:\n{sql}"
+        sql.contains("_orbit_edge_0.severity AS v_severity"),
+        "property group key must be selected from the current FK holder, got:\n{sql}"
     );
     assert!(
-        sql.contains("GROUP BY v.severity"),
-        "property group key must be grouped from Vulnerability alias, got:\n{sql}"
+        sql.contains("GROUP BY _orbit_edge_0.severity"),
+        "property group key must be grouped from the current FK holder, got:\n{sql}"
     );
 
     let has_false_bool = compiled.base.params.iter().any(|(_, p)| {

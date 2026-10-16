@@ -16,6 +16,16 @@ pub struct ExecutionPlan {
     pub bindings: Vec<BindingSource>,
 }
 
+impl ExecutionPlan {
+    pub fn property(&self, node: &str, property: &str) -> Column {
+        self.bindings
+            .iter()
+            .find(|binding| binding.node == node)
+            .and_then(|binding| binding.column(property))
+            .unwrap_or_else(|| Column::new(node, property))
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SubplanId(pub usize);
 
@@ -30,15 +40,21 @@ pub struct BindingSource {
     pub node: String,
     pub alias: String,
     pub column: String,
-    pub joined: bool,
+    pub property_source: Option<String>,
+    pub traversal_path: Option<Column>,
 }
 
 impl BindingSource {
     pub(super) fn column(&self, property: &str) -> Option<Column> {
+        if property == ontology::constants::TRAVERSAL_PATH_COLUMN {
+            return self.traversal_path.clone();
+        }
         if property == DEFAULT_PRIMARY_KEY {
             Some(Column::new(&self.alias, &self.column))
         } else {
-            self.joined.then(|| Column::new(&self.node, property))
+            self.property_source
+                .as_ref()
+                .map(|source| Column::new(source, property))
         }
     }
 
@@ -47,7 +63,11 @@ impl BindingSource {
             node: alias.into(),
             alias: alias.into(),
             column: DEFAULT_PRIMARY_KEY.into(),
-            joined: true,
+            property_source: Some(alias.into()),
+            traversal_path: Some(Column::new(
+                alias,
+                ontology::constants::TRAVERSAL_PATH_COLUMN,
+            )),
         }
     }
 }

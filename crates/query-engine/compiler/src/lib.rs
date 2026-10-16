@@ -1287,7 +1287,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregation_group_by_property_keeps_role_gated_target_table() {
+    fn aggregation_group_by_property_uses_role_gated_fk_holder() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1310,8 +1310,9 @@ mod tests {
             "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
         );
         assert!(
-            sql.contains("v.severity AS v_severity") && sql.contains("GROUP BY v.severity"),
-            "security property grouping must use the protected node alias, got:\n{sql}"
+            sql.contains("_orbit_edge_0.severity AS v_severity")
+                && sql.contains("GROUP BY _orbit_edge_0.severity"),
+            "security property grouping must use the current FK holder, got:\n{sql}"
         );
     }
 

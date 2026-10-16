@@ -29,7 +29,8 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
                     NodeBinding::source(
                         &binding.alias,
                         &binding.column,
-                        binding.joined.then(|| binding.node.clone()),
+                        binding.property_source.clone(),
+                        binding.traversal_path.as_ref().map(column),
                     ),
                 )
             })

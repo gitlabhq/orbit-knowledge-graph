@@ -146,6 +146,10 @@ pub fn node_predicates(node: &NodePlan) -> Vec<Predicate> {
 }
 
 pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
+    node_outputs_at(node, &node.alias)
+}
+
+pub fn node_outputs_at(node: &NodePlan, source: &str) -> Vec<Projection> {
     if !node.emit_select {
         return vec![];
     }
@@ -153,7 +157,7 @@ pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
         .into_iter()
         .map(|column| {
             Projection::new(
-                OutputValue::Column(Column::new(&node.alias, &column)),
+                OutputValue::Column(Column::new(source, &column)),
                 format!("{}_{column}", node.alias),
             )
         })

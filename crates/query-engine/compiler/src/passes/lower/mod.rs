@@ -11,7 +11,6 @@ use crate::ast::*;
 use crate::constants::EDGE_TYPE_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use std::collections::{BTreeMap, HashMap};
 
 use super::plan::{EdgeRelation, Plan, QueryPlan};
@@ -37,13 +36,16 @@ pub enum NodeBinding {
 }
 
 impl NodeBinding {
-    fn source(alias: &str, column: &str, table_alias: Option<String>) -> Self {
+    fn source(
+        alias: &str,
+        column: &str,
+        table_alias: Option<String>,
+        traversal_path: Option<Expr>,
+    ) -> Self {
         Self::Values {
             identity: Expr::col(alias, column),
-            traversal_path: table_alias
-                .as_ref()
-                .map(|alias| Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
             table_alias,
+            traversal_path,
         }
     }
 
@@ -117,7 +119,7 @@ impl EmitOutput {
                         ..
                     }),
                     _,
-                ) => NodeBinding::source(alias, &source.1, None),
+                ) => NodeBinding::source(alias, &source.1, None, None),
                 (_, [id]) => NodeBinding::Values {
                     identity: Expr::lit(*id),
                     table_alias: None,
@@ -182,11 +184,16 @@ fn edge_type(query: &Query, relation: &EdgeRelation, index: usize) -> Option<Exp
         .cloned()
 }
 
-fn emit_traversal(input: &Input, output: EmitOutput, relations: &[EdgeRelation]) -> Result<Node> {
+fn emit_traversal(
+    input: &Input,
+    output: EmitOutput,
+    relations: &[EdgeRelation],
+    execution: &crate::passes::plan::physical::ExecutionPlan,
+) -> Result<Node> {
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
         (Some(order), _) => vec![ordered(
-            Expr::col(&order.node, &order.property),
+            requirements::column(&execution.property(&order.node, &order.property)),
             order.direction,
         )],
         (None, Some(sort)) => {
@@ -219,7 +226,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            emit_traversal(input, output, &plan.relations)
+            emit_traversal(input, output, &plan.relations, &plan.operation.execution)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;

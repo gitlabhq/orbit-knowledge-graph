@@ -13,7 +13,7 @@ cases:
     clickhouse:
       planned:
         expect:
-        - "(Filter NOT ((_orbit_edge_0.source_tags HAS ANY ['state:merged']) AND (_orbit_edge_0.target_tags HAS ANY ['state:closed'])) (_))"
+        - "(Filter NOT (((mr.state = 'merged') AND (_orbit_edge_0.source_tags HAS ANY ['state:merged'])) AND (_orbit_edge_0.target_tags HAS ANY ['state:closed'])) (_))"
 - name: NOT over a non-nullable denormalized property reads edge tags instead of the node table
   query:
     json: |
@@ -78,4 +78,4 @@ cases:
     clickhouse:
       planned:
         expect:
-        - "(Filter NOT (_orbit_edge_0.source_tags HAS ANY ['state:blocked']) (_))"
+        - "(Filter ..., NOT ((u.state IN ['blocked']) AND (_orbit_edge_0.source_tags HAS ANY ['state:blocked'])) (_))"

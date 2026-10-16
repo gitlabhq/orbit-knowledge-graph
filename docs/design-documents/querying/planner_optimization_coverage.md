@@ -44,6 +44,8 @@ query limit.
 | Canonical node fallback | Active | Joins `FINAL` node rows for uncovered match values. |
 | Late output hydration | Active | Fetches traversal output properties after matching and limiting. |
 | Routed relationship tables | Active | Reads each relationship from its ontology route. |
+| Normalized FK relations | Active | Reads one current FK-holder row and projects the canonical edge schema. |
+| FK holder property reuse | Active | Reuses required holder columns for filtering, grouping, sorting, and output. |
 | Multi-table alternatives | Active | Normalizes routed arms with `UNION ALL`. |
 | Typed edge joins | Active | Compares endpoint ID and kind across fixed chains and branches. |
 | Current stored edges | Active | Uses `FINAL` or explicit latest-row resolution before tombstone checks. |
@@ -99,19 +101,19 @@ WHERE edge.relationship_kind = 'CALLS'
 ### Exact edge metadata
 
 ```gql orbit-query
-MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'})
 RETURN u.id, mr.id
 ```
 
 ```sql
 SELECT edge.source_id, edge.target_id
 FROM gl_edge AS edge FINAL
-WHERE edge.relationship_kind = 'AUTHORED'
+WHERE edge.relationship_kind = 'APPROVED'
   AND has(edge.target_tags, 'state:merged')
   AND edge._deleted = false
 ```
 
-### Uncovered endpoint filter
+### FK relation with an uncovered endpoint filter
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/orbit'})
@@ -135,22 +137,26 @@ exact_projects AS MATERIALIZED (
     AND _deleted = false
 )
 SELECT count()
-FROM gl_edge FINAL
-WHERE target_id IN (SELECT id FROM exact_projects)
+FROM gl_merge_request FINAL
+WHERE project_id IN (SELECT id FROM exact_projects)
+  AND _deleted = false
 ```
 
 Candidate IDs only narrow the exact read. The exact current-row query enforces
 the property filter and deletion check.
 
 ```sql
-SELECT edge.source_id, edge.target_id
-FROM gl_edge AS edge FINAL
-INNER JOIN gl_project AS p FINAL ON edge.target_id = p.id
-WHERE edge.relationship_kind = 'IN_PROJECT'
-  AND p.full_path = 'gitlab-org/orbit'
-  AND edge._deleted = false
+SELECT mr.id, mr.project_id
+FROM gl_merge_request AS mr FINAL
+INNER JOIN gl_project AS p FINAL ON mr.project_id = p.id
+WHERE p.full_path = 'gitlab-org/orbit'
+  AND mr._deleted = false
   AND p._deleted = false
 ```
+
+The FK-holder scan also projects required MergeRequest properties. The planner
+does not read `gl_merge_request` again for filtering, grouping, sorting, or
+output.
 
 ### Joined edge relations
 
