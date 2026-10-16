@@ -405,6 +405,8 @@ stages:
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__obj $F $$$REST))))'
       - match: '(tuple_value $C:__callee $$$REST)'
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__call $C $$$REST))))'
+      - match: '(tuple_value $P:closure_parameters $$$REST)'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__lambda $P $$$REST))))'
       - match: '(tuple_value)'
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$ROOT $ROOT)))'
       - match: '(__ssa_return $V:identifier)'
