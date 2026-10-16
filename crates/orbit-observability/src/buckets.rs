@@ -8,8 +8,8 @@
 /// query pipelines. Tail extends past 10 s to keep p99 measurable under load.
 pub const LATENCY: &[f64] = &[0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0];
 
-/// End-to-end query latency buckets (100 ms to 60 s). The 5 s and 25 s
-/// boundaries are latency SLI thresholds; 15 s and 20 s split the tail.
+/// End-to-end query latency buckets (100 ms to 60 s), with a finer tail
+/// between 10 s and 30 s.
 pub const QUERY_LATENCY: &[f64] = &[
     0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 60.0,
 ];
