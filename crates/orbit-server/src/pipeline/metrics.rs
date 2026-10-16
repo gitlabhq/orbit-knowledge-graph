@@ -53,7 +53,7 @@ pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
     match err {
         PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => Some("security"),
         PipelineError::Compile { .. } => None,
-        PipelineError::Execution(_) => Some(err.failure_reason().as_str()),
+        PipelineError::Execution(_) => Some("execution"),
         PipelineError::Authorization(_) => Some("authorization"),
         PipelineError::ContentResolution(_) => Some("content_resolution"),
         PipelineError::Streaming(_) => Some("streaming"),
@@ -165,22 +165,5 @@ impl PipelineObserver for OTelPipelineObserver {
         METRICS.batches.record(self.batch_count as u64, &qt);
         METRICS.result_set_rows.record(row_count as u64, &qt);
         METRICS.redactions.record(redacted_count as u64, &qt);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn execution_failures_report_the_clickhouse_limit() {
-        let cases = [
-            ("Code: 159. DB::Exception: Timeout exceeded", "too_slow"),
-            ("Code: 47. DB::Exception: Unknown identifier", "execution"),
-        ];
-        for (message, reason) in cases {
-            let err = PipelineError::Execution(format!("query error: bad response: {message}"));
-            assert_eq!(failure_reason(&err), Some(reason), "{message}");
-        }
     }
 }

@@ -432,11 +432,12 @@ impl Server {
             ),
             [[status, outcome]]
         );
-        // Compile rejections are counted on the compiler metric instead, and the metric
-        // names a redaction failure `authorization`.
-        let failed = match failure_reason {
-            Some("redaction") => Some("authorization"),
-            reason => reason.filter(|_| status != "compile_error"),
+        // The failed metric keeps coarse reasons; compile rejections are on the compiler metric.
+        let failed = match (status, failure_reason) {
+            ("compile_error", _) => None,
+            ("execution_error", _) => Some("execution"),
+            (_, Some("redaction")) => Some("authorization"),
+            (_, reason) => reason,
         };
         assert_eq!(
             metric_labels(&metrics, "gkg.query.pipeline.failed", &["failure_reason"]),

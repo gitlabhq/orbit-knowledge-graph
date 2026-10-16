@@ -134,10 +134,8 @@ pub const CH_MEMORY_USAGE: MetricSpec = MetricSpec::histogram_u64(
 /// Counter for every query that failed during pipeline execution (post-compile).
 /// `failure_reason` is a closed enum derived from `PipelineError::code()` with
 /// the `_error` suffix stripped: `security`, `execution`, `authorization`,
-/// `content_resolution`, `streaming`, `timeout`, `custom`. Execution failures
-/// with a known ClickHouse limit use the limit name instead of `execution`.
-/// Compile-time rejections are counted separately under
-/// `gkg.query.engine.compiler.rejected`.
+/// `content_resolution`, `streaming`, `custom`. Compile-time rejections are
+/// counted separately under `gkg.query.engine.compiler.rejected`.
 pub const FAILED: MetricSpec = MetricSpec::counter(
     "gkg.query.pipeline.failed",
     "Total queries that failed in the pipeline post-compile, labelled by failure reason.",
