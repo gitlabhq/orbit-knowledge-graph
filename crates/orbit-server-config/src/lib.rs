@@ -29,7 +29,7 @@ pub mod tls;
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use app::{AppConfig, ConfigError, EMBEDDED_DEFAULTS, SECRET_FILE_DIR, SharedAppConfig};
 pub use billing::{BillingAuthMode, BillingConfig, QuotaAuthMode, QuotaConfig, QuotaConfigError};
-pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
+pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig, TimeoutConfig};
 pub use clickhouse_setup::ClickHouseSetupConfig;
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,

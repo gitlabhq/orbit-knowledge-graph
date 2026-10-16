@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use orbit_server_config::ClickHouseConfiguration;
 
@@ -29,8 +28,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             service,
         )
         .with_replicated(self.replicated)
-        .with_insert_timeout(Duration::from_secs(self.insert_timeout_secs))
-        .with_query_timeout(Duration::from_secs(self.query_timeout_secs))
+        .with_timeouts(self.timeouts)
     }
 }
 
@@ -67,6 +65,7 @@ mod tests {
             "username": "default",
             "password": "secret",
             "replicated": false,
+            "timeouts": { "insert_secs": 900, "statement_secs": 0 },
             "profiling": {
                 "enabled": false, "explain": false, "query_log": false,
                 "processors": false, "instance_health": false
@@ -85,6 +84,7 @@ mod tests {
             "url": "http://127.0.0.1:8123",
             "username": "default",
             "replicated": false,
+            "timeouts": { "insert_secs": 900, "statement_secs": 0 },
             "profiling": {
                 "enabled": false, "explain": false, "query_log": false,
                 "processors": false, "instance_health": false

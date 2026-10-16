@@ -11,7 +11,7 @@ pub enum ClickHouseError {
     #[error("insert error: {0}")]
     Insert(#[source] clickhouse::error::Error),
 
-    #[error("{operation} ran past the client bound of {after:?}")]
+    #[error("{operation} timed out after {after:?}")]
     Timeout {
         operation: &'static str,
         after: Duration,

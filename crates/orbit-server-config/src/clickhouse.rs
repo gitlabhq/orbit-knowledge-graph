@@ -1,12 +1,10 @@
 //! ClickHouse connection configuration.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-pub const DEFAULT_INSERT_TIMEOUT_SECS: u64 = 900;
-pub const DEFAULT_QUERY_TIMEOUT_SECS: u64 = 7200;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -25,19 +23,25 @@ pub struct ClickHouseConfiguration {
     /// part creation when many small or concurrent writes hit the same tables.
     #[serde(default)]
     pub insert_settings: HashMap<String, String>,
-    #[serde(default = "default_insert_timeout_secs")]
-    pub insert_timeout_secs: u64,
-    #[serde(default = "default_query_timeout_secs")]
-    pub query_timeout_secs: u64,
+    pub timeouts: TimeoutConfig,
     pub profiling: ProfilingConfig,
 }
 
-fn default_insert_timeout_secs() -> u64 {
-    DEFAULT_INSERT_TIMEOUT_SECS
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TimeoutConfig {
+    pub insert_secs: u64,
+    pub statement_secs: u64,
 }
 
-fn default_query_timeout_secs() -> u64 {
-    DEFAULT_QUERY_TIMEOUT_SECS
+impl TimeoutConfig {
+    pub fn insert(&self) -> Option<Duration> {
+        (self.insert_secs > 0).then(|| Duration::from_secs(self.insert_secs))
+    }
+
+    pub fn statement(&self) -> Option<Duration> {
+        (self.statement_secs > 0).then(|| Duration::from_secs(self.statement_secs))
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -90,4 +94,19 @@ pub enum ConfigurationError {
 
     #[error("replicated is enabled but insert_quorum is set to 0")]
     ReplicatedWithoutQuorum,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_zero_second_bound_turns_that_timeout_off() {
+        let timeouts = TimeoutConfig {
+            insert_secs: 0,
+            statement_secs: 5,
+        };
+        assert_eq!(timeouts.insert(), None);
+        assert_eq!(timeouts.statement(), Some(Duration::from_secs(5)));
+    }
 }

@@ -129,7 +129,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `datalake.password` | None | Auth password |
 | `datalake.session_settings` | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
 | `datalake.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
-| `datalake.query_timeout_secs` | `7200` | Same as `graph.query_timeout_secs`, for statements on the datalake connection |
+| `datalake.timeouts` | as `graph.timeouts` | The same two bounds, for the datalake connection |
 
 ### Graph
 
@@ -141,9 +141,9 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
 | `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
-| `graph.insert_timeout_secs` | `900` | Client bound on one INSERT request (send and response); `0` turns it off; keep it above `insert_quorum_timeout` |
+| `graph.timeouts.insert_secs` | `900` | Client bound on each Arrow insert send and on the insert end; `0` turns it off; keep it above `insert_quorum_timeout` |
+| `graph.timeouts.statement_secs` | `0` | `max_execution_time` on every request unless the session settings or the statement set their own, plus a client backstop at twice the bound on each statement and each read chunk; `0` turns both off; when set, keep it above `insert_quorum_timeout`, the largest `query.*.max_execution_time`, and any `max_execution_time` a statement sets |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
-| `graph.query_timeout_secs` | `7200` | `max_execution_time` the server applies to each executed statement unless the operator or the statement sets its own, plus a client backstop of up to 30 s more for a stuck socket; `0` turns both off. The default is unmeasured; the longest statement on this path is the namespace deletion tombstone copy (`INSERT INTO t SELECT ... WHERE startsWith(traversal_path, X) AND _deleted = false`), and a server kill there leaves a valid partial tombstone set that the redelivery copies again in full |
 
 ### Self-managed replicated clusters
 

@@ -11,7 +11,9 @@ impl From<ClickHouseError> for WriteError {
             ClickHouseError::Insert(source) => {
                 WriteError::Write(source.to_string(), Some(Box::new(source)))
             }
-            bound @ ClickHouseError::Timeout { .. } => WriteError::Write(bound.to_string(), None),
+            timeout @ ClickHouseError::Timeout { .. } => {
+                WriteError::Write(timeout.to_string(), None)
+            }
             ClickHouseError::ArrowDecode(source) => WriteError::Write(
                 format!("arrow decode error: {source}"),
                 Some(Box::new(source)),

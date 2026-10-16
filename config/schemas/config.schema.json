@@ -290,17 +290,8 @@
           },
           "default": {}
         },
-        "insert_timeout_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0,
-          "default": 900
-        },
-        "query_timeout_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0,
-          "default": 7200
+        "timeouts": {
+          "$ref": "#/$defs/TimeoutConfig"
         },
         "profiling": {
           "$ref": "#/$defs/ProfilingConfig"
@@ -312,7 +303,28 @@
         "url",
         "username",
         "replicated",
+        "timeouts",
         "profiling"
+      ]
+    },
+    "TimeoutConfig": {
+      "type": "object",
+      "properties": {
+        "insert_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "statement_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "insert_secs",
+        "statement_secs"
       ]
     },
     "ProfilingConfig": {

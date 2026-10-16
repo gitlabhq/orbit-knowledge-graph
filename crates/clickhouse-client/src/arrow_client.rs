@@ -14,15 +14,12 @@ use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use orbit_observability::resilience::MetricsObserver;
-use orbit_server_config::clickhouse::DEFAULT_INSERT_TIMEOUT_SECS;
-use orbit_server_config::clickhouse::DEFAULT_QUERY_TIMEOUT_SECS;
+use orbit_server_config::TimeoutConfig;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::io::SyncIoBridge;
 use tracing::warn;
 
 pub use clickhouse::QuerySummary;
@@ -90,8 +87,7 @@ pub struct ArrowClickHouseClient {
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
     insert_timeout: Option<Duration>,
-    query_timeout: Option<Duration>,
-    server_bound: bool,
+    backstop: Option<Duration>,
     quorum_writes: bool,
     replicated: bool,
     circuit_breaker: CircuitBreaker,
@@ -131,10 +127,8 @@ impl ArrowClickHouseClient {
             base_url: url.to_string(),
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
-            insert_timeout: Some(Duration::from_secs(DEFAULT_INSERT_TIMEOUT_SECS)),
-            query_timeout: Some(Duration::from_secs(DEFAULT_QUERY_TIMEOUT_SECS)),
-            server_bound: !session_settings.contains_key(MAX_EXECUTION_TIME)
-                && !insert_settings.contains_key(MAX_EXECUTION_TIME),
+            insert_timeout: None,
+            backstop: None,
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
             circuit_breaker: CircuitBreaker::new(
@@ -156,8 +150,17 @@ impl ArrowClickHouseClient {
         self
     }
 
-    pub fn with_insert_timeout(mut self, timeout: Duration) -> Self {
-        self.insert_timeout = (!timeout.is_zero()).then_some(timeout);
+    pub fn with_timeouts(mut self, timeouts: TimeoutConfig) -> Self {
+        self.insert_timeout = timeouts.insert();
+        self.backstop = timeouts.statement().map(|bound| bound.saturating_mul(2));
+        if let Some(bound) = timeouts
+            .statement()
+            .filter(|_| self.client.get_setting(MAX_EXECUTION_TIME).is_none())
+        {
+            self.client = self
+                .client
+                .with_setting(MAX_EXECUTION_TIME, bound.as_secs().to_string());
+        }
         self
     }
 
@@ -165,6 +168,21 @@ impl ArrowClickHouseClient {
         self.client
             .insert_formatted_with(sql)
             .with_timeouts(self.insert_timeout, self.insert_timeout)
+    }
+
+    async fn flush_drain(
+        &self,
+        insert: &mut InsertFormatted,
+        drain: &DrainableWriter,
+    ) -> Result<(), ClickHouseError> {
+        let bytes = drain.take();
+        if !bytes.is_empty() {
+            insert
+                .send(Bytes::from(bytes))
+                .await
+                .map_err(|error| self.insert_error(error))?;
+        }
+        Ok(())
     }
 
     fn insert_error(&self, error: clickhouse::error::Error) -> ClickHouseError {
@@ -175,11 +193,6 @@ impl ArrowClickHouseClient {
             },
             (error, _) => ClickHouseError::Insert(error),
         }
-    }
-
-    pub fn with_query_timeout(mut self, timeout: Duration) -> Self {
-        self.query_timeout = (!timeout.is_zero()).then_some(timeout);
-        self
     }
 
     pub fn database(&self) -> &str {
@@ -198,8 +211,7 @@ impl ArrowClickHouseClient {
     pub fn query(&self, sql: &str) -> ArrowQuery {
         ArrowQuery {
             inner: self.client.query(sql),
-            timeout: self.query_timeout,
-            server_bound: self.server_bound,
+            backstop: self.backstop,
             retry_quorum_conflicts: self.quorum_writes,
             circuit_breaker: self.circuit_breaker.clone(),
         }
@@ -354,9 +366,7 @@ impl ArrowClickHouseClient {
 
         let mut insert = self.bounded_insert(sql);
 
-        flush_drain(&mut insert, &drain)
-            .await
-            .map_err(|error| self.insert_error(error))?;
+        self.flush_drain(&mut insert, &drain).await?;
 
         for (batch_index, batch) in batches.into_iter().enumerate() {
             if batch.schema() != schema {
@@ -364,15 +374,11 @@ impl ArrowClickHouseClient {
             }
             writer.write(&batch).map_err(ClickHouseError::ArrowEncode)?;
             drop(batch);
-            flush_drain(&mut insert, &drain)
-                .await
-                .map_err(|error| self.insert_error(error))?;
+            self.flush_drain(&mut insert, &drain).await?;
         }
 
         writer.finish().map_err(ClickHouseError::ArrowEncode)?;
-        flush_drain(&mut insert, &drain)
-            .await
-            .map_err(|error| self.insert_error(error))?;
+        self.flush_drain(&mut insert, &drain).await?;
 
         insert.end().await.map_err(|error| self.insert_error(error))
     }
@@ -476,52 +482,48 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 
 pub struct ArrowQuery {
     pub(crate) inner: Query,
-    timeout: Option<Duration>,
-    server_bound: bool,
+    backstop: Option<Duration>,
     retry_quorum_conflicts: bool,
     circuit_breaker: CircuitBreaker,
 }
 
 const MAX_EXECUTION_TIME: &str = "max_execution_time";
-const QUERY_TIMEOUT_GRACE: Duration = Duration::from_secs(30);
 
-async fn execute_within(
-    query: Query,
-    timeout: Option<Duration>,
-    server_bound: bool,
-) -> Result<(), ClickHouseError> {
-    let Some(timeout) = timeout else {
-        return query.execute().await.map_err(ClickHouseError::Query);
+async fn within<T>(
+    backstop: Option<Duration>,
+    operation: &'static str,
+    call: impl Future<Output = Result<T, clickhouse::error::Error>>,
+) -> Result<T, ClickHouseError> {
+    let Some(after) = backstop else {
+        return call.await.map_err(ClickHouseError::Query);
     };
-    let query = match server_bound {
-        true => query.with_setting(MAX_EXECUTION_TIME, timeout.as_secs_f64().to_string()),
-        false => query,
-    };
-    let backstop = timeout + timeout.min(QUERY_TIMEOUT_GRACE);
-    match tokio::time::timeout(backstop, query.execute()).await {
+    match tokio::time::timeout(after, call).await {
         Ok(outcome) => outcome.map_err(ClickHouseError::Query),
-        Err(_) => Err(ClickHouseError::Timeout {
-            operation: "statement",
-            after: backstop,
-        }),
+        Err(_) => Err(ClickHouseError::Timeout { operation, after }),
     }
 }
 
 type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
 
 /// A quorum conflict arrives with the first chunk, before any rows, so only that read retries.
-async fn open_cursor(query: Query) -> Result<FirstChunk, ClickHouseError> {
+async fn open_cursor(
+    query: Query,
+    backstop: Option<Duration>,
+) -> Result<FirstChunk, ClickHouseError> {
     let mut cursor = query
         .fetch_bytes("ArrowStream")
         .map_err(ClickHouseError::Query)?;
-    let first = cursor.next().await.map_err(ClickHouseError::Query)?;
+    let first = within(backstop, "read", cursor.next()).await?;
     Ok((cursor, first))
 }
 
-async fn collect_bytes(query: Query) -> Result<(Vec<u8>, Option<QuerySummary>), ClickHouseError> {
-    let (mut cursor, first) = open_cursor(query).await?;
+async fn collect_bytes(
+    query: Query,
+    backstop: Option<Duration>,
+) -> Result<(Vec<u8>, Option<QuerySummary>), ClickHouseError> {
+    let (mut cursor, first) = open_cursor(query, backstop).await?;
     let mut buffer = first.map(|chunk| chunk.to_vec()).unwrap_or_default();
-    while let Some(chunk) = cursor.next().await.map_err(ClickHouseError::Query)? {
+    while let Some(chunk) = within(backstop, "read", cursor.next()).await? {
         buffer.extend(chunk);
     }
     Ok((buffer, cursor.summary().cloned()))
@@ -534,10 +536,6 @@ impl ArrowQuery {
     }
 
     pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        let name = name.into();
-        if name == MAX_EXECUTION_TIME {
-            self.server_bound = false;
-        }
         self.inner = self.inner.with_setting(name, value);
         self
     }
@@ -553,10 +551,10 @@ impl ArrowQuery {
         breaker
             .call_transient(|| async {
                 if !self.retry_quorum_conflicts {
-                    return execute_within(self.inner, self.timeout, self.server_bound).await;
+                    return within(self.backstop, "statement", self.inner.execute()).await;
                 }
                 retry_quorum_conflicts(true, || {
-                    execute_within(self.inner.clone(), self.timeout, self.server_bound)
+                    within(self.backstop, "statement", self.inner.clone().execute())
                 })
                 .await
             })
@@ -575,7 +573,7 @@ impl ArrowQuery {
         let (buffer, summary) = breaker
             .call_transient(|| {
                 retry_quorum_conflicts(self.retry_quorum_conflicts, || {
-                    collect_bytes(self.inner.clone())
+                    collect_bytes(self.inner.clone(), self.backstop)
                 })
             })
             .await?;
@@ -605,7 +603,7 @@ impl ArrowQuery {
         breaker
             .call_transient(|| {
                 retry_quorum_conflicts(self.retry_quorum_conflicts, || {
-                    open_cursor(self.inner.clone())
+                    open_cursor(self.inner.clone(), self.backstop)
                 })
             })
             .await
@@ -615,32 +613,10 @@ impl ArrowQuery {
         self,
         max_block_size: Option<u64>,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        let (cursor, first) = self.open_cursor(max_block_size).await?;
-
-        let handle = tokio::runtime::Handle::current();
-        let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
-
-        tokio::task::spawn_blocking(move || {
-            let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
-            let bridge = SyncIoBridge::new_with_handle(body, handle);
-            let reader = match StreamReader::try_new(bridge, None) {
-                Ok(reader) => reader,
-                Err(err) => {
-                    let _ = tx.blocking_send(Err(ClickHouseError::ArrowDecode(err)));
-                    return;
-                }
-            };
-
-            for batch_result in reader {
-                let mapped: Result<RecordBatch, ClickHouseError> =
-                    batch_result.map_err(ClickHouseError::ArrowDecode);
-                if tx.blocking_send(mapped).is_err() {
-                    break;
-                }
-            }
-        });
-
-        Ok(ReceiverStream::new(rx).boxed())
+        let (stream, _) = self
+            .fetch_arrow_streamed_with_summary(max_block_size)
+            .await?;
+        Ok(stream)
     }
 
     pub async fn fetch_arrow_streamed_with_summary(
@@ -653,6 +629,7 @@ impl ArrowQuery {
         ),
         ClickHouseError,
     > {
+        let backstop = self.backstop;
         let (mut cursor, first) = self.open_cursor(max_block_size).await?;
 
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
@@ -686,11 +663,17 @@ impl ArrowQuery {
                     }
                     Ok(None) => break,
                     Err(err) => {
-                        let _ = tx.send(Err(ClickHouseError::Query(err))).await;
+                        let _ = tx.send(Err(err)).await;
                         return;
                     }
                 }
-                next = cursor.next().await;
+                if tx.is_closed() {
+                    break;
+                }
+                next = within(backstop, "read", cursor.next()).await;
+            }
+            if let Err(err) = decoder.finish() {
+                let _ = tx.send(Err(ClickHouseError::ArrowDecode(err))).await;
             }
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
@@ -742,17 +725,6 @@ fn has_quorum_insert_setting(
         })
 }
 
-async fn flush_drain(
-    insert: &mut InsertFormatted,
-    drain: &DrainableWriter,
-) -> Result<(), clickhouse::error::Error> {
-    let bytes = drain.take();
-    if !bytes.is_empty() {
-        insert.send(Bytes::from(bytes)).await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,33 +734,17 @@ mod tests {
     use circuit_breaker::CircuitBreakableError;
     use futures::future::BoxFuture;
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[test]
-    fn a_zero_query_timeout_turns_the_bound_off() {
-        let client = client_with_insert_settings(HashMap::new());
-        assert_eq!(
-            client.query_timeout,
-            Some(Duration::from_secs(DEFAULT_QUERY_TIMEOUT_SECS))
-        );
-        let off = client.clone().with_query_timeout(Duration::ZERO);
-        assert_eq!(off.query_timeout, None);
-        let bounded = client.with_query_timeout(Duration::from_secs(5));
-        assert_eq!(bounded.query_timeout, Some(Duration::from_secs(5)));
-    }
-
-    async fn never_answering_server() -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<u8>>>) {
+    async fn never_answering_server() -> (String, Arc<Mutex<Vec<u8>>>) {
         use tokio::io::AsyncReadExt;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let connections = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let (accepted, seen) = (connections.clone(), requests.clone());
+        let seen = requests.clone();
         tokio::spawn(async move {
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
-                accepted.fetch_add(1, Ordering::SeqCst);
                 let seen = seen.clone();
                 tokio::spawn(async move {
                     let mut chunk = [0u8; 4096];
@@ -801,7 +757,7 @@ mod tests {
                 });
             }
         });
-        (url, connections, requests)
+        (url, requests)
     }
 
     fn bounded_client(
@@ -817,183 +773,108 @@ mod tests {
             &HashMap::new(),
             "test",
         )
-        .with_query_timeout(Duration::from_millis(200))
+        .with_timeouts(TimeoutConfig {
+            insert_secs: 1,
+            statement_secs: 1,
+        })
     }
 
-    async fn hung_statement(statement: ArrowQuery) -> ClickHouseError {
-        tokio::time::timeout(Duration::from_secs(60), statement.execute())
+    async fn times_out_on<T: std::fmt::Debug>(
+        call: impl Future<Output = Result<T, ClickHouseError>>,
+    ) -> &'static str {
+        let outcome = tokio::time::timeout(Duration::from_secs(60), call)
             .await
-            .expect("the statement must end on its own bound, not on the test bound")
-            .unwrap_err()
+            .expect("the call must end on its own bound, not on the test bound");
+        match outcome {
+            Err(ClickHouseError::Timeout { operation, .. }) => operation,
+            other => panic!("{other:?}"),
+        }
     }
 
     fn request_text(requests: &Mutex<Vec<u8>>) -> String {
         String::from_utf8_lossy(&requests.lock().unwrap()).into_owned()
     }
 
+    fn requests_sent(requests: &Mutex<Vec<u8>>) -> usize {
+        request_text(requests).matches(" HTTP/1.1\r\n").count()
+    }
+
     #[tokio::test]
-    async fn a_statement_the_server_never_answers_fails_on_the_query_timeout() {
-        let (url, connections, requests) = never_answering_server().await;
+    async fn a_statement_the_server_never_answers_fails_on_the_backstop() {
+        let (url, requests) = never_answering_server().await;
         let client = bounded_client(&url, insert_quorum_setting());
         assert!(client.has_quorum_writes());
 
-        let error = hung_statement(client.query("INSERT INTO t SELECT 1")).await;
+        let operation = times_out_on(client.query("INSERT INTO t SELECT 1").execute()).await;
 
-        assert!(
-            matches!(
-                error,
-                ClickHouseError::Timeout {
-                    operation: "statement",
-                    ..
-                }
-            ),
-            "{error}"
-        );
-        assert_eq!(connections.load(Ordering::SeqCst), 1, "{error}");
-        assert!(request_text(&requests).contains("max_execution_time=0.2"));
+        assert_eq!(operation, "statement");
+        assert_eq!(requests_sent(&requests), 1);
+        assert!(request_text(&requests).contains("max_execution_time=1"));
     }
 
     #[tokio::test]
     async fn an_operator_max_execution_time_is_not_overridden() {
-        let (url, _, requests) = never_answering_server().await;
+        let (url, requests) = never_answering_server().await;
         let session = HashMap::from([(MAX_EXECUTION_TIME.to_string(), "5".to_string())]);
         let client = bounded_client(&url, session);
 
-        let error = hung_statement(client.query("INSERT INTO t SELECT 1")).await;
+        let operation = times_out_on(client.query("INSERT INTO t SELECT 1").execute()).await;
 
-        assert!(matches!(error, ClickHouseError::Timeout { .. }), "{error}");
+        assert_eq!(operation, "statement");
         let request = request_text(&requests);
         assert!(request.contains("max_execution_time=5"), "{request}");
-        assert!(!request.contains("max_execution_time=0.2"), "{request}");
+        assert!(!request.contains("max_execution_time=1"), "{request}");
     }
 
     #[tokio::test]
     async fn a_statement_with_its_own_max_execution_time_keeps_it() {
-        let (url, _, requests) = never_answering_server().await;
+        let (url, requests) = never_answering_server().await;
         let client = bounded_client(&url, HashMap::new());
-
         let statement = client
             .query("INSERT INTO t SELECT 1")
             .with_setting(MAX_EXECUTION_TIME, "7");
-        let error = hung_statement(statement).await;
 
-        assert!(matches!(error, ClickHouseError::Timeout { .. }), "{error}");
+        let operation = times_out_on(statement.execute()).await;
+
+        assert_eq!(operation, "statement");
         let request = request_text(&requests);
         assert!(request.contains("max_execution_time=7"), "{request}");
-        assert!(!request.contains("max_execution_time=0.2"), "{request}");
+        assert!(!request.contains("max_execution_time=1"), "{request}");
     }
 
-    #[test]
-    fn a_zero_insert_timeout_turns_the_bound_off() {
-        let client = client_with_insert_settings(HashMap::new());
-        assert_eq!(
-            client.insert_timeout,
-            Some(Duration::from_secs(DEFAULT_INSERT_TIMEOUT_SECS))
-        );
-        let off = client.clone().with_insert_timeout(Duration::ZERO);
-        assert_eq!(off.insert_timeout, None);
-        let bounded = client.with_insert_timeout(Duration::from_secs(5));
-        assert_eq!(bounded.insert_timeout, Some(Duration::from_secs(5)));
+    #[tokio::test]
+    async fn a_read_the_server_never_answers_fails_on_the_backstop() {
+        let (url, _) = never_answering_server().await;
+        let client = bounded_client(&url, HashMap::new());
+
+        let operation = times_out_on(client.query("SELECT 1").fetch_arrow()).await;
+
+        assert_eq!(operation, "read");
     }
 
     #[tokio::test]
     async fn an_insert_the_server_never_answers_fails_on_the_end_timeout() {
-        use tokio::io::AsyncReadExt;
+        let (url, requests) = never_answering_server().await;
+        let client = bounded_client(&url, HashMap::new());
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move {
-            loop {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                tokio::spawn(async move {
-                    let mut sink = [0u8; 4096];
-                    while socket.read(&mut sink).await.is_ok_and(|n| n > 0) {}
-                });
-            }
-        });
-        let client = ArrowClickHouseClient::new(
-            &url,
-            "db",
-            "default",
-            None,
-            &HashMap::new(),
-            &HashMap::new(),
-            "test",
-        )
-        .with_insert_timeout(Duration::from_millis(200));
-        let schema = Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)]));
-        let batch =
-            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2]))]).unwrap();
+        let operation =
+            times_out_on(client.insert_arrow_streaming("t", vec![one_row_batch()])).await;
 
-        let insert = client.insert_arrow_streaming("t", vec![batch]);
-        let outcome = tokio::time::timeout(Duration::from_secs(10), insert).await;
-
-        let error = outcome
-            .expect("the insert must end on its own timeout, not on the test bound")
-            .unwrap_err();
-        assert!(
-            matches!(
-                error,
-                ClickHouseError::Timeout {
-                    operation: "insert",
-                    ..
-                }
-            ),
-            "{error}"
-        );
+        assert_eq!(operation, "insert");
+        assert!(request_text(&requests).contains("max_execution_time=1"));
     }
 
     #[tokio::test]
     async fn a_timed_out_insert_is_not_retried_as_a_quorum_conflict() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use tokio::io::AsyncReadExt;
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let connections = Arc::new(AtomicUsize::new(0));
-        let accepted = connections.clone();
-        tokio::spawn(async move {
-            loop {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                accepted.fetch_add(1, Ordering::SeqCst);
-                tokio::spawn(async move {
-                    let mut sink = [0u8; 4096];
-                    while socket.read(&mut sink).await.is_ok_and(|n| n > 0) {}
-                });
-            }
-        });
-        let client = ArrowClickHouseClient::new(
-            &url,
-            "db",
-            "default",
-            None,
-            &insert_quorum_setting(),
-            &HashMap::new(),
-            "test",
-        )
-        .with_insert_timeout(Duration::from_millis(200));
+        let (url, requests) = never_answering_server().await;
+        let client = bounded_client(&url, insert_quorum_setting());
         assert!(client.has_quorum_writes());
-        let schema = Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)]));
-        let batch =
-            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1]))]).unwrap();
 
-        let insert = client.insert_arrow_streaming("t", vec![batch]);
-        let error = tokio::time::timeout(Duration::from_secs(60), insert)
-            .await
-            .expect("the insert must end on its own bound, not on the test bound")
-            .unwrap_err();
+        let operation =
+            times_out_on(client.insert_arrow_streaming("t", vec![one_row_batch()])).await;
 
-        assert!(
-            matches!(
-                error,
-                ClickHouseError::Timeout {
-                    operation: "insert",
-                    ..
-                }
-            ),
-            "{error}"
-        );
-        assert_eq!(connections.load(Ordering::SeqCst), 1, "{error}");
+        assert_eq!(operation, "insert");
+        assert_eq!(requests_sent(&requests), 1);
     }
 
     fn client_with_insert_settings(
