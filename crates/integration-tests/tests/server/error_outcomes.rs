@@ -20,7 +20,6 @@ use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::{ExecuteQueryError, ExecuteQueryRequest};
 use orbit_server_config::AppConfig;
 use orbit_server_config::query::{QueryConfig, QuerySettings};
-use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
@@ -97,23 +96,52 @@ async fn query_memory_limit_is_a_server_error() {
         .await;
 }
 
-// Server limits use whole seconds and seeded queries finish faster, so hit ClickHouse directly.
 #[tokio::test]
 async fn clickhouse_timeout_is_a_server_error() {
-    let graph = TestContext::new(&[]).await;
-
-    let error = graph
-        .create_client()
-        .query_arrow(
-            "SELECT sleepEachRow(0.5) FROM numbers(10) \
-             SETTINGS max_execution_time = 1, max_block_size = 1",
+    let mut server = Server::start_with_query_limits(QueryConfig {
+        max_execution_time: Some(1),
+        ..Default::default()
+    })
+    .await;
+    server
+        .graph
+        .apply_server_config(
+            "users.d/speed.xml",
+            "<clickhouse><profiles><default><max_execution_speed>1</max_execution_speed>\
+             <timeout_before_checking_execution_speed>0</timeout_before_checking_execution_speed>\
+             </default></profiles></clickhouse>",
         )
-        .await
-        .unwrap_err();
-    let error = PipelineError::Execution(error.to_string());
+        .await;
 
-    assert_eq!(error.failure_reason().as_str(), "too_slow");
-    assert_eq!(error.outcome(), "server_error");
+    let error = server.run(project_query(json!({}))).await.unwrap_err();
+
+    assert_eq!(error.code, "execution_error");
+    server
+        .assert_recorded("execution_error", "server_error", Some("too_slow"))
+        .await;
+}
+
+#[tokio::test]
+async fn clickhouse_server_memory_limit_is_a_server_error() {
+    let mut server = Server::start().await;
+    server
+        .graph
+        .apply_server_config(
+            "config.d/memory.xml",
+            "<clickhouse><max_server_memory_usage>1</max_server_memory_usage></clickhouse>",
+        )
+        .await;
+
+    let error = server.run(project_query(json!({}))).await.unwrap_err();
+
+    assert_eq!(error.code, "execution_error");
+    server
+        .assert_recorded(
+            "execution_error",
+            "server_error",
+            Some("total_memory_limit"),
+        )
+        .await;
 }
 
 #[tokio::test]
@@ -179,6 +207,7 @@ async fn content_for_more_rows_than_the_resolver_cap_is_a_caller_error() {
 }
 
 // Hydration resolves every pinned node_id regardless of limit, so 4 rows reach the resolver.
+// The caller asked for no more than the cap, so the overflow is ours and stays a server error.
 #[tokio::test]
 async fn content_batch_over_the_cap_with_limit_at_the_cap_is_a_server_error() {
     let mut server = Server::start().await;
@@ -220,7 +249,7 @@ struct Server {
     analytics: Arc<InMemoryAnalyticsTracker>,
     meter_provider: SdkMeterProvider,
     metrics: InMemoryMetricExporter,
-    _graph: TestContext,
+    graph: TestContext,
     _shutdown: DropGuard,
 }
 
@@ -255,7 +284,7 @@ impl Server {
             analytics,
             meter_provider,
             metrics: exporter,
-            _graph: graph,
+            graph,
             _shutdown: shutdown.drop_guard(),
         }
     }

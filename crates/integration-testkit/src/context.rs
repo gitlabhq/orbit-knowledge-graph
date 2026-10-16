@@ -11,7 +11,7 @@ use testcontainers::bollard::Docker;
 use testcontainers::bollard::query_parameters::{
     ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
 };
-use testcontainers::core::{ContainerPort, ImageExt};
+use testcontainers::core::{CmdWaitFor, ContainerPort, ExecCommand, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
@@ -42,7 +42,7 @@ const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 #[derive(Clone)]
 pub struct TestContext {
-    _container: Arc<ContainerAsync<GenericImage>>,
+    container: Arc<ContainerAsync<GenericImage>>,
     pub config: ClickHouseConfiguration,
     url: String,
     schema_sqls: Arc<Vec<String>>,
@@ -70,11 +70,28 @@ impl TestContext {
         };
 
         Self {
-            _container: Arc::new(container),
+            container: Arc::new(container),
             config,
             url,
             schema_sqls: Arc::new(schema_sqls.iter().map(|s| s.to_string()).collect()),
         }
+    }
+
+    /// Writes a ClickHouse server or users config override (e.g. `config.d/limits.xml`) and reloads it.
+    pub async fn apply_server_config(&self, file: &str, xml: &str) {
+        let write = ExecCommand::new([
+            "sh",
+            "-c",
+            "printf %s \"$0\" > /etc/clickhouse-server/$1",
+            xml,
+            file,
+        ])
+        .with_cmd_ready_condition(CmdWaitFor::exit_code(0));
+        self.container
+            .exec(write)
+            .await
+            .expect("failed to write ClickHouse config override");
+        self.execute("SYSTEM RELOAD CONFIG").await;
     }
 
     pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {
@@ -223,7 +240,7 @@ impl TestContext {
         }
 
         Self {
-            _container: Arc::clone(&self._container),
+            container: Arc::clone(&self.container),
             config: ClickHouseConfiguration {
                 database: name.to_string(),
                 url: self.url.clone(),
