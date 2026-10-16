@@ -167,7 +167,6 @@ mod tests {
     use crate::campaign::CampaignState;
     use crate::modules::code::test_helpers::{
         build_replication_events, code_indexing_task_columns,
-        code_indexing_task_columns_with_storage,
     };
     use crate::orchestrator::siphon::Siphon;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
@@ -221,15 +220,9 @@ mod tests {
     async fn copies_repository_storage_from_the_event() {
         let nats = Arc::new(MockNatsServices::new());
         let payload = build_replication_events(vec![
-            code_indexing_task_columns_with_storage(
-                42,
-                123,
-                "refs/heads/main",
-                "abc123",
-                "/org/project-123",
-                "gitaly-1",
-            )
-            .build(),
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .with_string("repository_storage", "gitaly-1")
+                .build(),
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
@@ -246,6 +239,25 @@ mod tests {
         let nats = Arc::new(MockNatsServices::new());
         let payload = build_replication_events(vec![
             code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage, None);
+    }
+
+    #[tokio::test]
+    async fn dispatches_with_a_null_repository_storage() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .with_null("repository_storage")
                 .build(),
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));

@@ -41,6 +41,11 @@ impl EventBuilder {
         self
     }
 
+    pub fn with_null(mut self, name: &'static str) -> Self {
+        self.columns.push((name, Value { value: None }));
+        self
+    }
+
     pub fn build(self) -> (Vec<String>, ReplicationEvent) {
         let column_names: Vec<String> = self.columns.iter().map(|(n, _)| n.to_string()).collect();
         let event_columns: Vec<Column> = self
@@ -86,18 +91,6 @@ pub fn build_replication_events_for_table(
     let encoded = payload.encode_to_vec();
     let compressed = zstd::encode_all(encoded.as_slice(), 0).expect("compression failed");
     Bytes::from(compressed)
-}
-
-pub fn code_indexing_task_columns_with_storage(
-    id: i64,
-    project_id: i64,
-    ref_name: &str,
-    commit_sha: &str,
-    traversal_path: &str,
-    repository_storage: &str,
-) -> EventBuilder {
-    code_indexing_task_columns(id, project_id, ref_name, commit_sha, traversal_path)
-        .with_string("repository_storage", repository_storage)
 }
 
 pub fn code_indexing_task_columns(
