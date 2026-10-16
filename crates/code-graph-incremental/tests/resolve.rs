@@ -524,7 +524,13 @@ fn an_own_copy_added_later_moves_the_importer_off_the_other_copy() {
     let (_, resolved) = templates::reindex(Context::new(&env, changes), resolved.state, vec![])
         .unwrap()
         .finish();
-    assert!(resolved_paths(&resolved).contains(&"lib/src/com/acme/coll/Lists.java"));
+    assert_eq!(
+        resolved_paths(&resolved),
+        [
+            "lib/src/com/acme/base/Checks.java",
+            "lib/src/com/acme/coll/Lists.java"
+        ]
+    );
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair(
@@ -532,4 +538,54 @@ fn an_own_copy_added_later_moves_the_importer_off_the_other_copy() {
             "lib/src/com/acme/base/Checks.java:checkState"
         )]
     );
+}
+
+#[test]
+fn a_file_added_to_a_glob_imported_package_resolves_only_itself() {
+    let repo = tempfile::tempdir().unwrap();
+    for dir in ["src/com/acme/base", "src/com/acme/app", "src/com/acme/top"] {
+        std::fs::create_dir_all(repo.path().join(dir)).unwrap();
+    }
+    write_all(
+        repo.path(),
+        &[
+            (
+                "src/com/acme/base/Checks.java",
+                "package com.acme.base;\npublic final class Checks { public static void check() {} }\n",
+            ),
+            (
+                "src/com/acme/base/Names.java",
+                "package com.acme.base;\npublic final class Names { public static void name() {} }\n",
+            ),
+            (
+                "src/com/acme/app/Service.java",
+                "package com.acme.app;\nimport com.acme.base.*;\npublic class Service { public void run() { Checks.check(); } }\n",
+            ),
+            (
+                "src/com/acme/app/Worker.java",
+                "package com.acme.app;\nimport com.acme.base.*;\npublic class Worker { public void work() { Names.name(); } }\n",
+            ),
+            (
+                "src/com/acme/top/Main.java",
+                "package com.acme.top;\nimport com.acme.app.Service;\npublic class Main { void start() { new Service().run(); } }\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Java, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    write_all(
+        repo.path(),
+        &[(
+            "src/com/acme/base/Extra.java",
+            "package com.acme.base;\npublic final class Extra {}\n",
+        )],
+    );
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo.path(),
+        paths: vec!["src/com/acme/base/Extra.java".into()],
+    });
+    let (_, resolved) = templates::reindex(Context::new(&env, changes), resolved.state, vec![])
+        .unwrap()
+        .finish();
+    assert_eq!(resolved_paths(&resolved), ["src/com/acme/base/Extra.java"]);
 }

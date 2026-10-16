@@ -210,21 +210,29 @@ impl Resolver {
             .keys()
             .any(|key| !previous_index.keys.contains_key(key));
         if added_keys || self.lookup != *lookup {
-            let known_imports: FxHashSet<_> = self
-                .reqs
-                .iter()
-                .map(|req| (req.fi, req.node, req.target_fi, req.anchor))
-                .collect();
+            let known_imports: FxHashSet<_> =
+                self.reqs.iter().map(|req| (req.fi, req.node)).collect();
             let discovery_files = (0..trees.len() as u32)
                 .filter(|fi| !dirty_fis.contains(fi))
                 .collect();
             let (discovered, _) =
                 gather_imports_for(trees, env, &self.file_index, lookup, &discovery_files);
+            let discovered_targets: FxHashSet<_> = discovered
+                .iter()
+                .map(|req| (req.fi, req.node, req.target_fi, req.anchor))
+                .collect();
             invalidated.extend(
                 discovered
                     .iter()
+                    .filter(|req| !known_imports.contains(&(req.fi, req.node)))
+                    .map(|req| req.fi),
+            );
+            invalidated.extend(
+                self.reqs
+                    .iter()
+                    .filter(|req| !dirty_fis.contains(&req.fi))
                     .filter(|req| {
-                        !known_imports.contains(&(req.fi, req.node, req.target_fi, req.anchor))
+                        !discovered_targets.contains(&(req.fi, req.node, req.target_fi, req.anchor))
                     })
                     .map(|req| req.fi),
             );
