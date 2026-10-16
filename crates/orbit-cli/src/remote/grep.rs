@@ -115,6 +115,8 @@ struct Response {
 #[derive(Deserialize)]
 struct ResponseTarget {
     full_path: String,
+    #[serde(default, rename = "type")]
+    kind: String,
 }
 
 #[derive(Deserialize)]
@@ -259,7 +261,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             return Outcome::Skipped("branches belong to a project; name one".into());
         }
         let wanted = request.keywords.join(" ");
-        match super::branch::search_text(&client, &shown, &scope.1, &wanted).await {
+        match super::sdlc::search_text(&client, &shown, &scope.1, &wanted).await {
             Ok(Some(text)) => found.push(text),
             Ok(None) => {}
             Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
@@ -318,8 +320,13 @@ fn render(project: &str, query: &str, keywords: &[String], responses: &[Response
         .flat_map(|keyword| keyword.split_whitespace())
         .map(str::to_lowercase)
         .collect();
+    let home = responses
+        .iter()
+        .filter_map(|response| response.target.as_ref())
+        .find(|target| target.kind.eq_ignore_ascii_case("project"))
+        .map(|target| target.full_path.as_str());
     let mut seen = std::collections::HashSet::new();
-    let mut rows: Vec<(usize, String)> = Vec::new();
+    let mut rows: Vec<(usize, String, Option<String>)> = Vec::new();
     let mut files: Vec<(String, std::collections::BTreeMap<u64, String>)> = Vec::new();
     for entry in responses.iter().flat_map(|response| &response.results) {
         if entry.scope == "blobs" {
@@ -341,25 +348,23 @@ fn render(project: &str, query: &str, keywords: &[String], responses: &[Response
             }
             continue;
         }
-        let label = label(entry);
+        let (label, readable) = label(entry, home);
         if seen.insert(label.clone()) {
             let mut row = label;
             if let Some(state) = &entry.state {
                 let _ = write!(row, " {state}");
             }
-            if let Some(parent) = entry.reference.get("noteable").and_then(|v| v.as_str()) {
-                let _ = write!(row, " on {parent}");
-            }
             if !entry.text.is_empty() {
                 let _ = write!(row, "  {}", entry.text);
             }
-            rows.push((scope_order(&entry.scope), row));
+            rows.push((scope_order(&entry.scope), row, readable));
         }
     }
     if rows.is_empty() && files.is_empty() {
         return Outcome::Empty;
     }
-    rows.sort_by_key(|(order, _)| *order);
+    rows.sort_by_key(|(order, _, _)| *order);
+    let next = rows.iter().find_map(|(_, _, readable)| readable.clone());
     let statuses = responses.iter().flat_map(|response| &response.scopes);
     let truncated = responses.iter().any(|response| response.truncated);
     let mut failed: Vec<String> = Vec::new();
@@ -379,7 +384,7 @@ fn render(project: &str, query: &str, keywords: &[String], responses: &[Response
         "GitLab {query:?} in {project}{}:\n",
         if truncated { ", truncated" } else { "" }
     );
-    for (_, row) in &rows {
+    for (_, row, _) in &rows {
         let _ = writeln!(out, "{row}");
     }
     for (heading, lines) in &files {
@@ -401,11 +406,7 @@ fn render(project: &str, query: &str, keywords: &[String], responses: &[Response
     if !failed.is_empty() {
         let _ = writeln!(out, "unavailable: {}", failed.join(", "));
     }
-    let token = responses
-        .iter()
-        .flat_map(|response| &response.results)
-        .find_map(|entry| entry.token.as_deref());
-    if let Some(token) = token {
+    if let Some(token) = next {
         let _ = writeln!(
             out,
             "next: {} context {token}",
@@ -433,21 +434,56 @@ fn blob_heading(entry: &Entry) -> String {
     }
 }
 
-fn label(entry: &Entry) -> String {
-    if let Some(token) = &entry.token {
-        return token.clone();
+fn reference(kind: &str, sigil: char, path: Option<&str>, iid: i64, home: Option<&str>) -> String {
+    match path.filter(|path| Some(*path) != home) {
+        Some(path) => format!("{kind}:{path}{sigil}{iid}"),
+        None => format!("{kind}:{iid}"),
     }
-    match entry
-        .reference
-        .get("sha")
-        .and_then(serde_json::Value::as_str)
-    {
-        Some(sha) => format!(
-            "{} {}",
-            entry.entity_type,
-            sha.chars().take(SHA_CHARS).collect::<String>()
-        ),
-        None => format!("{} {}", entry.entity_type, entry.reference),
+}
+
+fn parent(reference: &str, home: Option<&str>) -> Option<String> {
+    let (path, sigil, kind) = match reference.rsplit_once('!') {
+        Some((path, _)) => (path, '!', "mr"),
+        None => (reference.rsplit_once('#')?.0, '#', "issue"),
+    };
+    let iid = reference[path.len() + 1..].parse().ok()?;
+    Some(self::reference(kind, sigil, Some(path), iid, home))
+}
+
+fn label(entry: &Entry, home: Option<&str>) -> (String, Option<String>) {
+    let field = |name: &str| entry.reference.get(name);
+    let iid = field("iid").and_then(serde_json::Value::as_i64);
+    let path = field("project_path").and_then(serde_json::Value::as_str);
+    let readable = match (entry.scope.as_str(), iid) {
+        ("merge_requests", Some(iid)) => Some(reference("mr", '!', path, iid, home)),
+        ("work_items", Some(iid)) => Some(reference("issue", '#', path, iid, home)),
+        _ => None,
+    };
+    if let Some(readable) = readable {
+        return (readable.clone(), Some(readable));
+    }
+    if entry.scope == "notes" {
+        let on = field("noteable_reference")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|noteable| parent(noteable, home))
+            .or_else(|| {
+                field("noteable")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            });
+        return match on {
+            Some(on) => (format!("comment on {on}"), Some(on)),
+            None => ("comment".to_string(), None),
+        };
+    }
+    if let Some(sha) = field("sha").and_then(serde_json::Value::as_str) {
+        let commit = format!("commit:{}", sha.chars().take(SHA_CHARS).collect::<String>());
+        let readable = (entry.scope == "commits").then(|| commit.clone());
+        return (commit, readable);
+    }
+    match &entry.token {
+        Some(token) => (token.clone(), Some(token.clone())),
+        None => (format!("{} {}", entry.entity_type, entry.reference), None),
     }
 }
 
@@ -462,17 +498,18 @@ mod tests {
     #[test]
     fn results_merge_across_keywords_in_scope_order() {
         let first = response(
-            r#"{"scopes":[{"name":"merge_requests","status":"ok"},{"name":"notes","status":"error","reason":{"code":"timeout"}},
+            r#"{"target":{"type":"Project","full_path":"group/project"},
+               "scopes":[{"name":"merge_requests","status":"ok"},{"name":"notes","status":"error","reason":{"code":"timeout"}},
                 {"name":"users","status":"unavailable","reason":{"code":"not_available_for_search_type"}}],
-               "results":[{"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"state":"merged","text":"Add scoped search"}],
+               "results":[{"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42,"iid":4,"project_path":"group/project"},"state":"merged","text":"Add scoped search"}],
                "truncated":false}"#,
         );
         let second = response(
             r#"{"scopes":[],"results":[
                 {"scope":"commits","type":"Commit","token":null,"reference":{"project_id":1,"sha":"0123456789abcdef0123"},"text":"Fix grep"},
-                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42},"state":"merged","text":"Add scoped search"},
-                {"scope":"notes","type":"Note","token":"Note[9]","reference":{"id":9,"noteable":"WorkItem[7]"},"text":"grep should search notes"},
-                {"scope":"work_items","type":"WorkItem","token":"WorkItem[7]","reference":{"id":7},"state":"opened","text":"Grep issue"},
+                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42,"iid":4,"project_path":"group/project"},"state":"merged","text":"Add scoped search"},
+                {"scope":"notes","type":"Note","token":"Note[9]","reference":{"id":9,"noteable":"MergeRequest[42]","noteable_reference":"group/project!4"},"text":"grep should search notes"},
+                {"scope":"work_items","type":"WorkItem","token":"WorkItem[7]","reference":{"id":7,"iid":2,"project_path":"group/other"},"state":"opened","text":"Grep issue"},
                 {"scope":"blobs","type":"File","token":null,"reference":{"project_id":3,"project_path":"g/lib","path":"a.go"},"text":"a.go",
                  "matches":[{"start_line":10,"end_line":11,"text":"// helper\nfunc Grep() {"}]},
                 {"scope":"blobs","type":"File","token":null,"reference":{"project_id":3,"project_path":"g/lib","path":"a.go"},"text":"a.go",
@@ -492,17 +529,17 @@ mod tests {
             text,
             format!(
                 "GitLab \"grep|search\" in gitlab.com/group/project, truncated:\n\
-                 WorkItem[7] opened  Grep issue\n\
-                 MergeRequest[42] merged  Add scoped search\n\
-                 Commit 0123456789ab  Fix grep\n\
-                 Note[9] on WorkItem[7]  grep should search notes\n\
+                 issue:group/other#2 opened  Grep issue\n\
+                 mr:4 merged  Add scoped search\n\
+                 commit:0123456789ab  Fix grep\n\
+                 comment on mr:4  grep should search notes\n\
                  g/lib/a.go\n\
                  10-// helper\n\
                  11:func Grep() {{\n\
                  --\n\
                  20:x := grep()\n\
                  unavailable: notes (timeout)\n\
-                 next: {} context MergeRequest[42]\n",
+                 next: {} context issue:group/other#2\n",
                 crate::commands::setup::spec::launcher()
             )
         );

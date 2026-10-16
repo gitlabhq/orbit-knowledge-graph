@@ -345,7 +345,7 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn context_target_help() -> String {
     format!(
-        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, directories, or GitLab tokens such as MergeRequest[42], Issue[7], group/project!12, and GitLab URLs. Mix or repeat targets; quote paths with spaces.",
+        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, directories, names, or GitLab targets: mr:42, issue:7, branch:name, pipeline:123, job:456, commit:sha, GitLab URLs, with repo:group/project for another project. Mix or repeat targets; quote paths with spaces. No targets reads the current branch.",
         commands::setup::spec::launcher()
     )
 }

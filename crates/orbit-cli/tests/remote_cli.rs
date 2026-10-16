@@ -762,7 +762,7 @@ fn context_branch_target_reads_the_merge_request_of_that_branch() {
     let (base_url, handle) = serve_routes(vec![
         (
             "merge_requests?",
-            r#"[{"id":41,"state":"merged"},{"id":42,"state":"opened"}]"#,
+            r#"[{"id":41,"iid":3,"state":"merged"},{"id":42,"iid":4,"state":"opened"}]"#,
         ),
         ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
     ]);
@@ -774,7 +774,7 @@ fn context_branch_target_reads_the_merge_request_of_that_branch() {
         clone.path(),
         data.path(),
         &base_url,
-        &["context", "Branch:fix-ci"],
+        &["context", "branch:fix-ci"],
     );
     let requests = handle.join().expect("join mock");
 
@@ -791,13 +791,13 @@ fn context_branch_target_reads_the_merge_request_of_that_branch() {
         requests[0].request_line
     );
     assert!(
-        requests[1].body.contains("MergeRequest[42]"),
+        requests[1].body.contains("my-group/my-project!4"),
         "{}",
         requests[1].body
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "branch fix-ci: MergeRequest[42]\norbit_context version=1.1.0 entities=1\n"
+        "branch:fix-ci mr:4 opened\norbit_context version=1.1.0 entities=1\n"
     );
 }
 
@@ -807,7 +807,7 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
         ("merge_requests?", "[]"),
         (
             "pipelines?ref",
-            r#"[{"id":7,"status":"failed","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
+            r#"[{"id":7,"status":"failed","ref":"ci-fix","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
         ),
         (
             "pipelines/7/jobs",
@@ -826,6 +826,53 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
     let data = tempfile::tempdir().expect("tempdir");
 
     let output = run_orbit_with_data(clone.path(), data.path(), &base_url, &["context"]);
+    handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "branch:ci-fix no merge request\n\
+         pipeline:7 failed ref ci-fix commit:0123456789ab https://localhost/p/-/pipelines/7\n\
+         failed_jobs[1]:\n  \
+         job:9 unit (test, script_failure) https://localhost/p/-/jobs/9\n    \
+         | ok\n    \
+         | --- FAIL: TestX\n"
+    );
+}
+
+#[test]
+fn context_reads_jobs_and_commits_in_a_named_project() {
+    let (base_url, handle) = serve_routes(vec![
+        (
+            "jobs/9 ",
+            r#"{"id":9,"name":"unit","stage":"test","status":"failed","failure_reason":"script_failure","web_url":"https://localhost/j/9","ref":"main","pipeline":{"id":7},"commit":{"id":"0123456789abcdef"}}"#,
+        ),
+        ("jobs/9/trace", "--- FAIL: TestX\n"),
+        (
+            "commits/0123456 ",
+            r#"{"id":"0123456789abcdef","title":"Fix grep","message":"Fix grep\n\nCloses #7\n","author_name":"Ada","authored_date":"2026-07-02T10:00:00Z"}"#,
+        ),
+        (
+            "commits/0123456/diff",
+            r#"[{"new_path":"a.go","new_file":false,"deleted_file":false,"renamed_file":false}]"#,
+        ),
+        (
+            "commits/0123456/merge_requests",
+            r#"[{"iid":4,"state":"merged","title":"Fix grep"}]"#,
+        ),
+    ]);
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        dir.path(),
+        dir.path(),
+        &base_url,
+        &["context", "job:9", "commit:0123456", "repo:other/lib"],
+    );
     let requests = handle.join().expect("join mock");
 
     assert!(
@@ -834,23 +881,28 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        requests[3].request_line.contains("/jobs/9/trace"),
-        "{}",
-        requests[3].request_line
+        requests
+            .iter()
+            .all(|request| request.request_line.contains("/projects/other%2Flib/")),
+        "{:?}",
+        requests.iter().map(|r| &r.request_line).collect::<Vec<_>>()
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "branch ci-fix: no merge request\n\
-         pipeline 7 failed 0123456789ab https://localhost/p/-/pipelines/7\n\
-         failed_jobs[1]:\n  \
-         unit (test, script_failure) https://localhost/p/-/jobs/9\n    \
-         | ok\n    \
-         | --- FAIL: TestX\n"
+        "job:9 unit (test, script_failure) https://localhost/j/9 failed pipeline:7 ref main commit:0123456789ab\n  \
+         | --- FAIL: TestX\n\
+         commit:0123456789ab Fix grep\n  \
+         author Ada 2026-07-02\n  \
+         message:\n    \
+         Closes #7\n  \
+         changed_files[1]:\n    \
+         M a.go\n  \
+         merge_requests: mr:4 merged Fix grep\n"
     );
 }
 
 #[test]
-fn grep_kind_branch_lists_matching_branches_with_their_merge_requests() {
+fn grep_is_branch_lists_matching_branches_with_their_merge_requests() {
     let (base_url, handle) = serve_routes(vec![
         (
             "search=approval&",
@@ -859,7 +911,7 @@ fn grep_kind_branch_lists_matching_branches_with_their_merge_requests() {
         ("search=rules&", r#"[{"name":"aa/show-approval-rules"}]"#),
         (
             "source_branch=aa%2Fshow-approval-rules",
-            r#"[{"id":42,"state":"opened"}]"#,
+            r#"[{"id":42,"iid":4,"state":"opened"}]"#,
         ),
         (
             "ref=aa%2Fshow-approval-rules",
@@ -876,33 +928,26 @@ fn grep_kind_branch_lists_matching_branches_with_their_merge_requests() {
         clone.path(),
         data.path(),
         &base_url,
-        &["grep", "approval rules", "--kind", "Branch"],
+        &["grep", "is:branch approval rules"],
     );
-    let requests = handle.join().expect("join mock");
+    handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        requests[0]
-            .request_line
-            .contains("/repository/branches?search=approval&per_page=100"),
-        "{}",
-        requests[0].request_line
-    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.starts_with(
             "GitLab branches matching \"approval rules\" in localhost/my-group/my-project:\n\
-             aa/show-approval-rules  MergeRequest[42] opened  pipeline failed\n\
-             fix-approvals  no merge request\n"
+             branch:aa/show-approval-rules  mr:4 opened  pipeline:7 failed\n\
+             branch:fix-approvals  no merge request\n"
         ),
         "{stdout}"
     );
     assert!(
-        stdout.contains("context Branch:aa/show-approval-rules\n"),
+        stdout.contains("context branch:aa/show-approval-rules\n"),
         "{stdout}"
     );
 }

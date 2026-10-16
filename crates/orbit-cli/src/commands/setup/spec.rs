@@ -351,10 +351,7 @@ mod tests {
                     remote,
                     "{launcher}: {rendered}"
                 );
-                assert!(
-                    rendered.contains("MergeRequest[42]") == remote,
-                    "{launcher}"
-                );
+                assert!(rendered.contains(" mr:42;") == remote, "{launcher}");
                 let budget = if remote { 110 } else { 90 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }

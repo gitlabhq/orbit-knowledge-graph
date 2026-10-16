@@ -5,15 +5,18 @@ description: >-
   Expand local code context and GitLab entities.
 
 
-  Batch file paths, `path:start-end` line ranges, directories, `File:<id>`, or
-  `Definition:<id>`. Add GitLab references such as `MergeRequest[42]`, `Issue[7]`,
-  `group/project!12`, `!12`, or a GitLab URL. Code targets read the local index,
-  including another indexed checkout that owns the ID. GitLab references return
-  entity context after the local output: description, comments and review
-  threads, and for merge requests the changed files and failed CI jobs.
-  `Branch:<name>` reads the merge request of that branch, or its latest pipeline
-  and failed job logs when it has no merge request. With no targets at all it
-  reads the current branch. Files return compact definition maps with every followable
+  Batch file paths, `path:start-end` line ranges, directories, names, and the
+  `Definition:<id>` or `File:<id>` that grep prints. GitLab targets use what
+  GitLab shows, as `grep` prints them: `mr:42`, `issue:7`, `branch:name`,
+  `pipeline:123`, `job:456`, `commit:0123abc`, or a GitLab URL. They resolve in
+  the `origin` project; `repo:group/project` names another, and `mr:group/project!42`
+  names one per target. Code targets read the local index, including another
+  indexed checkout that owns the ID. Merge requests and issues return their
+  description, comments and review threads, and for merge requests the changed
+  files and failed CI jobs. A branch reads its merge request, or its latest
+  pipeline when it has none. Pipelines and jobs show failed jobs with the end
+  of their logs; commits show their message, changed files, and merge requests.
+  With no targets at all it reads the current branch. Files return compact definition maps with every followable
   ID and up to ten connections per section, with omitted counts. Line ranges
   return those numbered lines with the definitions they touch; directories list
   indexed files with definition counts. Choose a Definition ID for complete source and its indexed
