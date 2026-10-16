@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_returns_valid_complete_paths
 description: Shortest path from User 1 to Project 1000 via Group
 
 query:
@@ -26,4 +25,4 @@ expect:
     Project:
       ids: [1000]
   path_edges:
-    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }, { type: CONTAINS, to: Project, to_id: 1000 }]
+    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100, step: 0 }, { from: Group, from_id: 100, type: CONTAINS, to: Project, to_id: 1000, step: 1 }]

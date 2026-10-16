@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_sum_produces_correct_totals
 description: Sum of user IDs per group
 
 config:

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_rel_types_restricts_traversal
 description: MEMBER_OF-only rel_types cannot reach Project from User (needs CONTAINS)
 
 query:

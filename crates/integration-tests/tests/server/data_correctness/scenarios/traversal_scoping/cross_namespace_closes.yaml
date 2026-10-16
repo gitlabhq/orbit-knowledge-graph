@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::cross_namespace_closes_returns_cross_project_work_item
 description: Cross-namespace CLOSES edge returns a work item from a different group
 
 config:

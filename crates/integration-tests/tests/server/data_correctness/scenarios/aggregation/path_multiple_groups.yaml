@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_path_multiple_groups
 description: Multiple security paths (1/100/ and 1/102/) show both groups, exclude 101
 
 config:

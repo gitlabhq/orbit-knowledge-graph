@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_work_item_has_label_returns_correct_edges
 description: WorkItem-Label HAS_LABEL traversal returns correct edges and label properties
 
 query:
@@ -20,9 +19,9 @@ expect:
   referential_integrity: true
   edge_exists:
     HAS_LABEL:
-      - [4000, 7000]
-      - [4000, 7001]
-      - [4001, 7002]
+      - { from: WorkItem, from_id: 4000, to: Label, to_id: 7000 }
+      - { from: WorkItem, from_id: 4000, to: Label, to_id: 7001 }
+      - { from: WorkItem, from_id: 4001, to: Label, to_id: 7002 }
   nodes:
     Label:
       rows:

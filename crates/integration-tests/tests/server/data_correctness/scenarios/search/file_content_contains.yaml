@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_contains_selective
 description: File content contains filter returns matching files
 
 query:

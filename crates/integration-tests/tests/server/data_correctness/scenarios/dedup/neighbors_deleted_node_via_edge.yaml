@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::neighbors_deleted_node_visible_via_edge
 description: >
   Deleted neighbor visible via edge; neighbor queries don't join non-center
   node tables (indexer soft-deletes edges alongside parent)
@@ -40,4 +39,4 @@ expect:
       ids: [9311]
   edge_exists:
     AUTHORED:
-      - [9301, 9311]
+      - { from: User, from_id: 9301, to: MergeRequest, to_id: 9311 }

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_without_order_by_is_deterministic
 description: Traversal cursor without order_by returns deterministic first page
 
 query:
@@ -18,5 +17,14 @@ query:
 expect:
   repeat_count: 2
   node_count: 6
+  nodes:
+    User: { order: [1, 2, 3] }
+    Group: { ids: [100, 101, 102] }
+  edge_count: { MEMBER_OF: 4 }
+  edge_exists:
+    MEMBER_OF:
+      - { from: User, from_id: 1, to: Group, to_id: 100 }
+      - { from: User, from_id: 1, to: Group, to_id: 102 }
+      - { from: User, from_id: 2, to: Group, to_id: 100 }
+      - { from: User, from_id: 3, to: Group, to_id: 101 }
   has_more: true
-  skip_requirements: ["relationship:MEMBER_OF"]

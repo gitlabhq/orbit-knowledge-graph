@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::aggregation_filter_excludes_stale_mutable_match
 description: Aggregation filter excludes stale mutable match after dedup
 
 config:

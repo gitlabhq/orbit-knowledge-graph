@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_shared_target_fan_in
 description: Multiple notes fan in from a single merge request via HAS_NOTE
 
 query:
