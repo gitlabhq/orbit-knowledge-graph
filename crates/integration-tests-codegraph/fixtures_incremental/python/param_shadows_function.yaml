@@ -35,6 +35,26 @@ fixtures:
           x = make()
           x.bar()
 
+      def p(a, /, make, *, c):
+          x = make()
+          x.bar()
+
+      def q(a, /, *, c):
+          x = make()
+          x.bar()
+
+      def ts(**make: dict):
+          x = make()
+          x.bar()
+
+      def lam_default():
+          made = lambda make=None: make()
+          made()
+
+      def lam_splat():
+          made = lambda *make: make()
+          made()
+
       def caller():
           x = make()
           x.bar()
@@ -72,6 +92,31 @@ tests:
     assert:
       - { empty: true }
 
+  - name: a typed splat parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'ts'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a plain parameter between separators hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'p'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: separators alone do not hide the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'q'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
   - name: a plain parameter after self hides the top-level def
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
@@ -87,6 +132,14 @@ tests:
       RETURN t.name AS callee
     assert:
       - { empty: true }
+
+  - name: only the functions without a make parameter call make
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE t.name = 'make'
+      RETURN c.name AS caller
+    assert:
+      - { column_values: { field: caller, values: ["caller", "q"] } }
 
   - name: a function without the parameter still calls make and Foo.bar
     query: |
@@ -105,10 +158,11 @@ tests:
     assert:
       - { column_values: { field: name, values: ["bar", "baz"] } }
 
-  - name: functions and the cls method keep their definition_type
+  - name: functions with plain parameters stay functions
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
-      RETURN d.name AS name
+      WHERE d.name IN ['make', 'f', 'g', 'h', 'k', 'p', 'q', 'ts', 'caller']
+      RETURN d.definition_type AS kind
     assert:
-      - { column_values: { field: name, values: ["build", "caller", "f", "g", "h", "k", "make"] } }
+      - { row_count: 9 }
+      - { column_values: { field: kind, values: ["Function"] } }
