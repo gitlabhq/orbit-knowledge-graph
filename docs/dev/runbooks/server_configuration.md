@@ -129,6 +129,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `datalake.password` | None | Auth password |
 | `datalake.session_settings` | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
 | `datalake.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
+| `datalake.query_timeout_secs` | `7200` | Same as `graph.query_timeout_secs`, for statements on the datalake connection |
 
 ### Graph
 
@@ -141,7 +142,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
 | `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
-| `graph.query_timeout_secs` | `7200` | Server-side `max_execution_time` for each executed statement, plus a client backstop of up to 30 s more; `0` turns both off; unmeasured default |
+| `graph.query_timeout_secs` | `7200` | `max_execution_time` the server applies to each executed statement unless the operator or the statement sets its own, plus a client backstop of up to 30 s more for a stuck socket; `0` turns both off. The default is unmeasured; the longest statement on this path is the namespace deletion tombstone copy (`INSERT INTO t SELECT ... WHERE startsWith(traversal_path, X) AND _deleted = false`), and a server kill there leaves a valid partial tombstone set that the redelivery copies again in full |
 
 ### Self-managed replicated clusters
 
