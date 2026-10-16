@@ -155,8 +155,6 @@ tests:
       - { row: { callee: "Box.Companion.size", kind: "Property" } }
 
   - name: a bare read next to an init-block local of the same name types by the property
-    # Known gap: an init-block local has no def between it and the class, so it fills the field slot of the index.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Init.goInit'

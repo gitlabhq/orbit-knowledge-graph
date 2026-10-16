@@ -55,8 +55,6 @@ tests:
       - { row: { callee: "Box\\x", kind: "Method" } }
 
   - name: a read on this of the shared name types by the promoted property
-    # Known gap: a member read through this of a promoted property is not typed, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'read' AND t.name = 'b'
