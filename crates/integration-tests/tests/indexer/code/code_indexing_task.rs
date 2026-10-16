@@ -2268,6 +2268,7 @@ fn code_indexing_task_envelope(
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     })
     .expect("failed to create envelope")
 }
@@ -2285,6 +2286,7 @@ fn code_indexing_backfill_envelope(
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     })
     .expect("failed to create envelope")
 }

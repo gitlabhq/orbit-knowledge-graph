@@ -85,6 +85,9 @@ pub struct CodeIndexingTaskRequest {
     pub dispatch_id: Uuid,
     #[serde(default)]
     pub campaign_id: Option<String>,
+    /// Gitaly storage of the repository, when the producer knows it.
+    #[serde(default)]
+    pub repository_storage: Option<String>,
 }
 
 impl CodeIndexingTaskRequest {

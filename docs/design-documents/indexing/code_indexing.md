@@ -158,6 +158,8 @@ Rails writes to a dedicated `p_knowledge_graph_code_indexing_tasks` table only w
 
 Each task carries `project_id`, `ref`, `commit_sha`, and `traversal_path` directly. So the handler does not need to call Rails for default branch validation or query ClickHouse for the namespace hierarchy.
 
+The table may also carry `repository_storage`. The dispatcher copies it into the request, and the handler uses it for the per-storage archive lease without asking Rails for project info. Rows without it (older GitLab) and backfill requests keep the project lookup.
+
 For the full rationale behind this approach and the alternatives that were considered, see [ADR 005: PostgreSQL task table for code indexing triggers](../decisions/005_code_indexing_task_table.md).
 
 ##### Dispatch

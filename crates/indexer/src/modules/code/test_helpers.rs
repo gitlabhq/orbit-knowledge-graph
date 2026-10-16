@@ -88,6 +88,18 @@ pub fn build_replication_events_for_table(
     Bytes::from(compressed)
 }
 
+pub fn code_indexing_task_columns_with_storage(
+    id: i64,
+    project_id: i64,
+    ref_name: &str,
+    commit_sha: &str,
+    traversal_path: &str,
+    repository_storage: &str,
+) -> EventBuilder {
+    code_indexing_task_columns(id, project_id, ref_name, commit_sha, traversal_path)
+        .with_string("repository_storage", repository_storage)
+}
+
 pub fn code_indexing_task_columns(
     id: i64,
     project_id: i64,

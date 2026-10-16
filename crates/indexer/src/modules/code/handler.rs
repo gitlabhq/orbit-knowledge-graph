@@ -384,9 +384,16 @@ impl CodeIndexingTaskHandler {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to save start: {e}")))?;
 
-        let repository_storage = match project_info {
-            Some(info) => info.repository_storage,
-            None => self.repository_storage(project_id).await,
+        let repository_storage = match request
+            .repository_storage
+            .as_ref()
+            .filter(|storage| !storage.is_empty())
+        {
+            Some(storage) => Some(storage.clone()),
+            None => match project_info {
+                Some(info) => info.repository_storage,
+                None => self.repository_storage(project_id).await,
+            },
         };
         let indexing_request = IndexingRequest {
             project_id,
@@ -598,6 +605,31 @@ mod tests {
             branch: &str,
             commit_sha: Option<&str>,
         ) -> Envelope {
+            Self::make_request_full(task_id, project_id, branch, commit_sha, None)
+        }
+
+        fn make_request_with_storage(
+            task_id: i64,
+            project_id: i64,
+            branch: &str,
+            repository_storage: Option<&str>,
+        ) -> Envelope {
+            Self::make_request_full(
+                task_id,
+                project_id,
+                branch,
+                Some("abc123"),
+                repository_storage,
+            )
+        }
+
+        fn make_request_full(
+            task_id: i64,
+            project_id: i64,
+            branch: &str,
+            commit_sha: Option<&str>,
+            repository_storage: Option<&str>,
+        ) -> Envelope {
             Envelope::new(&CodeIndexingTaskRequest {
                 task_id,
                 project_id,
@@ -606,6 +638,7 @@ mod tests {
                 traversal_path: TraversalPath::new_unchecked(format!("1/{project_id}/")),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
+                repository_storage: repository_storage.map(str::to_string),
             })
             .unwrap()
         }
@@ -673,6 +706,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 
@@ -692,6 +726,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 
@@ -740,6 +775,7 @@ mod tests {
                 traversal_path: TraversalPath::new_unchecked("1/123/"),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
+                repository_storage: None,
             })
             .unwrap();
 
@@ -750,6 +786,61 @@ mod tests {
                 "branch {branch:?}: got {result:?}"
             );
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_storage_on_a_push_task_skips_the_project_lookup() {
+        let config = crate::testkit::builders::test_pipeline_configuration();
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        for slot in 0..config.archive_storage_budget {
+            ctx.mock_locks
+                .set_lock(&crate::modules::code::repository::slot_key(
+                    Some("gitaly-2"),
+                    slot,
+                ));
+        }
+        let envelope = TestContext::make_request_with_storage(1, 123, "main", Some("gitaly-2"));
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_empty_storage_on_a_push_task_falls_back_to_the_lookup() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let envelope = TestContext::make_request_with_storage(1, 123, "main", Some(""));
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 1);
+    }
+
+    #[test]
+    fn an_envelope_without_the_storage_still_deserializes() {
+        let request: CodeIndexingTaskRequest = serde_json::from_value(serde_json::json!({
+            "task_id": 1,
+            "project_id": 2,
+            "branch": "main",
+            "commit_sha": null,
+            "traversal_path": "1/2/",
+        }))
+        .unwrap();
+
+        assert_eq!(request.repository_storage, None);
     }
 
     #[tokio::test]
@@ -792,6 +883,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 
@@ -837,6 +929,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 

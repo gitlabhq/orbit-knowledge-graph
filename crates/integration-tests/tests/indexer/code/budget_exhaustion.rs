@@ -25,6 +25,7 @@ fn backfill_envelope() -> Envelope {
         traversal_path: TraversalPath::new_unchecked(TRAVERSAL_PATH),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     })
     .expect("envelope")
 }
