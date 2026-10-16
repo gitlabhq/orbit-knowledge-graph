@@ -2,7 +2,7 @@ variables:
   ORBIT_TELEMETRY_ENABLED: "false"
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
-  CLICKHOUSE_VERSION: "26.2"
+  CLICKHOUSE_VERSION: "26.6"
   DEV_PREFIX: "dev"
   GCLOUD_PROJECT: gitlab-ci-runners-signing
   SERVICE_ACCOUNT: gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com
