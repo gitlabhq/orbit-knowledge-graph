@@ -14,7 +14,7 @@ use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    Compact, Edge, EdgeKind, MemberIndex, Role, Slots, by_role, member_index, members_by_level,
+    Compact, Edge, EdgeKind, MemberIndex, Role, Slots, member_index, members_by_level,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -1186,9 +1186,8 @@ impl<'t> Fold<'t> {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
                 bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
-                self.map_members(&mut bound, site);
-                for r in &bound {
-                    self.emit(r, from);
+                for r in bound {
+                    self.emit(&self.member_for(r, site), from);
                 }
                 return;
             }
@@ -1205,8 +1204,11 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_name(&mut self, sym: u32, from: u32, site: Cursor<'t>, fallback: Wildcards) {
-        let mut targets = self.lookup(sym);
-        self.map_members(&mut targets, site);
+        let mut targets: Vec<Value> = self
+            .lookup(sym)
+            .into_iter()
+            .map(|r| self.member_for(r, site))
+            .collect();
         if targets.is_empty() {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
@@ -1303,29 +1305,30 @@ impl<'t> Fold<'t> {
         index.get(&name).copied()
     }
 
-    fn member_for(&self, def: u32, site: Cursor<'t>) -> u32 {
+    fn member_for(&self, value: Value, site: Cursor<'t>) -> Value {
+        let Value::LocalDef(def) = value else {
+            return value;
+        };
         let target = self.tree.cursor(def);
         let role = site.role();
-        if target.has_role(role) {
-            return def;
+        if crate::canonical::def_type_of(target).is_some_and(|kind| kind.fills(role)) {
+            return value;
         }
-        let Some(class) = target
+        let name = target.child_sym(C::DefName);
+        let class = target
             .ancestors()
             .filter(|node| node.is(C::Def))
-            .find(|node| node.is_class())
-        else {
-            return def;
-        };
-        if !target.is_member_of(class) && shadows(target, site) {
-            return def;
-        }
-        let Some(name) = target.child_sym(C::DefName) else {
-            return def;
-        };
-        self.parts(class.index())
-            .into_iter()
-            .find_map(|part| self.slots(part, name)?.slot(role))
-            .unwrap_or(def)
+            .find(|node| node.is_class());
+        let declaring =
+            |up: Cursor<'t>| up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == name;
+        let member = class
+            .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring))
+            .and_then(|class| {
+                self.find_method_in(class.index(), name?, role)
+                    .first()
+                    .copied()
+            });
+        member.map_or(value, Value::LocalDef)
     }
 
     fn parts(&self, dn: u32) -> Vec<u32> {
@@ -1338,14 +1341,6 @@ impl<'t> Fold<'t> {
                 d != dn && (c.has(C::ImplBlock) || self.tree.cursor(d).has(C::ImplBlock))
             });
         std::iter::once(dn).chain(same_name).collect()
-    }
-
-    fn map_members(&self, values: &mut [Value], site: Cursor<'t>) {
-        for value in values {
-            if let Value::LocalDef(def) = value {
-                *def = self.member_for(*def, site);
-            }
-        }
     }
 
     fn chain_is_class(&mut self, c: Cursor) -> bool {
@@ -1390,12 +1385,9 @@ impl<'t> Fold<'t> {
             }
             return bound
                 .into_iter()
-                .map(|r| match r {
-                    Value::LocalDef(d) => {
-                        let d = self.member_for(d, c);
-                        self.field_value(d).unwrap_or(Value::LocalDef(d))
-                    }
-                    _ => r,
+                .map(|r| match self.member_for(r, c) {
+                    Value::LocalDef(d) => self.field_value(d).unwrap_or(Value::LocalDef(d)),
+                    r => r,
                 })
                 .collect();
         };
@@ -1467,11 +1459,13 @@ impl<'t> Fold<'t> {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(|dn| self.parts(dn)).collect::<Vec<_>>()
         };
-        let found = |dn| Some(self.slots(dn, name)?.pick(role));
-        let members = members_by_level(self.parts(container), supers, found);
-        by_role(members, |def| {
-            self.tree.cursor(def).fills_role(role, self.tags.callable)
-        })
+        let pick = |dn| Some(self.slots(dn, name)?.pick(role));
+        let mut members = members_by_level(self.parts(container), supers, pick);
+        let fills = |&def: &u32| self.tree.cursor(def).fills(role, self.tags.callable);
+        if members.iter().any(fills) {
+            members.retain(fills);
+        }
+        members
     }
 }
 
@@ -1604,27 +1598,8 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
     let mut seen = FxHashSet::default();
     f.edges
-        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
+        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution as u8)));
     Ok((f.edges, f.limited))
-}
-
-fn shadows<'t>(target: Cursor<'t>, site: Cursor<'t>) -> bool {
-    let within = |node: Cursor<'t>| site.ancestors().any(|up| up.index() == node.index());
-    let Some(scope) = target.ancestors().find(|node| node.is(C::Def)) else {
-        return false;
-    };
-    if !within(scope) || within(target) {
-        return false;
-    }
-    let name = target.child_sym(C::DefName);
-    let declares = |node: &Cursor<'t>| {
-        node.is(C::Binding) && node.has(C::Declaration) && node.sym_opt() == name
-    };
-    let siblings = target
-        .parent()
-        .into_iter()
-        .flat_map(|parent| parent.children());
-    !siblings.filter(declares).any(within)
 }
 
 fn is_name(value: &Value) -> bool {

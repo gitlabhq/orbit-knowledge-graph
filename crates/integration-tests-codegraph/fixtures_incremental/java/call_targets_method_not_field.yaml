@@ -39,6 +39,18 @@ fixtures:
               converter.reverse.b();
           }
 
+          static class LateElements {
+              int e4() {
+                  return 4;
+              }
+
+              int e4 = 4;
+          }
+
+          int readLate(LateElements samples) {
+              return samples.e4 + 1;
+          }
+
       }
 
 tests:
@@ -60,6 +72,15 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "Main.SampleElements.e4", kind: "Field" } }
+
+  - name: a field read with the method declared first keeps the field as its target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'readLate' AND t.name = 'e4'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Main.LateElements.e4", kind: "Field" } }
 
   - name: a receiver chain through a field does not type by the method of the same name
     query: |
