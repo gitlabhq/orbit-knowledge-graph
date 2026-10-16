@@ -55,6 +55,15 @@ fixtures:
           made = lambda *make: make()
           made()
 
+      def lam_plain():
+          made = lambda make: make()
+          made()
+
+      def lam_shadow():
+          cb = lambda make=make: make()
+          x = make()
+          x.bar()
+
       def caller():
           x = make()
           x.bar()
@@ -139,7 +148,16 @@ tests:
       WHERE t.name = 'make'
       RETURN c.name AS caller
     assert:
-      - { column_values: { field: caller, values: ["caller", "q"] } }
+      - { column_values: { field: caller, values: ["caller", "lam_shadow", "q"] } }
+
+  - name: a lambda parameter does not shadow make for the rest of the enclosing function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'lam_shadow'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
 
   - name: a function without the parameter still calls make and Foo.bar
     query: |

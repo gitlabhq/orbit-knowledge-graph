@@ -164,6 +164,8 @@ stages:
         replace: '(__binding @$C)'
       - match: '(dictionary_splat_pattern $C:identifier)'
         replace: '(__binding @$C)'
+      - match: '(lambda_parameters $$$P:identifier|__binding)'
+        replace: '(lambda_parameters $$$P->__binding)'
       - match: '(parameters $S:(identifier "/^(self|cls)$/") $$$P:identifier|__binding)'
         replace: '(parameters $S $$$P->__binding)'
       - match: '(parameters $$$P:identifier|__binding)'
