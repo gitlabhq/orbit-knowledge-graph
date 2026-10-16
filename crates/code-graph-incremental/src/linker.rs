@@ -1546,7 +1546,11 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     f.cur = entry;
     for dn in f.defs.clone() {
         f.run.check().and_then(|()| f.file.check())?;
-        for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
+        for c in tree
+            .cursor(dn)
+            .children()
+            .filter(|c| c.is(C::Decorator) && !c.has(C::Member))
+        {
             for target in f.lookup_chain(c) {
                 match target {
                     Value::LocalDef(target) => {
