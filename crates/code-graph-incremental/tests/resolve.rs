@@ -706,7 +706,7 @@ fn java_two_root_tree_resolves_once_and_stays_resolved() {
     );
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
-        calls(&[own_copy.clone()])
+        calls(std::slice::from_ref(&own_copy))
     );
 
     let (_, resolved) = reindex_files(
