@@ -34,6 +34,26 @@ fixtures:
               x = B()
 
 
+      def loop_shadow_join(c, d):
+          x = make()
+          while c:
+              if d:
+                  x = B()
+              x.m()
+              x = C()
+
+
+      def loop_target_shadows(items):
+          x = A()
+          for x in items:
+              x.m()
+
+
+      def loop_over_expression_list():
+          for x in A(), B():
+              x.m()
+
+
       def three_producers(a, b):
           x = make()
           if a:
@@ -58,6 +78,30 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["main.A.m", "main.B", "main.B.m", "main.make"] } }
+
+  - name: a receiver behind a join in a loop body reaches the loop-carried producers too
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'loop_shadow_join'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.A.m", "main.B", "main.B.m", "main.C", "main.C.m", "main.make"] } }
+
+  - name: a loop target without an element type hides the value assigned before the loop
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'loop_target_shadows'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.A"] } }
+
+  - name: a loop variable over an expression list of constructors reaches both methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'loop_over_expression_list'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["main.A", "main.A.m", "main.B", "main.B.m"] } }
 
   - name: three producers reach all three methods
     query: |

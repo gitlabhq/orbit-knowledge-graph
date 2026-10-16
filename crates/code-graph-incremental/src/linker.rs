@@ -109,7 +109,7 @@ struct Fold<'t> {
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
-    loop_receivers: Vec<(Value, u32, u32, u32, u32)>,
+    loop_receivers: Vec<LoopReceiver>,
     shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
@@ -119,6 +119,15 @@ struct Fold<'t> {
 }
 
 type Undo = Vec<(u32, Option<(u32, usize)>)>;
+
+struct LoopReceiver {
+    phi: Value,
+    object: u32,
+    method: u32,
+    from: u32,
+    site: u32,
+    seen: Vec<Value>,
+}
 
 type LoopSpans = (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>, Vec<u32>);
 
@@ -727,6 +736,9 @@ impl<'t> Fold<'t> {
             return true;
         }
         if rhs.is_none() && c.child_sym(C::Declaration).is_some() {
+            if c.parent().is_some_and(|parent| parent.is(C::SsaLoop)) {
+                self.ssa.write_variable(lhs, self.cur, Value::Opaque);
+            }
             return true;
         }
         let branch = rhs.and_then(|r| r.child(C::SsaBranch));
@@ -1203,28 +1215,43 @@ impl<'t> Fold<'t> {
     }
 
     fn defer_loop_receiver(&mut self, obj: Cursor, method: u32, from: u32, site: u32) {
-        if self.loops.is_empty()
-            || obj.children().next().is_some()
-            || !self.lookup(obj.sym()).is_empty()
-        {
+        if self.loops.is_empty() || obj.children().next().is_some() {
             return;
         }
-        let value = self
+        let phi = self
             .ssa
             .read_variable_internal(self.binding(obj.sym()), self.cur);
-        if matches!(value, Value::Phi(_)) {
-            self.loop_receivers
-                .push((value, obj.index(), method, from, site));
+        if matches!(phi, Value::Phi(_)) {
+            let seen = self.lookup(obj.sym());
+            self.loop_receivers.push(LoopReceiver {
+                phi,
+                object: obj.index(),
+                method,
+                from,
+                site,
+                seen,
+            });
         }
     }
 
     fn resolve_loop_receivers(&mut self) {
-        for (value, obj, method, from, site) in std::mem::take(&mut self.loop_receivers) {
+        for receiver in std::mem::take(&mut self.loop_receivers) {
+            if let Err(k) = self
+                .run
+                .check()
+                .and_then(|()| self.file.check())
+                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))
+            {
+                self.killed = Some(k);
+                return;
+            }
             let first = self.edges.len();
-            let values = self.ssa.resolve_value(&value);
-            self.resolve_values(self.tree.cursor(obj), method, from, values);
+            let mut values = self.ssa.resolve_value(&receiver.phi);
+            values.retain(|value| !receiver.seen.contains(value));
+            let object = self.tree.cursor(receiver.object);
+            self.resolve_values(object, receiver.method, receiver.from, values);
             for edge in &mut self.edges[first..] {
-                edge.site = Some(site);
+                edge.site = Some(receiver.site);
             }
         }
     }
