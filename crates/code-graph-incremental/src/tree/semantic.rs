@@ -270,33 +270,16 @@ pub type MemberIndex = rustc_hash::FxHashMap<u32, Slots>;
 pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberIndex {
     let nested = |node: Cursor<'_, S>| node.is_class() && !node.has(C::ImplBlock);
     let mut index = MemberIndex::default();
-    let mut locals: Vec<(u32, bool)> = Vec::new();
-    for node in owner.descendants_pruned(nested) {
-        while locals.last().is_some_and(|&(end, _)| node.start() >= end) {
-            locals.pop();
-        }
-        if node.is(C::Scope) {
-            locals.push((node.end(), false));
+    for def in owner
+        .descendants_pruned(nested)
+        .filter(|node| node.is(C::Def))
+    {
+        let Some(name) = def.child_sym(C::DefName) else {
             continue;
-        }
-        if !node.is(C::Def) {
-            continue;
-        }
-        let member = match locals.as_slice() {
-            [] => true,
-            [(_, true)] => node.binds_ivar(),
-            _ => false,
         };
-        if let Some(name) = node.child_sym(C::DefName) {
-            let slots = index
-                .entry(name)
-                .or_insert_with(|| Slots::new(node.index()));
-            if member {
-                slots.fill(node.index(), node.def_kind());
-            }
-        }
-        if !node.has(C::ImplBlock) && !nested(node) {
-            locals.push((node.end(), true));
+        let slots = index.entry(name).or_insert_with(|| Slots::new(def.index()));
+        if def.is_member_of(owner) {
+            slots.fill(def.index(), def.def_kind());
         }
     }
     index
