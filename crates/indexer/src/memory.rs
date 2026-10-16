@@ -2,58 +2,57 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
-use code_graph::v2::CancellationToken;
-use code_graph_incremental::{Admission, Killed, Sentinel};
 use orbit_server_config::resources::{MemoryPressure, cgroup_memory};
 use tokio::runtime::Handle;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, SemaphorePermit};
 use tracing::warn;
 
-use super::metrics::CodeMetrics;
-
-const INFLIGHT_SOURCE_BYTES: u32 = 4 * 1024 * 1024;
 const POLL: Duration = Duration::from_millis(50);
 const INTERVAL: Duration = Duration::from_millis(100);
 
-pub(super) fn budget() -> Arc<dyn Admission> {
-    Arc::new(InflightBudget {
-        permits: Semaphore::new(INFLIGHT_SOURCE_BYTES as usize),
-        runtime: Handle::current(),
-    })
-}
+pub type Permit<'a> = SemaphorePermit<'a>;
 
-struct InflightBudget {
+pub struct Budget {
     permits: Semaphore,
-    runtime: Handle,
+    size: u32,
 }
 
-fn permits_for(bytes: u64) -> u32 {
-    u32::try_from(bytes)
-        .unwrap_or(u32::MAX)
-        .min(INFLIGHT_SOURCE_BYTES)
-}
+impl Budget {
+    pub fn new(size: u32) -> Self {
+        Self {
+            permits: Semaphore::new(size as usize),
+            size,
+        }
+    }
 
-impl Admission for InflightBudget {
-    fn admit(&self, bytes: u64, run: &Sentinel) -> Result<(), Killed> {
-        self.runtime.block_on(async {
-            let acquire = self.permits.acquire_many(permits_for(bytes));
+    fn claim(&self, bytes: u64) -> u32 {
+        u32::try_from(bytes).unwrap_or(u32::MAX).min(self.size)
+    }
+
+    pub async fn acquire(&self, bytes: u64) -> Option<Permit<'_>> {
+        self.permits.acquire_many(self.claim(bytes)).await.ok()
+    }
+
+    pub fn acquire_blocking<E>(
+        &self,
+        bytes: u64,
+        runtime: &Handle,
+        check: impl Fn() -> Result<(), E>,
+    ) -> Result<Option<Permit<'_>>, E> {
+        runtime.block_on(async {
+            let acquire = self.acquire(bytes);
             tokio::pin!(acquire);
             loop {
                 tokio::select! {
-                    permit = &mut acquire => {
-                        if let Ok(permit) = permit {
-                            permit.forget();
-                        }
-                        return Ok(());
-                    }
-                    () = tokio::time::sleep(POLL) => run.check()?,
+                    permit = &mut acquire => return Ok(permit),
+                    () = tokio::time::sleep(POLL) => check()?,
                 }
             }
         })
     }
 
-    fn release(&self, bytes: u64) {
-        self.permits.add_permits(permits_for(bytes) as usize);
+    pub fn release(&self, bytes: u64) {
+        self.permits.add_permits(self.claim(bytes) as usize);
     }
 }
 
@@ -64,15 +63,14 @@ pub struct MemoryKill {
 }
 
 struct Job {
-    bytes: u64,
-    cancel: CancellationToken,
+    claim: u64,
+    cancel: Arc<dyn Fn() + Send + Sync>,
     killed: Arc<OnceLock<MemoryKill>>,
 }
 
 pub struct MemoryWatchdog {
     sample: Box<dyn Fn() -> Option<MemoryPressure> + Send + Sync>,
     kill_at_percent: u64,
-    metrics: CodeMetrics,
     jobs: Mutex<Vec<Job>>,
     used_at_last_kill: AtomicU64,
     watching: AtomicBool,
@@ -98,34 +96,36 @@ impl Drop for Registration {
 }
 
 impl MemoryWatchdog {
-    pub fn for_this_process(metrics: CodeMetrics, kill_at_percent: u64) -> Arc<Self> {
+    pub fn for_this_process(kill_at_percent: u64) -> Arc<Self> {
         if cgroup_memory().is_none() {
             warn!("memory watchdog inert: this process has no cgroup memory limit");
-            return Self::new(Box::new(|| None), metrics, 0);
+            return Self::new(Box::new(|| None), 0);
         }
-        Self::new(Box::new(cgroup_memory), metrics, kill_at_percent)
+        Self::new(Box::new(cgroup_memory), kill_at_percent)
     }
 
     pub fn new(
         sample: Box<dyn Fn() -> Option<MemoryPressure> + Send + Sync>,
-        metrics: CodeMetrics,
         kill_at_percent: u64,
     ) -> Arc<Self> {
         Arc::new(Self {
             sample,
             kill_at_percent: kill_at_percent.min(100),
-            metrics,
             jobs: Mutex::new(Vec::new()),
             used_at_last_kill: AtomicU64::new(0),
             watching: AtomicBool::new(false),
         })
     }
 
-    pub fn register(self: &Arc<Self>, bytes: u64, cancel: CancellationToken) -> Registration {
+    pub fn register(
+        self: &Arc<Self>,
+        claim: u64,
+        cancel: Arc<dyn Fn() + Send + Sync>,
+    ) -> Registration {
         let killed = Arc::new(OnceLock::new());
         let mut jobs = self.jobs();
         jobs.push(Job {
-            bytes,
+            claim,
             cancel,
             killed: killed.clone(),
         });
@@ -178,7 +178,7 @@ impl MemoryWatchdog {
         {
             return;
         }
-        let Some(victim) = jobs.iter().max_by_key(|job| job.bytes) else {
+        let Some(victim) = jobs.iter().max_by_key(|job| job.claim) else {
             return;
         };
         let kill = MemoryKill {
@@ -188,14 +188,13 @@ impl MemoryWatchdog {
         let _ = victim.killed.set(kill);
         self.used_at_last_kill
             .store(pressure.used, Ordering::Relaxed);
-        victim.cancel.cancel();
-        self.metrics.record_stage_error("memory_pressure");
+        (victim.cancel)();
         warn!(
             used = pressure.used,
             limit = pressure.limit,
-            repository_bytes = victim.bytes,
+            claim = victim.claim,
             alone = kill.alone,
-            "cancelling the largest code indexing job under pod memory pressure"
+            "cancelling the largest job under memory pressure"
         );
     }
 

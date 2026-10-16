@@ -542,6 +542,7 @@ mod tests {
                 table_names,
                 Arc::new(ontology),
                 crate::testkit::builders::test_pipeline_configuration(),
+                crate::memory::MemoryWatchdog::for_this_process(0),
                 tokio_util::sync::CancellationToken::new(),
             ));
 

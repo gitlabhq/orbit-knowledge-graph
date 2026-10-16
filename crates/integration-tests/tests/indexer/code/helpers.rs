@@ -14,10 +14,11 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use gitlab_client::GitlabClient;
 use indexer::handler::HandlerContext;
+use indexer::memory::MemoryWatchdog;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexer,
-    CodeIndexingTaskHandler, LocalRepositoryCache, MemoryWatchdog, RailsRepositoryService,
-    RepositoryService, config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
+    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
@@ -101,13 +102,10 @@ impl CodeIndexingDeps {
         mock: &MockGitlabServer,
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
-        watchdog: Arc<MemoryWatchdog>,
+        memory: Arc<MemoryWatchdog>,
     ) -> Self {
-        let mut deps = Self::new_with_pipeline_config(mock, clickhouse, pipeline_config);
-        Arc::get_mut(&mut deps.pipeline)
-            .expect("the indexer has no other owner yet")
-            .set_memory_watchdog(watchdog);
-        deps
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        Self::build(mock, clickhouse, pipeline_config, ontology, memory)
     }
 
     pub fn new_with_ontology(
@@ -115,6 +113,17 @@ impl CodeIndexingDeps {
         clickhouse: &TestContext,
         pipeline_config: CodeIndexingPipelineConfig,
         ontology: ontology::Ontology,
+    ) -> Self {
+        let memory = MemoryWatchdog::for_this_process(0);
+        Self::build(mock, clickhouse, pipeline_config, ontology, memory)
+    }
+
+    fn build(
+        mock: &MockGitlabServer,
+        clickhouse: &TestContext,
+        pipeline_config: CodeIndexingPipelineConfig,
+        ontology: ontology::Ontology,
+        memory: Arc<MemoryWatchdog>,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client("graph"));
@@ -161,6 +170,7 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             pipeline_config,
+            memory,
             shutdown.clone(),
         ));
 
@@ -207,6 +217,7 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             config,
+            MemoryWatchdog::for_this_process(0),
             self.shutdown.clone(),
         ));
         CodeIndexingTaskHandler::new(

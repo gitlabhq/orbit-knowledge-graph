@@ -5,15 +5,16 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
+use code_graph_incremental::{Admission, Killed, Sentinel};
 use gitlab_client::GitlabClientError;
 use orbit_server_config::CodeIndexingPipelineConfig;
+use tokio::runtime::Handle;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
-use super::memory::{MemoryKill, MemoryWatchdog};
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::resolver::Repository;
 use super::repository::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
@@ -21,6 +22,7 @@ use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
+use crate::memory::{Budget, MemoryKill, MemoryWatchdog};
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
 use orbit_utils::traversal_path::TraversalPath;
@@ -82,6 +84,29 @@ pub enum IndexError {
 impl From<HandlerError> for IndexError {
     fn from(err: HandlerError) -> Self {
         Self::Failed(err)
+    }
+}
+
+const INFLIGHT_SOURCE_BYTES: u32 = 4 * 1024 * 1024;
+
+struct InflightAdmission {
+    budget: Budget,
+    runtime: Handle,
+}
+
+impl Admission for InflightAdmission {
+    fn admit(&self, bytes: u64, run: &Sentinel) -> Result<(), Killed> {
+        if let Some(permit) = self
+            .budget
+            .acquire_blocking(bytes, &self.runtime, || run.check())?
+        {
+            permit.forget();
+        }
+        Ok(())
+    }
+
+    fn release(&self, bytes: u64) {
+        self.budget.release(bytes);
     }
 }
 
@@ -277,6 +302,7 @@ impl CodeIndexer {
         table_names: Arc<CodeTableNames>,
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
+        memory: Arc<MemoryWatchdog>,
         shutdown: tokio_util::sync::CancellationToken,
     ) -> Self {
         let fc = pipeline_config.fetch_concurrency;
@@ -300,10 +326,7 @@ impl CodeIndexer {
             checkpoint_store,
             stale_data_cleaner,
             inflight: Arc::new(AtomicUsize::new(0)),
-            memory: MemoryWatchdog::for_this_process(
-                metrics.clone(),
-                pipeline_config.memory_kill_percent,
-            ),
+            memory,
             metrics,
             table_names,
             ontology,
@@ -314,10 +337,6 @@ impl CodeIndexer {
             big_indexing_slots: sem(big),
             pipeline_config,
         }
-    }
-
-    pub fn set_memory_watchdog(&mut self, memory: Arc<MemoryWatchdog>) {
-        self.memory = memory;
     }
 
     /// Derived inflight cap for the engine listen loop: a download can pre-fetch ahead of
@@ -378,9 +397,10 @@ impl CodeIndexer {
         let lane = self
             .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
             .await?;
-        let memory = self
-            .memory
-            .register(repository.source_bytes(), cancel.clone());
+        let memory = self.memory.register(repository.source_bytes(), {
+            let cancel = cancel.clone();
+            Arc::new(move || cancel.cancel())
+        });
 
         let indexed = clock
             .run(self.index_fetched(
@@ -402,7 +422,12 @@ impl CodeIndexer {
                 })
             }
         }
-        .map_err(|error| memory.exceeded().map_or(error, IndexError::MemoryExceeded))?;
+        .map_err(|error| {
+            memory.exceeded().map_or(error, |kill| {
+                self.metrics.record_stage_error("memory_pressure");
+                IndexError::MemoryExceeded(kill)
+            })
+        })?;
         drop(memory);
 
         drop(repository);
@@ -749,7 +774,10 @@ impl CodeIndexer {
             batch_bytes: orbit_arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
-            admission: super::memory::budget(),
+            admission: Arc::new(InflightAdmission {
+                budget: Budget::new(INFLIGHT_SOURCE_BYTES),
+                runtime: Handle::current(),
+            }),
             phase_started: {
                 let span = span.clone();
                 Arc::new(move |family, phase, files| {

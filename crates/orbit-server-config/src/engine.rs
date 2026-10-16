@@ -278,11 +278,6 @@ pub struct CodeIndexingPipelineConfig {
     /// Edges that the incremental engine's linker may emit for one file. A file
     /// past the limit is skipped as too_many_edges. 0 = no limit.
     pub max_file_edges: usize,
-    /// Share of the pod's cgroup memory limit, in percent, at which the
-    /// indexer cancels the in-flight code job with the most source bytes so
-    /// the kernel does not kill the whole pod. 0 = off; values above 100 count
-    /// as 100.
-    pub memory_kill_percent: u64,
     /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. May exceed `nats.ack_wait_secs`: the handler heartbeats `ack_progress` and renews the project lock so a long job is not redelivered. 0 = no timeout.
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
@@ -504,6 +499,11 @@ pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Unset = derived
     /// from the container CPU count, capped by its memory limit.
     pub max_concurrent_workers: Option<usize>,
+
+    /// Share of the pod's cgroup memory limit, in percent, at which the
+    /// indexer cancels the in-flight job with the largest claim so the kernel
+    /// does not kill the whole pod. 0 = off; values above 100 count as 100.
+    pub memory_kill_percent: u64,
 
     /// Named concurrency groups with their limits. Empty = derived from the
     /// enabled `modules` and the worker cap.

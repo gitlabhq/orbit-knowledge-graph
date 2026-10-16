@@ -30,6 +30,7 @@ pub mod clickhouse;
 pub mod config;
 pub mod engine;
 pub mod locking;
+pub mod memory;
 pub mod modules;
 pub mod nats;
 pub mod observer;

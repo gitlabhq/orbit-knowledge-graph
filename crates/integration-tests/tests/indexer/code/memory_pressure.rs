@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use indexer::handler::{Handler, HandlerContext, HandlerError, PermanentAction};
-use indexer::modules::code::MemoryWatchdog;
-use indexer::modules::code::metrics::CodeMetrics;
+use indexer::memory::MemoryWatchdog;
 use indexer::nats::{MessageAcker, NatsError, ProgressNotifier};
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::types::Envelope;
@@ -74,7 +73,6 @@ fn fake_pressure(used: &Arc<AtomicU64>) -> Arc<MemoryWatchdog> {
                 limit: LIMIT,
             })
         }),
-        CodeMetrics::new(),
         90,
     )
 }

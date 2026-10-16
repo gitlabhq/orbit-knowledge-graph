@@ -3,7 +3,6 @@ mod checkpoint;
 pub mod config;
 mod handler;
 mod incremental;
-mod memory;
 pub mod metrics;
 pub(crate) mod observer;
 mod pipeline;
@@ -29,7 +28,6 @@ use repository::RepositoryResolver;
 
 pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
 pub use handler::{CodeIndexingTaskHandler, project_lock_key};
-pub use memory::MemoryWatchdog;
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
@@ -110,6 +108,7 @@ pub async fn register_handlers(
         table_names,
         Arc::new(ontology.clone()),
         pipeline_config,
+        crate::memory::MemoryWatchdog::for_this_process(config.engine.memory_kill_percent),
         shutdown,
     ));
 

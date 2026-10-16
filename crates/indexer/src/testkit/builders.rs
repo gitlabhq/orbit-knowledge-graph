@@ -18,6 +18,7 @@ pub const TEST_BIG_INDEXING_SLOTS: usize = 2;
 pub fn test_engine_configuration() -> EngineConfiguration {
     let mut engine = AppConfig::embedded_defaults().engine;
     engine.max_concurrent_workers = Some(TEST_MAX_CONCURRENT_WORKERS);
+    engine.memory_kill_percent = 0;
     engine.handlers.entity_handler.datalake_batch_size = Some(1);
     engine
 }
@@ -34,7 +35,6 @@ pub fn test_pipeline_configuration() -> CodeIndexingPipelineConfig {
     pipeline.write_buffer_age_secs = 1;
     pipeline.write_max_flush_age_secs = 1;
     pipeline.write_min_flush_rows = 1;
-    pipeline.memory_kill_percent = 0;
     pipeline
 }
 

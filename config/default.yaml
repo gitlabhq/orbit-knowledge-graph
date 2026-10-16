@@ -101,6 +101,7 @@ clickhouse_setup:
 
 engine:
   # max_concurrent_workers: 16     # unset = derived from container CPU count and memory limit
+  memory_kill_percent: 90
   concurrency_groups: {}           # empty = derived from `modules` and the worker cap
   topics: {}                       # sparse per-topic overrides of the module-declared policies
   modules: [sdlc, code, namespace_deletion]
@@ -131,7 +132,6 @@ engine:
         max_cross_file_names: 40000000
         max_manifest_bytes: 67108864
         max_file_edges: 2000000
-        memory_kill_percent: 90
         job_timeout_secs: 1500
         fetch_concurrency: 10
         write_channel_capacity: 8
