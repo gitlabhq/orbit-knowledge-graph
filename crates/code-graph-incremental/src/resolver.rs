@@ -16,8 +16,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    CallResolution, Compact, Edge, EdgeKind, find_method_in, infer_return_type, members_by_level,
-    reachable,
+    CallResolution, Compact, Edge, EdgeKind, find_method_in, infer_return_type, is_name_text,
+    members_by_level, reachable,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -1511,9 +1511,6 @@ enum Owner<'a> {
     External((u32, u32)),
 }
 
-/// The join class at one usage site: the same producer set with the same
-/// reaching producers gives the same class, so a long chain of joins is
-/// classified once per site instead of once per reaching pair.
 fn site_class<'a>(
     ctx: &'a ResolveCtx,
     usage: &Edge,
@@ -1991,9 +1988,10 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
     let named: FxHashSet<u32> = named.iter().map(|n| local(*n)).collect();
     let builtins = &ctx.env.rules_for(&ctx.trees[fi].label).config.link.builtins;
     let unbound = |from: Cursor, sym: u32| -> Vec<Edge> {
+        let guessable = is_name_text(ctx.lang.syms.resolve(sym));
         let wild = wild
             .iter()
-            .filter(|_| !named.contains(&sym) && !builtins.contains(&sym));
+            .filter(|_| guessable && !named.contains(&sym) && !builtins.contains(&sym));
         wild.map(|&w| from.edge_to(from.jump(fi as u32, w), EdgeKind::Imports))
             .collect()
     };
