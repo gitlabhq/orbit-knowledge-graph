@@ -384,8 +384,6 @@ display:
         tag: { def_type: Enum }
       - match: '(__def (__enum_variant))'
         tag: { def_type: EnumVariant }
-      - match: '(__def (__trait))'
-        tag: { def_type: Trait }
       - match: '(__def (__impl))'
         tag: { def_type: Impl }
       - match: '(__def (__variable))'
