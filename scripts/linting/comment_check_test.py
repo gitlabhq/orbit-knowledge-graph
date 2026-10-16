@@ -236,6 +236,15 @@ class ModeTest(RepoTestCase):
         self.commit()
         self.assertEqual([(p, t) for p, _, t in scan(base, "HEAD")], [("new.rs", "// added")])
 
+    def test_range_mode_exits_with_error_when_a_file_was_skipped(self):
+        self.commit(a_rs="fn a() {}\n")
+        base = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        self.commit(a_rs="fn a() { 1; }\n")
+        with patch.object(comment_check, "parser_for", side_effect=ImportError("no wheel")):
+            code, _, err = self.run_main("--range", base, "HEAD")
+        self.assertEqual(code, comment_check.EXIT_ERROR)
+        self.assertIn("no wheel", err)
+
     def test_broken_grammar_skips_the_file_and_fails_open(self):
         self.stage(a_rs="// why\nfn a() {}\n")
         with patch.object(comment_check, "parser_for", side_effect=ImportError("no wheel")):

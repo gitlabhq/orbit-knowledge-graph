@@ -21,8 +21,8 @@ Modes:
   comment_check.py --range BASE HEAD  two revisions (CI)
 
 Exit: 0 clean, acknowledged, or skipped; 3 when comments are flagged; 2 on an
-internal error in --range mode, so CI does not report a check that never ran
-as clean. In --staged mode an internal error exits 0. Failures before this
+internal error in --range mode, including a file skipped on error, so CI does
+not report a check that never ran as clean. In --staged mode an internal error exits 0. Failures before this
 script starts (uv or mise) are handled by comment_check_hook.sh.
 
 Environment:
@@ -212,13 +212,15 @@ def scan_file(base, head, old_path, new_path) -> list[tuple[str, int, str]]:
     return findings
 
 
-def scan(base: str | None, head: str | None) -> list[tuple[str, int, str]]:
+def scan(base: str | None, head: str | None, skipped: list[str] | None = None) -> list[tuple[str, int, str]]:
     findings = []
     for old_path, new_path in changed_paths(base, head):
         try:
             findings.extend(scan_file(base, head, old_path, new_path))
         except Exception as error:  # a broken grammar or odd file must not block a commit
             print(f"comment check: skipped {new_path}: {error}", file=sys.stderr)
+            if skipped is not None:
+                skipped.append(new_path)
     return merge_adjacent(findings)
 
 
@@ -261,16 +263,17 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--staged", action="store_true")
     group.add_argument("--range", nargs=2, metavar=("BASE", "HEAD"))
     args = parser.parse_args(argv)
+    skipped: list[str] = []
     try:
         if args.staged and merge_in_progress():
             return 0
         base, head = (None, None) if args.staged else args.range
-        findings = scan(base, head)
+        findings = scan(base, head, skipped)
     except Exception as error:
         print(f"comment check: skipped, internal error: {error}", file=sys.stderr)
         return 0 if args.staged else EXIT_ERROR
     if not findings:
-        return 0
+        return EXIT_ERROR if skipped and args.range else 0
     code = digest(findings)
     if os.environ.get("COMMENTS_OK") == code:
         print(f"comment check: acknowledged {len(findings)} comment(s) ({code})")

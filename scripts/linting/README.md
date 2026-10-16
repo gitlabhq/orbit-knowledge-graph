@@ -93,7 +93,7 @@ also works for the CI script. For the hook alone, lefthook's own
 `LEFTHOOK_EXCLUDE=comments` skips the job too.
 
 Exit codes of `comment_check.py`: 0 clean, acknowledged, or skipped; 3 comments
-flagged; 2 internal error in `--range` mode (CI shows the job as failed, not
+flagged; 2 internal error or a file skipped on error in `--range` mode (CI shows the job as failed, not
 green). The hook runs `comment_check_hook.sh`, which blocks the commit only on
 exit 3. Any other failure, including `uv` or `mise` not starting (no network
 with a cold cache, an untrusted worktree) or an internal error in the
