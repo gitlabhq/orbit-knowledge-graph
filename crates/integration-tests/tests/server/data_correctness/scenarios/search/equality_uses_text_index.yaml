@@ -25,9 +25,11 @@ cases:
     expect:
       sql_contains: ["lower(mr.title) = lower("]
       indexes_used: [{ table: gl_merge_request, index: idx_title }]
+      skip_requirements: ["filter:title"]
       node_count: 1
       nodes:
         MergeRequest:
+          order: [2004]
           rows:
             - { id: 2004, title: Ship feature E }
 
@@ -57,8 +59,10 @@ cases:
     expect:
       sql_contains: ["lower(mr.title) IN tuple(lower("]
       indexes_used: [{ table: gl_merge_request, index: idx_title }]
+      skip_requirements: ["filter:title"]
       node_count: 1
       nodes:
         MergeRequest:
+          order: [2004]
           rows:
             - { id: 2004, title: Ship feature E }

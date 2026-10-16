@@ -84,4 +84,5 @@ cases:
       sql_contains: ["IN (SELECT id FROM _filter_g)"]
       skip_requirements: ["filter:name"]
       node_count: 0
-      total_edge_count: 0
+      edge_count:
+        MEMBER_OF: 0
