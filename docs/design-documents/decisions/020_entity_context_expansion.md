@@ -254,7 +254,7 @@ Raw results carry `format_version`. TOON output carries its own version
   unreadable record. It also covers a namespace of the wrong kind, such as
   `group!5` or a project path in a `/groups/` URL.
 - `resolved_token` appears only when `found` is `true`.
-- For every iid form (URL, `path!iid`, `path#iid`), `id` is `null` when `found`
+- For every iid form (URL, `path!iid`, `path#iid`, `path&iid`), `id` is `null` when `found`
   is `false`. For `Type[id]` and GID tokens, `id` only echoes what the caller
   sent. `type` is `null` for every unfound token.
 - `linked_issues[]`, `linked_merge_requests[]`, and reviewers include readable
