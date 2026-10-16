@@ -1318,10 +1318,25 @@ impl<'t> Fold<'t> {
         if !target.is_member_of(class) && shadows(target, site) {
             return def;
         }
-        target
-            .child_sym(C::DefName)
-            .and_then(|name| self.slots(class.index(), name)?.slot(role))
+        let Some(name) = target.child_sym(C::DefName) else {
+            return def;
+        };
+        self.parts(class.index())
+            .into_iter()
+            .find_map(|part| self.slots(part, name)?.slot(role))
             .unwrap_or(def)
+    }
+
+    fn parts(&self, dn: u32) -> Vec<u32> {
+        let c = self.tree.cursor(dn);
+        let same_name = c
+            .child_sym(C::DefName)
+            .into_iter()
+            .flat_map(|n| self.defs_named(n))
+            .filter(move |&d| {
+                d != dn && (c.has(C::ImplBlock) || self.tree.cursor(d).has(C::ImplBlock))
+            });
+        std::iter::once(dn).chain(same_name).collect()
     }
 
     fn member_value(&self, value: &Value, site: Cursor<'t>) -> Value {
@@ -1446,23 +1461,12 @@ impl<'t> Fold<'t> {
     }
 
     fn find_method_in(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
-        let wrappers = |dn: u32| {
-            let c = self.tree.cursor(dn);
-            let same_name = c
-                .child_sym(C::DefName)
-                .into_iter()
-                .flat_map(|n| self.defs_named(n))
-                .filter(move |&d| {
-                    d != dn && (c.has(C::ImplBlock) || self.tree.cursor(d).has(C::ImplBlock))
-                });
-            std::iter::once(dn).chain(same_name).collect::<Vec<_>>()
-        };
         let supers = |dn: u32| {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
-            supers.flat_map(wrappers).collect::<Vec<_>>()
+            supers.flat_map(|dn| self.parts(dn)).collect::<Vec<_>>()
         };
         let found = |dn| Some(self.slots(dn, name)?.pick(role));
-        let members = members_by_level(wrappers(container), supers, found);
+        let members = members_by_level(self.parts(container), supers, found);
         by_role(members, |def| {
             self.tree.cursor(def).fills_role(role, self.tags.callable)
         })
