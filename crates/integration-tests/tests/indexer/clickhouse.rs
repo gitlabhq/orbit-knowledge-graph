@@ -1,6 +1,7 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use clickhouse_client::ClickHouseConfigurationExt;
+use integration_testkit::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG};
 use std::sync::Arc;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -15,8 +16,6 @@ use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 
-const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "26.6";
 const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 const TEST_DATABASE: &str = "test";
