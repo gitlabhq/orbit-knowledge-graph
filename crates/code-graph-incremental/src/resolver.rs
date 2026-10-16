@@ -1785,10 +1785,10 @@ fn wildcard_uses<'a>(
     };
     let root = |r: Cursor<'a>| qualified(ctx, r.sym(), &provided);
     let declared = |callee: Cursor<'a>| {
-        let head = chain_head(callee);
+        let head = callee.chain_root().reference();
         resolve_reference(ctx, head)
             .filter(|def| def.fi() == head.fi())
-            .or_else(|| enclosing_name(ctx, head, head.sym()))
+            .or_else(|| enclosing_type(ctx, head, head.sym()))
     };
     for from in referrers.iter().map(|&n| ctx.corpus.jump(fi as u32, n)) {
         for call in from.calls() {
@@ -1997,7 +1997,7 @@ fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
         branch_type(ctx, branch)
     } else {
         infer_return_type(target).and_then(|sym| {
-            enclosing_name(ctx, target, sym).or_else(|| visible_type(ctx, target.fi(), sym))
+            enclosing_type(ctx, target, sym).or_else(|| visible_type(ctx, target.fi(), sym))
         })
     }
 }
@@ -2098,9 +2098,25 @@ fn enclosing_name<'a>(ctx: &'a ResolveCtx, at: Cursor<'a>, sym: u32) -> Option<C
     enclosing_defs(at).find_map(|(d, header)| {
         enclosing_alias(ctx, d, sym).or_else(|| match header {
             true => None,
-            false => enclosing_type(ctx, d, sym),
+            false => type_in(ctx, d, sym),
         })
     })
+}
+
+fn enclosing_type<'a>(ctx: &'a ResolveCtx, at: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
+    enclosing_defs(at).find_map(|(d, header)| match header {
+        true => None,
+        false => type_in(ctx, d, sym),
+    })
+}
+
+fn type_in<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
+    let plain = |node: Cursor<'a>| node.is_class() && !node.has(C::ImplBlock);
+    if d.child_sym(C::DefName) == Some(sym) && plain(d) {
+        return Some(d);
+    }
+    let node = *members_of(ctx, d).get(&sym)?;
+    Some(d.jump(d.fi(), node)).filter(|member| plain(*member))
 }
 
 fn enclosing_alias<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
@@ -2113,24 +2129,6 @@ fn enclosing_alias<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<C
         .find_map(|c| c.child(C::SsaTyped))
         .filter(|bound| bound.sym() != sym)?;
     resolve_chain(ctx, bound)
-}
-
-fn enclosing_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
-    let plain = |node: Cursor<'a>| node.is_class() && !node.has(C::ImplBlock);
-    if plain(d) && d.child_sym(C::DefName) == Some(sym) {
-        return Some(d);
-    }
-    let node = *members_of(ctx, d).get(&sym)?;
-    Some(d.jump(d.fi(), node)).filter(|member| plain(*member))
-}
-
-fn chain_head(c: Cursor<'_>) -> Cursor<'_> {
-    let c = c.reference();
-    let member = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member));
-    match member.and_then(|m| m.child(C::Object)) {
-        Some(object) => chain_head(object),
-        None => c,
-    }
 }
 
 fn chain<'a>(
