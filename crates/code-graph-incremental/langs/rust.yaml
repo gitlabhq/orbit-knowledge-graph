@@ -81,9 +81,9 @@ stages:
   - name: retag-calls
     rules:
       - match: '(call_expression function: (parenthesized_expression $F:__member) arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
+        replace: '(__call (__property) (__callee $F) $A)'
       - match: '(call_expression function: (parenthesized_expression $F:__ivar) arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
+        replace: '(__call (__property) (__callee $F) $A)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
