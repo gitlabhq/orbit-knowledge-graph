@@ -1784,22 +1784,21 @@ fn wildcard_uses<'a>(
         }
     };
     let root = |r: Cursor<'a>| qualified(ctx, r.sym(), &provided);
-    let local =
-        |r: Cursor<'a>| resolve_reference(ctx, r).or_else(|| enclosing_name(ctx, r, r.sym()));
+    let declared = |callee: Cursor<'a>| {
+        let head = chain_head(callee);
+        resolve_reference(ctx, head).or_else(|| enclosing_name(ctx, head, head.sym()))
+    };
     for from in referrers.iter().map(|&n| ctx.corpus.jump(fi as u32, n)) {
         for call in from.calls() {
             let Some(callee) = call.child(C::Callee) else {
                 continue;
             };
-            if let Some(target) = chain(ctx, callee, &local) {
-                if target.has_tag(ctx.tags.callable) {
-                    edges.push(call_edge(from, target, Some(call.index())));
-                }
-                continue;
-            }
             let Some(target) = chain(ctx, callee, &root) else {
                 continue;
             };
+            if declared(callee).is_some() {
+                continue;
+            }
             import(target, &mut edges);
             if target.has_tag(ctx.tags.callable) {
                 edges.push(call_edge(from, target, Some(call.index())));
@@ -2121,6 +2120,15 @@ fn enclosing_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>, sym: u32) -> Option<Cu
     }
     let node = *members_of(ctx, d).get(&sym)?;
     Some(d.jump(d.fi(), node)).filter(|member| plain(*member))
+}
+
+fn chain_head(c: Cursor<'_>) -> Cursor<'_> {
+    let c = c.reference();
+    let member = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member));
+    match member.and_then(|m| m.child(C::Object)) {
+        Some(object) => chain_head(object),
+        None => c,
+    }
 }
 
 fn chain<'a>(
