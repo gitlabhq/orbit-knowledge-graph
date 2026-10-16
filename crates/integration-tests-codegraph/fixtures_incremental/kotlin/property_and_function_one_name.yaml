@@ -53,6 +53,18 @@ fixtures:
           }
       }
 
+      class Init {
+          init {
+              val size = Other()
+          }
+
+          val size: Box = Box()
+
+          fun size(): Int = 6
+
+          fun goInit() = size.b()
+      }
+
 tests:
   - name: the function x reads the property x and has no self edge
     query: |
@@ -141,3 +153,14 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box.Companion.size", kind: "Property" } }
+
+  - name: a bare read next to an init-block local of the same name types by the property
+    # Known gap: an init-block local has no def between it and the class, so it fills the field slot of the index.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Init.goInit'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.b" } }
