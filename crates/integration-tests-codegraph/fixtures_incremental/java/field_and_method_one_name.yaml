@@ -3,42 +3,66 @@ name: "Java: a field and a method of one name keep separate bindings"
 fixtures:
   - path: Main.java
     content: |
-      public class Main {
-          static class Other {
-              void b() {}
-          }
+      class Other {
+          void b() {}
+      }
 
-          static class Box {
-              Other x = new Other();
+      class Box {
+          Other x = new Other();
 
-              Box x() {
-                  if (x != null) {
-                      x.b();
-                  }
-                  return new Box();
-              }
-
-              void b() {}
-
-              void go() {
+          Box x() {
+              if (x != null) {
                   x.b();
               }
-
-              void goCall() {
-                  x().b();
-              }
-
-              void setX(Other v) {
-                  x = v;
-              }
+              return new Box();
           }
 
-          static class Sub extends Box {
-              void viaSuper() {
-                  x.b();
-              }
+          void b() {}
+
+          void go() {
+              x.b();
+          }
+
+          void goCall() {
+              x().b();
+          }
+
+          void setX(Other v) {
+              x = v;
           }
       }
+
+      class Sub extends Box {
+          void viaSuper() {
+              x.b();
+          }
+      }
+
+      abstract class Iter {
+          abstract void next();
+      }
+
+      class Set {
+          int indexOf() {
+              return first().hashCode();
+          }
+
+          Iter it() {
+              return new Iter() {
+                  final Other first = first();
+
+                  void next() {
+                      first.b();
+                  }
+              };
+          }
+
+          Other first() {
+              return new Other();
+          }
+      }
+
+      public class Main {}
 
 tests:
   - name: the method x reads the field x and has no self edge
@@ -48,7 +72,7 @@ tests:
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Main.Other.b", kind: "Method" } }
+      - { row: { callee: "Other.b", kind: "Method" } }
 
   - name: a read of x types the receiver by the field, not by the method of the same name
     query: |
@@ -57,26 +81,15 @@ tests:
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Main.Other.b", kind: "Method" } }
+      - { row: { callee: "Other.b", kind: "Method" } }
 
-  - name: a call of x() targets the method and not the field's type
+  - name: a call of x() targets the method and types the receiver by its return
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'goCall'
       RETURN t.fqn AS callee
     assert:
-      - { not: true, row: { callee: "Main.Other.b" } }
-      - { row: { callee: "Main.Box.x" } }
-
-  - name: a call of x() types the receiver by its return
-    # Known gap: a Java chained call on a method result is not typed, on main too.
-    skip: true
-    query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
-      WHERE c.name = 'goCall'
-      RETURN t.fqn AS callee
-    assert:
-      - { column_values: { field: callee, values: ["Main.Box.b", "Main.Box.x"] } }
+      - { column_values: { field: callee, values: ["Box.b", "Box.x"] } }
 
   - name: an inherited read of x types the receiver by the field
     # Known gap: a bare read of an inherited field is not bound in the subclass scope, on main too.
@@ -87,7 +100,7 @@ tests:
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { row_count: 1 }
-      - { row: { callee: "Main.Other.b", kind: "Method" } }
+      - { row: { callee: "Other.b", kind: "Method" } }
 
   - name: an assignment to x is not a call
     query: |
@@ -96,3 +109,20 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { empty: true }
+
+  - name: a call declared before an anonymous class field of the same name targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Set.indexOf' AND t.name = 'first'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Set.first", kind: "Method" } }
+
+  - name: the anonymous class field keeps its own read
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Set.it.next'
+      RETURN t.fqn AS callee
+    assert:
+      - { row: { callee: "Other.b" } }

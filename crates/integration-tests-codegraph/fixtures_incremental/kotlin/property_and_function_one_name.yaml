@@ -15,13 +15,6 @@ fixtures:
               return Box()
           }
 
-          val cb: Int = 1
-
-          fun local(): Int {
-              fun cb(): Int = 2
-              return cb()
-          }
-
           fun b() {}
 
           fun go() = x.b()
@@ -29,6 +22,27 @@ fixtures:
           fun goCall() = x().b()
 
           fun callOnly() = x()
+
+          val cb: () -> Int = { 1 }
+
+          fun other(): Int = cb()
+
+          fun local(): Int {
+              fun cb(): Int = 2
+              return cb()
+          }
+
+          fun shadow(): Int {
+              val cb: () -> Int = { 3 }
+              return cb()
+          }
+
+          fun numbers(n: Long): Int = 4
+
+          fun zip(): Int {
+              val numbers = numbers(1000L)
+              return numbers
+          }
       }
 
 tests:
@@ -40,15 +54,6 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "Other.b", kind: "Function" } }
-
-  - name: a local function with a property's name stays the call target
-    query: |
-      MATCH (c:Definition)-[:CALLS]->(t:Definition)
-      WHERE c.name = 'local' AND t.name = 'cb'
-      RETURN t.fqn AS callee, t.definition_type AS kind
-    assert:
-      - { row_count: 1 }
-      - { row: { kind: "Function" } }
 
   - name: a read of x types the receiver by the property, not by the function of the same name
     query: |
@@ -74,3 +79,48 @@ tests:
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { column_values: { field: kind, values: ["Function"] } }
+
+  - name: a call of a function-typed property does not reach a local function of that name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'other'
+      RETURN t.fqn AS callee
+    assert:
+      - { not: true, row: { callee: "Box.local.cb" } }
+
+  - name: a call of a function-typed property targets the property
+    # Known gap: a call of a function-typed property is not linked, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'other'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.cb", kind: "Property" } }
+
+  - name: a local function with a property's name stays the call target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'local' AND t.name = 'cb'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.local.cb", kind: "Function" } }
+
+  - name: a local val with a property's name does not reach the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'shadow'
+      RETURN t.fqn AS callee
+    assert:
+      - { not: true, row: { callee: "Box.cb" } }
+
+  - name: a call inside the initializer of a local val of the same name reaches the function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'zip'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.numbers", kind: "Function" } }
