@@ -236,6 +236,8 @@ stages:
 
   - name: classify
     rules:
+      - match: '(reference_expression value: $V:__call)'
+        replace: '$V'
       - match: '(let_declaration pattern: $P:unpack_pattern value: $V)'
         replace: '(unpack (__binding @$P|child_sym("__object") (__rhs @$V $V)) $P)'
       - match: '(tuple_expression $$$V:_*_named)'
@@ -265,6 +267,8 @@ stages:
       - match: '(assignment_expression left: $N:__ivar right: $R:__lambda)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R:__arr)'
+        replace: '(__binding $N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
         replace: '(__binding $N (__rhs @$R) $R)'
