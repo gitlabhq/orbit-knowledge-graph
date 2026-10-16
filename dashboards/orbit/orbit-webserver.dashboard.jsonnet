@@ -3,9 +3,11 @@
 // Opens on the answer to "is the webserver healthy?" without scrolling,
 // following the RED method (rate, errors, duration):
 //
-//   1. At a glance — eight small tiles, neutral until a threshold is
-//      crossed, then three charts: latency of successful queries,
-//      server errors by type, and rejected client queries by reason.
+//   1. At a glance — eight small tiles for the selected time range,
+//      neutral until a threshold is crossed; query totals with their
+//      volume curve (all, by outcome, by query type); then latency of
+//      successful queries, server errors by type, and rejected client
+//      queries by reason.
 //   2. Latency breakdown — per query type, per pipeline stage, and
 //      ClickHouse work, to find where time goes.
 //   3. Reliability — failure and rejection details.
@@ -115,6 +117,27 @@ local errorBars(title, description, targets, colors) =
     options+: { legend: { displayMode: 'list', placement: 'bottom', calcs: ['sum'] } },
   };
 
+// Number and trend in one panel: each series is a per-interval count, the
+// panel shows its sum over the selected range with the counts as a sparkline.
+local volume(title, description, targets, colors, w) =
+  o.stat(title, description, targets[0], 'locale', w, 6) + {
+    targets: targets,
+    interval: '5m',
+    fieldConfig+: {
+      defaults+: { decimals: 0, color: { mode: 'fixed', fixedColor: '#3987e5' } },
+      overrides: colored(colors),
+    },
+    options+: {
+      reduceOptions: { calcs: ['sum'], fields: '', values: false },
+      textMode: if std.length(targets) == 1 && std.length(colors) == 0 then 'value' else 'value_and_name',
+      graphMode: 'area',
+      colorMode: 'none',
+      justifyMode: 'center',
+      orientation: 'vertical',
+      text: { titleSize: 13, valueSize: 30 },
+    },
+  };
+
 local glance = [
   o.row('At a glance'),
   tile(
@@ -164,6 +187,31 @@ local glance = [
     'Share of all queries in the selected time range that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.',
     'sum(increase(%s{%s, status="compile_error"}[$__range])) / sum(increase(%s{%s}[$__range]))' % [Q, SEL, Q, SEL],
     'percentunit', NEUTRAL, 1,
+  ),
+  volume(
+    'Queries',
+    'All queries that reached the pipeline in the selected time range, including rejected client queries. The curve shows volume per 5 minutes or more.',
+    [o.target('sum(increase(%s{%s, query_type!="unknown"}[$__interval])) + sum(increase(%s{%s, status="compile_error"}[$__interval]))' % [Q, SEL, Q, SEL], 'Queries', DS, 'A')],
+    [], 6,
+  ),
+  volume(
+    'By outcome',
+    'Queries in the selected time range by outcome: successful, failed because of the service, and rejected as invalid client input. Totals sum 5-minute or longer buckets, so they can differ by a few from the tiles above.',
+    [
+      o.target('sum(increase(%s{%s, %s}[$__interval]))' % [Q, SEL, OK], 'Successful', DS, 'A'),
+      o.target('(%s)' % serverErrors('$__interval'), 'Server errors', DS, 'B'),
+      o.target('sum(increase(%s{%s, status="compile_error"}[$__interval]))' % [Q, SEL], 'Rejected', DS, 'C'),
+    ],
+    [['Successful', '#3987e5'], ['Server errors', '#e66767'], ['Rejected', '#8e8e9a']], 9,
+  ),
+  volume(
+    'By query type',
+    'Successful queries in the selected time range by query type.',
+    [
+      o.target('sum(increase(%s{%s, %s, query_type="%s"}[$__interval]))' % [Q, SEL, OK, t[0]], t[0], DS, t[1])
+      for t in [['traversal', 'A'], ['aggregation', 'B'], ['neighbors', 'C'], ['path_finding', 'D']]
+    ],
+    [['traversal', '#3987e5'], ['aggregation', '#d95926'], ['neighbors', '#199e70'], ['path_finding', '#c98500']], 9,
   ),
   percentiles(
     'Latency of successful queries',
