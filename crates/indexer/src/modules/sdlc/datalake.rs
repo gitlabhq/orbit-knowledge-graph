@@ -218,6 +218,7 @@ pub(in crate::modules::sdlc) fn is_arrow_string_overflow(err: &DatalakeError) ->
         return false;
     };
     message.contains("2147483646")
+        || message.contains("exceeds 32 bits")
         || (message.contains("Arrow") && message.contains("Capacity error"))
 }
 
@@ -234,6 +235,12 @@ mod tests {
                 .to_string(),
         );
         assert!(is_arrow_string_overflow(&err));
+        let native = DatalakeError::Query(
+            "Code: 128. DB::Exception: Arrow IPC string offset exceeds 32 bits: \
+             While executing ArrowIPCBlockOutputFormat. (TOO_LARGE_ARRAY_SIZE)"
+                .to_string(),
+        );
+        assert!(is_arrow_string_overflow(&native));
     }
 
     #[test]
