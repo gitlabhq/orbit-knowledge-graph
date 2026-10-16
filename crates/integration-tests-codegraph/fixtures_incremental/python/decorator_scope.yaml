@@ -56,6 +56,20 @@ fixtures:
           helper()
 
 
+      class Reg:
+          def hook(self, fn):
+              return fn
+
+
+      reg = Reg()
+
+
+      class T:
+          @reg.hook
+          def t0(self):
+              pass
+
+
       class Prop:
           @property
           def x(self):
@@ -130,11 +144,11 @@ tests:
       RETURN caller.start_line AS setter, callee.start_line AS getter
     assert:
       - { row_count: 1 }
-      - { row: { setter: 60, getter: 56 } }
+      - { row: { setter: 74, getter: 70 } }
 
   - name: a lambda parameter in a default value does not shadow the module function in the body
-    # Known gap: waits on the G9 `__lambda` wrap under `__rhs` (!2872); today the lambda
-    # parameter binds in the def, so `helper()` in the body resolves to it.
+    # Known gap: the lambda parameter binds in the def until a lambda is a node of its own,
+    # so `helper()` in the body resolves to it.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
@@ -143,3 +157,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "main.helper" } }
+
+  - name: a member decorator on an instance gives one row to the method
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.T.t0'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "main.Reg.hook" } }

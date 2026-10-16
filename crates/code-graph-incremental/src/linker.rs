@@ -687,11 +687,12 @@ impl<'t> Fold<'t> {
         if let Some(obj) = c.child(C::Object) {
             let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
-            if c.enclosing(|p| p.is(C::Decorator)).is_some() {
+            if c.enclosing(|p| p.is(C::Decorator)).is_none() {
+                for edge in &mut self.edges[first..] {
+                    edge.call_resolution = crate::tree::CallResolution::Reference;
+                }
+            } else {
                 self.retarget_own_def(first);
-            }
-            for edge in &mut self.edges[first..] {
-                edge.call_resolution = crate::tree::CallResolution::Reference;
             }
         }
     }
@@ -1560,7 +1561,11 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     f.cur = entry;
     for dn in f.defs.clone() {
         f.run.check().and_then(|()| f.file.check())?;
-        for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
+        for c in tree
+            .cursor(dn)
+            .children()
+            .filter(|c| c.is(C::Decorator) && !c.has(C::Member))
+        {
             let Some(head) = c.decorator_head() else {
                 continue;
             };
