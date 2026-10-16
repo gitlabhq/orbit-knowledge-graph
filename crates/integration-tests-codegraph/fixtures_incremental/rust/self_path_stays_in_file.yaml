@@ -1,0 +1,58 @@
+name: "Rust: a self path to a def of the importing file does not climb into another crate"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["alpha", "beta"]
+
+  - path: alpha/Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: alpha/src/lib.rs
+    content: |
+      pub mod errors;
+
+  - path: alpha/src/errors.rs
+    content: |
+      use self::Error::Kind;
+
+      pub enum Error {
+          Kind,
+          Other,
+      }
+
+      pub fn pick() -> Error {
+          Kind
+      }
+
+  - path: beta/Cargo.toml
+    content: |
+      [package]
+      name = "beta"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: beta/src/lib.rs
+    content: |
+      pub mod errors;
+
+  - path: beta/src/errors.rs
+    content: |
+      pub enum Error {
+          Kind,
+          Other,
+      }
+
+tests:
+  - name: "the self import names nothing in beta"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'alpha/src/errors.rs'
+      RETURN d.file_path AS file
+    assert:
+      - { not: true, row: { file: beta/src/errors.rs } }

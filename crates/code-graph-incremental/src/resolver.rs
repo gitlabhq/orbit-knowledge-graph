@@ -1083,8 +1083,28 @@ impl<'a> PathLookup<'a> {
     /// every file of a directory for a glob, else the one best match. A
     /// glob drops a file from another root when the importer's root has a
     /// file at the same relative path and the language says that path
-    /// names one type.
+    /// names one type. A path whose best match is a def of the importing
+    /// file names nothing here: the linker owns same-file paths.
     fn files(&self, fi: u32, path: &str, prefixes: &[String]) -> Vec<Loc> {
+        let (glob, mut found) = self.matches(fi, path, prefixes);
+        if !glob
+            && found
+                .first()
+                .is_some_and(|loc| loc.fi == fi && loc.node != 0)
+        {
+            return Vec::new();
+        }
+        found.retain(|loc| loc.fi != fi);
+        if !glob {
+            found.truncate(1);
+        }
+        found
+    }
+
+    /// Every match of `path` from `fi`, nearest root first and a file before
+    /// a def, with the importer's own file still in the list. Says whether
+    /// the path was a glob.
+    fn matches(&self, fi: u32, path: &str, prefixes: &[String]) -> (bool, Vec<Loc>) {
         let keyed = |key: &str| -> Vec<Loc> {
             std::iter::once(key.to_owned())
                 .chain(
@@ -1108,12 +1128,10 @@ impl<'a> PathLookup<'a> {
                 .collect(),
             None => keyed(path),
         };
-        found.retain(|loc| loc.fi != fi);
         found = found.into_iter().unique().collect();
         found.sort_by_key(|loc| (self.roots.distance(fi, loc.fi), loc.node != 0));
         if glob.is_none() {
-            found.truncate(1);
-            return found;
+            return (false, found);
         }
         let rel = |fi: u32| self.roots.rel_path(fi, &self.trees[fi as usize].label);
         let own: FxHashSet<&str> = std::iter::once(fi)
@@ -1131,7 +1149,7 @@ impl<'a> PathLookup<'a> {
                     .resolve
                     .same_path_same_type
         });
-        found
+        (true, found)
     }
 
     /// The file an empty path names from `fi`: the index file of its own
@@ -1225,14 +1243,23 @@ impl<'a> PathLookup<'a> {
     /// A path whose tail names defs inside a file, `use crate::errors::Error::Kind`
     /// with `enum Error { Kind }` in `errors.rs`: the longest head that names a
     /// file or a def, then one def per remaining segment. An import whose one
-    /// name is the last segment anchors at the def that holds it.
+    /// name is the last segment anchors at the def that holds it. A head that
+    /// names the importer's own file ends the climb: the linker owns that path.
     fn defs_on_path(&self, fi: u32, path: &str, names: &[u32], prefixes: &[String]) -> Vec<Hit> {
         let imported = (names.len() == 1).then(|| names[0]);
         let mut prefix = path;
         let mut tail = Vec::new();
         while let Some((head, last)) = prefix.rsplit_once(PATH_SEP) {
             tail.push(self.lang.syms.lookup(last));
-            let found = self.files(fi, head, prefixes);
+            let (_, found) = self.matches(fi, head, prefixes);
+            if found.first().is_some_and(|loc| loc.fi == fi) {
+                return Vec::new();
+            }
+            let found: Vec<Loc> = found
+                .into_iter()
+                .filter(|loc| loc.fi != fi)
+                .take(1)
+                .collect();
             if !found.is_empty() {
                 let rest = &path[head.len()..];
                 let head_name = self
