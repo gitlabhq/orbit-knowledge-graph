@@ -114,7 +114,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_ai_governance_sessions]
-      order_by: [traversal_path, id]
+      order_by: [traversal_path, session_started_at, id]
       query: agent_session.sql.j2
     transform:
       type: datafusion
