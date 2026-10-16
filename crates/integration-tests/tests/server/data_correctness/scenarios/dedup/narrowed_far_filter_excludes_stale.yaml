@@ -1,0 +1,54 @@
+description: A far endpoint narrowed from its pinned partner applies its filter to the latest version only
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9460, iid: 460, title: "Narrowed MR", state: opened, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_note:
+      - { id: 3460, note: once resolved, noteable_type: MergeRequest, noteable_id: 9460, confidential: false, internal: false, resolved_at: "2024-01-01 00:00:00", traversal_path: 1/100/1000/, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 3460, note: once resolved, noteable_type: MergeRequest, noteable_id: 9460, confidential: false, internal: false, traversal_path: 1/100/1000/, _version: "2024-06-01 00:00:00", _deleted: false }
+      - { id: 3461, note: still resolved, noteable_type: MergeRequest, noteable_id: 9460, confidential: false, internal: false, resolved_at: "2024-01-01 00:00:00", traversal_path: 1/100/1000/, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9460, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3460, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", source_id: 9460, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3461, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9001, 9002, 9003, 9010, 9011, 9300, 9301, 9600]
+      group: [100, 101, 102, 200, 300, 900]
+      project: [1000, 1001, 1002, 1003, 1004, 1010, 9000]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101, 9200, 9201, 9210, 9310, 9311, 9400, 9401, 9460, 9500, 9501, 9700, 9701, 9800, 9801, 9900, 9901]
+      note: [3000, 3001, 3002, 3003, 3460, 3461]
+      work_item: [4000, 4001, 4002, 4003, 4010]
+      milestone: [6000, 6001]
+      label: [7000, 7001, 7002]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 1000, "iid": 460}},
+        {"id": "n", "entity": "Note", "filters": {"resolved_at": {"is_not_null": true}}, "columns": ["id"]}
+      ],
+      "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest {project_id: 1000, iid: 460})-[:HAS_NOTE]->(n:Note)
+    WHERE n.resolved_at IS NOT NULL RETURN mr, n.id LIMIT 10
+
+expect:
+  sql_contains: ["IN (SELECT id FROM _filter_mr)", "IN (SELECT id FROM _narrow_n)"]
+  sql_not_contains: ["_filter_n"]
+  skip_requirements: ["filter:project_id", "filter:iid", "filter:resolved_at"]
+  node_count: 2
+  nodes:
+    MergeRequest:
+      ids: [9460]
+    Note:
+      ids: [3461]
+  edge_exists:
+    HAS_NOTE:
+      - [9460, 3461]
+  edge_count:
+    HAS_NOTE: 1
