@@ -4016,8 +4016,8 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-              "legendFormat": "p50 {{query_type}} / {{status}}",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type, status, outcome) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p50 {{query_type}} / {{status}} / {{outcome}}",
               "refId": "A"
             },
             {
@@ -4025,8 +4025,8 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-              "legendFormat": "p95 {{query_type}} / {{status}}",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type, status, outcome) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p95 {{query_type}} / {{status}} / {{outcome}}",
               "refId": "B"
             },
             {
@@ -4034,8 +4034,8 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-              "legendFormat": "p99 {{query_type}} / {{status}}",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, status, outcome) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p99 {{query_type}} / {{status}} / {{outcome}}",
               "refId": "C"
             }
           ],
@@ -4085,8 +4085,8 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, status) (rate(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-              "legendFormat": "{{query_type}} / {{status}}",
+              "expr": "sum by (query_type, status, outcome) (rate(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{query_type}} / {{status}} / {{outcome}}",
               "refId": "A"
             }
           ],
@@ -4427,8 +4427,8 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, status) (rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-              "legendFormat": "{{query_type}} / {{status}}",
+              "expr": "sum by (query_type, status, outcome) (rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{query_type}} / {{status}} / {{outcome}}",
               "refId": "A"
             }
           ],
