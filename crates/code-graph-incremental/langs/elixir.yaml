@@ -63,8 +63,8 @@ stages:
     rules:
       - match: '(source $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
-      - match: '(call target: (identifier "defmodule") (arguments $A:alias) $B:do_block)'
-        replace: '(__def (__defname @$A) (__class) $B)'
+      - match: '(call target: (identifier "defmodule") (arguments $A:alias) (do_block $$$B))'
+        replace: '(__def (__defname @$A) (__class) $$$B)'
       - match: '(call target: (identifier "def") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)'
         replace: '(__def (__defname @$N) (__function) $P $B)'
       - match: '(call target: (identifier "def") (arguments (call target: $N:identifier $P:arguments) $K:keywords))'
