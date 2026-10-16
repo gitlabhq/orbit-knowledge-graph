@@ -327,6 +327,20 @@ async fn content_for_more_rows_than_the_resolver_cap_is_a_caller_error() {
     }
 }
 
+#[tokio::test]
+async fn content_with_a_large_limit_but_few_rows_succeeds() {
+    let mut server = Server::start().await;
+    let query = json!({
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [5001], "columns": ["path", "content"]}],
+        "limit": RESOLVER_CAP + 1
+    });
+
+    server.run(request(query)).await.unwrap();
+
+    server.assert_recorded("ok", "success", None).await;
+}
+
 // Hydration resolves every pinned node_id regardless of limit, so 4 rows reach the resolver.
 // The caller asked for no more than the cap, so the overflow is ours and stays a server error.
 #[tokio::test]
