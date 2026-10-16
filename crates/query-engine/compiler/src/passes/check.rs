@@ -10,7 +10,6 @@ use serde_json::Value;
 
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
-use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
@@ -41,57 +40,16 @@ pub fn check_authorization(
     let Node::Query(query) = node else {
         return Ok(());
     };
-    check_result_context(input, result, model)?;
-    for redaction in result.nodes() {
-        check_redaction_node(query, metadata, redaction, model)?;
-    }
-    match result.query_type {
-        Some(QueryType::Neighbors) => {
-            require_output(query, crate::constants::neighbor_id_column())?;
-            require_output(query, crate::constants::neighbor_type_column())?;
-        }
-        Some(QueryType::PathFinding) => {
-            require_output(query, crate::constants::path_column())?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn check_result_context(
-    input: &Input,
-    result: &ResultContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<()> {
-    if result.query_type != Some(input.query_type) {
-        return Err(authorization_error(format!(
-            "result query type {:?} does not match {}",
-            result.query_type, input.query_type
-        )));
-    }
-    if result.entity_auth().count() != model.entity_auth().len()
-        || model
-            .entity_auth()
-            .iter()
-            .any(|(entity, expected)| result.get_entity_auth(entity) != Some(expected))
-    {
-        return Err(authorization_error(
-            "result authorization model differs from the query model",
-        ));
-    }
-    let selected: std::collections::HashSet<_> = match input.query_type {
-        QueryType::Traversal | QueryType::Neighbors => {
-            input.nodes.iter().map(|node| node.id.as_str()).collect()
-        }
-        QueryType::Aggregation => {
-            crate::input::node_group_ids(&input.aggregation.group_by).collect()
-        }
-        QueryType::PathFinding | QueryType::Hydration => Default::default(),
-    };
+    let grouped: std::collections::HashSet<_> =
+        crate::input::node_group_ids(&input.aggregation.group_by).collect();
     let expected: std::collections::BTreeMap<_, _> = input
         .nodes
         .iter()
-        .filter(|node| selected.contains(node.id.as_str()))
+        .filter(|node| match input.query_type {
+            QueryType::Traversal | QueryType::Neighbors => true,
+            QueryType::Aggregation => grouped.contains(node.id.as_str()),
+            QueryType::PathFinding | QueryType::Hydration => false,
+        })
         .filter_map(|node| Some((node.id.as_str(), node.entity.as_deref()?)))
         .collect();
     let actual: std::collections::BTreeMap<_, _> = result
@@ -103,6 +61,19 @@ fn check_result_context(
             "result nodes differ from query output: expected {expected:?}, got {actual:?}"
         )));
     }
+    for redaction in result.nodes() {
+        check_redaction_node(query, metadata, redaction, model)?;
+    }
+    match input.query_type {
+        QueryType::Neighbors => {
+            require_output(query, crate::constants::neighbor_id_column())?;
+            require_output(query, crate::constants::neighbor_type_column())?;
+        }
+        QueryType::PathFinding => {
+            require_output(query, crate::constants::path_column())?;
+        }
+        _ => {}
+    }
     Ok(())
 }
 
@@ -112,21 +83,6 @@ fn check_redaction_node(
     redaction: &crate::passes::enforce::RedactionNode,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
-    if redaction.id_column != redaction_id_column(&redaction.alias)
-        || redaction.type_column != redaction_type_column(&redaction.alias)
-        || redaction.pk_column != primary_key_column(&redaction.alias)
-    {
-        return Err(authorization_error(format!(
-            "node '{}' has invalid result metadata",
-            redaction.alias
-        )));
-    }
-    if model.entity(&redaction.entity_type).is_none() {
-        return Err(authorization_error(format!(
-            "node '{}' has unknown entity '{}'",
-            redaction.alias, redaction.entity_type
-        )));
-    }
     let auth_id = model
         .entity_auth()
         .get(&redaction.entity_type)
@@ -138,21 +94,14 @@ fn check_redaction_node(
             table_alias,
             ..
         }) => (
-            OutputRule::Exact(if auth_id == DEFAULT_PRIMARY_KEY {
+            Some(if auth_id == DEFAULT_PRIMARY_KEY {
                 identity.clone()
             } else {
                 Expr::col(table_alias.as_deref().unwrap_or(&redaction.alias), auth_id)
             }),
-            (auth_id != DEFAULT_PRIMARY_KEY).then(|| OutputRule::Exact(identity.clone())),
+            (auth_id != DEFAULT_PRIMARY_KEY).then(|| identity.clone()),
         ),
-        Some(NodeBinding::Projected { .. }) => (
-            if auth_id == DEFAULT_PRIMARY_KEY {
-                OutputRule::Present
-            } else {
-                OutputRule::Column(auth_id)
-            },
-            (auth_id != DEFAULT_PRIMARY_KEY).then_some(OutputRule::Present),
-        ),
+        Some(NodeBinding::Projected { .. }) => (None, None),
         _ => {
             return Err(authorization_error(format!(
                 "node '{}' has no lowered authorization identity",
@@ -160,30 +109,34 @@ fn check_redaction_node(
             )));
         }
     };
-    let expected = [
+    let entity_type = Expr::string(&redaction.entity_type);
+    let mut expected = vec![
         (
             "authorization ID",
             redaction.id_column.as_str(),
-            Some(authorization_id),
+            authorization_id.as_ref(),
         ),
         (
             "authorization type",
             redaction.type_column.as_str(),
-            Some(OutputRule::Exact(Expr::string(&redaction.entity_type))),
+            Some(&entity_type),
         ),
-        ("primary key", redaction.pk_column.as_str(), primary_key),
     ];
-    for (kind, column, rule) in expected {
-        let Some(rule) = rule else {
-            continue;
-        };
+    if auth_id != DEFAULT_PRIMARY_KEY {
+        expected.push((
+            "primary key",
+            redaction.pk_column.as_str(),
+            primary_key.as_ref(),
+        ));
+    }
+    for (kind, column, expected) in expected {
         let actual = output_expressions(query, column).ok_or_else(|| {
             authorization_error(format!(
                 "node '{}' is missing {kind} column '{column}'",
                 redaction.alias
             ))
         })?;
-        if !actual.iter().all(|value| rule.matches(value)) {
+        if expected.is_some_and(|expected| !actual.iter().all(|value| *value == expected)) {
             return Err(authorization_error(format!(
                 "node '{}' {kind} does not match its expected identity",
                 redaction.alias
@@ -191,24 +144,6 @@ fn check_redaction_node(
         }
     }
     Ok(())
-}
-
-enum OutputRule<'a> {
-    Present,
-    Exact(Expr),
-    Column(&'a str),
-}
-
-impl OutputRule<'_> {
-    fn matches(&self, value: &Expr) -> bool {
-        match self {
-            Self::Present => true,
-            Self::Exact(expected) => value == expected,
-            Self::Column(expected) => {
-                matches!(value, Expr::Column { column, .. } if column == expected)
-            }
-        }
-    }
 }
 
 fn output_expressions<'a>(query: &'a Query, alias: &str) -> Option<Vec<&'a Expr>> {
