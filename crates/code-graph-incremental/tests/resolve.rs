@@ -548,16 +548,20 @@ fn rust_import_shapes_stay_resolved_on_a_noop_reindex() {
     ];
     assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
 
+    let snapshot = tempfile::NamedTempFile::new().unwrap();
+    resolved.state.save(&env, snapshot.path()).unwrap();
+    let (env, state) = State::load(snapshot.path(), SupportLang::Rust).unwrap();
     let (context, resolved) = templates::reindex(
         Context::new(
             &env,
             common::load(orbit_utils::vfs::sources::Memory(vec![])),
         ),
-        resolved.state,
+        state,
         vec![],
     )
     .unwrap()
     .finish();
+    assert!(context.report.skipped.is_empty());
     assert!(context.report.files.is_empty());
     assert!(resolved.resolved.is_empty());
     assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
