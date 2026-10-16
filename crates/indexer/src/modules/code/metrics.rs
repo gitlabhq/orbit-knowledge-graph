@@ -3,7 +3,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use code_graph::v2::config::detect_language_from_path;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
 use orbit_observability::indexer::code;
 
@@ -32,6 +32,10 @@ pub struct CodeMetrics {
     pub(in crate::modules::code) language_files: Counter<u64>,
     pub(in crate::modules::code) language_bytes: Counter<u64>,
     pub(in crate::modules::code) pipeline_phase_duration: Histogram<f64>,
+    pub(in crate::modules::code) archive_lease_wait: Histogram<f64>,
+    pub(in crate::modules::code) archive_lease_slots_in_use: UpDownCounter<i64>,
+    pub(in crate::modules::code) archive_duration: Histogram<f64>,
+    pub(in crate::modules::code) archive_lease_lost: Counter<u64>,
 }
 
 impl CodeMetrics {
@@ -65,6 +69,11 @@ impl CodeMetrics {
             language_files: code::LANGUAGE_FILES.build_counter_u64(meter),
             language_bytes: code::LANGUAGE_BYTES.build_counter_u64(meter),
             pipeline_phase_duration: code::PIPELINE_PHASE_DURATION.build_histogram_f64(meter),
+            archive_lease_wait: code::ARCHIVE_LEASE_WAIT.build_histogram_f64(meter),
+            archive_lease_slots_in_use: code::ARCHIVE_LEASE_SLOTS_IN_USE
+                .build_up_down_counter_i64(meter),
+            archive_duration: code::ARCHIVE_DURATION.build_histogram_f64(meter),
+            archive_lease_lost: code::ARCHIVE_LEASE_LOST.build_counter_u64(meter),
         }
     }
 }
@@ -221,6 +230,42 @@ impl CodeMetrics {
         self.pipeline_phase_duration.record(
             elapsed.as_secs_f64(),
             &[KeyValue::new(code::labels::PHASE, slot)],
+        );
+    }
+
+    pub(in crate::modules::code) fn record_archive_lease_wait(
+        &self,
+        storage: &str,
+        elapsed: Duration,
+    ) {
+        self.archive_lease_wait.record(
+            elapsed.as_secs_f64(),
+            &[KeyValue::new(code::labels::STORAGE, storage.to_string())],
+        );
+    }
+
+    pub(in crate::modules::code) fn add_archive_lease_slots(&self, storage: &str, delta: i64) {
+        self.archive_lease_slots_in_use.add(
+            delta,
+            &[KeyValue::new(code::labels::STORAGE, storage.to_string())],
+        );
+    }
+
+    pub(in crate::modules::code) fn record_archive_duration(
+        &self,
+        storage: &str,
+        elapsed: Duration,
+    ) {
+        self.archive_duration.record(
+            elapsed.as_secs_f64(),
+            &[KeyValue::new(code::labels::STORAGE, storage.to_string())],
+        );
+    }
+
+    pub(in crate::modules::code) fn record_archive_lease_lost(&self, storage: &str) {
+        self.archive_lease_lost.add(
+            1,
+            &[KeyValue::new(code::labels::STORAGE, storage.to_string())],
         );
     }
 

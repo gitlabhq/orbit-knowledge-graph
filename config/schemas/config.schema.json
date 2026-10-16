@@ -642,6 +642,30 @@
           "format": "uint",
           "minimum": 0
         },
+        "archive_storage_budget": {
+          "description": "Maximum archive downloads in flight per Gitaly storage across all indexer pods, enforced with a NATS KV lease. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "archive_tenant_budget": {
+          "description": "Maximum archive downloads in flight across the whole tenant for projects whose Gitaly storage is unknown (GitLab versions whose `/info` omits `repository_storage`, or a failed lookup). Independent of `archive_storage_budget`, so during a mixed rollout a storage can see both budgets. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "archive_lease_ttl_secs": {
+          "description": "Seconds an archive lease stays valid without a heartbeat (minimum 1). A pod that crashes mid-download frees its slot after this long; a pod that loses the lease cancels its download.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "archive_lease_max_wait_secs": {
+          "description": "Seconds a download queues for an archive lease while holding a fetch slot. After that the task is NAKed without spending a checkpoint attempt, so a busy storage cannot hold every fetch slot of a pod. Each NAK still counts toward the stream's `max_deliver`.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "write_channel_capacity": {
           "description": "In-flight batches the streaming sink holds before back-pressuring the parser.",
           "type": "integer",
@@ -724,6 +748,10 @@
         "max_file_edges",
         "job_timeout_secs",
         "fetch_concurrency",
+        "archive_storage_budget",
+        "archive_tenant_budget",
+        "archive_lease_ttl_secs",
+        "archive_lease_max_wait_secs",
         "write_channel_capacity",
         "write_slice_rows",
         "write_buffer_age_secs",

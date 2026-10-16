@@ -282,6 +282,14 @@ pub struct CodeIndexingPipelineConfig {
     /// many repositories can be downloaded simultaneously in the pipelined
     /// code indexer. 0 = no limit.
     pub fetch_concurrency: usize,
+    /// Maximum archive downloads in flight per Gitaly storage across all indexer pods, enforced with a NATS KV lease. 0 = no limit.
+    pub archive_storage_budget: usize,
+    /// Maximum archive downloads in flight across the whole tenant for projects whose Gitaly storage is unknown (GitLab versions whose `/info` omits `repository_storage`, or a failed lookup). Independent of `archive_storage_budget`, so during a mixed rollout a storage can see both budgets. 0 = no limit.
+    pub archive_tenant_budget: usize,
+    /// Seconds an archive lease stays valid without a heartbeat (minimum 1). A pod that crashes mid-download frees its slot after this long; a pod that loses the lease cancels its download.
+    pub archive_lease_ttl_secs: u64,
+    /// Seconds a download queues for an archive lease while holding a fetch slot. After that the task is NAKed without spending a checkpoint attempt, so a busy storage cannot hold every fetch slot of a pod. Each NAK still counts toward the stream's `max_deliver`.
+    pub archive_lease_max_wait_secs: u64,
     /// In-flight batches the streaming sink holds before back-pressuring the parser.
     pub write_channel_capacity: usize,
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending.
