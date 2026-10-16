@@ -1,0 +1,34 @@
+name: "Python: an annotated local with a method's name"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Box:
+          def handler(self):
+              return 1
+
+          def run(self):
+              handler: int = 2
+              return handler()
+
+          @property
+          def decorated(self):
+              handler: int = 3
+              return handler()
+
+tests:
+  - name: a bare call of an annotated local does not reach the method of that name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'run' AND t.name = 'handler'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: a bare call of an annotated local in a decorated method does not reach the method of that name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'decorated' AND t.name = 'handler'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }

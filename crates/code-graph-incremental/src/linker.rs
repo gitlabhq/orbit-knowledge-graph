@@ -1415,30 +1415,44 @@ impl<'t> Fold<'t> {
         let Some(class) = target.ancestors().find(|node| node.is_class()) else {
             return def;
         };
+        let scope = target
+            .ancestors()
+            .find(|node| node.is(C::Def))
+            .map(|node| node.index());
+        let use_site = self.tree.cursor(site);
+        let access = use_site
+            .child(C::Callee)
+            .map(|callee| callee.child(C::Member).unwrap_or(callee))
+            .unwrap_or(use_site);
+        let bare = !access.has(C::Object) && !access.has(C::Ivar);
+        let mut inside_own = false;
+        let mut visible = false;
+        for node in use_site.ancestors() {
+            inside_own |= node.index() == def;
+            visible |= Some(node.index()) == scope;
+        }
+        if bare
+            && visible
+            && !inside_own
+            && !crate::tree::is_member_of(target, class)
+            && !self.inside_declaration(target, use_site)
+        {
+            return def;
+        }
+        target
+            .child_sym(C::DefName)
+            .and_then(|name| self.member_slot(class.index(), name, field))
+            .unwrap_or(def)
+    }
+
+    fn inside_declaration(&self, target: Cursor<'t>, site: Cursor<'t>) -> bool {
         let name = target.child_sym(C::DefName);
         let declaration = target.parent().and_then(|parent| {
             parent.children().find(|node| {
                 node.is(C::Binding) && node.has(C::Declaration) && Some(node.sym()) == name
             })
         });
-        let own = |node: Cursor| {
-            node.index() == def || declaration.is_some_and(|decl| decl.index() == node.index())
-        };
-        let scope = target
-            .ancestors()
-            .find(|node| node.is(C::Def))
-            .map(|node| node.index());
-        let mut inside_own = false;
-        let mut visible = false;
-        for node in self.tree.cursor(site).ancestors() {
-            inside_own |= own(node);
-            visible |= Some(node.index()) == scope;
-        }
-        if visible && !inside_own && !crate::tree::is_member_of(target, class) {
-            return def;
-        }
-        name.and_then(|name| self.member_slot(class.index(), name, field))
-            .unwrap_or(def)
+        declaration.is_some_and(|decl| site.ancestors().any(|node| node.index() == decl.index()))
     }
 
     fn chain_is_class(&mut self, c: Cursor) -> bool {

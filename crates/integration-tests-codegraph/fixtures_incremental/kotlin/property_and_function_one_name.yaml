@@ -43,6 +43,14 @@ fixtures:
               val numbers = numbers(1000L)
               return numbers
           }
+
+          fun size(): Int = 5
+
+          fun viaCompanion() = size.toLong()
+
+          companion object {
+              const val size = 100
+          }
       }
 
 tests:
@@ -108,13 +116,13 @@ tests:
       - { row_count: 1 }
       - { row: { callee: "Box.local.cb", kind: "Function" } }
 
-  - name: a local val with a property's name does not reach the property
+  - name: a local val with a property's name reaches neither the property nor another local
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'shadow'
       RETURN t.fqn AS callee
     assert:
-      - { not: true, row: { callee: "Box.cb" } }
+      - { empty: true }
 
   - name: a call inside the initializer of a local val of the same name reaches the function
     query: |
@@ -124,3 +132,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box.numbers", kind: "Function" } }
+
+  - name: a bare read of a companion constant types by the constant, not by the function of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'viaCompanion' AND t.name = 'size'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.Companion.size", kind: "Property" } }
