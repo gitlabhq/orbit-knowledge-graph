@@ -383,14 +383,12 @@ fn neighbors_query() {
         "bidirectional should include direction"
     );
     assert!(rendered.contains("gl_edge"));
-    // A pinned default-PK center on a single edge table fuses both directions into
-    // one scan: arrayJoin over the matched-arm tuples, no UNION ALL. The multi-table
-    // and non-denorm-filter neighbors tests still exercise the UNION ALL path.
     assert!(
-        rendered.contains("arrayJoin") && rendered.contains("arrayFilter"),
-        "pinned default-PK both should fuse to a single arrayJoin scan"
+        rendered.contains("UNION ALL") && !rendered.contains("arrayJoin"),
+        "pinned both should scan each direction on its own id column; a fused \
+         source_id OR target_id scan stops the primary key and both bloom indexes"
     );
-    assert!(!rendered.contains("UNION ALL"));
+    assert!(rendered.contains("(e.source_id = 100)") && rendered.contains("(e.target_id = 100)"));
 }
 
 #[test]
