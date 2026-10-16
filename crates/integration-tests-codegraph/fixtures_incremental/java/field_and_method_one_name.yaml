@@ -66,6 +66,20 @@ fixtures:
           }
       }
 
+      class Late {
+          Late x() {
+              return new Late();
+          }
+
+          void b() {}
+
+          Other x = new Other();
+
+          void goCall() {
+              x().b();
+          }
+      }
+
       public class Main {
           static class Nested {
               Nested x() {
@@ -163,3 +177,11 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { row: { callee: "Other.b" } }
+
+  - name: a bare call of a field name declared after the method of its name targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Late.goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Late.b", "Late.x"] } }

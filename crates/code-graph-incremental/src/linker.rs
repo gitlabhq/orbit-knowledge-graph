@@ -1260,6 +1260,11 @@ impl<'t> Fold<'t> {
             let mut bound = self.lookup(sym);
             if !bound.is_empty() {
                 bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
+                for r in &mut bound {
+                    if let Value::LocalDef(d) = r {
+                        *d = self.sibling_member(*d, false, site);
+                    }
+                }
                 for r in &bound {
                     self.emit(r, from);
                 }
