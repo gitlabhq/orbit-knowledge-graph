@@ -104,17 +104,9 @@ with sequential consistency, and retries the transient quorum and Keeper errors.
 One replica can leave the cluster while indexing and queries continue.
 Leave the switch off on a single node and on ClickHouse Cloud.
 
-ClickHouse 26.7 and later reject the GitLab migrations that create `AggregatingMergeTree` tables with
-columns outside the sorting key.
-Until [issue 627691](https://gitlab.com/gitlab-org/gitlab/-/work_items/627691) updates those migrations,
-set `allow_dimensions_outside_sorting_key` to `1` in the server `merge_tree` settings before you run the
-GitLab migrations on those releases:
-
-```xml
-<merge_tree>
-  <allow_dimensions_outside_sorting_key>1</allow_dimensions_outside_sorting_key>
-</merge_tree>
-```
+ClickHouse 26.7 and later reject some GitLab migrations. Follow
+[ClickHouse 26.7 and later](https://docs.gitlab.com/integration/clickhouse/#clickhouse-267-and-later) in the
+GitLab ClickHouse documentation, which sets `compatibility` to `26.6`.
 
 ### Sizing and settings
 
