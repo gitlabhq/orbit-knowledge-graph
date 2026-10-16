@@ -156,6 +156,16 @@ stages:
         replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
+      - match: '(default_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(list_splat_pattern $C:identifier)'
+        replace: '(__binding @$C)'
+      - match: '(dictionary_splat_pattern $C:identifier)'
+        replace: '(__binding @$C)'
+      - match: '(parameters $S:(identifier "/^(self|cls)$/") $$$P)'
+        replace: '(parameters $S $$$P:identifier|__binding->__binding)'
+      - match: '(parameters $$$P)'
+        replace: '(parameters $$$P:identifier|__binding->__binding)'
 
       # Bindings — RHS wrapped in __rhs for canonical containment
       - match: '(assignment left: $N:__ivar right: $R:__call)'

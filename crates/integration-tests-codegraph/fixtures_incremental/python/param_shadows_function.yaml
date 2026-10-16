@@ -1,0 +1,114 @@
+name: "Python: a plain parameter shadows a same-named top-level def"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Foo:
+          def bar(self):
+              pass
+
+          def baz(self, make):
+              x = make()
+              x.bar()
+
+          @classmethod
+          def build(cls, make):
+              x = make()
+              x.bar()
+
+      def make():
+          return Foo()
+
+      def f(make):
+          x = make()
+          x.bar()
+
+      def g(make=None):
+          x = make()
+          x.bar()
+
+      def h(*make):
+          x = make()
+          x.bar()
+
+      def k(**make):
+          x = make()
+          x.bar()
+
+      def caller():
+          x = make()
+          x.bar()
+
+tests:
+  - name: a plain parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'f'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a default parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'g'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a list splat parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'h'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a dictionary splat parameter hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'k'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a plain parameter after self hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'baz'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a plain parameter after cls hides the top-level def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'build'
+      RETURN t.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: a function without the parameter still calls make and Foo.bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'caller'
+      RETURN t.name AS callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["bar", "make"] } }
+
+  - name: methods with plain parameters after self stay methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ["bar", "baz"] } }
+
+  - name: functions and the cls method keep their definition_type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ["build", "caller", "f", "g", "h", "k", "make"] } }
