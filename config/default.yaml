@@ -133,6 +133,10 @@ engine:
         max_file_edges: 2000000
         job_timeout_secs: 1500
         fetch_concurrency: 10
+        archive_storage_budget: 4
+        archive_tenant_budget: 8
+        archive_lease_ttl_secs: 30
+        archive_lease_max_wait_secs: 30
         write_channel_capacity: 8
         write_slice_rows: 1000000
         write_buffer_age_secs: 60

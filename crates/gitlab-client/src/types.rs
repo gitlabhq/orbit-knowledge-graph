@@ -2,6 +2,8 @@
 pub struct ProjectInfo {
     pub project_id: i64,
     pub default_branch: String,
+    #[serde(default)]
+    pub repository_storage: Option<String>,
 }
 
 #[derive(Debug, Clone)]

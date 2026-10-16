@@ -114,6 +114,11 @@ impl LockGuard {
         }
     }
 
+    /// Drop without releasing: after `LockError::Lost` the key belongs to another holder.
+    pub fn abandon(mut self) {
+        self.service = None;
+    }
+
     pub async fn release(mut self) -> Result<(), LockError> {
         if let Some(service) = self.service.take() {
             service.release(&self.key).await

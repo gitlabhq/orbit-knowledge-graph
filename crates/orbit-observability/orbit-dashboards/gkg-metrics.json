@@ -446,12 +446,84 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.archive.duration",
+      "prom_name": "gkg_indexer_code_archive_duration_seconds",
+      "description": "Archive download and extraction time while holding a lease, per storage.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "storage"
+      ],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.archive.entries.skipped",
       "prom_name": "gkg_indexer_code_archive_entries_skipped_total",
       "description": "Files the stream recorded as a graph node but did not load or parse (and, for the tar source, did not write to disk). Reasons: `excluded_extension` (basename matches the `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, minified bundles), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid UTF-8), `minified` / `line_too_long` (high average line length or a >64 KiB line), `non_regular_file` (a symlink — a node, never parsed), `lfs_pointer` (a Git LFS pointer: the archive is fetched with `include_lfs_blobs=false`, so the pointer text stands in for content Orbit never indexes).",
       "kind": "counter",
       "labels": [
         "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.lease.lost",
+      "prom_name": "gkg_indexer_code_archive_lease_lost_total",
+      "description": "Archive downloads cancelled because the lease could not be renewed.",
+      "kind": "counter",
+      "labels": [
+        "storage"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.lease.slots_in_use",
+      "prom_name": "gkg_indexer_code_archive_lease_slots_in_use",
+      "description": "Archive lease slots held by this pod. Sum across pods for the storage's load against its budget.",
+      "kind": "up_down_counter",
+      "labels": [
+        "storage"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.lease.wait",
+      "prom_name": "gkg_indexer_code_archive_lease_wait_seconds",
+      "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "storage"
+      ],
+      "buckets": [
+        0.1,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0,
+        600.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
