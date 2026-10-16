@@ -114,7 +114,7 @@ host, so stop `mise run dev` (its ClickHouse port-forward uses it) first.
 ```bash
 docker rm -f gl-ch-dump 2>/dev/null
 docker run -d --name gl-ch-dump -e CLICKHOUSE_SKIP_USER_SETUP=1 \
-  -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:25.12.3-alpine
+  -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:26.2.13.2-alpine
 until curl -sf http://localhost:8123/ping | grep -q Ok; do sleep 1; done   # wait for CH to be ready
 curl -s http://localhost:8123/ --data "CREATE DATABASE IF NOT EXISTS gitlab_clickhouse_development"
 bundle exec rake gitlab:clickhouse:migrate:main
@@ -123,9 +123,9 @@ git diff db/click_house/main.sql          # MUST be only your new table's blocks
 docker rm -f gl-ch-dump
 ```
 
-> Pin version note: CI uses `clickhouse/clickhouse-server:25.12.3-alpine`. There is
+> Pin version note: CI uses `clickhouse/clickhouse-server:26.2.13.2-alpine`. There is
 > no pinned macOS ClickHouse binary, so Docker is the only faithful way. Verify the
-> CI image tag hasn't moved before relying on `25.12.3`.
+> CI image tag hasn't moved before relying on `26.2.13.2`.
 
 ### 3.4 What to commit (and what NOT to)
 
@@ -365,7 +365,7 @@ knowledge-graph:
 |---------|-------|-----|
 | Node never appears in `graph.sql`; DDL "succeeds" | New node/edge not registered in `config/ontology/schema.yaml` | Add it to the registry (5.3). |
 | Queries return **zero rows** for the new node, no error | Node not registered in `EE::Authz::RedactionService` → fails closed | Add the redaction registration + policy (Section 4). |
-| `clickhouse:check-schema` fails on `main.sql` | Hand-edited `main.sql`, or dumped from non-pinned ClickHouse | Regenerate with the `25.12.3` Docker image (3.3). |
+| `clickhouse:check-schema` fails on `main.sql` | Hand-edited `main.sql`, or dumped from non-pinned ClickHouse | Regenerate with the `26.2.13.2` Docker image (3.3). |
 | Siphon spec: `reconcile`/sharding mismatch | `expression_key_columns` ≠ `db/docs/<table>.yml` `sharding_key` | Align them; usually `[project_id]`. |
 | `bundle exec rails …` can't find a gem | Local bundle behind `master` | `bundle install`. |
 | `cargo test -p integration-tests` fails at dep resolution (rustc too old) | Bare `cargo` used an older PATH toolchain | Use `mise run` or `cargo +<pinned>`. |
