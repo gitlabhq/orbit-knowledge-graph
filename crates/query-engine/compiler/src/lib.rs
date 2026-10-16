@@ -1711,7 +1711,7 @@ mod tests {
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
                 "d.state",
                 "d",
-                "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
+                "_narrow_p|_narrow_d|!_filter_p",
             ),
             (
                 r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,

@@ -85,7 +85,7 @@ cases:
             - (Filter _orbit_edge_0.target_id IN _filter_b.id, ... (Union ALL AS _orbit_edge_0 (_) (_)))
           reject:
             - (CTE _narrow_b (_))
-            - (Scan Table(gl_definition) AS b)
+            - (Deduplicate LimitBy ... (Filter b.id IN _narrow_b.id (_)))
 
   - name: Only the first hop decides, so later selective keys do not narrow a filter-only node
 
