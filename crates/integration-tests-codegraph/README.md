@@ -150,8 +150,13 @@ or needs a LIMIT, fails the suite while it stays skipped.
 `limits: default` indexes a suite with the production budgets of
 `config/default.yaml` (incremental runner only; unset or `unlimited` applies no
 budget). `skipped:` lists the files those budgets must skip, each as
-`{ path: deep.js, label: depth }`; the label names the guard that must fire and
+`{ path: big.js, label: edges }`; the label names the guard that must fire and
 is optional. Without `skipped:` the runner fails when any file is skipped.
+`limited:` lists, in the same form, the files the budgets keep but cut short,
+such as `{ path: deep.js, label: depth }`; without it the runner fails when any
+file is limited. `max_tree_depth:` overrides the depth limit of `limits`, so a
+suite can cut a file at a small depth that the per-file budgets still walk in
+time.
 
 ## Adding a test
 
