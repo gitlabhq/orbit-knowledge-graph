@@ -1,0 +1,33 @@
+name: "Python: a local named like a function does not type its call result"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Foo:
+          def bar(self):
+              pass
+
+
+      def make():
+          return Foo()
+
+
+      def f(factory):
+          make = factory
+          x = make()
+          x.bar()
+
+
+      def g():
+          x = make()
+          x.bar()
+
+tests:
+  - name: "only the call to the top-level make types x"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'bar'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: g } }

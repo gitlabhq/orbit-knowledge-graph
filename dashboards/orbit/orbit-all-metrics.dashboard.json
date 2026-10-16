@@ -7991,7 +7991,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
@@ -8029,7 +8029,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 {{method}} / {{status}}",
@@ -8038,7 +8038,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 {{method}} / {{status}}",
@@ -8047,7 +8047,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 {{method}} / {{status}}",
@@ -8060,7 +8060,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
@@ -8098,7 +8098,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{method}} / {{status}}",
@@ -8111,7 +8111,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails → Orbit gRPC error count.",
       "fieldConfig": {
@@ -8149,7 +8149,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{method}} / {{code}}",
@@ -8162,7 +8162,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails-side redaction time.",
       "fieldConfig": {
@@ -8200,7 +8200,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8209,7 +8209,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8218,7 +8218,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8231,7 +8231,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails-side redaction time.",
       "fieldConfig": {
@@ -8269,7 +8269,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -8282,7 +8282,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails-side redaction batch size.",
       "fieldConfig": {
@@ -8320,7 +8320,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8329,7 +8329,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8338,7 +8338,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8351,7 +8351,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails-side redaction batch size.",
       "fieldConfig": {
@@ -8389,7 +8389,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -8402,7 +8402,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rows filtered by redaction per request.",
       "fieldConfig": {
@@ -8440,7 +8440,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8449,7 +8449,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8458,7 +8458,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8471,7 +8471,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rows filtered by redaction per request.",
       "fieldConfig": {
@@ -8509,7 +8509,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -8522,7 +8522,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "JWT assembly latency on Rails side.",
       "fieldConfig": {
@@ -8560,7 +8560,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8569,7 +8569,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8578,7 +8578,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8591,7 +8591,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "JWT assembly latency on Rails side.",
       "fieldConfig": {
@@ -8629,7 +8629,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -8642,7 +8642,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Auth-context build latency on Rails side.",
       "fieldConfig": {
@@ -8680,7 +8680,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8689,7 +8689,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8698,7 +8698,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8711,7 +8711,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Auth-context build latency on Rails side.",
       "fieldConfig": {
@@ -8749,7 +8749,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -8775,7 +8775,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Traversal IDs per request (pre-compaction).",
       "fieldConfig": {
@@ -8813,7 +8813,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8822,7 +8822,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8831,7 +8831,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8844,7 +8844,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Traversal IDs per request (pre-compaction).",
       "fieldConfig": {
@@ -8882,7 +8882,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -8895,7 +8895,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Compaction ratio of traversal IDs.",
       "fieldConfig": {
@@ -8933,7 +8933,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
@@ -8942,7 +8942,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
@@ -8951,7 +8951,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
@@ -8964,7 +8964,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Compaction ratio of traversal IDs.",
       "fieldConfig": {
@@ -9002,7 +9002,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
@@ -9015,7 +9015,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Traversal compaction fell back to uncompressed form.",
       "fieldConfig": {
@@ -9053,7 +9053,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{instance}}",
@@ -9066,7 +9066,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Requests with too many traversal IDs.",
       "fieldConfig": {
@@ -9104,7 +9104,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{instance}}",
@@ -9192,6 +9192,15 @@
         ],
         "query": "gprd,gstg",
         "type": "custom"
+      },
+      {
+        "hide": 2,
+        "label": "Rails datasource",
+        "name": "RAILS_DS",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "/^Mimir - Gitlab ${rails_env}$/i",
+        "type": "datasource"
       }
     ]
   },
