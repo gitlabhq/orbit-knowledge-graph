@@ -307,6 +307,7 @@ impl CodeIndexingTaskHandler {
         &self,
         context: &HandlerContext,
         key: &str,
+        heartbeat_interval: Duration,
     ) -> Result<LockGuard, HandlerError> {
         let held = match LockGuard::acquire(context.lock_service.clone(), key, self.lock_ttl)
             .await
@@ -315,16 +316,12 @@ impl CodeIndexingTaskHandler {
             Ok(guard) => return Ok(guard),
             Err(held) => held,
         };
-        let delay = held.time_left.unwrap_or(self.lock_ttl) + self.renew_interval();
+        let delay = held.time_left.unwrap_or(self.lock_ttl) + heartbeat_interval;
         warn!(lock_key = %key, ?delay, "code indexing deferred: lock held by another indexer");
         Err(HandlerError::Deferred {
             reason: format!("lock {key} held by another indexer"),
             delay,
         })
-    }
-
-    fn renew_interval(&self) -> Duration {
-        self.lock_ttl / 3
     }
 
     #[allow(
@@ -361,7 +358,8 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let guard = self.acquire_lock(context, &key).await?;
+        let heartbeat_interval = self.lock_ttl / 3;
+        let guard = self.acquire_lock(context, &key, heartbeat_interval).await?;
 
         checkpoint.start_attempt();
         self.checkpoint_store
@@ -378,7 +376,6 @@ impl CodeIndexingTaskHandler {
             checkpoint: checkpoint.clone(),
         };
         let cancel = CancellationToken::new();
-        let heartbeat_interval = self.renew_interval();
         let indexing = self.pipeline.index_project(
             context,
             &indexing_request,
