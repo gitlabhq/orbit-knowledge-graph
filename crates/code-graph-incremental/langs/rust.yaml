@@ -200,6 +200,12 @@ stages:
       - match: '(pub_use_entry "self")'
         replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
         tag: { import_type: PubUseGroup, shadows_nested: "true" }
+      - match: '(use_entry path: (scoped_identifier path: $P name: $N) alias: $A)'
+        replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$P|concat("/", "ancestor_sym:__source_path", "id")|replace("::","/")|regex_replace("^\./","")) (__name @$N (__alias @$A)))'
+        tag: { import_type: UseGroup, shadows_nested: "true" }
+      - match: '(pub_use_entry path: (scoped_identifier path: $P name: $N) alias: $A)'
+        replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$P|concat("/", "ancestor_sym:__source_path", "id")|replace("::","/")|regex_replace("^\./","")) (__name @$N (__alias @$A)))'
+        tag: { import_type: PubUseGroup, shadows_nested: "true" }
       - match: '(use_entry path: $N alias: $A)'
         replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
         tag: { import_type: UseGroup, shadows_nested: "true" }
