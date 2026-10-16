@@ -1786,7 +1786,9 @@ fn wildcard_uses<'a>(
     let root = |r: Cursor<'a>| qualified(ctx, r.sym(), &provided);
     let declared = |callee: Cursor<'a>| {
         let head = chain_head(callee);
-        resolve_reference(ctx, head).or_else(|| enclosing_name(ctx, head, head.sym()))
+        resolve_reference(ctx, head)
+            .filter(|def| def.fi() == head.fi())
+            .or_else(|| enclosing_name(ctx, head, head.sym()))
     };
     for from in referrers.iter().map(|&n| ctx.corpus.jump(fi as u32, n)) {
         for call in from.calls() {
