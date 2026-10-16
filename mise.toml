@@ -31,7 +31,7 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.23.4"
 "cargo:ast-grep" = "0.42.0"
-"cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
+"cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.6.1"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
 # Rebuild-and-run loop for Caproni edit mode (scripts/dev/caproni-edit-mode.sh).
