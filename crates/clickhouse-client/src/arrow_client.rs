@@ -447,15 +447,21 @@ pub struct ArrowQuery {
     circuit_breaker: CircuitBreaker,
 }
 
+const QUERY_TIMEOUT_GRACE: Duration = Duration::from_secs(30);
+
 async fn execute_within(query: Query, timeout: Option<Duration>) -> Result<(), ClickHouseError> {
-    let run = query.execute();
-    let outcome = match timeout {
-        Some(timeout) => tokio::time::timeout(timeout, run)
-            .await
-            .unwrap_or(Err(clickhouse::error::Error::TimedOut)),
-        None => run.await,
+    let Some(timeout) = timeout else {
+        return query.execute().await.map_err(ClickHouseError::Query);
     };
-    outcome.map_err(ClickHouseError::Query)
+    let query = query.with_setting("max_execution_time", timeout.as_secs_f64().to_string());
+    let backstop = timeout + timeout.min(QUERY_TIMEOUT_GRACE);
+    match tokio::time::timeout(backstop, query.execute()).await {
+        Ok(outcome) => outcome.map_err(ClickHouseError::Query),
+        Err(_) => Err(ClickHouseError::Timeout {
+            operation: "statement",
+            after: backstop,
+        }),
+    }
 }
 
 type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
@@ -726,16 +732,27 @@ mod tests {
 
     #[tokio::test]
     async fn a_statement_the_server_never_answers_fails_on_the_query_timeout() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::AsyncReadExt;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
+        let connections = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let (accepted, seen) = (connections.clone(), requests.clone());
         tokio::spawn(async move {
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
+                accepted.fetch_add(1, Ordering::SeqCst);
+                let seen = seen.clone();
                 tokio::spawn(async move {
-                    let mut sink = [0u8; 4096];
-                    while socket.read(&mut sink).await.is_ok_and(|n| n > 0) {}
+                    let mut chunk = [0u8; 4096];
+                    while let Ok(n) = socket.read(&mut chunk).await {
+                        if n == 0 {
+                            break;
+                        }
+                        seen.lock().unwrap().extend_from_slice(&chunk[..n]);
+                    }
                 });
             }
         });
@@ -744,25 +761,32 @@ mod tests {
             "db",
             "default",
             None,
-            &HashMap::new(),
+            &insert_quorum_setting(),
             &HashMap::new(),
             "test",
         )
         .with_query_timeout(Duration::from_millis(200));
+        assert!(client.has_quorum_writes());
 
         let statement = client.execute("INSERT INTO t SELECT 1");
-        let outcome = tokio::time::timeout(Duration::from_secs(10), statement).await;
+        let outcome = tokio::time::timeout(Duration::from_secs(60), statement).await;
 
         let error = outcome
-            .expect("the statement must end on its own timeout, not on the test bound")
+            .expect("the statement must end on its own bound, not on the test bound")
             .unwrap_err();
         assert!(
             matches!(
                 error,
-                ClickHouseError::Query(clickhouse::error::Error::TimedOut)
+                ClickHouseError::Timeout {
+                    operation: "statement",
+                    ..
+                }
             ),
             "{error}"
         );
+        assert_eq!(connections.load(Ordering::SeqCst), 1, "{error}");
+        let request = String::from_utf8_lossy(&requests.lock().unwrap()).into_owned();
+        assert!(request.contains("max_execution_time=0.2"), "{request}");
     }
 
     fn client_with_insert_settings(
