@@ -90,8 +90,6 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
-    /// An import path may continue through an import that binds its next
-    /// segment, as a `pub use` of a module does in Rust.
     pub path_bindings: bool,
 }
 
