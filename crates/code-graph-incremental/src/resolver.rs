@@ -16,8 +16,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    CallResolution, Compact, Edge, EdgeKind, MemberIndex, Role, find_method_in, infer_return_type,
-    member_index, members_by_level, reachable,
+    CallResolution, Compact, Edge, EdgeKind, MemberIndex, Role, infer_return_type, member_index,
+    members_by_level, reachable,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -966,6 +966,16 @@ fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<MemberIndex> {
         .clone()
 }
 
+fn member_in<'a>(
+    ctx: &'a ResolveCtx,
+    owner: Cursor<'a>,
+    name: u32,
+    role: Role,
+) -> Option<Cursor<'a>> {
+    let node = members_of(ctx, owner).get(&name)?.get(role)?;
+    Some(owner.jump(owner.fi(), node))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn propagate_reexports(
     trees: &[Tree],
@@ -1840,8 +1850,8 @@ fn member_targets<'a>(
         return Vec::new();
     }
     let find = |role| {
-        find_method_in(implementation, member.sym(), role, ctx.tags.callable).or_else(|| {
-            find_method_in(contract, member.sym(), role, ctx.tags.callable)
+        member_in(ctx, implementation, member.sym(), role).or_else(|| {
+            member_in(ctx, contract, member.sym(), role)
                 .filter(|method| !method.has(C::Declaration))
         })
     };
@@ -1890,13 +1900,9 @@ fn declared_member<'a>(
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
         .collect();
     let find = |role| {
-        owners.iter().find_map(|&owner| match owner.is(C::Def) {
-            true => members_of(ctx, owner)
-                .get(&name)?
-                .get(role)
-                .map(|node| owner.jump(owner.fi(), node)),
-            false => find_method_in(owner, name, role, ctx.tags.callable),
-        })
+        owners
+            .iter()
+            .find_map(|&owner| member_in(ctx, owner, name, role))
     };
     find(role).or_else(|| find(Role::Any))
 }
