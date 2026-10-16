@@ -2,16 +2,14 @@
 set -euo pipefail
 
 # Run unit tests: --lib tests from all workspace crates plus --bin tests
-# for binary-only crates that contain test modules, then every integration
-# test target of code-graph-incremental.
+# for binary-only crates that contain test modules, plus the integration
+# test targets of code-graph-incremental (one --test per file in its tests/).
 #
 # integration-tests targets (local, containers, cli) run in their own CI
 # jobs to avoid pulling the entire dependency graph into this job.
 # integration-tests-codegraph has its own job too (lance-graph/datafusion).
 #
-# NEXTEST_PROFILE selects the nextest profile; the second run uses the
-# profile with a -codegraph suffix so both runs keep their JUnit report.
-# Extra arguments are forwarded to both cargo nextest runs.
+# Extra arguments are forwarded to cargo nextest (e.g. --profile ci).
 
 args=(cargo nextest run --workspace \
   --features orbit-prompts/skill-validation \
@@ -21,16 +19,13 @@ args=(cargo nextest run --workspace \
   --exclude orbit-fuzz \
   --exclude query-profiler \
   --lib --bin xtask --bin orbit \
-  --test vfs_paths --test safe_fs)
-targets=(cargo nextest run -p code-graph-incremental --test '*')
+  --test vfs_paths --test safe_fs \
+  --test budgets --test export --test link --test parse --test pipeline \
+  --test resolve --test rewrite --test snapshot --test tree_storage)
 
-# Append caller's arguments last so they can override defaults.
+# Append caller's arguments last (e.g. --profile ci) so they can
+# override defaults.
 args+=("$@")
-targets+=("$@")
 
-status=0
 echo "+ ${args[*]}"
-"${args[@]}" || status=$?
-echo "+ ${targets[*]}"
-NEXTEST_PROFILE="${NEXTEST_PROFILE:+${NEXTEST_PROFILE}-codegraph}" "${targets[@]}" || status=$?
-exit "$status"
+exec "${args[@]}"

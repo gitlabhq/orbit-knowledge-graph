@@ -181,7 +181,6 @@ stages:
     reports:
       junit:
         - target/nextest/ci/junit.xml
-        - target/nextest/ci-codegraph/junit.xml
 
 # Identity for jobs acting as the Orbit automation bot (infra-mgmt!3039): the
 # glab image plus the bot token from Vault, readable on protected refs only.
@@ -773,7 +772,7 @@ unit-test:
     - ${RUNNER_LARGE}
   needs: []
   script:
-    - NEXTEST_PROFILE=ci ./scripts/dev/run-unit-tests.sh
+    - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
 compiler-integration-test:

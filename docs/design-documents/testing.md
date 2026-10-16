@@ -88,7 +88,7 @@ Unit tests live in `#[cfg(test)]` modules next to the code they test. They need 
 
 Repository-consistency checks, such as named queries, the migration ledger, and bundled ontology archives, run as unit tests, so `mise test:fast` catches drift.
 
-`mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
+`mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and the integration test targets of `code-graph-incremental`, and skips the crates that have their own jobs.
 
 In CI the same script uses the `ci` profile in [`.config/nextest.toml`](../../.config/nextest.toml). This profile runs every test even after a failure and retries a failed test. It also flags slow tests and publishes JUnit results.
 
