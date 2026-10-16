@@ -1,0 +1,28 @@
+name: "Ruby: a constant that names the importing file does not fall through to a same-named file in a nested root"
+
+fixtures:
+  - path: models/group.rb
+    content: |
+      class Group
+        def self.first_group
+          Group.new
+        end
+      end
+
+  - path: models/packages/policies/group.rb
+    content: |
+      module Packages
+        module Policies
+          class Group
+          end
+        end
+      end
+
+tests:
+  - name: "the Group reference in models/group.rb imports nothing from the policies root"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'models/group.rb'
+      RETURN d.file_path AS file
+    assert:
+      - { not: true, row: { file: models/packages/policies/group.rb } }

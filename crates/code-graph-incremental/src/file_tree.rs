@@ -93,6 +93,20 @@ impl Roots {
         self.paths.iter().map(String::as_str)
     }
 
+    /// Whether `hit` lies in a root strictly below the root of `from`.
+    pub fn nested_below(&self, from: u32, hit: u32) -> bool {
+        match (self.path(from), self.path(hit)) {
+            (Some(own), Some(other)) => {
+                other != own
+                    && (own.is_empty()
+                        || other
+                            .strip_prefix(own)
+                            .is_some_and(|rest| rest.starts_with(PATH_SEP)))
+            }
+            _ => false,
+        }
+    }
+
     pub fn distance(&self, from: u32, hit: u32) -> Distance {
         let (Some(own), Some(other)) = (self.path(from), self.path(hit)) else {
             return Distance::Other;

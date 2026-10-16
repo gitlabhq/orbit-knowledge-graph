@@ -1084,15 +1084,17 @@ impl<'a> PathLookup<'a> {
     /// glob drops a file from another root when the importer's root has a
     /// file at the same relative path and the language says that path
     /// names one type. A path whose best match is a def of the importing
-    /// file names nothing here: the linker owns same-file paths.
+    /// file names nothing here: the linker owns same-file paths. A path
+    /// whose best match is the importing file itself falls through to a
+    /// file in another root, as a test at the path of the class it tests
+    /// needs, but not to a root nested inside the importer's own.
     fn files(&self, fi: u32, path: &str, prefixes: &[String]) -> Vec<Loc> {
         let (glob, mut found) = self.matches(fi, path, prefixes);
-        if !glob
-            && found
-                .first()
-                .is_some_and(|loc| loc.fi == fi && loc.node != 0)
-        {
-            return Vec::new();
+        if !glob && found.first().is_some_and(|loc| loc.fi == fi) {
+            if found[0].node != 0 {
+                return Vec::new();
+            }
+            found.retain(|loc| !self.roots.nested_below(fi, loc.fi));
         }
         found.retain(|loc| loc.fi != fi);
         if !glob {
