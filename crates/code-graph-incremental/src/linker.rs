@@ -51,6 +51,7 @@ enum WorkItem {
         first_exit: usize,
     },
     ExitLoop(BlockId),
+    ExitLambda(BlockId),
     ExitBinding {
         binding: u32,
         lhs: u32,
@@ -113,6 +114,7 @@ struct Fold<'t> {
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
     visible: FxHashMap<u32, (u32, usize)>,
+    statics: FxHashMap<u32, Value>,
     keys: RefCell<FxHashMap<BindingKey, u32>>,
     arm_exits: Vec<BlockId>,
 }
@@ -211,6 +213,7 @@ impl<'t> Fold<'t> {
                     self.loops.pop();
                     self.cur = self.ssa.finish_loop(header, self.cur);
                 }
+                WorkItem::ExitLambda(parent) => self.cur = parent,
                 WorkItem::ExitBinding {
                     binding,
                     lhs,
@@ -305,6 +308,11 @@ impl<'t> Fold<'t> {
             let (header, body) = self.ssa.begin_loop(self.cur);
             self.cur = body;
             stack.push(WorkItem::ExitLoop(header));
+            Self::push_children(c, stack);
+            return;
+        } else if k == C::Lambda {
+            stack.push(WorkItem::ExitLambda(self.cur));
+            self.cur = self.ssa.add_sealed_successor(self.cur);
             Self::push_children(c, stack);
             return;
         }
@@ -423,9 +431,7 @@ impl<'t> Fold<'t> {
             if local == self.wildcard {
                 Rc::make_mut(&mut self.wildcards).push(n.index());
             }
-            let binding = self.declare_binding(n, local);
-            self.ssa
-                .write_variable(binding, self.cur, Value::ImportRef(n.index()));
+            let binding = self.declare_static(n, local, Value::ImportRef(n.index()));
             for alias in [C::Alias, C::SsaHint]
                 .into_iter()
                 .filter_map(|kind| n.child_sym(kind))
@@ -476,9 +482,7 @@ impl<'t> Fold<'t> {
         };
         for (bind_as, node) in &targets {
             self.register_def(self.tree.cursor(*node));
-            let binding = self.declare_binding(name, *bind_as);
-            self.ssa
-                .write_variable(binding, self.cur, Value::LocalDef(*node));
+            self.declare_static(name, *bind_as, Value::LocalDef(*node));
         }
         !targets.is_empty()
     }
@@ -547,9 +551,7 @@ impl<'t> Fold<'t> {
             if sym == name && c.has(C::ImplBlock) && !self.lookup(name).is_empty() {
                 continue;
             }
-            let binding = self.declare_binding(c, sym);
-            self.ssa
-                .write_variable(binding, self.cur, Value::LocalDef(c.index()));
+            self.declare_static(c, sym, Value::LocalDef(c.index()));
         }
     }
 
@@ -711,6 +713,10 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_binding(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) -> bool {
+        if c.has(C::Qualifier) {
+            self.declare_static(c, c.sym(), Value::Call(c.index()));
+            return true;
+        }
         let field = self.member_binding(c).map(|(root, field)| {
             let key = self.key(BindingKey::Field(root, field));
             *self
@@ -852,13 +858,14 @@ impl<'t> Fold<'t> {
             return;
         };
         let previous = self.visible.insert(name, (binding, depth));
-        if previous.is_none_or(|(_, at)| at != depth) {
+        if previous.is_none_or(|(key, at)| at != depth || self.statics.contains_key(&key)) {
             self.scopes[depth].1.push((name, previous));
         }
     }
 
     fn exit_scope(&mut self) {
-        for (name, previous) in self.scopes.pop().map(|(_, undo)| undo).unwrap_or_default() {
+        let undo = self.scopes.pop().map(|(_, undo)| undo).unwrap_or_default();
+        for (name, previous) in undo.into_iter().rev() {
             match previous {
                 Some(previous) => self.visible.insert(name, previous),
                 None => self.visible.remove(&name),
@@ -887,6 +894,28 @@ impl<'t> Fold<'t> {
         };
         self.bind(name, binding);
         binding
+    }
+
+    fn declare_static(&mut self, node: Cursor<'_>, name: u32, value: Value) -> u32 {
+        let binding = self.declare_binding(node, name);
+        self.ssa.write_variable(binding, self.cur, value.clone());
+        self.statics.insert(binding, value);
+        binding
+    }
+
+    fn lookup_static(&self, sym: u32) -> Option<Value> {
+        let (binding, depth) = *self.visible.get(&sym)?;
+        if let Some(value) = self.statics.get(&binding) {
+            return Some(value.clone());
+        }
+        self.scopes[..=depth]
+            .iter()
+            .rev()
+            .flat_map(|(_, undo)| undo.iter().rev())
+            .filter(|(name, _)| *name == sym)
+            .map(|(_, previous)| *previous)
+            .take_while(Option::is_some)
+            .find_map(|previous| self.statics.get(&previous?.0).cloned())
     }
 
     fn enter_scope(&mut self, scope: Cursor<'t>) {
@@ -936,7 +965,10 @@ impl<'t> Fold<'t> {
             .then_some(node)
             .or_else(|| node.child(C::Member))
             .or_else(|| node.child(C::Ivar))?;
-        let root = self.binding(member.child(C::Object)?.sym());
+        let object = member
+            .child(C::Object)
+            .filter(|object| !object.has(C::Qualifier))?;
+        let root = self.binding(object.sym());
         Some((root, member.sym()))
     }
 
@@ -1069,7 +1101,7 @@ impl<'t> Fold<'t> {
     }
 
     fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {
-        if tail.is(C::Obj) {
+        if tail.is(C::Obj) || tail.is(C::Lambda) {
             return Value::Opaque;
         }
         if let Some(slot) = self.field_slot(tail) {
@@ -1356,6 +1388,9 @@ impl<'t> Fold<'t> {
         }
         let c = c.reference();
         let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
+            if c.has(C::Qualifier) {
+                return self.lookup_static(c.sym()).into_iter().collect();
+            }
             let ivar = c.child(C::Ivar);
             let sym = ivar.map_or(c.sym(), |iv| iv.sym());
             let mut bound = if ivar.is_some() {
@@ -1383,6 +1418,7 @@ impl<'t> Fold<'t> {
         let name = obj.reference();
         let bare = obj.child(C::Call).is_none()
             && !name.has(C::Object)
+            && !name.has(C::Qualifier)
             && name.child(C::Member).is_none()
             && name.child(C::Ivar).is_none();
         let key = bare.then(|| (name.sym(), m.sym()));
@@ -1509,6 +1545,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         fields: FxHashMap::default(),
         scopes: vec![(root_label, Vec::new())],
         visible: FxHashMap::default(),
+        statics: FxHashMap::default(),
         keys: RefCell::default(),
         arm_exits: Vec::new(),
     };

@@ -272,7 +272,7 @@ stages:
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'
-        tag: { callable: "true" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__enum_variant))'
         tag: { callable: "true" }
 

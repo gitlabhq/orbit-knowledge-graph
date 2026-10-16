@@ -1536,7 +1536,7 @@ fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
     } else if let Some(ty) = target.child(C::SsaReturnType) {
         resolve_chain(ctx, ty)
     } else if let Some(branch) = target
-        .descendants_pruned(|n| n.is(C::Def))
+        .descendants_pruned(|n| n.is(C::Def) || n.is(C::Lambda))
         .find(|n| n.is(C::SsaReturn))
         .and_then(|r| r.child(C::SsaBranch))
     {
@@ -1624,7 +1624,8 @@ fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>>
         }
         let bound = d
             .children()
-            .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
+            .filter(|c| c.is(C::Binding) && c.sym() == sym)
+            .filter(|c| c.has(C::Qualifier) || (!r.has(C::Qualifier) && c.children().count() == 1))
             .find_map(|c| c.child(C::SsaTyped))
             .filter(|bound| bound.sym() != sym)?;
         resolve_chain(ctx, bound)

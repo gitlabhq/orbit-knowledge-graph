@@ -237,7 +237,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "95th percentile of overall query pipeline latency.",
+      "description": "95th percentile of query pipeline latency for successful queries. Failed queries are excluded because they end early or at a timeout.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -270,7 +270,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\"}[5m])))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -688,7 +688,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails → Orbit gRPC requests per minute.",
       "fieldConfig": {
@@ -721,7 +721,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]) * 60)",
           "legendFormat": "calls/min",
@@ -734,7 +734,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "Rails-side gRPC errors per minute.",
       "fieldConfig": {
@@ -767,7 +767,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "sum(rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]) * 60)",
           "legendFormat": "errors/min",
@@ -780,7 +780,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "mimir-gitlab-${rails_env}"
+        "uid": "$RAILS_DS"
       },
       "description": "95th percentile of Rails-side gRPC latency.",
       "fieldConfig": {
@@ -813,7 +813,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "mimir-gitlab-${rails_env}"
+            "uid": "$RAILS_DS"
           },
           "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 ms",
@@ -901,6 +901,15 @@
         ],
         "query": "gprd,gstg",
         "type": "custom"
+      },
+      {
+        "hide": 2,
+        "label": "Rails datasource",
+        "name": "RAILS_DS",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "/^Mimir - Gitlab ${rails_env}$/i",
+        "type": "datasource"
       }
     ]
   },

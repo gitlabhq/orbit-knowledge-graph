@@ -17,7 +17,7 @@
       }
     ]
   },
-  "description": "Orbit webserver dashboard. Top rows tell the latency story: a Rails request lands on Orbit over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).",
+  "description": "Orbit webserver dashboard. The top section answers whether the service is healthy: throughput, success rate, latency of successful queries, and errors by type. Lower rows break down latency, reliability, and resources. The per-domain catalog reference is collapsed at the bottom.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "Health",
+      "title": "At a glance",
       "type": "row"
     },
     {
@@ -53,31 +53,36 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of the user-facing Rails-side gRPC call to Orbit over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.",
+      "description": "Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes rejected client queries and schema calls.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
           "noValue": "—",
-          "unit": "s"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "short"
         }
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 3,
         "x": 0,
         "y": 1
       },
       "id": 2,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gitlab_knowledge_graph_grpc_duration_seconds_bucket%7Benv%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -85,7 +90,11 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name"
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
       },
       "targets": [
         {
@@ -93,12 +102,14 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))) or vector(0)",
-          "legendFormat": "Rails: gRPC p95 (5m)",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range])) * 60",
+          "instant": true,
+          "legendFormat": "Queries/min",
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "Rails: gRPC p95 (5m)",
+      "title": "Queries/min",
       "type": "stat"
     },
     {
@@ -106,31 +117,44 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of overall pipeline duration on the Orbit webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
+      "description": "Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
           "noValue": "—",
-          "unit": "s"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "#EAB839",
+                "value": 0.95
+              },
+              {
+                "color": "green",
+                "value": 0.995
+              }
+            ]
+          },
+          "unit": "percentunit"
         }
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 3,
+        "x": 3,
         "y": 1
       },
       "id": 3,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gkg_query_pipeline_duration_seconds_bucket%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -138,7 +162,11 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name"
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
       },
       "targets": [
         {
@@ -146,12 +174,14 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))) or vector(0)",
-          "legendFormat": "Pipeline: p95 (5m)",
+          "expr": "1 - ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "Success",
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "Pipeline: p95 (5m)",
+      "title": "Success",
       "type": "stat"
     },
     {
@@ -159,31 +189,36 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of queries the compiler rejected before execution. compile_error / total. Drives the \"client sent a bad query\" signal and is independent of server-side reliability.",
+      "description": "Queries that failed because of the service in the selected time range: execution, timeout, streaming, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
           "noValue": "—",
-          "unit": "percentunit"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "short"
         }
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 3,
+        "x": 6,
         "y": 1
       },
       "id": 4,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status%3D\\%22compile_error\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -191,7 +226,11 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name"
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
       },
       "targets": [
         {
@@ -199,12 +238,14 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[1h]))) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[1h])) > 0)) or vector(0)",
-          "legendFormat": "Compiler error rate (1h)",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))",
+          "instant": true,
+          "legendFormat": "Server errors",
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "Compiler error rate (1h)",
+      "title": "Server errors",
       "type": "stat"
     },
     {
@@ -212,37 +253,484 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of post-compile pipeline runs that did not return status=\"ok\". Excludes compile rejects from both the numerator and the denominator. This is the server-reliability SLI.",
+      "description": "Share of successful queries in the selected time range that finished in 5 seconds or less.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
           "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "#EAB839",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          },
           "unit": "percentunit"
         }
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 3,
+        "x": 9,
         "y": 1
       },
       "id": 5,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status!~\\%22ok%7Ccompile_error\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status!%3D\\%22compile_error\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
           "fields": "",
           "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", le=\"5.0\"}[$__range])) / sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "Under 5 s",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Under 5 s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Median duration of successful queries in the selected time range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "instant": true,
+          "legendFormat": "p50",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "p50",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "p95 duration of successful queries in the selected time range. Amber from 5 s, red from 25 s.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              },
+              {
+                "color": "#EAB839",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "instant": true,
+          "legendFormat": "p95",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "p95",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "p99 duration of successful queries in the selected time range. Amber from 25 s, the long-tail objective (99% of queries within 25 s).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              },
+              {
+                "color": "#EAB839",
+                "value": 25
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "instant": true,
+          "legendFormat": "p99",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "p99",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Share of queries in the selected time range (schema calls excluded) that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"compile_error|security_error\"}[$__range])) or vector(0)) / (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range])) - (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type=\"unknown\"}[$__range])) or vector(0)))",
+          "instant": true,
+          "legendFormat": "Rejected",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Rejected",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "All queries that reached the pipeline in the selected time range, including rejected client queries and excluding schema calls. The curve shows volume per 5 minutes or more.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#3987e5",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "noValue": "—",
+          "unit": "locale"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 5
+      },
+      "id": 10,
+      "interval": "5m",
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "vertical",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 30
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__interval])) - (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type=\"unknown\"}[$__interval])) or vector(0))",
+          "legendFormat": "Queries",
+          "refId": "A"
+        }
+      ],
+      "title": "Queries",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Queries in the selected time range by outcome: successful, failed because of the service, and rejected as invalid client input. Totals sum 5-minute or longer buckets, so they can differ by a few from the tiles above.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#3987e5",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "noValue": "—",
+          "unit": "locale"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Successful"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Server errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#e66767",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Rejected"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e9a",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 6,
+        "y": 5
+      },
+      "id": 11,
+      "interval": "5m",
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "vertical",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 30
         },
         "textMode": "value_and_name"
       },
@@ -252,636 +740,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!~\"ok|compile_error\"}[1h]))) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"compile_error\"}[1h])) > 0)) or vector(0)",
-          "legendFormat": "Pipeline failure rate (1h)",
-          "refId": "A"
-        }
-      ],
-      "title": "Pipeline failure rate (1h)",
-      "type": "stat"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 5
-      },
-      "id": 6,
-      "panels": [],
-      "title": "Volume in window",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Queries that returned status=\"ok\" in the dashboard window. Each one sends one gkg_query_executed analytics event, except GQL schema requests (query_type=\"unknown\").",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 12,
-        "x": 0,
-        "y": 6
-      },
-      "id": 7,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status%3D\\%22ok\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[$__range]))) or vector(0)",
-          "legendFormat": "Successful queries",
-          "refId": "A"
-        }
-      ],
-      "title": "Successful queries",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Queries that did not return status=\"ok\" in the dashboard window: compile errors, authorization errors, execution errors, timeouts, and content resolution errors. Failed queries send no analytics event.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 12,
-        "x": 12,
-        "y": 6
-      },
-      "id": 8,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status!%3D\\%22ok\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"ok\"}[$__range]))) or vector(0)",
-          "legendFormat": "Failed queries",
-          "refId": "A"
-        }
-      ],
-      "title": "Failed queries",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 25,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 2,
-        "w": 12,
-        "x": 0,
-        "y": 9
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[$__rate_interval]))",
-          "legendFormat": "rate",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 25,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 2,
-        "w": 12,
-        "x": 12,
-        "y": 9
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"ok\"}[$__rate_interval]))",
-          "legendFormat": "rate",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-side gRPC calls into Orbit in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 0,
-        "y": 11
-      },
-      "id": 11,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gitlab_knowledge_graph_grpc_duration_seconds_count%7Benv%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(sum(increase(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\".*\"}[$__range]))) or vector(0)",
-          "legendFormat": "gRPC calls (Rails)",
-          "refId": "A"
-        }
-      ],
-      "title": "gRPC calls (Rails)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-side redaction passes in the dashboard window. Roughly one per successful query.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 8,
-        "y": 11
-      },
-      "id": 12,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gitlab_knowledge_graph_redaction_duration_seconds_count%7Benv%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(sum(increase(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\".*\"}[$__range]))) or vector(0)",
-          "legendFormat": "Redactions (Rails)",
-          "refId": "A"
-        }
-      ],
-      "title": "Redactions (Rails)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "ClickHouse row-read events in the dashboard window. Bytes read tile sits next to it.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 16,
-        "y": 11
-      },
-      "id": 13,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_ch_read_rows_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(sum(increase(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range]))) or vector(0)",
-          "legendFormat": "CH row reads",
-          "refId": "A"
-        }
-      ],
-      "title": "CH row reads",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 25,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 2,
-        "w": 8,
-        "x": 0,
-        "y": 14
-      },
-      "id": 14,
-      "options": {
-        "legend": {
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\".*\"}[$__rate_interval]))",
-          "legendFormat": "rate",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 25,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 2,
-        "w": 8,
-        "x": 8,
-        "y": 14
-      },
-      "id": 15,
-      "options": {
-        "legend": {
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\".*\"}[$__rate_interval]))",
-          "legendFormat": "rate",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 25,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 2,
-        "w": 8,
-        "x": 16,
-        "y": 14
-      },
-      "id": 16,
-      "options": {
-        "legend": {
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__rate_interval]))",
-          "legendFormat": "rate",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
-      "id": 17,
-      "panels": [],
-      "title": "Latency story (Rails → Server → ClickHouse → Rails redaction)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "p95 of the Rails-side gRPC call to Orbit, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 17
-      },
-      "id": 18,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (method, le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "{{method}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Rails: gRPC duration p95 by method (5m)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Orbit-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 17
-      },
-      "id": 19,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__interval]))",
+          "legendFormat": "Successful",
           "refId": "A"
         },
         {
@@ -889,8 +749,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
+          "expr": "((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__interval])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__interval])) or vector(0)))",
+          "legendFormat": "Server errors",
           "refId": "B"
         },
         {
@@ -898,12 +758,701 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"compile_error|security_error\"}[$__interval])) or vector(0)",
+          "legendFormat": "Rejected",
           "refId": "C"
         }
       ],
-      "title": "Server: pipeline duration (p50/p95/p99)",
+      "title": "By outcome",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Successful queries in the selected time range by query type.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#3987e5",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "noValue": "—",
+          "unit": "locale"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traversal"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "aggregation"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d95926",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "neighbors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#199e70",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path_finding"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#c98500",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 15,
+        "y": 5
+      },
+      "id": 12,
+      "interval": "5m",
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "vertical",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 30
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", query_type=\"traversal\"}[$__interval]))",
+          "legendFormat": "traversal",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", query_type=\"aggregation\"}[$__interval]))",
+          "legendFormat": "aggregation",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", query_type=\"neighbors\"}[$__interval]))",
+          "legendFormat": "neighbors",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", query_type=\"path_finding\"}[$__interval]))",
+          "legendFormat": "path_finding",
+          "refId": "D"
+        }
+      ],
+      "title": "By query type",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "p50, p95 and p99 of successful queries over 30-minute windows. Dashed lines mark the 5 s and 25 s objectives. Failed queries are excluded because they end early or at a timeout.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent"
+              },
+              {
+                "color": "#EAB839",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d95926",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9085e9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[30m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[30m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[30m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Latency of successful queries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Queries that failed because of the service, by type, per 10 minutes. compiler_fault counts compiler bugs, not invalid client input.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "execution_error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "streaming_error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d95926",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "timeout"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#c98500",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "content_resolution_error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#199e70",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "authorization_error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d55181",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "custom_error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9085e9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compiler_fault"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#e66767",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 11
+      },
+      "id": 14,
+      "interval": "10m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (status) (increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__interval])) > 0",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__interval])) > 0",
+          "legendFormat": "compiler_fault",
+          "refId": "B"
+        }
+      ],
+      "title": "Server errors by type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Queries the compiler rejected as invalid client input, by reason, per 10 minutes. A jump usually means a client or agent changed what it sends.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "schema"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "parse"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d95926",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ontology"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#199e70",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reference"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#c98500",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pagination"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d55181",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "authorization"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9085e9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "restrict"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#008300",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 11
+      },
+      "id": 15,
+      "interval": "10m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (failure_reason) (increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason!~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__interval])) > 0",
+          "legendFormat": "{{failure_reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Rejected client queries by reason",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 16,
+      "panels": [],
+      "title": "Latency breakdown",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "p95 duration of successful queries per query type over 10-minute windows. One slow query type can move the overall latency on its own.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[10m])))",
+          "legendFormat": "{{query_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "p95 of successful queries by query type",
       "type": "timeseries"
     },
     {
@@ -926,10 +1475,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 25
+        "x": 12,
+        "y": 21
       },
-      "id": 20,
+      "id": 18,
       "options": {
         "legend": {
           "calcs": [
@@ -1004,10 +1553,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 25
+        "x": 0,
+        "y": 29
       },
-      "id": 21,
+      "id": 19,
       "options": {
         "legend": {
           "calcs": [
@@ -1073,10 +1622,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 33
+        "x": 12,
+        "y": 29
       },
-      "id": 22,
+      "id": 20,
       "options": {
         "legend": {
           "calcs": [
@@ -1127,195 +1676,6 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p50/p95/p99 of redaction time on the Rails side, after Orbit returns. Adds onto the server pipeline duration to make the total the user sees.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 33
-      },
-      "id": 23,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99",
-          "refId": "C"
-        }
-      ],
-      "title": "Rails: redaction duration p50/p95/p99 (5m)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "p95 of how many rows redaction sees per request, and how many it filters out. Big batch + low filtered count is fine; small batch + everything filtered is the worst case for the user (lots of work, nothing returned).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 41
-      },
-      "id": 24,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "batch p95",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "filtered p95",
-          "refId": "B"
-        }
-      ],
-      "title": "Rails: redaction batch size and filtered rows (p95)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-observed gRPC p95 plotted next to the server pipeline p95. The gap is the round-trip wire time plus JWT, auth-context, and redaction. A growing gap with stable server p95 means the slowdown is on the Rails side.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 41
-      },
-      "id": 25,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "rails total p95",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "server pipeline p95",
-          "refId": "B"
-        }
-      ],
-      "title": "Rails total p95 vs Server pipeline p95",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
       "description": "Bytes and rows pulled from ClickHouse per second. Lets you cross-correlate execute-stage latency with the volume of work the query actually did.",
       "fieldConfig": {
         "defaults": {
@@ -1332,9 +1692,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 37
       },
-      "id": 26,
+      "id": 21,
       "options": {
         "legend": {
           "calcs": [
@@ -1392,9 +1752,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 37
       },
-      "id": 27,
+      "id": 22,
       "options": {
         "legend": {
           "calcs": [
@@ -1445,66 +1805,6 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not Orbit.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 57
-      },
-      "id": 28,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "jwt p95",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "auth_ctx p95",
-          "refId": "B"
-        }
-      ],
-      "title": "Rails: JWT build and auth-context p95 (5m)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
       "description": "p50/p95/p99 of how many rows each query returned. A latency climb that tracks a row-count climb is just more work; a climb that does not is a regression.",
       "fieldConfig": {
         "defaults": {
@@ -1520,10 +1820,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 57
+        "x": 0,
+        "y": 45
       },
-      "id": 29,
+      "id": 23,
       "options": {
         "legend": {
           "calcs": [
@@ -1575,9 +1875,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 53
       },
-      "id": 30,
+      "id": 24,
       "panels": [],
       "title": "Reliability",
       "type": "row"
@@ -1603,9 +1903,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 66
+        "y": 54
       },
-      "id": 31,
+      "id": 25,
       "options": {
         "legend": {
           "calcs": [
@@ -1647,57 +1947,6 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Rails-side gRPC error counts in rolling 1h windows, by gRPC status code. Auth or unavailable spikes here often line up with the server reliability panel on the left.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 66
-      },
-      "id": 32,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (code) (increase(gitlab_knowledge_graph_grpc_errors_total{env=~\".*\"}[1h]))",
-          "legendFormat": "{{code}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Rails: gRPC errors by code (1h windows)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
       "description": "Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.",
       "fieldConfig": {
         "defaults": {
@@ -1713,10 +1962,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 74
+        "x": 12,
+        "y": 54
       },
-      "id": 33,
+      "id": 26,
       "options": {
         "legend": {
           "calcs": [
@@ -1768,10 +2017,10 @@
       "gridPos": {
         "h": 4,
         "w": 12,
-        "x": 12,
-        "y": 74
+        "x": 0,
+        "y": 62
       },
-      "id": 34,
+      "id": 27,
       "links": [
         {
           "targetBlank": false,
@@ -1812,202 +2061,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 66
       },
-      "id": 35,
-      "panels": [],
-      "title": "Traversal compaction (Rails)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Number of traversal IDs Rails attaches to each gRPC call (pre-compaction). p95 climbing means Rails is sending bigger authorization payloads.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 83
-      },
-      "id": 36,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "B"
-        }
-      ],
-      "title": "Rails: traversal IDs per request (p50/p95)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Ratio of compacted size to original. Lower is better — 0.1 means the compaction reduced the payload to 10% of original. Watch for sustained 1.0 (no benefit).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "percentunit"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 83
-      },
-      "id": 37,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "B"
-        }
-      ],
-      "title": "Rails: compaction ratio (p50/p95)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rate of requests where compaction fell back to the uncompressed form (left) or where the traversal ID list exceeded the threshold (right). Rising fallback often precedes a tail-latency event on the Rails side.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 91
-      },
-      "id": 38,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\".*\"}[5m])) * 60",
-          "legendFormat": "fallback/min",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\".*\"}[5m])) * 60",
-          "legendFormat": "threshold-exceeded/min",
-          "refId": "B"
-        }
-      ],
-      "title": "Rails: compaction fallback / threshold-exceeded per minute",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 99
-      },
-      "id": 39,
+      "id": 28,
       "panels": [],
       "title": "Content resolution (Gitaly)",
       "type": "row"
@@ -2033,9 +2089,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 100
+        "y": 67
       },
-      "id": 40,
+      "id": 29,
       "options": {
         "legend": {
           "calcs": [
@@ -2102,9 +2158,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 100
+        "y": 67
       },
-      "id": 41,
+      "id": 30,
       "options": {
         "legend": {
           "calcs": [
@@ -2171,9 +2227,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 108
+        "y": 75
       },
-      "id": 42,
+      "id": 31,
       "options": {
         "legend": {
           "calcs": [
@@ -2207,9 +2263,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 116
+        "y": 83
       },
-      "id": 43,
+      "id": 32,
       "panels": [],
       "title": "Schema watcher",
       "type": "row"
@@ -2235,9 +2291,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 117
+        "y": 84
       },
-      "id": 44,
+      "id": 33,
       "options": {
         "legend": {
           "calcs": [
@@ -2271,9 +2327,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 125
+        "y": 92
       },
-      "id": 45,
+      "id": 34,
       "panels": [],
       "title": "Resources",
       "type": "row"
@@ -2294,9 +2350,9 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 126
+        "y": 93
       },
-      "id": 46,
+      "id": 35,
       "links": [
         {
           "targetBlank": false,
@@ -2347,9 +2403,9 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 126
+        "y": 93
       },
-      "id": 47,
+      "id": 36,
       "links": [
         {
           "targetBlank": false,
@@ -2389,7 +2445,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Total OOM-killer events across webserver replicas in the last hour. Any non-zero value warrants a look at the memory panel below.",
+      "description": "Total OOM-killer events across webserver replicas in the selected time range. Any non-zero value warrants a look at the memory panel below.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -2400,9 +2456,9 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 126
+        "y": 93
       },
-      "id": 48,
+      "id": 37,
       "links": [
         {
           "targetBlank": false,
@@ -2442,7 +2498,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Container restarts across webserver replicas in the last hour. Crash-loops show up here before they show up in the app metrics.",
+      "description": "Container restarts across webserver replicas in the selected time range. Crash-loops show up here before they show up in the app metrics.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -2453,9 +2509,9 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 126
+        "y": 93
       },
-      "id": 49,
+      "id": 38,
       "links": [
         {
           "targetBlank": false,
@@ -2511,9 +2567,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 130
+        "y": 97
       },
-      "id": 50,
+      "id": 39,
       "options": {
         "legend": {
           "calcs": [
@@ -2571,9 +2627,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 130
+        "y": 97
       },
-      "id": 51,
+      "id": 40,
       "options": {
         "legend": {
           "calcs": [
@@ -2622,9 +2678,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 138
+        "y": 105
       },
-      "id": 52,
+      "id": 41,
       "options": {
         "legend": {
           "calcs": [
@@ -2682,9 +2738,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 138
+        "y": 105
       },
-      "id": 53,
+      "id": 42,
       "options": {
         "legend": {
           "calcs": [
@@ -2742,9 +2798,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 146
+        "y": 113
       },
-      "id": 54,
+      "id": 43,
       "options": {
         "legend": {
           "calcs": [
@@ -2802,9 +2858,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 146
+        "y": 113
       },
-      "id": 55,
+      "id": 44,
       "options": {
         "legend": {
           "calcs": [
@@ -2862,9 +2918,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 154
+        "y": 121
       },
-      "id": 56,
+      "id": 45,
       "options": {
         "legend": {
           "calcs": [
@@ -2907,9 +2963,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 162
+        "y": 129
       },
-      "id": 57,
+      "id": 46,
       "panels": [],
       "title": "gRPC transport",
       "type": "row"
@@ -2935,9 +2991,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 163
+        "y": 130
       },
-      "id": 58,
+      "id": 47,
       "options": {
         "legend": {
           "calcs": [
@@ -3004,9 +3060,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 163
+        "y": 130
       },
-      "id": 59,
+      "id": 48,
       "options": {
         "legend": {
           "calcs": [
@@ -3055,9 +3111,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 163
+        "y": 130
       },
-      "id": 60,
+      "id": 49,
       "options": {
         "legend": {
           "calcs": [
@@ -3106,9 +3162,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 171
+        "y": 138
       },
-      "id": 61,
+      "id": 50,
       "options": {
         "legend": {
           "calcs": [
@@ -3175,9 +3231,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 171
+        "y": 138
       },
-      "id": 62,
+      "id": 51,
       "options": {
         "legend": {
           "calcs": [
@@ -3226,9 +3282,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 171
+        "y": 138
       },
-      "id": 63,
+      "id": 52,
       "options": {
         "legend": {
           "calcs": [
@@ -3295,9 +3351,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 179
+        "y": 146
       },
-      "id": 64,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [
@@ -3331,9 +3387,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 187
+        "y": 154
       },
-      "id": 65,
+      "id": 54,
       "panels": [
         {
           "datasource": {
@@ -3356,9 +3412,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 188
+            "y": 155
           },
-          "id": 66,
+          "id": 55,
           "options": {
             "legend": {
               "calcs": [
@@ -3425,9 +3481,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 188
+            "y": 155
           },
-          "id": 67,
+          "id": 56,
           "options": {
             "legend": {
               "calcs": [
@@ -3476,9 +3532,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 188
+            "y": 155
           },
-          "id": 68,
+          "id": 57,
           "options": {
             "legend": {
               "calcs": [
@@ -3545,9 +3601,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 196
+            "y": 163
           },
-          "id": 69,
+          "id": 58,
           "options": {
             "legend": {
               "calcs": [
@@ -3596,9 +3652,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 196
+            "y": 163
           },
-          "id": 70,
+          "id": 59,
           "options": {
             "legend": {
               "calcs": [
@@ -3665,9 +3721,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 196
+            "y": 163
           },
-          "id": 71,
+          "id": 60,
           "options": {
             "legend": {
               "calcs": [
@@ -3716,9 +3772,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 204
+            "y": 171
           },
-          "id": 72,
+          "id": 61,
           "options": {
             "legend": {
               "calcs": [
@@ -3767,9 +3823,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 204
+            "y": 171
           },
-          "id": 73,
+          "id": 62,
           "options": {
             "legend": {
               "calcs": [
@@ -3818,9 +3874,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 204
+            "y": 171
           },
-          "id": 74,
+          "id": 63,
           "options": {
             "legend": {
               "calcs": [
@@ -3887,9 +3943,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 212
+            "y": 179
           },
-          "id": 75,
+          "id": 64,
           "options": {
             "legend": {
               "calcs": [
@@ -3938,9 +3994,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 212
+            "y": 179
           },
-          "id": 76,
+          "id": 65,
           "options": {
             "legend": {
               "calcs": [
@@ -4007,9 +4063,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 212
+            "y": 179
           },
-          "id": 77,
+          "id": 66,
           "options": {
             "legend": {
               "calcs": [
@@ -4058,9 +4114,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 220
+            "y": 187
           },
-          "id": 78,
+          "id": 67,
           "options": {
             "legend": {
               "calcs": [
@@ -4127,9 +4183,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 220
+            "y": 187
           },
-          "id": 79,
+          "id": 68,
           "options": {
             "legend": {
               "calcs": [
@@ -4178,9 +4234,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 220
+            "y": 187
           },
-          "id": 80,
+          "id": 69,
           "options": {
             "legend": {
               "calcs": [
@@ -4229,9 +4285,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 228
+            "y": 195
           },
-          "id": 81,
+          "id": 70,
           "options": {
             "legend": {
               "calcs": [
@@ -4298,9 +4354,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 228
+            "y": 195
           },
-          "id": 82,
+          "id": 71,
           "options": {
             "legend": {
               "calcs": [
@@ -4349,9 +4405,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 228
+            "y": 195
           },
-          "id": 83,
+          "id": 72,
           "options": {
             "legend": {
               "calcs": [
@@ -4400,9 +4456,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 236
+            "y": 203
           },
-          "id": 84,
+          "id": 73,
           "options": {
             "legend": {
               "calcs": [
@@ -4469,9 +4525,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 236
+            "y": 203
           },
-          "id": 85,
+          "id": 74,
           "options": {
             "legend": {
               "calcs": [
@@ -4520,9 +4576,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 236
+            "y": 203
           },
-          "id": 86,
+          "id": 75,
           "options": {
             "legend": {
               "calcs": [
@@ -4589,9 +4645,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 244
+            "y": 211
           },
-          "id": 87,
+          "id": 76,
           "options": {
             "legend": {
               "calcs": [
@@ -4629,9 +4685,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 252
+        "y": 219
       },
-      "id": 88,
+      "id": 77,
       "panels": [
         {
           "datasource": {
@@ -4654,9 +4710,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 253
+            "y": 220
           },
-          "id": 89,
+          "id": 78,
           "options": {
             "legend": {
               "calcs": [
@@ -4694,9 +4750,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 261
+        "y": 228
       },
-      "id": 90,
+      "id": 79,
       "panels": [
         {
           "datasource": {
@@ -4719,9 +4775,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 262
+            "y": 229
           },
-          "id": 91,
+          "id": 80,
           "options": {
             "legend": {
               "calcs": [
@@ -4788,9 +4844,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 262
+            "y": 229
           },
-          "id": 92,
+          "id": 81,
           "options": {
             "legend": {
               "calcs": [
@@ -4839,9 +4895,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 262
+            "y": 229
           },
-          "id": 93,
+          "id": 82,
           "options": {
             "legend": {
               "calcs": [
@@ -4890,9 +4946,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 270
+            "y": 237
           },
-          "id": 94,
+          "id": 83,
           "options": {
             "legend": {
               "calcs": [
@@ -4941,9 +4997,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 270
+            "y": 237
           },
-          "id": 95,
+          "id": 84,
           "options": {
             "legend": {
               "calcs": [
@@ -4992,9 +5048,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 270
+            "y": 237
           },
-          "id": 96,
+          "id": 85,
           "options": {
             "legend": {
               "calcs": [
@@ -5061,9 +5117,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 278
+            "y": 245
           },
-          "id": 97,
+          "id": 86,
           "options": {
             "legend": {
               "calcs": [
@@ -5112,9 +5168,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 278
+            "y": 245
           },
-          "id": 98,
+          "id": 87,
           "options": {
             "legend": {
               "calcs": [
@@ -5181,9 +5237,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 278
+            "y": 245
           },
-          "id": 99,
+          "id": 88,
           "options": {
             "legend": {
               "calcs": [
@@ -5221,9 +5277,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 286
+        "y": 253
       },
-      "id": 100,
+      "id": 89,
       "panels": [
         {
           "datasource": {
@@ -5246,9 +5302,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 287
+            "y": 254
           },
-          "id": 101,
+          "id": 90,
           "options": {
             "legend": {
               "calcs": [
@@ -5286,9 +5342,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 295
+        "y": 262
       },
-      "id": 102,
+      "id": 91,
       "panels": [
         {
           "datasource": {
@@ -5311,9 +5367,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 296
+            "y": 263
           },
-          "id": 103,
+          "id": 92,
           "options": {
             "legend": {
               "calcs": [
@@ -5362,9 +5418,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 296
+            "y": 263
           },
-          "id": 104,
+          "id": 93,
           "options": {
             "legend": {
               "calcs": [
@@ -5413,9 +5469,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 296
+            "y": 263
           },
-          "id": 105,
+          "id": 94,
           "options": {
             "legend": {
               "calcs": [
@@ -5464,9 +5520,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 304
+            "y": 271
           },
-          "id": 106,
+          "id": 95,
           "options": {
             "legend": {
               "calcs": [
@@ -5515,9 +5571,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 304
+            "y": 271
           },
-          "id": 107,
+          "id": 96,
           "options": {
             "legend": {
               "calcs": [
@@ -5555,9 +5611,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 312
+        "y": 279
       },
-      "id": 108,
+      "id": 97,
       "panels": [
         {
           "datasource": {
@@ -5580,9 +5636,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 313
+            "y": 280
           },
-          "id": 109,
+          "id": 98,
           "options": {
             "legend": {
               "calcs": [
@@ -5631,9 +5687,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 313
+            "y": 280
           },
-          "id": 110,
+          "id": 99,
           "options": {
             "legend": {
               "calcs": [
@@ -5682,9 +5738,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 313
+            "y": 280
           },
-          "id": 111,
+          "id": 100,
           "options": {
             "legend": {
               "calcs": [
@@ -5751,9 +5807,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 321
+            "y": 288
           },
-          "id": 112,
+          "id": 101,
           "options": {
             "legend": {
               "calcs": [
@@ -5802,9 +5858,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 321
+            "y": 288
           },
-          "id": 113,
+          "id": 102,
           "options": {
             "legend": {
               "calcs": [
@@ -5842,9 +5898,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 296
       },
-      "id": 114,
+      "id": 103,
       "panels": [
         {
           "datasource": {
@@ -5867,9 +5923,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 330
+            "y": 297
           },
-          "id": 115,
+          "id": 104,
           "options": {
             "legend": {
               "calcs": [
@@ -5918,9 +5974,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 330
+            "y": 297
           },
-          "id": 116,
+          "id": 105,
           "options": {
             "legend": {
               "calcs": [
@@ -5969,9 +6025,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 330
+            "y": 297
           },
-          "id": 117,
+          "id": 106,
           "options": {
             "legend": {
               "calcs": [
@@ -6002,1145 +6058,6 @@
       ],
       "title": "Circuit breaker (reference)",
       "type": "row"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 338
-      },
-      "id": 118,
-      "panels": [],
-      "title": "Rails Orbit — request (reference)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails → Orbit gRPC call latency.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 339
-      },
-      "id": 119,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{method}} / {{status}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{method}} / {{status}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{method}} / {{status}}",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_grpc_duration_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails → Orbit gRPC call latency.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 339
-      },
-      "id": 120,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\".*\"}[5m]))",
-          "legendFormat": "{{method}} / {{status}}",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_grpc_duration_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails → Orbit gRPC error count.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 339
-      },
-      "id": 121,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\".*\"}[5m]))",
-          "legendFormat": "{{method}} / {{code}}",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_grpc_errors_total — rate/s",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-side redaction time.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 347
-      },
-      "id": 122,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_redaction_duration_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-side redaction time.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 347
-      },
-      "id": 123,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_redaction_duration_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-side redaction batch size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 347
-      },
-      "id": 124,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_redaction_batch_size — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rails-side redaction batch size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 355
-      },
-      "id": 125,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_redaction_batch_size — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rows filtered by redaction per request.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 355
-      },
-      "id": 126,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_redaction_filtered_count — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Rows filtered by redaction per request.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 355
-      },
-      "id": 127,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_redaction_filtered_count — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "JWT assembly latency on Rails side.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 363
-      },
-      "id": 128,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_jwt_build_duration_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "JWT assembly latency on Rails side.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 363
-      },
-      "id": 129,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_jwt_build_duration_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Auth-context build latency on Rails side.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 363
-      },
-      "id": 130,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_auth_context_duration_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Auth-context build latency on Rails side.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 371
-      },
-      "id": 131,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_auth_context_duration_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 379
-      },
-      "id": 132,
-      "panels": [],
-      "title": "Rails Orbit — traversal (reference)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Traversal IDs per request (pre-compaction).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 380
-      },
-      "id": 133,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_traversal_ids_count — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Traversal IDs per request (pre-compaction).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 380
-      },
-      "id": 134,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_traversal_ids_count — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Compaction ratio of traversal IDs.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 380
-      },
-      "id": 135,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p50 overall",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p95 overall",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
-          "legendFormat": "p99 overall",
-          "refId": "C"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_compaction_ratio — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Compaction ratio of traversal IDs.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 388
-      },
-      "id": 136,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\".*\"}[5m]))",
-          "legendFormat": "count",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_compaction_ratio — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Traversal compaction fell back to uncompressed form.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 388
-      },
-      "id": 137,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\".*\"}[5m]))",
-          "legendFormat": "{{instance}}",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_compaction_fallback_total — rate/s",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Requests with too many traversal IDs.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 388
-      },
-      "id": 138,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\".*\"}[5m]))",
-          "legendFormat": "{{instance}}",
-          "refId": "A"
-        }
-      ],
-      "title": "gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total — rate/s",
-      "type": "timeseries"
     }
   ],
   "refresh": "",
