@@ -664,17 +664,17 @@ impl<'t> Fold<'t> {
 
     fn finish_call(&mut self, first: usize, site: u32) {
         let call = self.tree.cursor(site);
-        let callee = (!call.has(C::Property))
-            .then(|| call.child(C::Callee).and_then(callee_name))
-            .flatten();
+        let property = call.has(C::Property);
+        let callee = call.child(C::Callee).and_then(callee_name);
         for i in first..self.edges.len() {
             let target = self.tree.cursor(self.edges[i].to_node);
             let remap = callee.is_some()
                 && self.edges[i].kind == EdgeKind::Calls
                 && target.child_sym(C::DefName) == callee;
-            let to = match remap {
-                true => self.callable_in(target, site),
-                false => target.index(),
+            let to = match (remap, property) {
+                (true, false) => self.callable_in(target, site),
+                (true, true) => self.field_in(target, site),
+                _ => target.index(),
             };
             let edge = &mut self.edges[i];
             edge.site = Some(site);
