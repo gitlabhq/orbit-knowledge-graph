@@ -196,6 +196,8 @@ stages:
         replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement left: $N:identifier right: (list $$$E) body: $B)'
         replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
+      - match: '(for_statement left: $N:identifier right: (expression_list $$$E) body: $B)'
+        replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement left: $N:identifier right: $V body: $B)'
         replace: '(__ssa_loop $V (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement body: $B)'
