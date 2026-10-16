@@ -136,8 +136,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [hydration_plan]
         }
         settings {
-            reads_state: [input, node, pagination]
-            mutates: [query_plan, query_config]
+            reads_state: [input, pagination]
+            mutates: [query_plan, query_config, node]
         }
         codegen {
             reads_state: [node, input, pagination]
@@ -430,8 +430,11 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_type: &str = input.query_type.into();
     let mut config = settings::resolve(query_type);
 
-    let node = require(ctx.node().clone(), "node")?;
-    if let Node::Query(q) = &node {
+    let mut node = require(ctx.take_node(), "node")?;
+    if let Node::Query(q) = &mut node {
+        if config.materialized_ctes_enabled == Some(true) {
+            settings::materialize_shared_ctes(q)?;
+        }
         let derived = &mut config.compiler_derived;
         derived.null_in_is_unknown = input.has_negation();
         visit_queries(q, &mut |query| {
@@ -447,6 +450,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
             Ok(())
         })?;
     }
+    ctx.set_node(node);
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     if query_plan.hops().len() >= 3 {

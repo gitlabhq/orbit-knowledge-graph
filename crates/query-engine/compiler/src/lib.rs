@@ -1978,26 +1978,6 @@ mod tests {
     }
 
     #[test]
-    fn single_ref_cte_is_not_materialized() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("MATERIALIZED"),
-            "single-ref CTE must not use MATERIALIZED, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("enable_materialized_cte"),
-            "SETTINGS must not include enable_materialized_cte for non-materialized queries, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
         let query = r#"{
             "query_type": "aggregation",

@@ -6,7 +6,17 @@ pub fn visit_queries(query: &Query, callback: &mut impl FnMut(&Query) -> Result<
         visit_queries(&cte.query, callback)?;
     }
     visit_table_queries_ref(&query.from, callback)?;
-    for expression in query
+    for expression in query_expressions(query) {
+        visit_expr_queries_ref(expression, callback)?;
+    }
+    for arm in &query.union_all {
+        visit_queries(arm, callback)?;
+    }
+    callback(query)
+}
+
+pub fn query_expressions(query: &Query) -> impl Iterator<Item = &Expr> {
+    query
         .select
         .iter()
         .map(|select| &select.expr)
@@ -15,13 +25,6 @@ pub fn visit_queries(query: &Query, callback: &mut impl FnMut(&Query) -> Result<
         .chain(&query.group_by)
         .chain(query.order_by.iter().map(|order| &order.expr))
         .chain(query.limit_by.iter().flat_map(|(_, keys)| keys))
-    {
-        visit_expr_queries_ref(expression, callback)?;
-    }
-    for arm in &query.union_all {
-        visit_queries(arm, callback)?;
-    }
-    callback(query)
 }
 
 fn visit_table_queries_ref(
@@ -106,6 +109,7 @@ pub fn visit_expressions<'a>(
 pub fn visit_relations<'a>(table: &'a TableRef, callback: &mut impl FnMut(&'a TableRef)) {
     match table {
         TableRef::Join { left, right, .. } => {
+            callback(table);
             visit_relations(left, callback);
             visit_relations(right, callback);
         }

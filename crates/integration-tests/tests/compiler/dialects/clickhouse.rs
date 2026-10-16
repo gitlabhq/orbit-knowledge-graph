@@ -7,6 +7,7 @@ use ontology::introspection::{
     IntrospectionScope::{All, Local},
     build_schema_response,
 };
+use orbit_server_config::{QueryConfig, QuerySettings};
 
 #[test]
 fn compile_to_ast_works() {
@@ -360,6 +361,77 @@ fn path_finding_depth_control() {
     assert!(
         deep_sql.contains("backward AS"),
         "deep (max_depth=3) should have backward CTE"
+    );
+}
+
+#[test]
+fn shared_ctes_materialize_only_behind_the_server_flag() {
+    let ontology = crate::compiler::setup::embedded_ontology();
+    let shared = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "a", "entity": "Definition", "node_ids": [12000], "columns": ["id"]},
+            {"id": "b", "entity": "Definition", "filters": {"name": "helper"}, "columns": ["id"]},
+            {"id": "c", "entity": "Definition", "columns": ["id"]}
+        ],
+        "relationships": [
+            {"type": "CALLS", "from": "a", "to": "b"},
+            {"type": "CALLS", "from": "b", "to": "c"}
+        ]
+    }"#;
+    let single = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "filters": {"iid": 1}},
+            {"id": "n", "entity": "Note"}
+        ],
+        "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+        "limit": 10
+    }"#;
+    let paths = r#"{
+        "query_type": "path_finding",
+        "nodes": [
+            {"id": "start", "entity": "Project", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [2]}
+        ],
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS"]}
+    }"#;
+    let sql = |json| {
+        compile(json, Frontend::JsonDsl, &ontology, &test_ctx())
+            .unwrap()
+            .base
+            .sql
+    };
+
+    let off = sql(shared);
+    assert!(
+        off.matches("FROM _filter_b)").count() == 2 && !off.contains("MATERIALIZED"),
+        "{off}"
+    );
+    assert!(!off.contains("enable_materialized_cte"), "{off}");
+
+    orbit_server_config::query::init(QuerySettings {
+        default: QueryConfig {
+            materialized_ctes_enabled: Some(true),
+            ..QueryConfig::default()
+        },
+        overrides: Default::default(),
+    });
+
+    let on = sql(shared);
+    assert!(on.contains("_filter_b AS MATERIALIZED ("), "{on}");
+    assert!(on.contains("enable_materialized_cte = 1"), "{on}");
+    assert!(!on.contains("materialized_ctes_enabled"), "{on}");
+    let single = sql(single);
+    assert!(
+        single.contains("_filter_mr AS (") && !single.contains("MATERIALIZED"),
+        "{single}"
+    );
+    assert!(!single.contains("enable_materialized_cte"), "{single}");
+    let paths = sql(paths);
+    assert!(
+        paths.contains("forward AS MATERIALIZED (") && paths.contains(", backward AS ("),
+        "{paths}"
     );
 }
 

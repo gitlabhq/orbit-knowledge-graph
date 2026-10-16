@@ -1,0 +1,53 @@
+description: One-hop filter-only endpoint applies its filter to the latest version only
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9450, iid: 450, title: "Stale Filter MR", state: opened, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9450, iid: 450, title: "Renamed Filter MR", state: opened, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-06-01 00:00:00", _deleted: false }
+      - { id: 9451, iid: 451, title: "Stale Filter MR", state: opened, traversal_path: "1/100/1000/", project_id: 1000, _version: "2024-06-01 00:00:00", _deleted: false }
+    gl_note:
+      - { id: 3450, note: stale thread, noteable_type: MergeRequest, noteable_id: 9450, confidential: false, internal: false, traversal_path: 1/100/1000/ }
+      - { id: 3451, note: live thread, noteable_type: MergeRequest, noteable_id: 9451, confidential: false, internal: false, traversal_path: 1/100/1000/ }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9450, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3450, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", source_id: 9451, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3451, target_kind: Note, source_tags: ["state:opened"], target_tags: [], _version: "1970-01-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7, 9001, 9002, 9003, 9010, 9011, 9300, 9301, 9600]
+      group: [100, 101, 102, 200, 300, 900]
+      project: [1000, 1001, 1002, 1003, 1004, 1010, 9000]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9101, 9200, 9201, 9210, 9310, 9311, 9400, 9401, 9450, 9451, 9500, 9501, 9700, 9701, 9800, 9801, 9900, 9901]
+      note: [3000, 3001, 3002, 3003, 3450, 3451]
+      work_item: [4000, 4001, 4002, 4003, 4010]
+      milestone: [6000, 6001]
+      label: [7000, 7001, 7002]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"title": "Stale Filter MR"}},
+        {"id": "n", "entity": "Note", "columns": ["id"]}
+      ],
+      "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest {title: 'Stale Filter MR'})-[:HAS_NOTE]->(n:Note) RETURN mr, n.id LIMIT 10
+
+expect:
+  sql_contains: ["IN (SELECT id FROM _filter_mr)"]
+  skip_requirements: ["filter:title"]
+  node_count: 2
+  nodes:
+    MergeRequest:
+      ids: [9451]
+    Note:
+      ids: [3451]
+  edge_exists:
+    HAS_NOTE:
+      - [9451, 3451]
+  edge_count:
+    HAS_NOTE: 1

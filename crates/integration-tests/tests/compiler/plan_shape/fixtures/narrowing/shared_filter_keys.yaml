@@ -1,45 +1,80 @@
-name: A shared filter-only node defines authoritative keys on its first hop
+cases:
+  - name: A shared filter-only node defines authoritative keys on its first hop
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "a", "entity": "Definition", "node_ids": [12000], "columns": ["id"]},
-        {"id": "b", "entity": "Definition", "filters": {"name": "helper"}, "columns": ["id"]},
-        {"id": "c", "entity": "Definition", "columns": ["id"]}
-      ],
-      "relationships": [
-        {"type": "CALLS", "from": "a", "to": "b"},
-        {"type": "CALLS", "from": "b", "to": "c"}
-      ]
-    }
-  gql: |
-    MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition {name: 'helper'})-[:CALLS]->(c:Definition)
-    RETURN a.id, b.id, c.id
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "a", "entity": "Definition", "node_ids": [12000], "columns": ["id"]},
+            {"id": "b", "entity": "Definition", "filters": {"name": "helper"}, "columns": ["id"]},
+            {"id": "c", "entity": "Definition", "columns": ["id"]}
+          ],
+          "relationships": [
+            {"type": "CALLS", "from": "a", "to": "b"},
+            {"type": "CALLS", "from": "b", "to": "c"}
+          ]
+        }
+      gql: |
+        MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition {name: 'helper'})-[:CALLS]->(c:Definition)
+        RETURN a.id, b.id, c.id
 
-logical:
-  expect:
-    - (Filter a.id IN [12000] (NodeScan Definition AS a))
-
-physical:
-  clickhouse:
-    planned:
-      bind:
-        - (CTE $shared (Project b.id AS id (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))
-      ctes:
-        exact_order: [$shared]
+    logical:
       expect:
-        - (Filter e0p.target_id IN $shared.id, ... (_))
-      occurrences:
-        - pattern: (CTE $shared (_))
-          count: 1
-      reject:
-        - (Filter _orbit_edge_1.source_id IN $shared.id, ... (_))
-  duckdb:
-    planned:
-      ctes:
-        absent: true
+        - (Filter a.id IN [12000] (NodeScan Definition AS a))
+
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $shared (Project b.id AS id (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))
+          ctes:
+            exact_order: [$shared]
+          expect:
+            - (Filter e0p.target_id IN $shared.id, ... (_))
+          occurrences:
+            - pattern: (CTE $shared (_))
+              count: 1
+          reject:
+            - (Filter _orbit_edge_1.source_id IN $shared.id, ... (_))
+      duckdb:
+        planned:
+          ctes:
+            absent: true
+          expect:
+            - (Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))
+          reject: ["(SemiJoin ... (_) (_))"]
+
+  - name: Filter-only keys narrow the single edge scan and the ordered endpoint's candidate scan
+
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 9, "iid": 42}},
+            {"id": "n", "entity": "Note", "columns": ["id", "created_at"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "order_by": "-n.created_at",
+          "limit": 16
+        }
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 9, iid: 42})-[:HAS_NOTE]->(n:Note)
+        RETURN n.id, n.created_at ORDER BY n.created_at DESC LIMIT 16
+
+    logical:
       expect:
-        - (Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))
-      reject: ["(SemiJoin ... (_) (_))"]
+        - (Filter mr.project_id = 9, mr.iid = 42 (_))
+
+    physical:
+      clickhouse:
+        planned:
+          ctes:
+            exact_order: [_filter_mr, _narrow_n]
+          expect:
+            - (CTE _filter_mr (Project mr.id AS id (Filter mr.project_id = 9, mr.iid = 42, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+            - (CTE _narrow_n (Project _orbit_edge_0n.target_id AS id (Filter _orbit_edge_0n.source_id IN _filter_mr.id, ... (Scan Table(gl_edge) AS _orbit_edge_0n))))
+            - (Filter _orbit_edge_0.source_id IN _filter_mr.id, ... (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_0)))
+          reject:
+            - (Join ON mr.id = _orbit_edge_0.source_id (_) (_))

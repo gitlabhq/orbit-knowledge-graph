@@ -44,7 +44,7 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 |---|---|---|
 | `plan/edge_chain::reorder_by_selectivity` | Start at the more selective endpoint | `edge_scans/selective_end_reversal.yaml` |
 | `determine_hydration` | Skip node reads when edges supply identity and filters | `edge_scans/plain_single_hop.yaml`, `edge_scans/denormalized_filter.yaml` |
-| `determine_hydration` | Keep uncovered filters and property consumers table-backed | `edge_scans/uncovered_filter_fallback.yaml`, `narrowing/nonselective_join_guard.yaml`, `aggregation/property_inputs.yaml` |
+| `determine_hydration` | Keep uncovered filters as filter-only keys and property consumers table-backed | `edge_scans/uncovered_filter_fallback.yaml`, `narrowing/nonselective_join_guard.yaml`, `aggregation/property_inputs.yaml` |
 | `lower/helpers::push_edge_predicates` | Push shared code columns once; retain endpoint ID meaning | `edge_scans/code_column_pushdown.yaml` |
 | `emit_denorm_tags` | Use source/target tags, scalar/set membership, and one filter per shared node | `edge_scans/denormalized_filter.yaml`, `edge_scans/denormalized_incoming_set.yaml`, `edge_scans/denormalized_shared_node.yaml` |
 | `lower/flat_chain` | Plain single-edge traversal; streaming FINAL for multiple edges | `edge_scans/plain_single_hop.yaml`, `narrowing/recursive_cascade.yaml` |

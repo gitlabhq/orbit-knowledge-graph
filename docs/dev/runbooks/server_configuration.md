@@ -489,6 +489,7 @@ query:
 | `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
 | `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
 | `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
+| `query.default.materialized_ctes_enabled` | unset (off) | Materialize CTEs that a query references more than once (ClickHouse 26.3 or later) |
 
 ## Schema management
 
