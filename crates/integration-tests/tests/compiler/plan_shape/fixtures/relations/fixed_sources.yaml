@@ -1,71 +1,73 @@
 cases:
-- name: Projected endpoints hydrate from one edge relation
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
-    gql: |
-      MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project)
-      RETURN mr.title, p.name
-  logical:
-    expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
-  physical:
-    clickhouse:
-      planned:
-        expect:
-        - (Filter _orbit_edge_0.source_id = 2000 (_))
-        - (Project _orbit_edge_0.id AS source_id, ... (_))
-        - (Deduplicate Final (Scan Table(gl_merge_request) AS _orbit_edge_0))
-        reject: ["(Scan Table(gl_edge) ...)", "(Scan Table(gl_project) ...)"]
-- name: A fixed chain composes routed edge relations
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"},"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
-    gql: |
-      MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest)
-        -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
-      RETURN u.id, mr.id, pipe.id, j.id
-  logical:
-    expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
-  physical:
-    clickhouse:
-      planned:
-        expect:
-        - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
-        - (Join ON _orbit_edge_1.target_id = _orbit_edge_2.source_id (_) (_))
-        - (Scan Table(gl_merge_request) AS _orbit_edge_0)
-        - (Scan Table(gl_merge_request) AS _orbit_edge_1)
-        - (Scan Table(gl_job) AS _orbit_edge_2)
-- name: Stored relationship families compose through shared endpoints
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}]}
-    gql: |
-      MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
-      RETURN u.username, mr.title, p.name
-  logical:
-    expect: ["(EdgeScan APPROVED u->mr AS e0)", "(EdgeScan IN_PROJECT mr->p AS e1)"]
-  physical:
-    clickhouse:
-      planned:
-        expect:
-        - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
-        - (Scan Table(gl_edge) AS _orbit_edge_0)
-        - (Scan Table(gl_merge_request) AS _orbit_edge_1)
-        - (CTE _orbit_subplan_0 (_))
-        - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
-        - (Filter _orbit_edge_1.source_id IN _orbit_subplan_1.id, ... (_))
-- name: Relationship filters remain on their edge relation
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","columns":["id"]}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
-    gql: |
-      MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
-      RETURN mr.id, pipe.id, j.id
-  logical:
-    expect: ["(Filter e0.target_id = 1 (_))"]
-  physical:
-    clickhouse:
-      planned:
-        expect:
-        - (Filter _orbit_edge_0.target_id = 1, ... (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_edge_0)))
-        - (Scan Table(gl_job) AS _orbit_edge_1)
+  - name: Projected endpoints hydrate from one edge relation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project)
+        RETURN mr.title, p.name
+    logical:
+      expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter mr.id = 2000, ... (_))
+            - (Project mr.id AS e0_src, mr.project_id AS e0_dst, ... (_))
+            - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))
+          reject: ["(Scan Table(gl_edge) ...)", "(Scan Table(gl_project) ...)"]
+
+  - name: A fixed chain composes routed edge relations
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"},"columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+      gql: |
+        MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest)
+          -[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+        RETURN u.id, mr.id, pipe.id, j.id
+    logical:
+      expect: ["(EdgeScan AUTHORED u->mr AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON u.id = mr.author_id (_) (_))
+            - (Join ON j.pipeline_id = mr.head_pipeline_id (_) (_))
+            - (Scan Table(gl_merge_request) AS mr)
+            - (Scan Table(gl_job) AS j)
+
+  - name: Stored relationship families compose through shared endpoints
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+        RETURN u.username, mr.title, p.name
+    logical:
+      expect: ["(EdgeScan APPROVED u->mr AS e0)", "(EdgeScan IN_PROJECT mr->p AS e1)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON mr.id = _orbit_edge_0.target_id (_) (_))
+            - (Scan Table(gl_edge) AS _orbit_edge_0)
+            - (Scan Table(gl_merge_request) AS mr)
+            - (CTE _orbit_subplan_0 (_))
+            - (CTE _orbit_subplan_1 (Distinct (Project _frontier_source.target_id AS id (_))))
+            - (Filter mr.id IN _orbit_subplan_1.id, ... (_))
+
+  - name: Relationship filters remain on their edge relation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]},{"id":"j","entity":"Job","columns":["id"]}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
+        RETURN mr.id, pipe.id, j.id
+    logical:
+      expect: ["(Filter e0.target_id = 1 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_0.target_id = 1, ... (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_edge_0)))
+            - (Scan Table(gl_job) AS j)

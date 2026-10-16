@@ -1,4 +1,5 @@
 name: Filter-only endpoints use exact reusable keys
+
 query:
   json: |
     {
@@ -13,15 +14,17 @@ query:
   gql: |
     MATCH (mr:MergeRequest {id: 2000})<-[:AUTHORED]-(u:User {username: 'alice'})
     RETURN count(mr) AS n
+
 logical:
   expect:
     - (Filter u.username = 'alice' (NodeScan User AS u))
     - (Aggregate COUNT(mr) AS n (_))
+
 physical:
   clickhouse:
     planned:
       expect:
         - (CTE _orbit_subplan_0 (Project u.id AS id (Filter u.username = 'alice' (Scan Table(gl_user) AS u))))
         - (CTE _orbit_subplan_1 (Project u.id AS id (Filter u.id IN _orbit_subplan_0.id, u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
-        - (Filter _orbit_edge_0.source_id IN _orbit_subplan_1.id, ... (_))
-        - (Scan Table(gl_merge_request) AS _orbit_edge_0)
+        - (Filter mr.author_id IN _orbit_subplan_1.id, ... (_))
+        - (Scan Table(gl_merge_request) AS mr)

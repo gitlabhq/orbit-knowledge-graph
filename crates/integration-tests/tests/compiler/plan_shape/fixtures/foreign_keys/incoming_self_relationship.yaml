@@ -1,4 +1,5 @@
 name: Incoming self-relationships keep FK edge orientation
+
 query:
   json: |
     {
@@ -12,15 +13,17 @@ query:
   gql: |
     MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline)
     RETURN canceling.id, canceled.id
+
 logical:
   expect:
     - (EdgeScan AUTO_CANCELED_BY canceled->canceling AS e0)
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (Scan Table(gl_pipeline) AS _orbit_edge_0)
-        - (Project _orbit_edge_0.id AS source_id, 'Pipeline' AS source_kind, 'AUTO_CANCELED_BY' AS relationship_kind, _orbit_edge_0.auto_canceled_by_id AS target_id, 'Pipeline' AS target_kind, ... (_))
-        - (Project _orbit_edge_0.source_id AS e0_src, _orbit_edge_0.target_id AS e0_dst, ... (_))
+        - (Scan Table(gl_pipeline) AS canceled)
+        - (Project canceled.id AS e0_src, canceled.auto_canceled_by_id AS e0_dst, ... (_))
       reject:
         - (Join ON canceled.id = canceling.auto_canceled_by_id (_) (_))
+        - (Project canceled.auto_canceled_by_id AS e0_src, canceled.id AS e0_dst, ... (_))

@@ -139,8 +139,12 @@ impl RelationalMapping for ClickHouseBindings {
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variant_route(variant)
     }
-    fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
-        Vec::new()
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.reordered_layouts
+            .iter()
+            .filter(|copy| copy.source == table)
+            .map(|copy| copy.table.as_str())
+            .collect()
     }
     fn materialized_joins(&self) -> &[MaterializedJoin] {
         &self.materialized_joins

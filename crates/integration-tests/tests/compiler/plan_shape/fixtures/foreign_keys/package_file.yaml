@@ -1,18 +1,23 @@
 name: Package files use their FK edge relation
+
 missing_frontends:
   json: The JSON query form is being deprecated.
+
 query:
   gql: |
     MATCH (p:Package {id: 8001})-[:HAS_PACKAGE_FILE]->(f:PackageFile) RETURN p.id, f.file_name
+
 logical:
   expect: ["(EdgeScan HAS_PACKAGE_FILE p->f AS e0)"]
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (Filter _orbit_edge_0.source_id = 8001 (_))
-        - (Project _orbit_edge_0.package_id AS source_id, ... (_))
-        - (Deduplicate Final (Scan Table(gl_package_file) AS _orbit_edge_0))
+        - (Filter f.package_id = 8001 (_))
+        - (Project f.package_id AS e0_src, ... (_))
+        - (Deduplicate Final (Scan Table(gl_package_file) AS f))
       reject:
         - (Scan Table(gl_package) ...)
         - (Scan Table(gl_edge) ...)
+        - (Project f.id AS e0_src, f.package_id AS e0_dst, ... (_))
