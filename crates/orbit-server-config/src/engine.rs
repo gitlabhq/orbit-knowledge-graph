@@ -276,10 +276,10 @@ pub struct CodeIndexingPipelineConfig {
     /// Edges that the incremental engine's linker may emit for one file. A file
     /// past the limit is skipped as too_many_edges. 0 = no limit.
     pub max_file_edges: usize,
-    /// Source bytes the incremental engine parses at the same time within one
-    /// language family. A file larger than the budget runs alone. Bounds the
-    /// per-file parse memory, which is 50 to 190 times the file size, to the
-    /// budget instead of the worker count. 0 = no limit.
+    /// Source bytes one job's incremental-engine parse holds in flight at the
+    /// same time, admitted in arrival order. A file larger than the budget
+    /// runs alone. Bounds the per-file parse memory, which is 50 to 190 times
+    /// the file size, to the budget instead of the worker count. 0 = no limit.
     pub max_inflight_source_bytes: u64,
     /// Share of the pod's cgroup memory limit, in percent, at which the
     /// indexer cancels the in-flight code job with the most source bytes so

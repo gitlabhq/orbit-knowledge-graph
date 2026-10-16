@@ -19,6 +19,7 @@ pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::env::Env;
@@ -99,11 +100,27 @@ impl<I, A: ItemPhase<I>, B: ItemPhase<A::Output>> ItemPhase<I> for Chain<A, B> {
     }
 }
 
+/// Lets the caller hold an item before its per-file phases run, like a
+/// semaphore: `admit` may block, and `release` follows the item's end.
+pub trait Admission: Send + Sync {
+    fn admit(&self, bytes: u64);
+    fn release(&self, bytes: u64);
+}
+
+/// The default: every item runs at once.
+pub struct Unbounded;
+
+impl Admission for Unbounded {
+    fn admit(&self, _: u64) {}
+    fn release(&self, _: u64) {}
+}
+
 /// What one run shares across its phases; `run` is the run's total deadline.
 pub struct Context<'e> {
     pub env: &'e Env,
     pub repository: Sources,
     pub run: Sentinel,
+    pub admission: Arc<dyn Admission>,
     pub report: Report,
     observers: Vec<Box<dyn Observer>>,
 }
@@ -114,6 +131,7 @@ impl<'e> Context<'e> {
             env,
             repository,
             run: Sentinel::new("run", "", env.limits.total_ms),
+            admission: Arc::new(Unbounded),
             report: Report::default(),
             observers: Vec::new(),
         }
@@ -121,6 +139,11 @@ impl<'e> Context<'e> {
 
     pub fn observe(mut self, observer: impl Observer + 'static) -> Self {
         self.observers.push(Box::new(observer));
+        self
+    }
+
+    pub fn admit_with(mut self, admission: Arc<dyn Admission>) -> Self {
+        self.admission = admission;
         self
     }
 

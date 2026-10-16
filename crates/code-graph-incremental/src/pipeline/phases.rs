@@ -1,7 +1,6 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
@@ -11,9 +10,9 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase, Labelled,
-    LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths, State,
-    Workset,
+    Admission, Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileStats, ItemPhase,
+    Labelled, LinkedFile, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile,
+    SourcePaths, State, Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
@@ -198,14 +197,14 @@ where
             dirty,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
-        let admission = Admission::new(env.limits.max_inflight_bytes);
+        let admission = &*context.admission;
         let outcomes: Vec<_> = items
             .into_parallel(&context.repository)
             .map(|item| {
                 let item = item?;
                 let path = item.label().to_string();
                 let bytes = item.bytes();
-                let _admitted = admission.admit(bytes);
+                let _slot = Slot::admit(admission, bytes);
                 let started = Instant::now();
                 let outcome = phase.run(env, run, item);
                 Ok((outcome, path, bytes, started.elapsed()))
@@ -250,68 +249,22 @@ where
     }
 }
 
-/// Source bytes in flight across the workers, admitted in arrival order so a
-/// large item waits only for the items already running; an item larger than
-/// the whole budget runs alone. 0 = off.
-struct Admission {
-    budget: u64,
-    queue: Mutex<Queue>,
-    changed: Condvar,
-}
-
-#[derive(Default)]
-struct Queue {
-    used: u64,
-    next: u64,
-    serving: u64,
-}
-
-impl Admission {
-    fn new(budget: u64) -> Self {
-        Self {
-            budget,
-            queue: Mutex::default(),
-            changed: Condvar::new(),
-        }
-    }
-
-    fn admit(&self, bytes: u64) -> Admitted<'_> {
-        if self.budget > 0 {
-            let mut queue = self.lock();
-            let ticket = queue.next;
-            queue.next += 1;
-            while queue.serving != ticket || (queue.used > 0 && queue.used + bytes > self.budget) {
-                queue = self
-                    .changed
-                    .wait(queue)
-                    .unwrap_or_else(PoisonError::into_inner);
-            }
-            queue.serving += 1;
-            queue.used += bytes;
-            self.changed.notify_all();
-        }
-        Admitted {
-            admission: self,
-            bytes,
-        }
-    }
-
-    fn lock(&self) -> MutexGuard<'_, Queue> {
-        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-struct Admitted<'a> {
-    admission: &'a Admission,
+/// Holds an item's admission for the span of its phases.
+struct Slot<'a> {
+    admission: &'a dyn Admission,
     bytes: u64,
 }
 
-impl Drop for Admitted<'_> {
+impl<'a> Slot<'a> {
+    fn admit(admission: &'a dyn Admission, bytes: u64) -> Self {
+        admission.admit(bytes);
+        Self { admission, bytes }
+    }
+}
+
+impl Drop for Slot<'_> {
     fn drop(&mut self) {
-        if self.admission.budget > 0 {
-            self.admission.lock().used -= self.bytes;
-            self.admission.changed.notify_all();
-        }
+        self.admission.release(self.bytes);
     }
 }
 
@@ -746,59 +699,6 @@ mod tests {
         fn content(&self, _: &File<'_, ()>) -> Decision<()> {
             Decision::Keep(())
         }
-    }
-
-    fn settles(what: &str, condition: impl Fn() -> bool) {
-        let started = Instant::now();
-        while !condition() {
-            assert!(started.elapsed() < Duration::from_secs(10), "{what}");
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-
-    #[test]
-    fn admission_is_first_come_first_served_and_an_oversize_item_runs_alone() {
-        const MIB: u64 = 1024 * 1024;
-        let admission = Admission::new(2 * MIB);
-        let order = Mutex::new(Vec::new());
-        let (release_first, first_held) = std::sync::mpsc::channel::<()>();
-        let (release_big, big_held) = std::sync::mpsc::channel::<()>();
-        std::thread::scope(|scope| {
-            let (admission, order) = (&admission, &order);
-            scope.spawn(move || {
-                let _first = admission.admit(MIB);
-                order.lock().unwrap().push("first");
-                first_held.recv().ok();
-            });
-            settles("first is admitted", || admission.lock().used == MIB);
-
-            scope.spawn(move || {
-                let _big = admission.admit(3 * MIB);
-                order.lock().unwrap().push("big");
-                big_held.recv().ok();
-            });
-            settles("big has its ticket", || admission.lock().next == 2);
-
-            scope.spawn(move || {
-                let _small = admission.admit(MIB / 4);
-                order.lock().unwrap().push("small");
-            });
-            settles("small has its ticket", || admission.lock().next == 3);
-            assert_eq!(
-                admission.lock().used,
-                MIB,
-                "small waits behind big instead of slipping past it"
-            );
-
-            release_first.send(()).unwrap();
-            settles("big runs alone", || admission.lock().used == 3 * MIB);
-            settles("big is recorded", || order.lock().unwrap().len() == 2);
-            assert_eq!(*order.lock().unwrap(), ["first", "big"]);
-
-            release_big.send(()).unwrap();
-            settles("small runs after big", || order.lock().unwrap().len() == 3);
-        });
-        assert_eq!(*order.lock().unwrap(), ["first", "big", "small"]);
     }
 
     struct ArmOn(&'static str, Arc<AtomicUsize>);

@@ -721,6 +721,7 @@ fn config() -> CodeIndexingPipelineConfig {
 
 fn options() -> Options {
     Options {
+        admission: Arc::new(code_graph_incremental::Unbounded),
         limits: code_graph_incremental::Limits::UNLIMITED,
         worker_threads: config().worker_threads,
         concurrent_families: code_graph::v2::PipelineConfig::default().concurrent_languages(),
@@ -757,10 +758,6 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
     assert_eq!(mapped.max_cross_file_names, configured.max_cross_file_names);
     assert_eq!(mapped.max_manifest_bytes, configured.max_manifest_bytes);
     assert_eq!(mapped.max_file_edges, configured.max_file_edges);
-    assert_eq!(
-        mapped.max_inflight_bytes,
-        configured.max_inflight_source_bytes
-    );
 
     let unlimited = limits(&CodeIndexingPipelineConfig {
         max_files: 0,
@@ -773,7 +770,6 @@ fn engine_limits_come_from_the_server_config_and_zero_means_no_limit() {
         max_cross_file_names: 0,
         max_manifest_bytes: 0,
         max_file_edges: 0,
-        max_inflight_source_bytes: 0,
         ..configured
     });
     assert_eq!(unlimited, code_graph_incremental::Limits::UNLIMITED);

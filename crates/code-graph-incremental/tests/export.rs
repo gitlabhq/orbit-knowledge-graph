@@ -236,6 +236,7 @@ fn strs(row: &[&str]) -> Vec<String> {
 
 fn options() -> templates::Options {
     templates::Options {
+        admission: std::sync::Arc::new(code_graph_incremental::Unbounded),
         limits: Limits::UNLIMITED,
         worker_threads: 0,
         concurrent_families: 2,
@@ -270,6 +271,7 @@ fn families_follow_the_worker_budget_and_the_family_cap() {
         templates::repository(
             common::walk(repo.path()),
             templates::Options {
+                admission: std::sync::Arc::new(code_graph_incremental::Unbounded),
                 worker_threads,
                 concurrent_families: cap,
                 small_family_files,
@@ -341,6 +343,7 @@ fn a_family_panic_ends_the_run_with_a_typed_error() {
     let result = templates::repository(
         common::walk(repo.path()),
         templates::Options {
+            admission: std::sync::Arc::new(code_graph_incremental::Unbounded),
             concurrent_families: 1,
             ..options()
         },
@@ -372,6 +375,7 @@ fn tables_over_the_batch_byte_budget_split_into_batches() {
         templates::repository(
             common::walk(repo.path()),
             templates::Options {
+                admission: std::sync::Arc::new(code_graph_incremental::Unbounded),
                 batch_bytes,
                 ..options()
             },
@@ -433,6 +437,7 @@ fn cross_file_timeout_still_exports_every_family() {
     let report = templates::repository(
         common::walk(repo.path()),
         templates::Options {
+            admission: std::sync::Arc::new(code_graph_incremental::Unbounded),
             limits: Limits {
                 cross_file_resolve_ms: 0,
                 ..Limits::UNLIMITED

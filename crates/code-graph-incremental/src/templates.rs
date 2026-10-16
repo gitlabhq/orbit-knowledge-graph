@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::pipeline::{
-    Canonicalize, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
-    ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, State,
+    Admission, Canonicalize, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline,
+    Prepare, ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, State,
 };
 use crate::sentinel::Sentinel;
 use crate::treesitter::SupportLang;
@@ -25,6 +25,7 @@ pub struct Options {
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
     pub phase_started: PhaseHook,
+    pub admission: Arc<dyn Admission>,
 }
 
 struct PhaseStarted {
@@ -158,6 +159,7 @@ pub fn repository<E: std::fmt::Display>(
                 running += 1;
                 let (run, repository, owns, emit) = (&run, &repository, &owns, &emit);
                 let phase_started = options.phase_started.clone();
+                let admission = options.admission.clone();
                 let family_threads = if file_count <= options.small_family_files {
                     (worker_threads / 4).max(2).min(worker_threads)
                 } else {
@@ -169,12 +171,13 @@ pub fn repository<E: std::fmt::Display>(
                             let (report, batches) = {
                                 let mut env = Env::with_limits(language, limits)?;
                                 env.export_config = export_config.clone();
-                                let mut context =
-                                    Context::new(&env, repository.clone()).observe(PhaseStarted {
+                                let mut context = Context::new(&env, repository.clone())
+                                    .observe(PhaseStarted {
                                         family,
                                         files: file_count,
                                         hook: phase_started.clone(),
-                                    });
+                                    })
+                                    .admit_with(admission.clone());
                                 context.run = run.clone();
                                 let (context, graph) = index(context)?.then(Display)?.finish();
                                 let mut report = context.report;

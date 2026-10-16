@@ -631,7 +631,7 @@
           "minimum": 0
         },
         "max_inflight_source_bytes": {
-          "description": "Source bytes the incremental engine parses at the same time within one\nlanguage family. A file larger than the budget runs alone. Bounds the\nper-file parse memory, which is 50 to 190 times the file size, to the\nbudget instead of the worker count. 0 = no limit.",
+          "description": "Source bytes one job's incremental-engine parse holds in flight at the\nsame time, admitted in arrival order. A file larger than the budget\nruns alone. Bounds the per-file parse memory, which is 50 to 190 times\nthe file size, to the budget instead of the worker count. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0

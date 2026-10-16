@@ -757,6 +757,7 @@ impl CodeIndexer {
             batch_bytes: orbit_arrow::BATCH_BYTES,
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
+            admission: super::inflight::budget(self.pipeline_config.max_inflight_source_bytes),
             phase_started: {
                 let span = span.clone();
                 Arc::new(move |family, phase, files| {

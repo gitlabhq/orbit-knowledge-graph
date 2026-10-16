@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         started.elapsed().as_secs_f64()
     );
     let options = templates::Options {
+        admission: Arc::new(code_graph_incremental::Unbounded),
         limits: Limits::UNLIMITED,
         worker_threads: 0,
         concurrent_families: 2,

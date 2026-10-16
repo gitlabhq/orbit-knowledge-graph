@@ -197,119 +197,69 @@ fn item_phases_pipe_into_one_named_pass() {
     assert_eq!(killed.label, "run");
 }
 
-/// A barrier that fails instead of hanging when fewer items than expected
-/// are admitted together.
-struct Meet {
-    parties: usize,
-    state: Mutex<(usize, usize)>,
-    changed: std::sync::Condvar,
+#[derive(Default)]
+struct Ledger {
+    admitted: Mutex<Vec<u64>>,
+    inflight: AtomicU64,
 }
 
-impl Meet {
-    fn new(parties: usize) -> Self {
-        Self {
-            parties,
-            state: Mutex::new((0, 0)),
-            changed: std::sync::Condvar::new(),
-        }
+impl code_graph_incremental::Admission for Ledger {
+    fn admit(&self, bytes: u64) {
+        self.admitted.lock().unwrap().push(bytes);
+        self.inflight.fetch_add(bytes, Ordering::Relaxed);
     }
-
-    fn wait(&self) {
-        let mut state = self.state.lock().unwrap();
-        let generation = state.1;
-        state.0 += 1;
-        if state.0 == self.parties {
-            *state = (0, generation + 1);
-            self.changed.notify_all();
-            return;
-        }
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while state.1 == generation {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            assert!(
-                !left.is_zero(),
-                "only {} of {} items were admitted together",
-                state.0,
-                self.parties
-            );
-            state = self.changed.wait_timeout(state, left).unwrap().0;
-        }
+    fn release(&self, bytes: u64) {
+        self.inflight.fetch_sub(bytes, Ordering::Relaxed);
     }
 }
 
-#[derive(Clone)]
-struct InflightProbe {
-    inflight: Arc<AtomicU64>,
-    peak: Arc<AtomicU64>,
-    meet: Arc<Meet>,
-}
+struct SeesItsSlot(Arc<Ledger>);
 
-impl ItemPhase<SourceFile> for InflightProbe {
+impl ItemPhase<SourceFile> for SeesItsSlot {
     type Output = ();
     fn name(&self) -> Cow<'static, str> {
-        "probe".into()
+        "slot".into()
     }
     fn run(&self, _: &Env, _: &Sentinel, file: SourceFile) -> Result<(), Killed> {
-        let bytes = file.content.len() as u64;
-        let now = self.inflight.fetch_add(bytes, Ordering::Relaxed) + bytes;
-        self.peak.fetch_max(now, Ordering::Relaxed);
-        self.meet.wait();
-        self.inflight.fetch_sub(bytes, Ordering::Relaxed);
+        assert!(self.0.inflight.load(Ordering::Relaxed) >= file.content.len() as u64);
         Ok(())
     }
 }
 
-fn peak_inflight(
-    files: &[(String, String)],
-    max_inflight_bytes: u64,
-    parties: usize,
-) -> (u64, usize) {
+#[test]
+fn each_admits_every_item_before_its_phase_and_releases_it_after() {
+    // Each splits per item, so an admission that blocks holds only its own item.
+    let files: Vec<_> = (1..=8)
+        .map(|i| (format!("f{i}.py"), "x = 1\n".repeat(i * 1000)))
+        .collect();
     let repo = tempfile::tempdir().unwrap();
-    for (path, content) in files {
+    for (path, content) in &files {
         std::fs::write(repo.path().join(path), content).unwrap();
     }
-    let env = Env::with_limits(
-        SupportLang::Python,
-        Limits {
-            max_inflight_bytes,
-            ..Limits::UNLIMITED
-        },
-    )
-    .unwrap();
-    let probe = InflightProbe {
-        inflight: Arc::default(),
-        peak: Arc::default(),
-        meet: Arc::new(Meet::new(parties)),
-    };
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let ledger = Arc::new(Ledger::default());
     let items = rayon::ThreadPoolBuilder::new()
         .num_threads(8)
         .build()
         .unwrap()
         .install(|| {
-            Pipeline::new(Context::new(&env, common::walk(repo.path())), ())
-                .then(Prepare)
-                .unwrap()
-                .then(Each(probe.clone()))
-                .unwrap()
-                .into_value()
-                .items
-                .len()
+            Pipeline::new(
+                Context::new(&env, common::walk(repo.path())).admit_with(ledger.clone()),
+                (),
+            )
+            .then(Prepare)
+            .unwrap()
+            .then(Each(SeesItsSlot(ledger.clone())))
+            .unwrap()
+            .into_value()
+            .items
+            .len()
         });
-    (probe.peak.load(Ordering::Relaxed), items)
-}
-
-#[test]
-fn source_bytes_in_flight_stay_under_the_budget_and_an_oversize_file_runs_alone() {
-    const MIB: usize = 1024 * 1024;
-    let files: Vec<_> = (0..8)
-        .map(|i| (format!("f{i}.py"), "x = 1\n".repeat(MIB / 6)))
-        .collect();
-    let file = files[0].1.len() as u64;
-    assert_eq!(peak_inflight(&files, 0, 8), (8 * file, 8));
-    assert_eq!(peak_inflight(&files, 2 * MIB as u64, 2), (2 * file, 8));
-    let big = [("big.py".to_string(), "x = 1\n".repeat(MIB / 2))];
-    assert_eq!(
-        peak_inflight(&big, 2 * MIB as u64, 1),
-        (big[0].1.len() as u64, 1)
-    );
+    assert_eq!(items, 8);
+    let mut admitted = ledger.admitted.lock().unwrap().clone();
+    admitted.sort_unstable();
+    let mut sizes: Vec<u64> = files.iter().map(|(_, c)| c.len() as u64).collect();
+    sizes.sort_unstable();
+    assert_eq!(admitted, sizes);
+    assert_eq!(ledger.inflight.load(Ordering::Relaxed), 0);
 }
