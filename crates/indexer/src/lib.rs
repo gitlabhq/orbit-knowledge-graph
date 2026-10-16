@@ -157,15 +157,17 @@ pub async fn run(
 
     if config.engine.is_module_enabled(IndexerModule::Code) {
         info!("initializing Code handlers");
-        let deps = modules::ModuleDeps {
-            registry: &registry,
+        modules::code::register_handlers(
+            &registry,
             config,
-            clients: &clients,
-            ontology: &ontology,
-            writer: writer.clone(),
-            analytics: analytics.clone(),
-        };
-        modules::code::register_handlers(deps, &resources, shutdown.clone()).await?;
+            &clients,
+            &ontology,
+            writer.clone(),
+            analytics.clone(),
+            &resources,
+            shutdown.clone(),
+        )
+        .await?;
     } else {
         info!("Code handlers disabled by engine.modules");
     }
