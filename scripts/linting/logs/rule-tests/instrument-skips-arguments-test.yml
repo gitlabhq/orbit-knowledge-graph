@@ -1,0 +1,18 @@
+id: instrument-skips-arguments
+valid:
+  - |
+    #[instrument(skip_all)]
+    fn f(path: &str) {}
+  - |
+    #[tracing::instrument(name = "index", skip_all, fields({ safe::GL_PROJECT_ID } = id))]
+    fn f(id: u64) {}
+  - |
+    #[derive(Debug)]
+    struct S;
+invalid:
+  - |
+    #[instrument]
+    fn f(path: &str) {}
+  - |
+    #[tracing::instrument(skip(self, request))]
+    fn f(&self, request: Request) {}

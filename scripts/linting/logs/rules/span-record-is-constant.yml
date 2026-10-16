@@ -1,0 +1,24 @@
+id: span-record-is-constant
+language: rust
+severity: error
+message: Name the recorded span field with a constant from orbit_log_fields.
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        kind: field_expression
+        all:
+          - has:
+              field: field
+              regex: '^record$'
+          - has:
+              field: value
+              regex: '(?i)(span|span::current\(\))$'
+    - has:
+        field: arguments
+        has:
+          kind: string_literal
+          nthChild: 1
+  not:
+    matches: test-code
