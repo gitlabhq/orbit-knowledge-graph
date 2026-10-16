@@ -1,3 +1,9 @@
+physical:
+  clickhouse:
+    planned:
+      occurrences:
+        - { pattern: "(Scan Table(?) AS _orbit_edge_0)", count: 1 }
+
 cases:
   - name: Pipeline IN_PROJECT scans the CI edge table
     query:

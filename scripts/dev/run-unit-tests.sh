@@ -18,7 +18,8 @@ args=(cargo nextest run --workspace \
   --exclude orbit-fuzz \
   --exclude query-profiler \
   --lib --bin xtask --bin orbit \
-  --test vfs_paths --test safe_fs)
+  --test vfs_paths --test safe_fs \
+  --test link --test export --test budgets)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.
