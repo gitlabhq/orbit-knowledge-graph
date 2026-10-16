@@ -332,8 +332,7 @@ impl CodeIndexer {
     }
 
     /// Flush all buffered writes and wait until every project they made durable has been
-    /// stale-cleaned and checkpointed. For tests and shutdown; steady state relies on the
-    /// size/age flush and the per-project commit tokens.
+    /// stale-cleaned and checkpointed (tests, shutdown).
     pub async fn flush(&self) -> Result<(), HandlerError> {
         self.writer
             .flush()
@@ -400,6 +399,10 @@ impl CodeIndexer {
 
         drop(repository);
         context.work.release();
+        self.writer
+            .start_flush(run.commit.clone())
+            .await
+            .map_err(|e| IndexError::Failed(HandlerError::Processing(e.to_string())))?;
         run.commit.durable().await.map_err(IndexError::Failed)?;
         Ok(IndexOutcome::Indexed {
             rows_written: run.rows_written,

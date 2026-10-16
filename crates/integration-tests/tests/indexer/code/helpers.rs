@@ -40,7 +40,7 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
-    pub shutdown: tokio_util::sync::CancellationToken,
+    shutdown: tokio_util::sync::CancellationToken,
     cache_dir: tempfile::TempDir,
 }
 

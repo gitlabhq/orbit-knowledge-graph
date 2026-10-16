@@ -1070,7 +1070,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
 }
 
 #[tokio::test]
-async fn small_jobs_wait_for_the_natural_flush_and_share_one_part() {
+async fn a_finished_job_flushes_its_own_rows_without_the_age_cap() {
     let project_id: i64 = 61;
     let traversal_path = "1/61/";
 
@@ -1090,52 +1090,23 @@ async fn small_jobs_wait_for_the_natural_flush_and_share_one_part() {
         )],
     );
 
-    let other_project: i64 = 62;
-    let other_traversal = "1/62/";
-    mock.add_project(
-        other_project,
-        "main",
-        &[(
-            "src/Other.java",
-            "public class Other { public void keep() {} }",
-        )],
-    );
-
     let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, never_flushing());
-    let handler = Arc::new(deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL));
+    let handler = deps.code_indexing_task_handler();
 
-    let (first, first_slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
-    released(&first_slot).await;
-    let (second, second_slot) = spawn_with_work_slot(&handler, other_project, other_traversal);
-    released(&second_slot).await;
-    assert_eq!(
-        active_parts(&clickhouse, &t("gl_file")).await,
-        0,
-        "a finished job must not force a flush below the floor"
-    );
-    assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
-        None
-    );
-
-    clickhouse
-        .execute(&format!("SYSTEM STOP MERGES {}", t("gl_file")))
-        .await;
-    deps.pipeline.flush().await.expect("flush");
-    first.await.expect("join").expect("first job indexes");
-    second.await.expect("join").expect("second job indexes");
+    let envelope = code_indexing_task_envelope(project_id, "commit1", 1, traversal_path);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        handler.handle(handler_context(), envelope),
+    )
+    .await
+    .expect("a finished job must flush its own rows instead of waiting for the age cap")
+    .expect("indexing succeeds");
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_file_is_active(&clickhouse, other_project, "src/Other.java").await;
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "the checkpoint must be written before the handler returns"
-    );
-    assert_eq!(
-        active_parts(&clickhouse, &t("gl_file")).await,
-        1,
-        "both jobs' rows must land in the one part the flush writes"
     );
 }
 
@@ -1177,17 +1148,6 @@ async fn released(slot: &tokio::sync::Semaphore) {
     slot.acquire().await.expect("slot stays open").forget();
 }
 
-async fn active_parts(clickhouse: &integration_testkit::TestContext, table: &str) -> i64 {
-    let result = clickhouse
-        .query(&format!(
-            "SELECT toInt64(count()) FROM system.parts \
-             WHERE database = '{}' AND table = '{table}' AND active",
-            clickhouse.config.database
-        ))
-        .await;
-    i64::extract_column(&result, 0).expect("part count")[0]
-}
-
 #[tokio::test]
 async fn the_extraction_tree_is_deleted_before_the_job_waits_for_durability() {
     let project_id: i64 = 63;
@@ -1226,53 +1186,8 @@ async fn the_extraction_tree_is_deleted_before_the_job_waits_for_durability() {
         "the extraction tree must be gone while the job waits for its rows to land, found: {left:?}"
     );
 
-    deps.pipeline.flush().await.expect("flush");
     indexed.await.expect("join").expect("indexing succeeds");
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-}
-
-#[tokio::test]
-async fn a_shutdown_flushes_a_waiting_job_without_the_age_cap() {
-    let project_id: i64 = 64;
-    let traversal_path = "1/64/";
-
-    let clickhouse = integration_testkit::TestContext::new(&[
-        integration_testkit::SIPHON_SCHEMA_SQL,
-        *integration_testkit::GRAPH_SCHEMA_SQL,
-    ])
-    .await;
-
-    let mock = MockGitlabServer::start().await;
-    mock.add_project(
-        project_id,
-        "main",
-        &[(
-            "src/Main.java",
-            "public class Main { public void keep() {} }",
-        )],
-    );
-
-    let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, never_flushing());
-    let handler = Arc::new(deps.code_indexing_task_handler_with_lock_ttl(LONG_LOCK_TTL));
-
-    let (indexed, slot) = spawn_with_work_slot(&handler, project_id, traversal_path);
-    released(&slot).await;
-    assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
-        None
-    );
-
-    deps.shutdown.cancel();
-    tokio::time::timeout(std::time::Duration::from_secs(60), indexed)
-        .await
-        .expect("a shutdown must flush the waiting job instead of waiting for the age cap")
-        .expect("join")
-        .expect("indexing succeeds");
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-    assert_eq!(
-        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
-        Some(1)
-    );
 }
 
 #[tokio::test]

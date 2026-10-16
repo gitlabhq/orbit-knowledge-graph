@@ -171,6 +171,7 @@ type Token = Arc<dyn FlushToken>;
 enum Msg {
     Submit(String, RecordBatch, Token),
     Flush(tokio::sync::oneshot::Sender<()>),
+    FlushFor(Token),
 }
 
 /// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
@@ -224,21 +225,29 @@ impl BufferedWriter {
     ) -> Result<(), WriteError> {
         self.tx
             .blocking_send(Msg::Submit(table, batch, token))
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+            .map_err(|_| drain_closed())
     }
 
-    /// Flush all buffered rows now and wait until they are written. Used to make writes
-    /// synchronously visible (tests, shutdown); the steady-state path relies on the size/age
-    /// flush instead.
+    /// Flush all buffered rows now and wait until they are written (tests, shutdown).
     pub async fn flush(&self) -> Result<(), WriteError> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx
             .send(Msg::Flush(tx))
             .await
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))?;
-        rx.await
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+            .map_err(|_| drain_closed())?;
+        rx.await.map_err(|_| drain_closed())
     }
+
+    pub async fn start_flush(&self, token: Token) -> Result<(), WriteError> {
+        self.tx
+            .send(Msg::FlushFor(token))
+            .await
+            .map_err(|_| drain_closed())
+    }
+}
+
+fn drain_closed() -> WriteError {
+    WriteError::Write("buffered writer drain closed".into(), None)
 }
 
 #[derive(Default)]
@@ -285,6 +294,13 @@ async fn drain(
                     }
                     while writes.join_next().await.is_some() {}
                     let _ = ack.send(());
+                }
+                Some(Msg::FlushFor(token)) => {
+                    let holding = pending
+                        .extract_if(|_, buf| buf.tokens.iter().any(|t| Arc::ptr_eq(t, &token)));
+                    for (table, buf) in holding {
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
+                    }
                 }
                 Some(Msg::Submit(table, batch, token)) => {
                     let buf = pending.entry(table.clone()).or_default();
@@ -595,6 +611,47 @@ mod tests {
         );
     }
 
+    async fn flushed(token: &CountToken, count: usize, reason: &str) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while token.flushed.load(Ordering::SeqCst) < count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect(reason);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn start_flush_writes_only_the_tables_holding_the_tokens_rows() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 15,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1_000_000,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
+            CancellationToken::new(),
+        );
+        let first: Arc<CountToken> = Arc::new(CountToken::default());
+        let second: Arc<CountToken> = Arc::new(CountToken::default());
+
+        submit(&w, "gl_edge", batch(10), first.clone()).await;
+        submit(&w, "gl_definition", batch(10), second.clone()).await;
+        w.start_flush(first.clone()).await.unwrap();
+        flushed(&first, 1, "a finished producer's tables flush at once").await;
+
+        submit(&w, "gl_definition", batch(10), second.clone()).await;
+        flushed(
+            &second,
+            2,
+            "another producer's rows must still be pooled, so ten more rows reach max_rows",
+        )
+        .await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_cancelled_drain_flushes_without_waiting_for_the_age_cap() {
         let shutdown = CancellationToken::new();
@@ -614,23 +671,16 @@ mod tests {
 
         submit(&w, "gl_definition", batch(10), token.clone()).await;
         shutdown.cancel();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while token.flushed.load(Ordering::SeqCst) == 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("a shutdown must flush the buffered rows at once");
+        flushed(&token, 1, "a shutdown must flush the buffered rows at once").await;
         assert_eq!(token.failed.load(Ordering::SeqCst), 0);
 
         submit(&w, "gl_definition", batch(10), token.clone()).await;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while token.flushed.load(Ordering::SeqCst) < 2 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("rows submitted after the shutdown signal flush at once too");
+        flushed(
+            &token,
+            2,
+            "rows submitted after the shutdown signal flush at once too",
+        )
+        .await;
     }
 
     #[test]
