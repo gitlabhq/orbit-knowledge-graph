@@ -20,7 +20,7 @@ use crate::indexing_status::{
 };
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 
-const ROOTS_PER_QUERY: usize = 10_000;
+const ROOTS_PER_QUERY: usize = 1_000;
 const PHASES: [Phase; 4] = [
     Phase::NotStarted,
     Phase::Syncing,
