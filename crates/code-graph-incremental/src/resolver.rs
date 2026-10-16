@@ -1950,10 +1950,10 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 .filter(|c| c.is(C::Decorator))
                 .filter_map(|dec| dec.decorator_head())
             {
-                match resolve_chain(ctx, dec) {
-                    Some(t) if cross(t) => out.push(node.edge_to(t, EdgeKind::Calls)),
-                    Some(_) => {}
-                    None => out.extend(unbound(node, dec.sym())),
+                match (resolve_chain(ctx, dec), dec.sym_opt()) {
+                    (Some(t), _) if cross(t) => out.push(node.edge_to(t, EdgeKind::Calls)),
+                    (None, Some(sym)) => out.extend(unbound(node, sym)),
+                    _ => {}
                 }
             }
             let parents: Vec<Cursor> = node

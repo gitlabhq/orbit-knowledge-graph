@@ -1,0 +1,75 @@
+name: "Java: a qualified annotation resolves to the nested annotation type and guesses nothing when it cannot"
+
+fixtures:
+  - path: a/Outer.java
+    content: |
+      package a;
+
+      public class Outer {
+          public @interface Inner {}
+      }
+
+  - path: a/Same.java
+    content: |
+      package a;
+
+      public class Same {
+          @Outer.Inner
+          public void qualified() {}
+      }
+
+  - path: c/Helper.java
+    content: |
+      package c;
+
+      public class Helper {}
+
+  - path: b/Service.java
+    content: |
+      package b;
+
+      import a.Outer;
+      import c.*;
+
+      public class Service {
+          @Outer.Inner
+          public void imported() {}
+
+          @Missing.Thing
+          public void unresolved() {}
+      }
+
+tests:
+  - name: a qualified annotation in the same package reaches the nested annotation type
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'qualified'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "a.Outer.Inner" } }
+
+  - name: a qualified annotation through an explicit import reaches the nested annotation type
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'imported'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "a.Outer.Inner" } }
+
+  - name: an unresolved qualified annotation takes no wildcard import as a guess
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.name = 'unresolved'
+      RETURN symbol.import_path AS path
+    assert:
+      - { row_count: 0 }
+
+  - name: an unresolved qualified annotation reaches no definition
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'unresolved'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 0 }

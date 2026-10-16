@@ -87,6 +87,20 @@ fixtures:
           def root_validator(cls, values):
               pass
 
+
+      class Prop:
+          @property
+          def x(self):
+              return 1
+
+          @x.setter
+          def x(self, value):
+              pass
+
+          @x.deleter
+          def x(self):
+              pass
+
 tests:
   - name: a member decorator on an instance names the method, not the class
     query: |
@@ -151,3 +165,13 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "tools.root_validator" } }
+
+  - name: a property setter names the getter and a deleter names the setter, with no self edge
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.Prop.x' AND callee.fqn = 'main.Prop.x'
+      RETURN caller.start_line AS from, callee.start_line AS to
+    assert:
+      - { row_count: 2 }
+      - { row: { from: 74, to: 70 } }
+      - { row: { from: 78, to: 74 } }
