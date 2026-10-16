@@ -695,7 +695,7 @@ impl<'t> Fold<'t> {
     }
 
     fn field_in(&self, target: Cursor<'t>) -> u32 {
-        let found = crate::tree::field_target(target);
+        let found = self.tree.cursor(self.sibling_member(target.index(), true));
         if found.is_field() {
             return found.index();
         }
