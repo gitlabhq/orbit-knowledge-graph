@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use crate::canonical::Canonical as C;
+use crate::canonical::{Canonical as C, is_canonical};
 use crate::constants::{PATH_SEP, RED_ZONE, ROOT_PATH, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::file_tree::{Distance, LookupConfig, Roots};
@@ -2119,10 +2119,11 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     let outer = CUT.replace(false);
     let found = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
         chain(ctx, c, &|r| {
+            let local =
+                || enclosing_type(ctx, r, r.sym()).or_else(|| visible_type(ctx, r.fi(), r.sym()));
             resolve_reference(ctx, r)
                 .or_else(|| enclosing_alias(ctx, r))
-                .or_else(|| enclosing_type(ctx, r, r.sym()))
-                .or_else(|| visible_type(ctx, r.fi(), r.sym()).filter(|_| !imported_inline(r)))
+                .or_else(|| (!imported_inline(r)).then(local).flatten())
         })
     });
     if !CUT.get() {
@@ -2172,14 +2173,17 @@ fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>>
 }
 
 fn enclosing_type<'a>(ctx: &'a ResolveCtx, at: Cursor<'a>, sym: u32) -> Option<Cursor<'a>> {
-    let mut via = at;
-    at.ancestors().find_map(|up| {
-        let header =
-            crate::canonical::is_canonical(via.kind()) && !via.is(C::Def) && !via.is(C::Scope);
-        via = up;
-        let members = (up.is(C::Def) && !header).then(|| members_of(ctx, up))?;
-        let member = up.jump(up.fi(), *members.get(&sym)?);
-        (member.is_class() && !member.has(C::ImplBlock)).then_some(member)
+    let path = std::iter::once(at).chain(at.ancestors());
+    path.tuple_windows().find_map(|(via, up)| {
+        let header = is_canonical(via.kind()) && !via.is(C::Def) && !via.is(C::Scope);
+        if !up.is(C::Def) || header {
+            return None;
+        }
+        let plain =
+            |node| Some(up.jump(up.fi(), node)).filter(|d| d.is_class() && !d.has(C::ImplBlock));
+        plain(up.index())
+            .filter(|_| up.child_sym(C::DefName) == Some(sym))
+            .or_else(|| plain(*members_of(ctx, up).get(&sym)?))
     })
 }
 

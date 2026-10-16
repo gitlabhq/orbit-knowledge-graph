@@ -53,6 +53,19 @@ fixtures:
               times
           }
 
+          pub fn shadowed(self) -> std::fs::FileTimes {
+              struct FileTimes;
+
+              impl FileTimes {
+                  fn set_accessed(self, _t: SystemTime) -> Self {
+                      self
+                  }
+              }
+
+              let times = std::fs::FileTimes::new();
+              times.set_accessed(SystemTime::now())
+          }
+
           pub fn local(self) -> Mark {
               let mark = Mark::new();
               mark.set_accessed(SystemTime::now())
@@ -63,7 +76,7 @@ tests:
   - name: "the std value calls none of the local methods"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.name IN ['plain', 'guarded']
+      WHERE caller.name IN ['plain', 'guarded', 'shadowed']
       RETURN caller.name AS caller, callee.name AS callee
     assert:
       - { row_count: 0 }

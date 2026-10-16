@@ -1,0 +1,51 @@
+name: "Java: a nested class next to a member of its name"
+
+fixtures:
+  - path: Main.java
+    content: |
+      class Main {
+          static class Box {
+              Box() {}
+
+              void b() {}
+
+              Box make() {
+                  return new Box();
+              }
+
+              void go() {
+                  make().b();
+              }
+          }
+
+          Pair Pair() {
+              return new Pair();
+          }
+
+          static class Pair {
+              void p() {}
+          }
+
+          void goPair() {
+              Pair().p();
+          }
+      }
+
+tests:
+  - name: a constructor of the nested class's name does not hide the class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.Box.go' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Box.b"] } }
+
+  # The member index keeps the first def of a name, here the method, so the class declared after it is not found.
+  - name: a method of the nested class's name declared before the class
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.goPair' AND t.name = 'p'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Pair.p"] } }
