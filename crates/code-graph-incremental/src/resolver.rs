@@ -592,9 +592,7 @@ fn expand(
     for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
-    ctx.chains
-        .iter_mut()
-        .for_each(|memo| memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear());
+    ctx.clear_memos();
     cross_edges.extend(&wave1);
     ctx.run.check()?;
 
@@ -688,12 +686,7 @@ fn expand(
                     .or_insert(e.to());
             }
         }
-        for memo in &mut ctx.producer_classes {
-            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
-        }
-        for memo in &mut ctx.site_classes {
-            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
-        }
+        ctx.clear_memos();
         wave = wave
             .par_iter()
             .flat_map(|ce| resolve_type_edges(ctx, ce))
@@ -795,6 +788,18 @@ impl ResolveCtx<'_> {
             .flat_map(move |n| self.imports_to.get(&(fi as u32, n.index())))
             .flatten()
             .copied()
+    }
+
+    fn clear_memos(&mut self) {
+        for memo in &mut self.chains {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        for memo in &mut self.producer_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        for memo in &mut self.site_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
     }
 }
 

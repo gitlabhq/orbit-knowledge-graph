@@ -477,9 +477,9 @@ fn a_join_chain_resolves_in_work_linear_in_its_reaching_pairs() {
         .build()
         .unwrap();
     let best = |joins| (0..3).map(|_| resolve_ms(joins)).fold(f64::MAX, f64::min);
-    let (small, large) = pool.install(|| (best(300), best(1200)));
+    let (small, large) = pool.install(|| (best(200), best(1600)));
     assert!(
-        large < 32.0 * small.max(5.0),
-        "resolving 4x the joins went from {small:.0} ms to {large:.0} ms"
+        large < 128.0 * small.max(5.0),
+        "resolving 8x the joins went from {small:.0} ms to {large:.0} ms"
     );
 }
