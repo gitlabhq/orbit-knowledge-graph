@@ -85,6 +85,18 @@ tests:
       - { row_count: 3 }
       - { column_values: { field: caller, values: ["assign_try", "let_try", "reset"] } }
 
+  - name: "a call behind a question mark types the local"
+    # Known gap: the local takes the callee's return type Result<Item, ()>, the wrapper, not its argument, so item.touch() has no edge.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "let_try"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["touch", "try_pick"] } }
+
   - name: "a call behind an await links and types the local"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

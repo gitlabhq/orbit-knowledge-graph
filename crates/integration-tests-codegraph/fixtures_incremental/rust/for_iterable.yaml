@@ -66,6 +66,13 @@ fixtures:
           }
       }
 
+      pub fn loop_shadows_outer(item: &Other, items: Vec<Item>) {
+          for item in items {
+              item.touch();
+          }
+          item.touch();
+      }
+
       pub fn loop_over_constructors() {
           for item in [pick(), pick_other()] {
               item.touch();
@@ -96,6 +103,15 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["pick", "pick_other"] } }
+
+  - name: "the loop variable does not leak past the loop"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "loop_shadows_outer" AND callee.name = "touch"
+      RETURN owner.name AS owner
+    assert:
+      - { row_count: 1 }
+      - { row: { owner: Other } }
 
   - name: "array elements type the loop variable"
     # Known gap on this branch: the loop variable takes the element types of an array iterable only with the loop element typing of the loop-phi producers branch (G32); the shape here matches it.

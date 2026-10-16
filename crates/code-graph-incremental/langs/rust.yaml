@@ -313,7 +313,7 @@ stages:
       - match: '(match_expression value: $V body: (match_block $$$ARMS:__ssa_arm))'
         replace: '(__ssa_branch $V $$$ARMS)'
       - match: '(for_expression pattern: $N:identifier value: $V body: $B)'
-        replace: '(__ssa_loop $V (__binding @$N (__declaration)) $B)'
+        replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
       - match: '(for_expression value: $V body: $B)'
         replace: '(__ssa_loop $V $B)'
       - match: '(while_expression body: $B)'
