@@ -1,0 +1,31 @@
+name: "JavaScript: extends reaches the class definition"
+pipeline: js
+
+fixtures:
+  - path: main.js
+    content: |
+      class Animal {
+          greet() { return "hi"; }
+      }
+
+      class Dog extends Animal {
+          fetch() { this.greet(); }
+      }
+
+tests:
+  - name: extends becomes an Extends edge
+    query: |
+      MATCH (c:Definition)-[:EXTENDS]->(p:Definition)
+      RETURN c.name AS child, p.name AS parent
+    assert:
+      - { row_count: 1 }
+      - { row: { child: "Dog", parent: "Animal" } }
+
+  - name: a call through the inherited method links
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'fetch'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "greet" } }

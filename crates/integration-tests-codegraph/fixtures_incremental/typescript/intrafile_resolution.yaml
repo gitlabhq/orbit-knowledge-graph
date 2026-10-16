@@ -59,13 +59,15 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: Puppy.play() does not resolve inherited speak via this
+  - name: Puppy.play() resolves inherited speak via this
+    description: "Puppy extends Dog, so this.speak() in Puppy.play() is Dog.speak; the gap closed when extends reached the class definition."
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'play' AND callee.name = 'speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { caller: "Puppy::play", callee: "Dog::speak" } }
 
   - name: unused has no incoming call edges
     query: |

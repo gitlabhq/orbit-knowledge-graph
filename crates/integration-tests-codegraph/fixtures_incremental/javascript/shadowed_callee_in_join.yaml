@@ -7,7 +7,9 @@ fixtures:
         bar() {}
       }
 
-      class Foo2 extends Foo {}
+      class Foo2 {
+        bar() {}
+      }
 
       function make() {
         return new Foo();
@@ -35,10 +37,20 @@ fixtures:
       }
 
 tests:
-  - name: "f, whose make is a parameter, does not call bar through the join"
+  - name: "f, whose make is a parameter, calls only the bar of the class it constructs"
+    description: "Foo2 does not extend Foo and has its own bar. With extends, f's join would resolve bar through the common class Foo, which is the language value and not the shadowing this suite pins."
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'f' AND callee.name = 'bar'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Foo2::bar" } }
+
+  - name: "f does not call the top-level make its parameter hides"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f' AND callee.name = 'make'
       RETURN caller.name AS caller
     assert:
       - { empty: true }
