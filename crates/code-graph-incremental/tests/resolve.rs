@@ -479,12 +479,27 @@ fn reindex_files(
     root: &Path,
     files: &[(&str, &str)],
 ) -> (Vec<String>, Resolved) {
+    reindex_changes(env, state, root, files, &[])
+}
+
+/// Writes `files`, deletes `removed`, and reindexes both sets.
+fn reindex_changes(
+    env: &Env,
+    state: State,
+    root: &Path,
+    files: &[(&str, &str)],
+    removed: &[&str],
+) -> (Vec<String>, Resolved) {
     write_tree(root, files);
+    for path in removed {
+        std::fs::remove_file(root.join(path)).unwrap();
+    }
     let changes = common::load(orbit_utils::vfs::sources::Diff {
         root,
         paths: files.iter().map(|(path, _)| (*path).into()).collect(),
     });
-    let (context, resolved) = templates::reindex(Context::new(env, changes), state, vec![])
+    let removed = removed.iter().map(|path| (*path).to_string()).collect();
+    let (context, resolved) = templates::reindex(Context::new(env, changes), state, removed)
         .unwrap()
         .finish();
     assert!(context.report.skipped.is_empty());
@@ -616,8 +631,9 @@ const STRINGS: &str = "package com.acme.base;\npublic final class Strings {}\n";
 
 /// A Java tree with a package copied under two source roots, a nested-class
 /// import, and a package glob: every importer of the package in the own
-/// root moves to its own copy when that copy appears, and a file added to a
-/// package re-resolves only the importers that use a name it declares.
+/// root moves to its own copy when that copy appears, and a file added to,
+/// removed from, or renamed in a package re-resolves only the importers that
+/// use a name it declares.
 #[test]
 fn java_two_root_tree_resolves_once_and_stays_resolved() {
     let repo = tempfile::tempdir().unwrap();
@@ -755,8 +771,48 @@ fn java_two_root_tree_resolves_once_and_stays_resolved() {
     );
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
-        calls(&[own_copy, later])
+        calls(&[own_copy.clone(), later.clone()])
     );
+
+    let (_, resolved) = reindex_changes(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[],
+        &["lib/src/com/acme/base/Extra.java"],
+    );
+    assert!(resolved_paths(&resolved).is_empty());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        calls(&[own_copy.clone(), later.clone()])
+    );
+
+    let (_, resolved) = reindex_changes(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[(
+            "lib/src/com/acme/util/Naming.java",
+            "package com.acme.util;\npublic final class Names { public static void name() {} }\n",
+        )],
+        &["lib/src/com/acme/util/Names.java"],
+    );
+    assert_eq!(
+        resolved_paths(&resolved),
+        [
+            "lib/src/com/acme/app/Worker.java",
+            "lib/src/com/acme/util/Naming.java"
+        ]
+    );
+    let renamed = pair(
+        "lib/src/com/acme/app/Worker.java:work",
+        "lib/src/com/acme/util/Naming.java:name",
+    );
+    let mut expected = calls(&[own_copy, later]);
+    expected.retain(|edge| *edge != names);
+    expected.push(renamed);
+    expected.sort();
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), expected);
 }
 
 /// Chained Scala package clauses form one package: a file sees its own and

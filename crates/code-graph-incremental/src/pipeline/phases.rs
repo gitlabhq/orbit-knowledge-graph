@@ -109,7 +109,15 @@ impl Phase<ReindexInput> for Remap {
             .map(String::as_str)
             .chain(context.repository.files().map(|f| f.path.as_ref()))
             .collect();
-        let dirty = remap(&mut state, &old_labels, &dirty_labels);
+        let removed_labels: FxHashSet<&str> = removed.iter().map(String::as_str).collect();
+        let exports_key = crate::tags::ReservedTags::new(&context.env.lang).exports;
+        let dirty = remap(
+            &mut state,
+            &old_labels,
+            &dirty_labels,
+            &removed_labels,
+            exports_key,
+        );
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
@@ -119,8 +127,27 @@ impl Phase<ReindexInput> for Remap {
 
 /// `Parse` entries this crate has a grammar for become the lazy workset,
 /// Drops the dirty trees, renumbers what remains, and returns the retained
-/// files whose resolution depended on a dropped one.
-fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<u32> {
+/// importers of a modified file. The importers of a removed file wait for
+/// the resolver's own stale check, which knows the names that file declared.
+fn remap(
+    state: &mut State,
+    old_labels: &[String],
+    dirty: &FxHashSet<&str>,
+    removed: &FxHashSet<&str>,
+    exports_key: u32,
+) -> FxHashSet<u32> {
+    let declared_by_removed: FxHashMap<u32, FxHashSet<u32>> = state
+        .trees
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| removed.contains(t.label.as_str()))
+        .map(|(i, t)| {
+            (
+                u32::try_from(i).expect("file index exceeds u32"),
+                crate::resolver::declared_names(t, exports_key),
+            )
+        })
+        .collect();
     state.trees.retain(|t| !dirty.contains(t.label.as_str()));
 
     let label_to_fi: FxHashMap<&str, u32> = state
@@ -159,17 +186,18 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         .filter(|(_, l)| dirty.contains(l.as_str()))
         .map(|(i, _)| u32::try_from(i).expect("file index exceeds u32"))
         .collect();
-    let reverse_dirty: FxHashSet<u32> = state
+    let was_removed = |old_fi: u32| removed.contains(old_labels[old_fi as usize].as_str());
+    let dependents: FxHashSet<u32> = state
         .resolver
         .reqs()
         .iter()
-        .filter(|r| old_dirty_fis.contains(&r.target_fi))
+        .filter(|r| old_dirty_fis.contains(&r.target_fi) && !was_removed(r.target_fi))
         .filter_map(|r| label_to_fi.get(old_labels[r.fi as usize].as_str()))
         .copied()
         .collect();
-
-    let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
-    dependents.extend(reverse_dirty);
+    state
+        .resolver
+        .remap(old_labels, &label_to_fi, &declared_by_removed);
     dependents
 }
 
