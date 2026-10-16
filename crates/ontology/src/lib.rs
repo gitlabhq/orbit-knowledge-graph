@@ -2308,6 +2308,21 @@ mod tests {
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
+    fn assert_redaction(
+        ontology: &Ontology,
+        entity: &str,
+        resource_type: &str,
+        id_column: &str,
+        ability: &str,
+    ) {
+        let config = ontology
+            .get_redaction_config(entity)
+            .unwrap_or_else(|| panic!("{entity} should have redaction config"));
+        assert_eq!(config.resource_type, resource_type);
+        assert_eq!(config.id_column, id_column);
+        assert_eq!(config.ability, ability);
+    }
+
     #[test]
     fn agent_session_is_project_delegated_and_exposes_only_allowlisted_properties() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
