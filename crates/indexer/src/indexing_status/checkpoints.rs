@@ -1,0 +1,122 @@
+use std::collections::HashMap;
+
+use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, TimeDelta, Utc};
+use clickhouse_client::{ArrowQuery, FromArrowColumn};
+use ontology::pipelines::PipelineDescriptor;
+use orbit_migrations::execute::CHECKPOINT_TABLE;
+use orbit_migrations::version::prefixed_table_name;
+
+use super::phase::Phase;
+use crate::checkpoint::{CheckpointError, NAMESPACE_KEY_PREFIX};
+
+const MAX_SDLC_ATTEMPTS: i64 = 5;
+// The hourly sweep retries a dead run, so wait for two sweeps.
+const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
+
+// Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
+pub const PLAN_CHECKPOINTS_SQL: &str = "\
+SELECT root, plan, \
+       maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \
+       argMax(attempts, _version) AS attempts, \
+       max(_version) AS written_at \
+  FROM (SELECT *, \
+               toInt64OrZero(splitByChar('.', key)[2]) AS root, \
+               splitByChar('.', key)[3] AS plan, \
+               maxIf(_version, _deleted) OVER (PARTITION BY key) AS tombstoned_at \
+          FROM {table:Identifier} \
+         WHERE startsWith(key, {namespace_prefix:String}) \
+           AND length(splitByChar('.', key)) = 3 \
+           AND root IN {roots:Array(Int64)}) \
+ GROUP BY key, root, plan \
+HAVING argMax(_deleted, _version) = false";
+
+struct PlanCheckpoint {
+    indexed_at: Option<DateTime<Utc>>,
+    attempts: i64,
+    written_at: DateTime<Utc>,
+}
+
+#[derive(Default)]
+pub struct PlanCheckpoints {
+    by_plan: HashMap<String, PlanCheckpoint>,
+}
+
+impl PlanCheckpoints {
+    pub fn get_plan_phase(&self, plan: &str, now: DateTime<Utc>) -> Phase {
+        let Some(checkpoint) = self.by_plan.get(plan) else {
+            return Phase::NotStarted;
+        };
+
+        if checkpoint.indexed_at.is_some() {
+            Phase::Ready
+        } else if checkpoint.attempts >= MAX_SDLC_ATTEMPTS
+            || now - checkpoint.written_at > STALE_AFTER
+        {
+            Phase::Error
+        } else {
+            Phase::Syncing
+        }
+    }
+
+    pub fn get_completed_at(&self, plan: &str) -> Option<DateTime<Utc>> {
+        self.by_plan.get(plan)?.indexed_at
+    }
+
+    pub fn get_last_completed_at(&self, plans: &[PipelineDescriptor]) -> Option<DateTime<Utc>> {
+        let indexed_at: Option<Vec<DateTime<Utc>>> = plans
+            .iter()
+            .map(|plan| self.get_completed_at(&plan.name))
+            .collect();
+
+        indexed_at?.into_iter().min()
+    }
+}
+
+pub fn bind_plan_checkpoints(query: ArrowQuery, version: u32, roots: &[i64]) -> ArrowQuery {
+    query
+        .param("table", prefixed_table_name(CHECKPOINT_TABLE, version))
+        .param("namespace_prefix", NAMESPACE_KEY_PREFIX)
+        .param("roots", roots)
+}
+
+pub fn parse_plan_checkpoints(
+    roots: &[i64],
+    batches: &[RecordBatch],
+) -> Result<HashMap<i64, PlanCheckpoints>, CheckpointError> {
+    let mut checkpoints: HashMap<i64, PlanCheckpoints> = roots
+        .iter()
+        .map(|root| (*root, PlanCheckpoints::default()))
+        .collect();
+
+    let roots = i64::extract_column(batches, 0).map_err(extraction_error)?;
+    let plans = String::extract_column(batches, 1).map_err(extraction_error)?;
+    let indexed_at =
+        Option::<DateTime<Utc>>::extract_column(batches, 2).map_err(extraction_error)?;
+    let attempts = i64::extract_column(batches, 3).map_err(extraction_error)?;
+    let written_at = DateTime::<Utc>::extract_column(batches, 4).map_err(extraction_error)?;
+
+    for ((((root, plan), indexed_at), attempts), written_at) in roots
+        .into_iter()
+        .zip(plans)
+        .zip(indexed_at)
+        .zip(attempts)
+        .zip(written_at)
+    {
+        let checkpoint = PlanCheckpoint {
+            indexed_at,
+            attempts,
+            written_at,
+        };
+        checkpoints
+            .entry(root)
+            .or_default()
+            .by_plan
+            .insert(plan, checkpoint);
+    }
+    Ok(checkpoints)
+}
+
+fn extraction_error(error: impl std::fmt::Display) -> CheckpointError {
+    CheckpointError::Store(error.to_string())
+}

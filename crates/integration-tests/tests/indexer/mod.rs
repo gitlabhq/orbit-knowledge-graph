@@ -4,6 +4,7 @@ pub(crate) mod common;
 mod dispatcher;
 mod engine;
 mod namespace_deletion;
+mod namespace_freshness;
 mod nats;
 mod nats_tls;
 mod schema;

@@ -6,11 +6,11 @@ use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;
 
-use super::phase::Phase;
 use crate::status_query::{
     bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error,
 };
+use indexer::indexing_status::Phase;
 
 pub(super) const PROJECT_NODE: &str = "Project";
 const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";

@@ -29,6 +29,7 @@ pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
 pub mod engine;
+pub mod indexing_status;
 pub mod locking;
 pub mod modules;
 pub mod nats;
@@ -66,8 +67,8 @@ use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
-    TableCleanup,
+    NamespaceDeletionScheduler, NamespaceDispatcher, NamespaceFreshness, Scheduled,
+    StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -369,6 +370,12 @@ pub async fn run_dispatcher(
             ))),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
+        )),
+        Box::new(NamespaceFreshness::new(
+            clients.graph.clone(),
+            clients.datalake.clone(),
+            catalog.clone(),
+            config.schedule.tasks.namespace_freshness.clone(),
         )),
         Box::new(MigrationCompletionChecker::new(
             clients.graph.clone(),

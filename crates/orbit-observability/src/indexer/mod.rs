@@ -1,6 +1,7 @@
 pub mod code;
 pub mod deletion;
 pub mod etl;
+pub mod freshness;
 pub mod migration;
 pub mod nats;
 pub mod scheduler;

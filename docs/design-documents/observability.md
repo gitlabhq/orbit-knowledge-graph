@@ -106,6 +106,16 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.indexer.namespace_deletion.table.duration` | Histogram | s | | Duration of a single table's soft-delete INSERT-SELECT |
 | `gkg.indexer.namespace_deletion.table.errors` | Counter | count | `table` | Total per-table deletion failures |
 
+*Namespace freshness metrics:*
+
+The dispatcher reads the served schema version's checkpoints for every enabled namespace, using the same phase rules as the indexing status view. A replica exports these gauges only while its last snapshot is younger than three task intervals, so a missing series means no replica refreshed them.
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.indexer.freshness.namespaces` | Observable gauge | count | `phase` (not_started/syncing/ready/error) | Enabled namespaces by SDLC indexing phase on the served schema version |
+| `gkg.indexer.freshness.ready.namespaces` | Observable gauge | count | `max_age` (1h/2h/4h/8h/16h) | Ready namespaces whose least recent SDLC plan completed within `max_age` |
+| `gkg.indexer.freshness.plan.oldest.age` | Observable gauge | s | `plan` | Seconds since the least recent completion of each namespaced SDLC plan across enabled namespaces |
+
 *Schema migration metrics:*
 
 | Metric | Type | Unit | Labels | Description |

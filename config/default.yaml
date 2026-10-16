@@ -167,6 +167,8 @@ schedule:
     stale-edge-reconciliation:
       cron: "0 */30 * * * *"
       lookback_secs: 3600
+    namespace-freshness:
+      cron: "0 */5 * * * *"
 
 health_check:
   bind_address: "0.0.0.0:4201"

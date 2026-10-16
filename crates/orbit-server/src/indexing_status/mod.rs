@@ -1,6 +1,5 @@
 mod checkpoints;
 mod domains;
-mod phase;
 mod projects;
 mod response;
 
@@ -15,14 +14,13 @@ use orbit_utils::traversal_path::TraversalPath;
 use tracing::warn;
 
 pub use self::domains::{DomainStatus, EntityStatus};
-pub use self::phase::Phase;
 pub use self::projects::ProjectCoverage;
 pub use self::response::{build_indexing_status_response, format_timestamp};
+pub use indexer::indexing_status::Phase;
 
-use self::checkpoints::PlanCheckpoints;
-use self::phase::combine_phases;
 use self::projects::PROJECT_NODE;
 use crate::active_schema::SchemaSnapshot;
+use indexer::indexing_status::{PlanCheckpoints, combine_phases};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopeStatus {

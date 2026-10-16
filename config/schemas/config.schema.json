@@ -858,6 +858,9 @@
         },
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig"
+        },
+        "namespace-freshness": {
+          "$ref": "#/$defs/ScheduleConfiguration"
         }
       },
       "additionalProperties": false,
@@ -869,7 +872,8 @@
         "table-cleanup",
         "namespace-deletion",
         "migration-completion",
-        "stale-edge-reconciliation"
+        "stale-edge-reconciliation",
+        "namespace-freshness"
       ]
     },
     "GlobalDispatcherConfig": {
@@ -1001,6 +1005,19 @@
       "required": [
         "cron",
         "lookback_secs"
+      ]
+    },
+    "ScheduleConfiguration": {
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "$ref": "#/$defs/CronSchedule"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cron"
       ]
     },
     "HealthCheckConfig": {

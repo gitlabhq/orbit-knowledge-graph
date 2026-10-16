@@ -753,6 +753,40 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.freshness.namespaces",
+      "prom_name": "gkg_indexer_freshness_namespaces",
+      "description": "Enabled namespaces by SDLC indexing phase on the served schema version.",
+      "kind": "observable_gauge",
+      "labels": [
+        "phase"
+      ],
+      "stability": "stable",
+      "domain": "indexer.freshness"
+    },
+    {
+      "otel_name": "gkg.indexer.freshness.plan.oldest.age",
+      "prom_name": "gkg_indexer_freshness_plan_oldest_age_seconds",
+      "description": "Seconds since the least recent completion of each namespaced SDLC plan across enabled namespaces.",
+      "kind": "observable_gauge",
+      "unit": "s",
+      "labels": [
+        "plan"
+      ],
+      "stability": "stable",
+      "domain": "indexer.freshness"
+    },
+    {
+      "otel_name": "gkg.indexer.freshness.ready.namespaces",
+      "prom_name": "gkg_indexer_freshness_ready_namespaces",
+      "description": "Ready namespaces whose least recent SDLC plan completed within max_age.",
+      "kind": "observable_gauge",
+      "labels": [
+        "max_age"
+      ],
+      "stability": "stable",
+      "domain": "indexer.freshness"
+    },
+    {
       "otel_name": "gkg.indexer.max_deliveries.exhausted",
       "prom_name": "gkg_indexer_max_deliveries_exhausted_total",
       "description": "Messages deleted after JetStream exhausted max_deliver, labelled by stream and consumer.",

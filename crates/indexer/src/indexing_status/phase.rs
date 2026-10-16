@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Phase {
     Unknown,
     NotStarted,
@@ -10,6 +10,16 @@ pub enum Phase {
 impl Phase {
     pub fn is_settled(self) -> bool {
         matches!(self, Phase::Ready | Phase::Error)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::Unknown => "unknown",
+            Phase::NotStarted => "not_started",
+            Phase::Syncing => "syncing",
+            Phase::Ready => "ready",
+            Phase::Error => "error",
+        }
     }
 }
 

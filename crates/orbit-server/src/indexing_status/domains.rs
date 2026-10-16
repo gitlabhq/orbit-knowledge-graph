@@ -1,7 +1,7 @@
 use ontology::pipelines::PipelineDescriptor;
 use ontology::{DomainInfo, NodeEntity, Ontology};
 
-use super::phase::{Phase, combine_phases};
+use indexer::indexing_status::{Phase, combine_phases};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DomainStatus {
