@@ -334,6 +334,10 @@ for `var`. Python assignment rules use function labels. Rust declarations take
 effect in source order. Scope labels are YAML symbols; the engine does not branch
 on language names.
 
+A `__qualifier` marker on the object of a member names a module or type, as in
+`ptr::write`. The linker resolves that object through declared items and imports
+only. A parameter or local with the same name does not shadow it.
+
 C and C++ compound statements, Java and C# blocks, and Lua blocks retain lexical boundaries. Their
 local declarations introduce bindings independently of assignments to outer names.
 JavaScript-family iteration rules retain the source expression and bind the loop

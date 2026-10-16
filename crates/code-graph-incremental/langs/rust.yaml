@@ -109,7 +109,7 @@ stages:
         replace: '(__call (__callee @$N) $B)'
       # `let f = Service::new;` aliases the associated function
       - match: '(let_declaration pattern: $N value: (scoped_identifier path: $P name: $M:(identifier "/^[a-z]/")))'
-        replace: '(__binding @$N (__declaration) (__rhs (__member @$M (__object @$P))))'
+        replace: '(__binding @$N (__declaration) (__rhs (__member @$M (__object @$P (__qualifier)))))'
 
       # self::f() is the local scope
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
@@ -121,12 +121,12 @@ stages:
         replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
       - match: '(call_expression function: (scoped_identifier path: (generic_type type: $T) name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T (__qualifier)))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))'
-        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch @$P (__object @$R)))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P (__qualifier)) (__dispatch @$P (__object @$R)))) $A)'
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P (__qualifier)))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
 
