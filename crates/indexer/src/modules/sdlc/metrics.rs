@@ -96,8 +96,8 @@ impl SdlcMetrics {
         );
     }
 
-    pub(in crate::modules::sdlc) fn record_change_delay(&self, dispatched_at: &DateTime<Utc>) {
-        self.change_delay.record(seconds_since(dispatched_at), &[]);
+    pub(in crate::modules::sdlc) fn record_change_delay(&self, oldest_change: &DateTime<Utc>) {
+        self.change_delay.record(seconds_since(oldest_change), &[]);
     }
 }
 

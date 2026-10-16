@@ -297,6 +297,8 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
+Every extract also selects the row watermark as `_watermark`. Transforms ignore it, and the run keeps the oldest value it read. An incremental run outside a migration campaign reports that change's wait as the change-delay histogram.
+
 Paging counts *output* rows (points 3 and 8), so extracts must emit at least one output row per driver row. A join that drops driver rows silently truncates the window (#1064). So use `LEFT JOIN` and drop unmatched rows in the transform.
 
 On a backfill (no parent checkpoint) a plan that probes above `PARTITION_MIN_ROWS` runs one of these loops per key range concurrently. This runs under the single worker-pool slot the handler holds. The page budget is divided across those ranges, so the slot holds one plan's worth of pages rather than one per range. It is floored at the smallest page the config layer derives. Below that, the extra round trips cost more than the smaller pages save.
@@ -312,7 +314,8 @@ SELECT
     title,
     traversal_path,
     _siphon_replicated_at AS _version,
-    _siphon_deleted AS _deleted
+    _siphon_deleted AS _deleted,
+    _siphon_watermark AS _watermark
 FROM sdlc.issues
 WHERE _siphon_watermark > {last_watermark:String}
   AND _siphon_watermark <= {watermark:String}

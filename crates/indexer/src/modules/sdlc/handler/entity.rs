@@ -253,8 +253,11 @@ impl EntityHandler {
 
         match &result {
             Ok(stats) => {
-                if mode == IndexingMode::Incremental && request.campaign_id.is_none() {
-                    self.metrics.record_change_delay(&window.target);
+                if let Some(oldest_change) = stats.oldest_watermark
+                    && mode == IndexingMode::Incremental
+                    && request.campaign_id.is_none()
+                {
+                    self.metrics.record_change_delay(&oldest_change);
                 }
                 debug!(
                     read_rows = stats.read_rows,
@@ -454,7 +457,7 @@ mod tests {
 
     use crate::modules::sdlc::plan::build_plans;
     use crate::modules::sdlc::test_helpers::{
-        EmptyDatalake, MockCheckpointStore, RecordedMetrics, test_metrics,
+        ChangedRowDatalake, EmptyDatalake, MockCheckpointStore, RecordedMetrics, test_metrics,
     };
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
@@ -475,6 +478,7 @@ mod tests {
         build_handler_with(
             entity_name,
             scope,
+            Arc::new(EmptyDatalake),
             Arc::new(MockCheckpointStore::default()),
             test_metrics(),
         )
@@ -483,6 +487,7 @@ mod tests {
     fn build_handler_with(
         entity_name: &str,
         scope: EtlScope,
+        datalake: Arc<dyn DatalakeQuery>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
     ) -> EntityHandler {
@@ -505,7 +510,6 @@ mod tests {
             .find(|p| p.name == entity_name)
             .unwrap_or_else(|| panic!("entity plan not found: {entity_name}"));
 
-        let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
         let pipeline = Arc::new(Pipeline::new(
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
@@ -565,6 +569,7 @@ mod tests {
     }
 
     async fn change_delay_observations(
+        datalake: impl DatalakeQuery + 'static,
         checkpoint_store: MockCheckpointStore,
         request: serde_json::Value,
     ) -> u64 {
@@ -572,6 +577,7 @@ mod tests {
         let handler = build_handler_with(
             "MergeRequest",
             EtlScope::Namespaced,
+            Arc::new(datalake),
             Arc::new(checkpoint_store),
             recorded.sdlc_metrics(),
         );
@@ -579,6 +585,10 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&request.to_string());
         handler.handle(handler_context(), envelope).await.unwrap();
         recorded.histogram_count("gkg.indexer.sdlc.change.delay")
+    }
+
+    fn changed_row() -> ChangedRowDatalake {
+        ChangedRowDatalake::at(ts("2024-01-20T23:59:30Z"))
     }
 
     fn completed_store() -> MockCheckpointStore {
@@ -595,25 +605,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn incremental_run_records_change_delay() {
+    async fn incremental_run_that_reads_changes_records_change_delay() {
         let observations =
-            change_delay_observations(completed_store(), namespace_request(None)).await;
+            change_delay_observations(changed_row(), completed_store(), namespace_request(None))
+                .await;
         assert_eq!(observations, 1);
     }
 
     #[tokio::test]
-    async fn full_load_does_not_record_change_delay() {
+    async fn incremental_run_without_changes_does_not_record_change_delay() {
         let observations =
-            change_delay_observations(MockCheckpointStore::default(), namespace_request(None))
+            change_delay_observations(EmptyDatalake, completed_store(), namespace_request(None))
                 .await;
         assert_eq!(observations, 0);
     }
 
     #[tokio::test]
+    async fn full_load_does_not_record_change_delay() {
+        let observations = change_delay_observations(
+            changed_row(),
+            MockCheckpointStore::default(),
+            namespace_request(None),
+        )
+        .await;
+        assert_eq!(observations, 0);
+    }
+
+    #[tokio::test]
     async fn campaign_run_does_not_record_change_delay() {
-        let observations =
-            change_delay_observations(completed_store(), namespace_request(Some("campaign-1")))
-                .await;
+        let observations = change_delay_observations(
+            changed_row(),
+            completed_store(),
+            namespace_request(Some("campaign-1")),
+        )
+        .await;
         assert_eq!(observations, 0);
     }
 

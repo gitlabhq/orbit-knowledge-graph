@@ -4,6 +4,9 @@ use futures::stream;
 
 use std::sync::Arc;
 
+use arrow::array::{BooleanArray, Int64Array, StringArray, TimestampMicrosecondArray};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use ontology::constants::WATERMARK_COLUMN;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
@@ -113,6 +116,61 @@ impl DatalakeQuery for EmptyDatalake {
         _max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError> {
         Ok(vec![])
+    }
+}
+
+/// Returns one changed row shaped like a namespaced extract (`traversal_path`, `id` sort key).
+pub(crate) struct ChangedRowDatalake {
+    watermark: chrono::DateTime<chrono::Utc>,
+}
+
+impl ChangedRowDatalake {
+    pub(crate) fn at(watermark: chrono::DateTime<chrono::Utc>) -> Self {
+        Self { watermark }
+    }
+
+    fn batch(&self) -> RecordBatch {
+        let timestamp = || DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()));
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("traversal_path", DataType::Utf8, false),
+            Field::new("id", DataType::Int64, false),
+            Field::new("_version", timestamp(), false),
+            Field::new("_deleted", DataType::Boolean, false),
+            Field::new(WATERMARK_COLUMN, timestamp(), false),
+        ]));
+        let micros = self.watermark.timestamp_micros();
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["42/100/"])),
+                Arc::new(Int64Array::from(vec![1])),
+                Arc::new(TimestampMicrosecondArray::from(vec![micros]).with_timezone("UTC")),
+                Arc::new(BooleanArray::from(vec![false])),
+                Arc::new(TimestampMicrosecondArray::from(vec![micros]).with_timezone("UTC")),
+            ],
+        )
+        .unwrap()
+    }
+}
+
+#[async_trait]
+impl DatalakeQuery for ChangedRowDatalake {
+    async fn query_arrow(
+        &self,
+        _sql: &str,
+        _params: serde_json::Value,
+        _max_block_size: Option<u64>,
+    ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+        Ok(Box::pin(stream::iter(vec![Ok(self.batch())])))
+    }
+
+    async fn query_batches(
+        &self,
+        _sql: &str,
+        _params: serde_json::Value,
+        _max_block_size: Option<u64>,
+    ) -> Result<Vec<RecordBatch>, DatalakeError> {
+        Ok(vec![self.batch()])
     }
 }
 

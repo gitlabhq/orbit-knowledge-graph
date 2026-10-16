@@ -13,6 +13,7 @@ SELECT
   scan_id,
   partition_number,
   {{version_column}} AS _version,
+  {{watermark_column}} AS _watermark,
   {{deleted_column}} AS _deleted
 FROM siphon_security_findings
 WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}

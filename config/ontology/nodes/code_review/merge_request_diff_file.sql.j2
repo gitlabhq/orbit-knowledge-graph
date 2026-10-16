@@ -15,6 +15,7 @@ WITH
     relative_order,
     traversal_path,
     {{version_column}} AS _version,
+    {{watermark_column}} AS _watermark,
     {{deleted_column}} AS _deleted
   FROM siphon_merge_request_diff_files
   WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
@@ -50,6 +51,7 @@ SELECT
   _batch.traversal_path AS traversal_path,
   _batch.relative_order AS relative_order,
   _batch._version AS _version,
+  _batch._watermark AS _watermark,
   _batch._deleted AS _deleted
 FROM _batch
 LEFT JOIN _e0 ON _batch.merge_request_diff_id = _e0.id
