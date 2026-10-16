@@ -251,12 +251,11 @@ impl EntityHandler {
             }
         };
 
-        if result.is_ok() && mode == IndexingMode::Incremental && request.campaign_id.is_none() {
-            self.metrics.record_change_delay(&window.target);
-        }
-
         match &result {
             Ok(stats) => {
+                if mode == IndexingMode::Incremental && request.campaign_id.is_none() {
+                    self.metrics.record_change_delay(&window.target);
+                }
                 debug!(
                     read_rows = stats.read_rows,
                     read_bytes = stats.read_bytes,
@@ -453,17 +452,14 @@ impl Handler for EntityHandler {
 mod tests {
     use super::*;
 
-    use crate::checkpoint::CheckpointError;
-    use crate::durability::WriteDurability;
     use crate::modules::sdlc::plan::build_plans;
-    use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
+    use crate::modules::sdlc::test_helpers::{
+        EmptyDatalake, MockCheckpointStore, RecordedMetrics, test_metrics,
+    };
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
     use ontology::Ontology;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
     use orbit_server_config::AppConfig;
 
     fn handler_context() -> HandlerContext {
@@ -479,7 +475,7 @@ mod tests {
         build_handler_with(
             entity_name,
             scope,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::default()),
             test_metrics(),
         )
     }
@@ -568,76 +564,25 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    struct CompletedCheckpointStore;
-
-    #[async_trait]
-    impl CheckpointStore for CompletedCheckpointStore {
-        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-            let mut checkpoint = Checkpoint::new(ts("2024-01-20T00:00:00Z"));
-            checkpoint.complete(ts("2024-01-20T00:00:00Z"));
-            Ok(Some(checkpoint))
-        }
-
-        async fn save(
-            &self,
-            _key: &str,
-            _checkpoint: &Checkpoint,
-            _durability: WriteDurability,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
-        }
-
-        async fn load_by_prefix(
-            &self,
-            _prefix: &str,
-        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
-            Ok(Vec::new())
-        }
-
-        async fn consolidate(
-            &self,
-            _parent_key: &str,
-            _watermark: &DateTime<Utc>,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
-        }
-    }
-
     async fn change_delay_observations(
-        checkpoint_store: Arc<dyn CheckpointStore>,
+        checkpoint_store: MockCheckpointStore,
         request: serde_json::Value,
     ) -> u64 {
-        let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder()
-            .with_reader(PeriodicReader::builder(exporter.clone()).build())
-            .build();
-        let metrics = SdlcMetrics::with_meter(&provider.meter("test"));
+        let recorded = RecordedMetrics::new();
         let handler = build_handler_with(
             "MergeRequest",
             EtlScope::Namespaced,
-            checkpoint_store,
-            metrics,
+            Arc::new(checkpoint_store),
+            recorded.sdlc_metrics(),
         );
 
         let envelope = TestEnvelopeFactory::simple(&request.to_string());
         handler.handle(handler_context(), envelope).await.unwrap();
-        provider.force_flush().unwrap();
+        recorded.histogram_count("gkg.indexer.sdlc.change.delay")
+    }
 
-        exporter
-            .get_finished_metrics()
-            .unwrap()
-            .iter()
-            .flat_map(|resource| resource.scope_metrics())
-            .flat_map(|scope| scope.metrics())
-            .filter(|metric| metric.name() == "gkg.indexer.sdlc.change.delay")
-            .map(|metric| match metric.data() {
-                AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
-                    .data_points()
-                    .map(|point| point.count())
-                    .sum::<u64>(),
-                _ => 0,
-            })
-            .sum()
+    fn completed_store() -> MockCheckpointStore {
+        MockCheckpointStore::completed_at(ts("2024-01-20T00:00:00Z"))
     }
 
     fn namespace_request(campaign_id: Option<&str>) -> serde_json::Value {
@@ -652,25 +597,23 @@ mod tests {
     #[tokio::test]
     async fn incremental_run_records_change_delay() {
         let observations =
-            change_delay_observations(Arc::new(CompletedCheckpointStore), namespace_request(None))
-                .await;
+            change_delay_observations(completed_store(), namespace_request(None)).await;
         assert_eq!(observations, 1);
     }
 
     #[tokio::test]
     async fn full_load_does_not_record_change_delay() {
         let observations =
-            change_delay_observations(Arc::new(MockCheckpointStore), namespace_request(None)).await;
+            change_delay_observations(MockCheckpointStore::default(), namespace_request(None))
+                .await;
         assert_eq!(observations, 0);
     }
 
     #[tokio::test]
     async fn campaign_run_does_not_record_change_delay() {
-        let observations = change_delay_observations(
-            Arc::new(CompletedCheckpointStore),
-            namespace_request(Some("campaign-1")),
-        )
-        .await;
+        let observations =
+            change_delay_observations(completed_store(), namespace_request(Some("campaign-1")))
+                .await;
         assert_eq!(observations, 0);
     }
 
