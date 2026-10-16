@@ -32,6 +32,30 @@ fixtures:
           Ok(Item)
       }
 
+      pub struct Builder;
+
+      impl Builder {
+          pub fn touch(&self) {}
+      }
+
+      impl std::future::IntoFuture for Builder {
+          type Output = Item;
+          type IntoFuture = std::future::Ready<Item>;
+
+          fn into_future(self) -> Self::IntoFuture {
+              std::future::ready(Item)
+          }
+      }
+
+      pub fn build() -> Builder {
+          Builder
+      }
+
+      pub async fn await_builder() {
+          let item = build().await;
+          item.touch();
+      }
+
       pub struct Holder {
           pub item: Item,
       }
@@ -118,6 +142,18 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["pick", "touch"] } }
+
+  - name: "an awaited builder types the local by the IntoFuture output"
+    # Known gap: the awaited value takes the declared return type Builder, not the IntoFuture output Item, so item.touch() links Builder::touch.
+    skip: true
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "await_builder" AND callee.name = "touch"
+      RETURN owner.name AS owner
+    assert:
+      - { row_count: 1 }
+      - { row: { owner: Item } }
+      - { not: true, row: { owner: Builder } }
 
   - name: "a call behind an await and a question mark links"
     query: |

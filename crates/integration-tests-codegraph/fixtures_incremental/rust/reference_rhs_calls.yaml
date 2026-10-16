@@ -65,6 +65,18 @@ fixtures:
           holder.shared = &mut pick();
       }
 
+      pub mod a {
+          pub fn f() -> super::Item {
+              super::Item
+          }
+      }
+
+      pub fn consume(item: &Item) {}
+
+      pub fn argument_reference() {
+          consume(&crate::a::f());
+      }
+
       pub fn reassign_reference(item: &Item) {
           let mut current = item;
           current = &pick();
@@ -113,6 +125,18 @@ tests:
       - { row: { caller: assign_mut_reference, callee: pick } }
       - { row: { caller: let_mut_reference, callee: pick } }
       - { row: { caller: let_mut_reference, callee: touch } }
+
+  - name: "a call with an inline import behind a reference in an argument links"
+    # Known gap until !2887: the argument rule before nested-path-call drops the inline import of a path call, so f has no edge here; !2887 restores it.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "argument_reference"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["consume", "f"] } }
 
   - name: "a call inside a macro on the right-hand side links"
     # Known gap: a macro body is a token tree, so the call inside vec![pick()] has no call node to link.

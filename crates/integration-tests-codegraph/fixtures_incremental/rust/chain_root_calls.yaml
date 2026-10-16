@@ -32,6 +32,36 @@ fixtures:
           Items
       }
 
+      pub mod helpers {
+          pub fn helper() {}
+      }
+
+      use helpers::*;
+
+      pub struct Wrapper;
+
+      pub fn try_items() -> Result<Items, ()> {
+          Ok(Items)
+      }
+
+      pub async fn fetch_items() -> Items {
+          Items
+      }
+
+      pub fn chain_through_try() -> Result<(), ()> {
+          let n = try_items()?.count();
+          Ok(())
+      }
+
+      pub async fn chain_through_await() {
+          let n = fetch_items().await.count();
+      }
+
+      pub fn glob_and_chain(w: &Wrapper) {
+          w.as_ref().touch();
+          helper();
+      }
+
       pub fn chain_in_let() {
           let n = make_items().count();
       }
@@ -54,6 +84,33 @@ tests:
     assert:
       - { row_count: 3 }
       - { column_values: { field: caller, values: ["chain_as_statement", "chain_in_let", "chain_in_loop"] } }
+
+  - name: "the call at the root of a chain behind a question mark or an await links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chain_through_try", "chain_through_await"] AND callee.name IN ["try_items", "fetch_items"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: chain_through_await, callee: fetch_items } }
+      - { row: { caller: chain_through_try, callee: try_items } }
+
+  - name: "the method after an await resolves through the awaited return type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "chain_through_await" AND callee.name = "count"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "a bare glob-export call keeps its edge when the chain in the same def is no longer a glob referrer"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "glob_and_chain" AND callee.name = "helper"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
 
   - name: "the methods on the chain resolve through the return type of the root call"
     query: |
