@@ -875,7 +875,7 @@ fn resolve_node_flags(
             .filter(|np| {
                 narrows(&np.alias)
                     && np.hydration == HydrationStrategy::Join
-                    && np.filters.is_empty()
+                    && !np.has_selective_filters()
                     && edge_narrowable(np)
             })
             .map(|np| np.alias.clone())

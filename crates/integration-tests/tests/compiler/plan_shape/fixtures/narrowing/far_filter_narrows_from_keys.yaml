@@ -1,31 +1,64 @@
-name: A filter-only endpoint without selective keys narrows from its selective partner and rechecks its filter after dedup
+cases:
+  - name: A filter-only endpoint without selective keys narrows from its selective partner and rechecks its filter after dedup
 
-query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 9, "iid": 42}},
-        {"id": "n", "entity": "Note", "filters": {"resolved_at": {"is_not_null": true}}, "columns": ["id", "created_at"]}
-      ],
-      "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
-      "limit": 10
-    }
-  gql: |
-    MATCH (mr:MergeRequest {project_id: 9, iid: 42})-[:HAS_NOTE]->(n:Note)
-    WHERE n.resolved_at IS NOT NULL RETURN n.id, n.created_at LIMIT 10
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 9, "iid": 42}},
+            {"id": "n", "entity": "Note", "filters": {"resolved_at": {"is_not_null": true}}, "columns": ["id", "created_at"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 9, iid: 42})-[:HAS_NOTE]->(n:Note)
+        WHERE n.resolved_at IS NOT NULL RETURN n.id, n.created_at LIMIT 10
 
-logical:
-  expect:
-    - (Filter n.resolved_at IS NOT NULL (_))
-
-physical:
-  clickhouse:
-    planned:
-      ctes:
-        exact_order: [_filter_mr, _narrow_n]
+    logical:
       expect:
-        - (CTE _narrow_n (Project _orbit_edge_0n.target_id AS id (Filter _orbit_edge_0n.source_id IN _filter_mr.id, ... (Scan Table(gl_edge) AS _orbit_edge_0n))))
-        - (Bind n (Filter n.resolved_at IS NOT NULL, n._deleted = false (Deduplicate LimitBy ... (Filter n.id IN _narrow_n.id (Scan Table(gl_note) AS n)))))
-      reject:
-        - (CTE _filter_n (_))
+        - (Filter n.resolved_at IS NOT NULL (_))
+
+    physical:
+      clickhouse:
+        planned:
+          ctes:
+            exact_order: [_filter_mr, _narrow_n]
+          expect:
+            - (CTE _narrow_n (Project _orbit_edge_0n.target_id AS id (Filter _orbit_edge_0n.source_id IN _filter_mr.id, ... (Scan Table(gl_edge) AS _orbit_edge_0n))))
+            - (Bind n (Filter n.resolved_at IS NOT NULL, n._deleted = false (Deduplicate LimitBy ... (Filter n.id IN _narrow_n.id (Scan Table(gl_note) AS n)))))
+          reject:
+            - (CTE _filter_n (_))
+
+  - name: An ordered endpoint with a non-selective filter narrows from its selective partner too
+
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 9, "iid": 42}},
+            {"id": "n", "entity": "Note", "filters": {"resolved_at": {"is_not_null": true}}, "columns": ["id", "created_at"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "order_by": "-n.created_at",
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 9, iid: 42})-[:HAS_NOTE]->(n:Note)
+        WHERE n.resolved_at IS NOT NULL RETURN n.id, n.created_at ORDER BY n.created_at DESC LIMIT 10
+
+    logical:
+      expect:
+        - (Sort n.created_at DESC (_))
+
+    physical:
+      clickhouse:
+        planned:
+          ctes:
+            exact_order: [_filter_mr, _narrow_n]
+          expect:
+            - (Bind n (Filter n.resolved_at IS NOT NULL, n._deleted = false (Deduplicate LimitBy ... (Filter n.id IN _narrow_n.id (Scan Table(gl_note) AS n)))))
+          reject:
+            - (CTE _filter_n (_))
