@@ -861,11 +861,6 @@ fn gather_imports_for(
         .par_iter()
         .map(|&fi| {
             let tree = &trees[fi as usize];
-            let same_path_same_type = env
-                .rules_for(&tree.label)
-                .config
-                .resolve
-                .same_path_same_type;
             let own_root = root_of(tree);
             let own_prefix = own_root
                 .filter(|root| !root.is_empty())
@@ -923,8 +918,14 @@ fn gather_imports_for(
                                 .unwrap_or(tree.label.as_str())
                                 .trim_start_matches(PATH_SEP)
                         };
+                        let same_path = |loc: &Loc| {
+                            env.rules_for(&trees[loc.fi as usize].label)
+                                .config
+                                .resolve
+                                .same_path_same_type
+                        };
                         let dedupe = |path: &str, mut hits: Vec<Loc>| -> Vec<Loc> {
-                            if !same_path_same_type || hits.iter().all(inside) {
+                            if !config.same_path_same_type || hits.iter().all(inside) {
                                 hits.retain(|loc| loc.fi != fi);
                                 return hits;
                             }
@@ -941,7 +942,8 @@ fn gather_imports_for(
                             keyed
                                 .into_iter()
                                 .filter(|(loc, rel)| {
-                                    loc.fi != fi && (inside(loc) || !own.contains(rel))
+                                    loc.fi != fi
+                                        && (inside(loc) || !own.contains(rel) || !same_path(loc))
                                 })
                                 .map(|(loc, _)| loc)
                                 .collect()
