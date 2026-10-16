@@ -48,6 +48,7 @@ fixtures:
       struct Holder {
           cb: fn(i32) -> i32,
           xs: [i32; 2],
+          v: i32,
       }
 
       impl Holder {
@@ -55,9 +56,42 @@ fixtures:
               self.cb = |x| other(x);
           }
 
+          fn plain_call_to_ivar(&mut self) {
+              self.v = helper(1);
+          }
+
           fn array_to_ivar(&mut self) {
               self.xs = [helper(1), other(2)];
           }
+      }
+
+      struct A;
+
+      impl A {
+          fn go_a(&self) -> i32 {
+              1
+          }
+      }
+
+      struct B;
+
+      impl B {
+          fn go_b(&self) -> i32 {
+              2
+          }
+      }
+
+      fn mk_a() -> A {
+          A
+      }
+
+      fn mk_b() -> B {
+          B
+      }
+
+      fn array_in_block() -> i32 {
+          let xs = { [mk_a(), mk_b()] };
+          xs.go_b()
       }
 
       fn array_to_field(holder: &mut Holder) {
@@ -99,7 +133,8 @@ tests:
       RETURN caller.name AS caller, callee.name AS callee
       ORDER BY caller, callee
     assert:
-      - { row_count: 20 }
+      - { row_count: 21 }
+      - { row: { caller: "plain_call_to_ivar", callee: "helper" } }
       - { row: { caller: "array_to_field", callee: "helper" } }
       - { row: { caller: "array_to_field", callee: "other" } }
       - { row: { caller: "array_to_ivar", callee: "helper" } }
@@ -120,6 +155,18 @@ tests:
       - { row: { caller: "in_match", callee: "other" } }
       - { row: { caller: "in_tuple", callee: "helper" } }
       - { row: { caller: "returned", callee: "helper" } }
+
+  - name: an array behind a block does not type its variable by its last element
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'array_in_block'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "mk_a" } }
+      - { row: { callee: "mk_b" } }
+      - { not: true, row: { callee: "go_b" } }
 
   - name: the closures are not definitions
     query: |
