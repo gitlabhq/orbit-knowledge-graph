@@ -7,7 +7,7 @@
 //! Renamed here to `batches`, `redactions`, and `result_set.rows`.
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, ROW_COUNT};
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, QUERY_LATENCY, ROW_COUNT};
 
 pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
@@ -40,7 +40,7 @@ pub const PIPELINE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "End-to-end pipeline duration from security check to formatted output.",
     Some("s"),
     &[labels::QUERY_TYPE, labels::STATUS],
-    LATENCY,
+    QUERY_LATENCY,
     DOMAIN,
 );
 

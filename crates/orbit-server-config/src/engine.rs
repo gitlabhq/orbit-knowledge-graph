@@ -263,8 +263,10 @@ pub struct CodeIndexingPipelineConfig {
     /// the part of the last wave that finished, which depends on thread
     /// scheduling. 0 = no timeout.
     pub cross_file_resolve_timeout_ms: u64,
-    /// Syntax tree depth above which the incremental engine skips a file as
-    /// deeply nested. 0 = no limit.
+    /// Syntax tree depth at which the incremental engine cuts a file: it drops
+    /// the deeper nodes, indexes the rest, and reports the file as limited
+    /// (deeply_nested). A left-nested chain of one operator adds no depth.
+    /// 0 = no limit.
     pub max_tree_depth: usize,
     /// Names that cross-file resolution may make visible across all files of
     /// one language family before it stops as an overrun. 0 = no limit.

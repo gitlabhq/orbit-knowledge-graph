@@ -110,6 +110,31 @@ pub async fn entity_handler_with_partitions(
     partitions: u32,
 ) -> Arc<dyn Handler> {
     let config: IndexerConfig = create_test_indexer_config(&ctx.config);
+    entity_handler_for_config(ctx, config, entity_name, partitions).await
+}
+
+/// Pages the entity extract at `batch_size` rows so small fixtures exercise keyset paging.
+pub async fn entity_handler_with_batch_size(
+    ctx: &TestContext,
+    entity_name: &str,
+    batch_size: u64,
+) -> Arc<dyn Handler> {
+    let mut config: IndexerConfig = create_test_indexer_config(&ctx.config);
+    config
+        .engine
+        .handlers
+        .entity_handler
+        .batch_size_overrides
+        .insert(entity_name.to_string(), batch_size);
+    entity_handler_for_config(ctx, config, entity_name, 1).await
+}
+
+async fn entity_handler_for_config(
+    ctx: &TestContext,
+    config: IndexerConfig,
+    entity_name: &str,
+    partitions: u32,
+) -> Arc<dyn Handler> {
     let writer = Arc::new(ClickHouseWriter::new(
         ctx.config.clone().build_client("graph"),
         Arc::new(EngineMetrics::default()),

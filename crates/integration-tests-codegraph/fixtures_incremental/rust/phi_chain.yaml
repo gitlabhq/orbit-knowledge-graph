@@ -15,13 +15,14 @@ fixtures:
       - "    n.visit();\n}\n"
 
 tests:
-  - name: "walk calls the constructor and the method of the chain"
+  - name: "walk calls new once, next at each of the 1,000 joins, and visit after them"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'walk'
-      RETURN callee.name AS callee
+      RETURN callee.name AS callee, count(caller) AS calls
       ORDER BY callee
     assert:
-      - { row_count: 2 }
-      - { row: { callee: new } }
-      - { row: { callee: next } }
+      - { row_count: 3 }
+      - { row: { callee: new, calls: 1 } }
+      - { row: { callee: next, calls: 1000 } }
+      - { row: { callee: visit, calls: 1 } }
