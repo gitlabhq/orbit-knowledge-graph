@@ -23,6 +23,11 @@ pub struct Node {
     pub(crate) end_col: u32,
     pub(crate) synth: bool,
     pub(crate) named: bool,
+    /// Hoisted out of a removed raw node by `prune`.
+    pub(crate) lifted: bool,
+    /// A text label that kept the node it names; a node lifted into it is
+    /// walked for edges but is not the label's value.
+    pub(crate) labelled: bool,
 }
 
 impl<S: Storage<Node = Node>> Tree<S> {
@@ -90,6 +95,9 @@ impl Tree {
             if !canonical::is_canonical(self.node(id).kind) {
                 let children: Vec<_> = id.children(&self.storage.0).collect();
                 for child in children {
+                    if canonical::is_canonical(self.node(child).kind) {
+                        self.node_mut(child).lifted = true;
+                    }
                     child.detach(&mut self.storage.0);
                     id.insert_before(child, &mut self.storage.0);
                 }

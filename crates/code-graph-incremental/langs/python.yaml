@@ -71,6 +71,8 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
+      - match: '(lambda $$$C)'
+        replace: '(__lambda $$$C)'
 
       # Hoist decorators onto the inner def/class
       - match: '(decorator $N:identifier)'
@@ -112,6 +114,11 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(call function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
+      # `await f()` and `(f())` carry the value of the call they wrap
+      - match: '(await $V:__call)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(call function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
 
@@ -144,10 +151,12 @@ stages:
       - match: '(nonlocal_statement $$$N:identifier)'
         replace: '(nonlocal_names $$$N=>nonlocal_name)'
       # Defs
-      - match: '(assignment left: $N right: $R:lambda)'
+      - match: '(assignment left: $N right: $R:__lambda)'
         replace: '(__def (__defname @$N) (__lambda) $R)'
       - match: '(assignment left: $N type: $T:type)'
         replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(typed_default_parameter name: $N type: (type $T) value: $V)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
       - match: '(typed_default_parameter name: $N type: (type $T))'
         replace: '(__binding @$N (__ssa_typed @$T))'
       - match: '(typed_default_parameter name: $N)'
@@ -156,6 +165,10 @@ stages:
         replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
+      - match: '(default_parameter name: $N:identifier value: $V)'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(lambda_parameters $$$P:identifier|__binding)'
+        replace: '(lambda_parameters $$$P->__binding)'
 
       # Bindings — RHS wrapped in __rhs for canonical containment
       - match: '(assignment left: $N:__ivar right: $R:__call)'
@@ -192,6 +205,14 @@ stages:
         replace: '(__ssa_branch)'
 
       # Loops
+      - match: '(for_statement left: $N:identifier right: (tuple $$$E) body: $B)'
+        replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
+      - match: '(for_statement left: $N:identifier right: (list $$$E) body: $B)'
+        replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
+      - match: '(for_statement left: $N:identifier right: (expression_list $$$E) body: $B)'
+        replace: '(__ssa_loop (__arr $$$E) (__binding @$N (__declaration "function")) $B)'
+      - match: '(for_statement left: $N:identifier right: $V body: $B)'
+        replace: '(__ssa_loop $V (__binding @$N (__declaration "function")) $B)'
       - match: '(for_statement body: $B)'
         replace: '(__ssa_loop $B)'
       - match: '(while_statement body: $B)'
@@ -240,7 +261,7 @@ stages:
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'
-        tag: { callable: "true" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__enum_variant))'
         tag: { callable: "true" }
 

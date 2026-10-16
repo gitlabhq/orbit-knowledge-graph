@@ -211,6 +211,8 @@ pub enum Canonical {
     Declaration,
     #[strum(serialize = "__dispatch")]
     Dispatch,
+    #[strum(serialize = "__qualifier")]
+    Qualifier,
 }
 
 impl From<Canonical> for u16 {
@@ -238,6 +240,18 @@ impl Canonical {
     }
     pub fn is_scoped(self) -> bool {
         self.get_str("scoped") == Some("true")
+    }
+    /// A node that stands for a value on its own: the tail of a right-hand
+    /// side or the root of a member chain.
+    pub fn is_value(self) -> bool {
+        matches!(
+            self,
+            Self::Call | Self::Member | Self::Ivar | Self::Obj | Self::Arr | Self::Lambda
+        )
+    }
+    /// A value with no callee to type a binding by.
+    pub fn is_opaque_value(self) -> bool {
+        matches!(self, Self::Obj | Self::Arr | Self::Lambda)
     }
     pub fn display_name(self) -> &'static str {
         self.get_str("display").unwrap_or("")

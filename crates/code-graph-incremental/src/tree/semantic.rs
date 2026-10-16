@@ -20,6 +20,28 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn named(self) -> bool {
         self.node().named
     }
+    pub fn lifted(self) -> bool {
+        self.node().lifted
+    }
+    pub fn labelled(self) -> bool {
+        self.node().labelled
+    }
+    pub fn is_value(self) -> bool {
+        C::try_from_u16(self.kind()).is_some_and(C::is_value)
+    }
+    /// A text label keeps the node it names. A node lifted out of that node
+    /// is walked, but it is not the value the label stands for.
+    pub fn stands_for(self, child: Self) -> bool {
+        !(self.labelled() && child.lifted())
+    }
+    pub fn value_child(self, kind: C) -> Option<Self> {
+        self.children()
+            .find(|node| node.is(kind) && self.stands_for(*node))
+    }
+    pub fn value(self) -> Option<Self> {
+        self.children()
+            .find(|node| node.is_value() && self.stands_for(*node))
+    }
     pub fn field(self) -> u16 {
         self.node().field
     }
@@ -69,7 +91,7 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.has(C::Trait) || self.has(C::Interface)
     }
     pub fn reference(self) -> Self {
-        self.child(C::Call)
+        self.value_child(C::Call)
             .filter(|call| call.has(C::Property))
             .and_then(|call| call.child(C::Callee))
             .unwrap_or(self)
@@ -78,26 +100,27 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.child(C::Callee)?.child(C::Member)
     }
     pub fn chain_root(self) -> Self {
-        std::iter::successors(Some(self), |node| node.child(C::Member)?.child(C::Object))
-            .last()
-            .unwrap_or(self)
+        std::iter::successors(Some(self), |node| {
+            node.value_child(C::Member)?.child(C::Object)
+        })
+        .last()
+        .unwrap_or(self)
     }
     pub fn tail_expr(self) -> Self {
-        let stop = |node: &Self| {
-            node.is(C::Call)
-                || node.is(C::SsaBranch)
-                || node.is(C::SsaReturn)
-                || node.is(C::Member)
-                || node.is(C::Obj)
-        };
+        let stop = |node: &Self| node.is_value() || node.is(C::SsaBranch) || node.is(C::SsaReturn);
         std::iter::successors(Some(self), |node| {
-            (!stop(node)).then(|| node.last_named()).flatten()
+            (!stop(node))
+                .then(|| node.last_named())
+                .flatten()
+                .filter(|tail| node.stands_for(*tail))
         })
         .last()
         .unwrap_or(self)
     }
     pub fn rhs_callee(self) -> Option<u32> {
-        self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
+        self.child(C::Rhs)?
+            .value_child(C::Call)?
+            .child_sym(C::Callee)
     }
     pub fn bare_rhs(self) -> Option<Self> {
         self.child(C::Rhs)
@@ -110,9 +133,9 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn typed(self) -> Option<Self> {
         self.child(C::SsaTyped).or_else(|| {
             let rhs = self.child(C::Rhs)?;
-            rhs.child(C::Call)
+            rhs.value_child(C::Call)
                 .and_then(|call| call.child(C::Callee))
-                .or_else(|| rhs.child(C::Member))
+                .or_else(|| rhs.value_child(C::Member))
         })
     }
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
@@ -149,7 +172,7 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
     }
     let mut bindings = rustc_hash::FxHashMap::default();
     def.walk().run(|node, walk| {
-        if node.is(C::Def) && node.index() != def.index() {
+        if node.is(C::Def) && node.index() != def.index() || node.is(C::Lambda) {
             walk.skip_subtree();
             return ControlFlow::Continue(());
         }
@@ -163,6 +186,7 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
         if node.is(C::SsaReturn) {
             let value = node
                 .children()
+                .filter(|child| node.stands_for(*child))
                 .find(|child| child.is(C::Call) || child.sym_opt().is_some())
                 .and_then(|child| {
                     if child.is(C::Call) {

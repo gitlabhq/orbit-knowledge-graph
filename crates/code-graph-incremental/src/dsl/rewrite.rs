@@ -1,6 +1,7 @@
 use indextree::NodeId;
 use smallvec::{SmallVec, smallvec};
 
+use crate::canonical;
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Compact, Node, Storage, Tree};
@@ -36,6 +37,19 @@ impl Placement {
             t.clone_within(src, parent)
         }
     }
+
+    /// A node a text label names stays under that label when it can move,
+    /// so the canonical nodes inside it survive `prune`. A bare leaf holds
+    /// none and is left to be removed with the target.
+    fn keep(&mut self, t: &mut Tree, src: NodeId, label: NodeId) {
+        let node = t.node(src);
+        let holds_nodes =
+            src.children(&t.storage.0).next().is_some() || canonical::is_canonical(node.kind);
+        if self.mv && src != self.target && holds_nodes && !self.moved.contains(&src) {
+            self.place(t, src, label);
+            t.node_mut(label).labelled = true;
+        }
+    }
 }
 
 /// Everything a match hands to template construction that stays fixed while
@@ -44,6 +58,7 @@ pub(crate) struct Fill<'a> {
     pub lang: &'a Lang,
     pub caps: &'a [Cap],
     pub filters: &'a [Vec<u16>],
+    pub placed: &'a [bool],
     pub span: (u32, u32),
     pub edge_ctx: Option<&'a EdgeCtx<'a>>,
 }
@@ -53,6 +68,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
         lang,
         caps,
         filters,
+        placed,
         span,
         edge_ctx,
     } = *fill;
@@ -188,8 +204,17 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     start_col: src.start_col,
                     end_row: src.end_row,
                     end_col: src.end_col,
+                    lifted: false,
+                    labelled: false,
                 },
             );
+            if let Text::From(slot, _) = text
+                && !placed[*slot as usize]
+                && let Some(&labelled) = caps[*slot as usize].first()
+                && !overlaps_placed(t, caps, placed, labelled)
+            {
+                pl.keep(t, labelled, at);
+            }
             for k in kids {
                 materialize(t, fill, k, at, pl);
             }
@@ -205,6 +230,19 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
         }
         Pat::Not(_) | Pat::Desc(_) => {}
     }
+}
+
+/// A text label does not move a node that a placed capture also holds, above
+/// or below it: that node is already going where the template puts it.
+fn overlaps_placed(t: &Tree, caps: &[Cap], placed: &[bool], node: NodeId) -> bool {
+    caps.iter()
+        .zip(placed)
+        .filter(|&(_, &is_placed)| is_placed)
+        .flat_map(|(cap, _)| cap.iter().copied())
+        .any(|other| {
+            node.ancestors(&t.storage.0).any(|a| a == other)
+                || other.ancestors(&t.storage.0).any(|a| a == node)
+        })
 }
 
 fn build_template(t: &mut Tree, fill: &Fill, pat: &Pat, mut pl: Placement) -> Vec<NodeId> {
@@ -402,6 +440,7 @@ fn apply_structure(
         lang,
         caps,
         filters: &r.filters,
+        placed: &r.placed,
         span: (root_node.start, root_node.end),
         edge_ctx,
     };

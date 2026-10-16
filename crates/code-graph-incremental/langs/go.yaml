@@ -176,8 +176,8 @@ stages:
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
       - match: '(select_statement $$$CASES:communication_case|default_case)'
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
-      - match: '(for_statement body: $B)'
-        replace: '(__ssa_loop $B)'
+      - match: '(for_statement $$$H body: $B)'
+        replace: '(__ssa_loop $$$H $B)'
 
       # Struct fields: named → field def; embedded → supertype
       - match: '(field_declaration name: $N:field_identifier)'
