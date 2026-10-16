@@ -130,7 +130,6 @@ stages:
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
-      # The heritage wrapper's supertypes belong to the class itself
       - match: '(class_heritage $$$S (implements_clause $$$I:__supertype))'
         replace: '(class_heritage $$$S $$$I)'
       - match: '(class_declaration name: $N (class_heritage $$$H) body: $B $$$REST)'
