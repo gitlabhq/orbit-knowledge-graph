@@ -101,7 +101,10 @@ fn check_redaction_node(
             }),
             (auth_id != DEFAULT_PRIMARY_KEY).then(|| identity.clone()),
         ),
-        Some(NodeBinding::Projected { .. }) => (None, None),
+        Some(NodeBinding::Projected { .. }) => (
+            (auth_id != DEFAULT_PRIMARY_KEY).then(|| Expr::col(&redaction.alias, auth_id)),
+            None,
+        ),
         _ => {
             return Err(authorization_error(format!(
                 "node '{}' has no lowered authorization identity",
@@ -391,6 +394,15 @@ mod tests {
         };
         query.select[0].expr = Expr::col("p", "id");
         assert!(check_authorization(&input, &wrong, &metadata, &result, model.as_ref()).is_err());
+
+        let mut projected = metadata.clone();
+        projected.nodes.insert(
+            "p".into(),
+            NodeBinding::Projected {
+                role_identity: None,
+            },
+        );
+        assert!(check_authorization(&input, &wrong, &projected, &result, model.as_ref()).is_err());
 
         let empty = ResultContext::new().with_query_type(QueryType::Traversal);
         assert!(check_authorization(&input, &wrong, &metadata, &empty, model.as_ref()).is_err());
