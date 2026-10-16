@@ -253,9 +253,9 @@ impl EntityHandler {
 
         match &result {
             Ok(stats) => {
-                if let Some(oldest_change) = stats.oldest_watermark
-                    && mode == IndexingMode::Incremental
+                if mode == IndexingMode::Incremental
                     && request.campaign_id.is_none()
+                    && let Some(oldest_change) = stats.oldest_watermark
                 {
                     self.metrics.record_change_delay(&oldest_change);
                 }
@@ -572,7 +572,7 @@ mod tests {
         datalake: impl DatalakeQuery + 'static,
         checkpoint_store: MockCheckpointStore,
         request: serde_json::Value,
-    ) -> u64 {
+    ) -> (u64, f64) {
         let recorded = RecordedMetrics::new();
         let handler = build_handler_with(
             "MergeRequest",
@@ -584,11 +584,15 @@ mod tests {
 
         let envelope = TestEnvelopeFactory::simple(&request.to_string());
         handler.handle(handler_context(), envelope).await.unwrap();
-        recorded.histogram_count("gkg.indexer.sdlc.change.delay")
+        recorded.histogram("gkg.indexer.sdlc.change.delay")
+    }
+
+    fn changed_at() -> DateTime<Utc> {
+        ts("2024-01-20T23:59:30Z")
     }
 
     fn changed_row() -> ChangedRowDatalake {
-        ChangedRowDatalake::at(ts("2024-01-20T23:59:30Z"))
+        ChangedRowDatalake::at(changed_at())
     }
 
     fn completed_store() -> MockCheckpointStore {
@@ -605,11 +609,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn incremental_run_that_reads_changes_records_change_delay() {
-        let observations =
+    async fn incremental_run_records_the_wait_of_its_oldest_change() {
+        let (count, seconds) =
             change_delay_observations(changed_row(), completed_store(), namespace_request(None))
                 .await;
-        assert_eq!(observations, 1);
+        let oldest_change_age = (Utc::now() - changed_at()).num_seconds() as f64;
+        assert_eq!(count, 1);
+        assert!(
+            seconds >= oldest_change_age,
+            "{seconds} < {oldest_change_age}"
+        );
     }
 
     #[tokio::test]
@@ -617,7 +626,7 @@ mod tests {
         let observations =
             change_delay_observations(EmptyDatalake, completed_store(), namespace_request(None))
                 .await;
-        assert_eq!(observations, 0);
+        assert_eq!(observations.0, 0);
     }
 
     #[tokio::test]
@@ -628,7 +637,7 @@ mod tests {
             namespace_request(None),
         )
         .await;
-        assert_eq!(observations, 0);
+        assert_eq!(observations.0, 0);
     }
 
     #[tokio::test]
@@ -639,7 +648,7 @@ mod tests {
             namespace_request(Some("campaign-1")),
         )
         .await;
-        assert_eq!(observations, 0);
+        assert_eq!(observations.0, 0);
     }
 
     #[test]

@@ -601,7 +601,7 @@ mod tests {
     }
 
     fn row_watermark(id: i64) -> DateTime<Utc> {
-        test_watermark() - chrono::Duration::hours(1) + chrono::Duration::seconds(id)
+        test_watermark() - chrono::Duration::seconds(id)
     }
 
     use crate::modules::sdlc::test_helpers::EmptyDatalake;
@@ -788,13 +788,37 @@ mod tests {
         assert!(final_state.is_completed(), "should be completed");
     }
 
+    struct PagesDatalake {
+        pages: Mutex<Vec<Vec<RecordBatch>>>,
+    }
+
+    #[async_trait]
+    impl DatalakeQuery for PagesDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            Ok(self.pages.lock().unwrap().pop().unwrap_or_default())
+        }
+    }
+
     #[tokio::test]
     async fn run_reports_the_oldest_row_watermark_across_pages() {
         let plan = simple_plan_with_batch_size("Test", 10);
         let pipeline = Pipeline::new(
-            Arc::new(MultiBatchDatalake {
-                call_count: Mutex::new(0),
-                batch_size: 10,
+            Arc::new(PagesDatalake {
+                pages: Mutex::new(vec![vec![test_batch_range(11, 5)], vec![test_batch(10)]]),
             }),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
@@ -814,7 +838,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(stats.oldest_watermark, Some(row_watermark(1)));
+        assert_eq!(stats.oldest_watermark, Some(row_watermark(15)));
     }
 
     #[tokio::test]

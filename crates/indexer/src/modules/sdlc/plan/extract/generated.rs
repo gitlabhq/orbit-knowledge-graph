@@ -97,8 +97,8 @@ fn render_single_table_sql(
         }
     }
     select_columns.push(format!("{} AS _version", declaration.version));
-    select_columns.push(format!("{} AS _deleted", declaration.deleted));
     select_columns.push(format!("{} AS {WATERMARK_COLUMN}", declaration.watermark));
+    select_columns.push(format!("{} AS _deleted", declaration.deleted));
 
     let mut where_clause =
         if declaration.scope == EtlScope::Namespaced && seen.contains(TRAVERSAL_PATH_COLUMN) {
@@ -139,8 +139,8 @@ fn render_with_lookups(
         .map(|c| SelectColumn::typed(c).expression)
         .collect();
     batch_select.push(format!("{version} AS _version"));
-    batch_select.push(format!("{deleted} AS _deleted"));
     batch_select.push(format!("{} AS {WATERMARK_COLUMN}", declaration.watermark));
+    batch_select.push(format!("{deleted} AS _deleted"));
 
     let mut ctes = vec![format!(
         "_batch AS (SELECT\n    {}\n  FROM {source}\n  WHERE {where_clause} {{{{filters}}}}\n  ORDER BY {}\n  LIMIT {{{{batch_size}}}})",
@@ -156,8 +156,8 @@ fn render_with_lookups(
         })
         .collect();
     final_cols.push("_batch._version AS _version".to_string());
-    final_cols.push("_batch._deleted AS _deleted".to_string());
     final_cols.push(format!("_batch.{WATERMARK_COLUMN} AS {WATERMARK_COLUMN}"));
+    final_cols.push("_batch._deleted AS _deleted".to_string());
 
     let mut join_clauses: Vec<String> = Vec::new();
     for join in joins {

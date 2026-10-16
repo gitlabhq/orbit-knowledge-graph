@@ -160,7 +160,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
   `.sql.j2` file's raw content verbatim as `ExtractQuery::Sql`. The indexer's `plan/extract/sql.rs`
   renders `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan
   build. It derives the qualified watermark expression from the file's `AS _version`. It recovers
-  `AS _deleted`. It passes `{{filters}}`/`{{batch_size}}` through to query time. All ClickHouse
+  `AS _deleted`. Every `AS _version` needs a sibling `{{watermark_column}} AS _watermark`, which feeds
+  the change-delay histogram. It passes `{{filters}}`/`{{batch_size}}` through to query time. All ClickHouse
   dialect and SQL generation live in the
   indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`. It
   decomposes each pipeline and hands `extract/` transform-neutral inputs. Those inputs are an
@@ -178,8 +179,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
   `ontology::siphon_version_column()`, `ontology::siphon_watermark_column()`, and
   `ontology::siphon_deleted_column()`, never literal column names. They derive at runtime from
   `schema.yaml`'s `settings.etl.default_version` / `default_watermark` / `default_deleted` via a
-  `LazyLock<Ontology>`. Use the version column for `_version` and `argMax`; use the watermark only
-  for change-window predicates.
+  `LazyLock<Ontology>`. Use the version column for `_version` and `argMax`; use the watermark for
+  change-window predicates and the `_watermark` extract column.
 
 If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
 shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.

@@ -314,8 +314,8 @@ SELECT
     title,
     traversal_path,
     _siphon_replicated_at AS _version,
-    _siphon_deleted AS _deleted,
-    _siphon_watermark AS _watermark
+    _siphon_watermark AS _watermark,
+    _siphon_deleted AS _deleted
 FROM sdlc.issues
 WHERE _siphon_watermark > {last_watermark:String}
   AND _siphon_watermark <= {watermark:String}

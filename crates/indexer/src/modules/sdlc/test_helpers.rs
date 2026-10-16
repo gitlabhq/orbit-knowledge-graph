@@ -41,7 +41,8 @@ impl RecordedMetrics {
         SdlcMetrics::with_meter(&self.provider.meter("test"))
     }
 
-    pub(crate) fn histogram_count(&self, name: &str) -> u64 {
+    /// Observation count and sum of an f64 histogram.
+    pub(crate) fn histogram(&self, name: &str) -> (u64, f64) {
         self.provider.force_flush().unwrap();
         self.exporter
             .get_finished_metrics()
@@ -50,14 +51,14 @@ impl RecordedMetrics {
             .flat_map(|resource| resource.scope_metrics())
             .flat_map(|scope| scope.metrics())
             .filter(|metric| metric.name() == name)
-            .map(|metric| match metric.data() {
+            .flat_map(|metric| match metric.data() {
                 AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
                     .data_points()
-                    .map(|point| point.count())
-                    .sum::<u64>(),
+                    .map(|point| (point.count(), point.sum()))
+                    .collect::<Vec<_>>(),
                 _ => panic!("{name} is not an f64 histogram"),
             })
-            .sum()
+            .fold((0, 0.0), |(count, sum), (c, s)| (count + c, sum + s))
     }
 }
 
