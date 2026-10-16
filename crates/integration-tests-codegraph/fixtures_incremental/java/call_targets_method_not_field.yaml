@@ -32,8 +32,7 @@ fixtures:
           }
 
           int readField(SampleElements samples) {
-              int n = samples.e4;
-              return n;
+              return samples.e4 + 1;
           }
 
           void chainRead(Converter converter) {
@@ -53,13 +52,14 @@ tests:
       - { column_values: { field: callee, values: ["Main.Converter", "Main.Converter.reverse", "Main.SampleElements", "Main.SampleElements.e4"] } }
       - { column_values: { field: kind, values: ["Class", "Method"] } }
 
-  - name: a field read does not become a call of the method of the same name
+  - name: a field read keeps the field as its target
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'readField' AND t.name = 'e4'
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
-      - { not: true, row: { kind: "Method" } }
+      - { row_count: 1 }
+      - { row: { callee: "Main.SampleElements.e4", kind: "Field" } }
 
   - name: a receiver chain through a field does not type by the method of the same name
     query: |
