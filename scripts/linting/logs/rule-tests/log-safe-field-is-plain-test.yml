@@ -1,0 +1,18 @@
+id: log-safe-field-is-plain
+valid:
+  - 'info!(safe(GL_PROJECT_ID) = id, safe(KIND) = kind.as_str(), "ok");'
+  - 'info!(expanded(ERROR_MESSAGE) = %e, expanded(ADDITIONAL_DETAILS) = ?d, "ok");'
+  - 'info_span!("x", safe(GL_PROJECT_ID) = tracing::field::Empty);'
+  - 'info!(expanded(FILE_PATH) = format!("{a}/{b}"), "expanded may be formatted");'
+  - 'span.record(expanded::BRANCH, tracing::field::display(&branch));'
+invalid:
+  - 'info!(safe(KIND) = %kind, "display");'
+  - 'info!(safe(OUTCOME) = ?state, "debug");'
+  - 'info!(safe(OUTCOME) = tracing::field::debug(&state), "debug fn");'
+  - 'info_span!("x", safe(OUTCOME) = %state);'
+  - 'info!(safe(KIND) = format!("{path}"), "format");'
+  - |
+    #[instrument(skip_all, fields({ safe::REASON } = %self.path))]
+    fn f(&self) {}
+  - 'span.record(safe::REASON, tracing::field::display(path));'
+  - 'span.record(safe::KIND, format!("{x}"));'

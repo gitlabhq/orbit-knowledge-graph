@@ -1,0 +1,17 @@
+# The argument list of a tracing macro, and the legacy `{ field = value }`
+# block that tracing accepts after `target:` or `parent:`.
+id: log-args
+language: rust
+rule:
+  kind: token_tree
+  any:
+    - inside:
+        matches: tracing-macro
+    - regex: '^\{'
+      not:
+        precedes:
+          regex: '^=$'
+      inside:
+        kind: token_tree
+        inside:
+          matches: tracing-macro

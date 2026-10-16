@@ -1,0 +1,10 @@
+id: log-message-has-no-arguments
+valid:
+  - 'info!("done");'
+  - 'info!("done",);'
+  - 'info!(safe(COUNT) = n, "done");'
+  - 'info_span!("index_project", safe(GL_PROJECT_ID) = id);'
+invalid:
+  - 'info!("done {}", n);'
+  - 'warn!("failed: {e}", e = err);'
+  - 'error!(target: "x", "failed {}", err);'

@@ -1,0 +1,18 @@
+id: no-raw-tracing-macro
+valid:
+  - 'orbit_log_fields::info!("done");'
+  - 'use orbit_log_fields::{info, warn};'
+  - 'use tracing::{Instrument, field::Empty};'
+  - 'use tracing::field::debug;'
+  - 'tracing::Span::current();'
+  - |
+    #[cfg(test)]
+    mod tests {
+        use tracing::info;
+        fn t() { tracing::info!("test"); }
+    }
+invalid:
+  - 'tracing::info!("done");'
+  - 'tracing::info_span!("work");'
+  - 'use tracing::{Instrument, info, warn};'
+  - 'use tracing::debug;'

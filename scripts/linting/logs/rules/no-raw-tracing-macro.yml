@@ -1,0 +1,28 @@
+id: no-raw-tracing-macro
+language: rust
+severity: error
+message: Log through the orbit_log_fields macros, not the tracing ones.
+note: |
+  The orbit_log_fields macros take the same arguments and name fields with
+  `safe(NAME)` and `expanded(NAME)`, which the other rules check.
+rule:
+  any:
+    - kind: macro_invocation
+      has:
+        field: macro
+        regex: '^(::)?tracing::(trace|debug|info|warn|error|event|span|trace_span|debug_span|info_span|warn_span|error_span)$'
+    - kind: identifier
+      regex: '^(trace|debug|info|warn|error|event|span|trace_span|debug_span|info_span|warn_span|error_span)$'
+      inside:
+        kind: use_list
+        inside:
+          kind: scoped_use_list
+          has:
+            field: path
+            regex: '^(::)?tracing$'
+    - kind: scoped_identifier
+      regex: '^(::)?tracing::(trace|debug|info|warn|error|event|span|trace_span|debug_span|info_span|warn_span|error_span)$'
+      inside:
+        kind: use_declaration
+  not:
+    matches: test-code
