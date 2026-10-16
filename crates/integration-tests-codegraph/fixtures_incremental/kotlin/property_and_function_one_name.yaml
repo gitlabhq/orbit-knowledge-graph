@@ -1,0 +1,166 @@
+name: "Kotlin: a property and a function of one name keep separate bindings"
+
+fixtures:
+  - path: Main.kt
+    content: |
+      class Other {
+          fun b() {}
+      }
+
+      class Box {
+          val x: Other = Other()
+
+          fun x(): Box {
+              x.b()
+              return Box()
+          }
+
+          fun b() {}
+
+          fun go() = x.b()
+
+          fun goCall() = x().b()
+
+          fun callOnly() = x()
+
+          val cb: () -> Int = { 1 }
+
+          fun other(): Int = cb()
+
+          fun local(): Int {
+              fun cb(): Int = 2
+              return cb()
+          }
+
+          fun shadow(): Int {
+              val cb: () -> Int = { 3 }
+              return cb()
+          }
+
+          fun numbers(n: Long): Int = 4
+
+          fun zip(): Int {
+              val numbers = numbers(1000L)
+              return numbers
+          }
+
+          fun size(): Int = 5
+
+          fun viaCompanion() = size.toLong()
+
+          companion object {
+              const val size = 100
+          }
+      }
+
+      class Init {
+          init {
+              val size = Other()
+          }
+
+          val size: Box = Box()
+
+          fun size(): Int = 6
+
+          fun goInit() = size.b()
+      }
+
+tests:
+  - name: the function x reads the property x and has no self edge
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'x' AND t.name IN ['x', 'b']
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Function" } }
+
+  - name: a read of x types the receiver by the property, not by the function of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'go'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Function" } }
+
+  - name: a call of x() targets the function and types the receiver by its return
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Box.b", "Box.x"] } }
+
+  - name: a call of x() alone targets the function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'callOnly'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: kind, values: ["Function"] } }
+
+  - name: a call of a function-typed property does not reach a local function of that name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'other'
+      RETURN t.fqn AS callee
+    assert:
+      - { not: true, row: { callee: "Box.local.cb" } }
+
+  - name: a call of a function-typed property targets the property
+    # Known gap: a call of a function-typed property is not linked, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'other'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.cb", kind: "Property" } }
+
+  - name: a local function with a property's name stays the call target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'local' AND t.name = 'cb'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.local.cb", kind: "Function" } }
+
+  - name: a local val with a property's name reaches neither the property nor another local
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'shadow'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: a call inside the initializer of a local val of the same name reaches the function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'zip'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.numbers", kind: "Function" } }
+
+  - name: a bare read of a companion constant types by the constant, not by the function of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'viaCompanion' AND t.name = 'size'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.Companion.size", kind: "Property" } }
+
+  - name: a bare read next to an init-block local of the same name types by the property
+    # Known gap: an init-block local has no def between it and the class, so it fills the field slot of the index.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Init.goInit'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.b" } }

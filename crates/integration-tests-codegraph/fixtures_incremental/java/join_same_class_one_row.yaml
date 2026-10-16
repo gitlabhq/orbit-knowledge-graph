@@ -1,0 +1,66 @@
+name: "Java: a join of two values of one class gives one CALLS row"
+
+fixtures:
+  - path: Main.java
+    content: |
+      public class Main {
+          static class Foo {
+              void bar() {}
+
+              static Foo fromString(String s) {
+                  return new Foo();
+              }
+          }
+
+          void tryAndCatch(String s) {
+              Foo f;
+              try {
+                  f = Foo.fromString(s);
+              } catch (IllegalArgumentException e) {
+                  f = new Foo();
+              }
+              f.bar();
+          }
+
+          void twoNews(boolean c) {
+              Foo f = new Foo();
+              if (c) {
+                  f = new Foo();
+              }
+              f.bar();
+          }
+
+          void twoSites(String s) {
+              Foo f = Foo.fromString(s);
+              f.bar();
+              f.bar();
+          }
+      }
+
+tests:
+  - name: a receiver assigned in try and in catch gives one row for bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'tryAndCatch' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Main.Foo.bar" } }
+
+  - name: a receiver assigned twice from the same constructor gives one row for bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'twoNews' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Main.Foo.bar" } }
+
+  - name: two call sites in one method keep one row per site
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'twoSites' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "Main.Foo.bar" } }
