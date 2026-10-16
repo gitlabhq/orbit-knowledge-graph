@@ -1,5 +1,5 @@
 use super::super::build::PlanError;
-use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
+use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN, WATERMARK_COLUMN};
 use ontology::sql_template;
 
 use super::{
@@ -39,6 +39,13 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
                     declaration.entity, declaration.version
                 ))
             })?;
+    let aliases = |alias: &str| rendered.matches(&format!(" AS {alias}")).count();
+    if aliases(WATERMARK_COLUMN) != aliases(VERSION_COLUMN) {
+        return Err(PlanError::MalformedTemplate(format!(
+            "authored SQL for '{}' must select [qualifier.]{} AS {WATERMARK_COLUMN} next to every {VERSION_COLUMN}",
+            declaration.entity, declaration.watermark
+        )));
+    }
     let deleted = aliased_expression(&rendered, DELETED_COLUMN)
         .unwrap_or_else(|| declaration.deleted.clone());
 
@@ -94,7 +101,7 @@ mod tests {
     fn markers_are_substituted_and_aliases_recovered() {
         let spec = compile_authored_extract(
             &group_decl(),
-            "SELECT namespace.{{version_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT namespace.{{version_column}} AS _version, namespace.{{watermark_column}} AS _watermark, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect("valid authored SQL");
         assert!(!spec.template.as_str().contains("{{version_column}}"));
@@ -111,10 +118,20 @@ mod tests {
     }
 
     #[test]
+    fn missing_watermark_alias_is_rejected() {
+        let err = compile_authored_extract(
+            &group_decl(),
+            "SELECT {{version_column}} AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+        )
+        .expect_err("missing watermark alias should be rejected");
+        assert!(err.to_string().contains("AS _watermark"), "got: {err}");
+    }
+
+    #[test]
     fn unresolved_marker_is_rejected() {
         let err = compile_authored_extract(
             &group_decl(),
-            "SELECT {{typo_column}} AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT {{typo_column}} AS _version, w AS _watermark, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect_err("unresolved marker should be rejected");
         assert!(
@@ -127,7 +144,7 @@ mod tests {
     fn complex_version_expression_is_rejected() {
         let err = compile_authored_extract(
             &group_decl(),
-            "SELECT greatest({{version_column}}, now64(6)) AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT greatest({{version_column}}, now64(6)) AS _version, w AS _watermark, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect_err("complex version expression should be rejected");
         assert!(
