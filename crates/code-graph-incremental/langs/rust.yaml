@@ -57,6 +57,8 @@ stages:
 
       - match: '(closure_expression $$$C)'
         replace: '(__lambda $$$C)'
+      - match: '(array_expression $$$E)'
+        replace: '(__arr $$$E)'
 
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
@@ -83,6 +85,8 @@ stages:
 
   - name: retag-calls
     rules:
+      - match: '(call_expression function: (parenthesized_expression $F:__lambda) arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: (parenthesized_expression $F:__member) arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: (parenthesized_expression $F:__ivar) arguments: $A)'
@@ -249,6 +253,8 @@ stages:
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__lambda)'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
+      - match: '(let_declaration pattern: $N value: $V:__arr)'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'
         replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(let_declaration pattern: $N)'
@@ -260,9 +266,13 @@ stages:
         replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__member right: $R:__lambda)'
+        replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__member right: $R)'
         replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R:__lambda)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N right: $R:__arr)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N (__rhs @$R))'

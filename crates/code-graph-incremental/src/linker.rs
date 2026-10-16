@@ -1079,7 +1079,7 @@ impl<'t> Fold<'t> {
     }
 
     fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {
-        if tail.is(C::Obj) || tail.is(C::Lambda) {
+        if tail.is(C::Obj) || tail.is(C::Arr) || tail.is(C::Lambda) {
             return Value::Opaque;
         }
         if let Some(slot) = self.field_slot(tail) {
