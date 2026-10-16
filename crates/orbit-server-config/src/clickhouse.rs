@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_INSERT_TIMEOUT_SECS: u64 = 600;
+pub const DEFAULT_INSERT_TIMEOUT_SECS: u64 = 900;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -26,7 +26,10 @@ pub struct ClickHouseConfiguration {
     pub insert_settings: HashMap<String, String>,
     /// Bound on one INSERT request: sending a chunk, and waiting for the
     /// server's answer after the last one. A hung connection fails the write
-    /// instead of holding its commit open.
+    /// instead of holding its commit open. 0 turns the bound off. Keep it
+    /// above the server's `insert_quorum_timeout`: the client starts its
+    /// timer before the server starts the quorum wait, and a shorter bound
+    /// turns a quorum wait the server would retry into a hard timeout.
     #[serde(default = "default_insert_timeout_secs")]
     pub insert_timeout_secs: u64,
     pub profiling: ProfilingConfig,
