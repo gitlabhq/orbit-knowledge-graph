@@ -42,6 +42,8 @@ fixtures:
 
       fun useShape(shape: Shape): Int = shape.area()
 
+      fun read(): Int = Box.Item
+
   - path: b/Use.kt
     content: |
       package b
@@ -52,6 +54,8 @@ fixtures:
           val item: Box.Item = Box.Item()
           return item.go()
       }
+
+      fun typed(item: Box.Item): Int = item.go()
 
 tests:
   - name: a call on the enum targets the declared abstract function, not the override in the first entry body
@@ -77,3 +81,20 @@ tests:
       RETURN t.fqn AS callee
     assert:
       - { column_values: { field: callee, values: ["a.Box.Item.go"] } }
+
+  - name: a parameter typed by the nested class next to a companion property of its name is typed by the class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'typed' AND t.name = 'go'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["a.Box.Item.go"] } }
+
+  - name: a read of the shared name in expression position takes the companion property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'read' AND t.name = 'Item'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "a.Box.Companion.Item", kind: "Property" } }
