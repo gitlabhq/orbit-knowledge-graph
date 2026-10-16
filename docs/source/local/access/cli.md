@@ -198,7 +198,8 @@ For every agent it configures, `orbit setup`:
   it, so installing needs no network. `--skill full` writes the skill files
   themselves, for agents that cannot run a command when they load a skill.
   GitLab Duo CLI is one, so setup installs `full` whenever Duo is among the
-  agents, and every agent that shares `.agents/skills` gets it. Without
+  agents, and every agent that shares `.agents/skills` gets it. An explicit
+  `--skill wrapper` overrides that and prints a warning. Without
   `--skill`, a later setup keeps the kind already installed and, for `full`, fetches the instance's skill again. `full` uses the
   skill your instance serves when credentials resolve and the instance answers,
   and the skill embedded in the binary otherwise. The directory name stays
@@ -208,13 +209,15 @@ For every agent it configures, `orbit setup`:
   setup wrote them, is renamed to `orbit.orbit-backup`, with its `SKILL.md` renamed to
   `SKILL.md.orbit-backup` so it stops loading. Setup also removes the
   `orbit-cli` skill and link that earlier releases installed, including the real
-  copy they wrote where symlinks fail. `glab skills update orbit` replaces the
-  directory, so run `orbit setup` again afterward.
+  copy they wrote where symlinks fail. A wrapper that
+  `glab skills install` or `glab skills update` wrote is kept as it is, so the
+  two tools do not swap it back and forth, and a lone wrapper without a
+  `.orbit-managed` file is adopted instead of moved aside.
 - For Claude Code, adds `Bash(orbit skills get orbit)` and
   `Bash(orbit skills get orbit *)` to `permissions.allow` in `settings.json`, so
-  the wrapper skill loads without a permission prompt. Under `glab orbit` the
-  rules read `Bash(glab orbit skills get orbit)` and
-  `Bash(glab orbit skills get orbit *)`.
+  the wrapper skill loads without a permission prompt. Under `glab orbit`, or when the kept
+  wrapper runs through it, the rules read `Bash(glab orbit skills get orbit)`
+  and `Bash(glab orbit skills get orbit *)`.
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
 - Adds entries to that agent's JSON configuration, where the agent

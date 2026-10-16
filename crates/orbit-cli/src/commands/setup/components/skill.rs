@@ -68,21 +68,38 @@ fn is_ours(path: &Path) -> bool {
     tree_digest(&current) == marker.digest || is_wrapper_tree(&current)
 }
 
-/// A lone `SKILL.md` equal to this release's wrapper for either launcher, apart from its
+/// The launcher of a lone `SKILL.md` equal to this release's wrapper for it, apart from its
 /// `version:` line. That is what `glab skills update` writes when glab ships another release.
-fn is_wrapper_tree(tree: &BTreeMap<String, Vec<u8>>) -> bool {
+fn wrapper_launcher(tree: &BTreeMap<String, Vec<u8>>) -> Option<&'static str> {
     let [(path, contents)] = tree.iter().collect::<Vec<_>>()[..] else {
-        return false;
+        return None;
     };
     if path != MANIFEST {
-        return false;
+        return None;
     }
     let current = mask_version(&String::from_utf8_lossy(contents));
     [spec::DIRECT_LAUNCHER, spec::GLAB_LAUNCHER]
         .into_iter()
-        .filter_map(|launcher| crate::skill::wrapper_tree_for(launcher).ok())
-        .filter_map(|wrapper| wrapper.get(MANIFEST).cloned())
-        .any(|manifest| mask_version(&String::from_utf8_lossy(&manifest)) == current)
+        .find(|launcher| {
+            crate::skill::wrapper_tree_for(launcher)
+                .ok()
+                .and_then(|wrapper| wrapper.get(MANIFEST).cloned())
+                .is_some_and(|manifest| {
+                    mask_version(&String::from_utf8_lossy(&manifest)) == current
+                })
+        })
+}
+
+/// Whether `current` is a wrapper for the launcher that `tree` does not use.
+fn is_other_launcher_wrapper(
+    current: &BTreeMap<String, Vec<u8>>,
+    tree: &BTreeMap<String, Vec<u8>>,
+) -> bool {
+    wrapper_launcher(current).is_some_and(|launcher| Some(launcher) != wrapper_launcher(tree))
+}
+
+fn is_wrapper_tree(tree: &BTreeMap<String, Vec<u8>>) -> bool {
+    wrapper_launcher(tree).is_some()
 }
 
 fn mask_version(manifest: &str) -> String {
@@ -138,14 +155,15 @@ impl Installer for Skill<'_> {
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+        let mut launchers = BTreeSet::from([spec::launcher()]);
         for skill in skill_targets(agents, target)? {
             migrate_legacy(&skill, target, report)?;
             let kind = self.kind_for(&skill);
             if kind == SkillKind::Wrapper && has_full_only_owner(&skill) {
-                eprintln!(
-                    "warning: {} gets the wrapper, which an agent using it (such as Duo) cannot run when it loads a skill",
+                crate::tui::warning(format!(
+                    "{} gets the wrapper, which an agent using it (such as Duo) cannot run when it loads a skill",
                     skill.label
-                );
+                ));
             }
             let tree = self.tree_for(kind)?;
             write_skill_files(
@@ -157,11 +175,13 @@ impl Installer for Skill<'_> {
                 report,
             )?;
             if let Some(link) = &skill.link {
-                link_skill_dir(link, &skill, kind, &tree, report)?;
+                link_skill_dir(link, &skill, kind, &tree, symlink_dir, report)?;
             }
+            // An adopted wrapper may run through the other launcher.
+            launchers.extend(read_tree(&skill.root).and_then(|tree| wrapper_launcher(&tree)));
         }
         for agent in agents {
-            install_permissions(*agent, target, report)?;
+            install_permissions(*agent, target, &launchers, report)?;
         }
         Ok(())
     }
@@ -318,7 +338,12 @@ fn skill_targets(agents: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> 
     Ok(targets)
 }
 
-fn install_permissions(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
+fn install_permissions(
+    agent: Agent,
+    target: &Target,
+    launchers: &BTreeSet<&str>,
+    report: &mut Report,
+) -> Result<()> {
     let Some(permissions) = agent
         .skills
         .as_ref()
@@ -329,10 +354,12 @@ fn install_permissions(agent: Agent, target: &Target, report: &mut Report) -> Re
     let (path, label) = target.resolve(&permissions.file)?;
     let mut root = json::read_object(&path)?;
     let mut changed = false;
-    for rule in &permissions.rules {
-        let rule = rule.replace("{{orbit}}", spec::launcher());
-        changed |= json::append_unique(&mut root, &ALLOW_PATH.map(String::from), &rule)
-            .with_context(|| format!("failed to update {}", path.display()))?;
+    for launcher in launchers {
+        for rule in &permissions.rules {
+            let rule = rule.replace("{{orbit}}", launcher);
+            changed |= json::append_unique(&mut root, &ALLOW_PATH.map(String::from), &rule)
+                .with_context(|| format!("failed to update {}", path.display()))?;
+        }
     }
     // Hooks share this file and back it up before they write it.
     let hooks_wrote_it = agent
@@ -395,9 +422,18 @@ fn write_skill_files(
         agents: owners,
         digest: tree_digest(tree),
     };
-    // A tree identical to ours (for example one `glab skills install` wrote) is adopted as is.
-    if read_tree(skill_root).is_some_and(|current| current == *tree) {
-        write_marker(skill_root, &marker)?;
+    // A tree identical to ours (for example one `glab skills install` wrote) is adopted as is,
+    // and so is a wrapper for the other launcher, which `glab skills update` would swap back.
+    if let Some(current) = read_tree(skill_root).filter(|current| {
+        current == tree || (kind == SkillKind::Wrapper && is_other_launcher_wrapper(current, tree))
+    }) {
+        write_marker(
+            skill_root,
+            &Marker {
+                digest: tree_digest(&current),
+                ..marker
+            },
+        )?;
         report.note(label, "unchanged");
         return Ok(());
     }
@@ -416,7 +452,8 @@ fn make_room(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
     };
-    if !metadata.is_dir() || is_ours(path) {
+    let lone_wrapper = || read_tree(path).is_some_and(|tree| is_wrapper_tree(&tree));
+    if !metadata.is_dir() || is_ours(path) || lone_wrapper() {
         remove_path(path)?;
         let _ = std::fs::remove_file(marker_path(path));
         return Ok(());
@@ -482,6 +519,7 @@ fn link_skill_dir(
     skill: &SkillTarget,
     kind: SkillKind,
     tree: &BTreeMap<String, Vec<u8>>,
+    symlink: fn(&Path, &Path) -> std::io::Result<()>,
     report: &mut Report,
 ) -> Result<()> {
     let link_target = relative_path_from_link(&link.path, &skill.root);
@@ -495,7 +533,7 @@ fn link_skill_dir(
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    match symlink_dir(&link_target, &link.path) {
+    match symlink(&link_target, &link.path) {
         Ok(()) => {
             report.note(&link.label, format!("linked to {}", skill.label));
             Ok(())
@@ -721,4 +759,36 @@ fn remove_symlink(link_path: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 fn remove_symlink(link_path: &Path) -> std::io::Result<()> {
     std::fs::remove_dir(link_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_link_falls_back_to_a_copy_of_the_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = Target::project(Some(dir.path().to_path_buf())).unwrap();
+        let claude = spec::agents().find(|agent| agent.name == "claude").unwrap();
+        let skill = skill_targets(&[claude], &target).unwrap().remove(0);
+        let link = skill.link.as_ref().unwrap();
+        let tree = crate::skill::wrapper_tree().unwrap();
+        let mut report = Report::default();
+        let no_symlinks = |_: &Path, _: &Path| Err(std::io::Error::other("symlinks unavailable"));
+
+        link_skill_dir(
+            link,
+            &skill,
+            SkillKind::Wrapper,
+            &tree,
+            no_symlinks,
+            &mut report,
+        )
+        .unwrap();
+
+        assert!(!std::fs::symlink_metadata(&link.path).unwrap().is_symlink());
+        assert_eq!(read_tree(&link.path).unwrap(), tree);
+        assert!(read_marker(&link.path).is_some());
+    }
 }

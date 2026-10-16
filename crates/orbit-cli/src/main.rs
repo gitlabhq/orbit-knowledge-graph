@@ -904,18 +904,17 @@ async fn dispatch(
             let components = commands::setup::Component::from_flags(mcp, &skip);
             let machine = commands::setup::detect::Machine::current()?;
             let target = flags.target()?;
-            let skill = commands::setup::skill_request(
-                skill,
-                &agents,
+            let options = flags.to_options(
+                agents,
                 all,
-                &components,
-                flags.dry_run,
-                &machine,
-                &target,
-            )
-            .await?;
-            let options = flags.to_options(agents, all, !no_index, components, skill);
-            let run = commands::setup::install(options, target, &machine)?;
+                !no_index,
+                components,
+                commands::setup::SkillRequest {
+                    kind: skill,
+                    full_tree: None,
+                },
+            );
+            let run = commands::setup::install(options, target, &machine).await?;
             if let Some(tracker) = &tracker {
                 telemetry::emit_setup_event(
                     tracker,

@@ -1,5 +1,5 @@
 name: setup
-version: 1.4.0
+version: 1.4.1
 short: Configure AI coding agents to consult the graph
 description: >-
   Configure AI coding agents to consult the graph
@@ -9,8 +9,8 @@ description: >-
   instruction section, hooks, and skill. A picker lists the detected agents;
   `--yes` skips it. `--mcp` also registers the MCP server. The skill is always
   named `orbit`. By default it is a wrapper that loads the real skill when the
-  agent reads it. With `--skill full` it holds the skill files themselves, and Duo always gets that
-  form. A later run keeps the installed form unless `--skill` says otherwise. Inside a Git
+  agent reads it. With `--skill full` it holds the skill files themselves. Duo gets that form
+  unless `--skill wrapper` says otherwise, which warns that Duo cannot run it. A later run keeps the installed form unless `--skill` says otherwise. Inside a Git
   repository it then indexes the repository; `--no-index` skips that.
   Writes user-global configuration unless `--project` or `--dir` is given.
   Existing files get a one-time `.orbit-backup` sibling, and an `orbit` skill

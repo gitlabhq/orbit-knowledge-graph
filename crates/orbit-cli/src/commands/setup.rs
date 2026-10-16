@@ -68,7 +68,11 @@ impl SetupRun {
     }
 }
 
-pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
+pub(crate) async fn install(
+    options: Options,
+    target: Target,
+    machine: &Machine,
+) -> Result<SetupRun> {
     let interactive = tui::can_prompt(options.yes)?;
     let detected_agents = machine.installed_agents();
     let finish = |selection: &Selection, outcome, indexed: bool| SetupRun {
@@ -103,6 +107,12 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     if options.dry_run {
         show_dry_run(&plan, "Dry run: nothing written.")?;
         return Ok(finish(&selection, Outcome::DryRun, false));
+    }
+
+    if selection.components.contains(&Component::Skill)
+        && needs_instance_skill(&selection.skill, &selection.agents, &target)
+    {
+        selection.skill.full_tree = Some(crate::skill::full_tree().await?);
     }
 
     apply_and_report(&options, |report| {
@@ -284,45 +294,17 @@ pub(crate) struct SkillRequest {
     pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
 }
 
-/// Fetches the full tree only when an agent that will be configured can load nothing else, or
-/// the directory already holds a full install;
-/// anything chosen later in the picker falls back to the embedded skill.
-pub(crate) async fn skill_request(
-    kind: Option<SkillKind>,
-    agents: &[String],
-    all: bool,
-    components: &BTreeSet<Component>,
-    dry_run: bool,
-    machine: &Machine,
-    target: &Target,
-) -> Result<SkillRequest> {
-    let needed = match kind {
-        Some(kind) => kind == SkillKind::Full,
-        None => requires_full_skill(agents, all, machine, target),
-    };
-    let wanted = !dry_run && components.contains(&Component::Skill) && needed;
-    let full_tree = match wanted {
-        true => Some(crate::skill::full_tree().await?),
-        false => None,
-    };
-    Ok(SkillRequest { kind, full_tree })
-}
-
-fn requires_full_skill(agents: &[String], all: bool, machine: &Machine, target: &Target) -> bool {
-    let selected: Vec<_> = match (all, agents.is_empty()) {
-        (true, _) => spec::agents().collect(),
-        (false, false) => plan::agents_named(agents).unwrap_or_default(),
-        (false, true) => machine
-            .installed_agents()
-            .into_iter()
-            .map(|(agent, _)| agent)
-            .collect(),
-    };
+/// Whether the final agent selection ends up with the full skill, so the instance's tree is
+/// worth fetching.
+fn needs_instance_skill(request: &SkillRequest, selected: &[spec::Agent], target: &Target) -> bool {
+    if let Some(kind) = request.kind {
+        return kind == SkillKind::Full;
+    }
     let needs_full = selected
         .iter()
         .any(|agent| agent.skills.as_ref().is_some_and(|dirs| dirs.requires_full));
     // A rerun keeps `full`, so it needs the instance's tree again, not the embedded one.
-    needs_full || components::records_full_skill(&selected, target)
+    needs_full || components::records_full_skill(selected, target)
 }
 
 pub(crate) struct Options {
@@ -396,8 +378,32 @@ mod tests {
 
     use super::*;
 
+    fn install(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(super::install(options, target, machine))
+    }
+
     fn project(dir: &Path) -> Target {
         Target::project(Some(dir.to_path_buf())).unwrap()
+    }
+
+    #[test]
+    fn the_instance_skill_is_needed_when_duo_is_in_the_final_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = project(dir.path());
+        let request = SkillRequest::default();
+        let duo = plan::agents_named(&["duo".to_string()]).unwrap();
+        let claude = plan::agents_named(&["claude".to_string()]).unwrap();
+        assert!(needs_instance_skill(&request, &duo, &target));
+        assert!(!needs_instance_skill(&request, &claude, &target));
+        let wrapper = SkillRequest {
+            kind: Some(SkillKind::Wrapper),
+            full_tree: None,
+        };
+        assert!(!needs_instance_skill(&wrapper, &duo, &target));
     }
 
     fn options_for(names: &[&str]) -> Options {
@@ -843,6 +849,73 @@ mod tests {
         std::fs::remove_file(skills.join(".orbit-managed")).unwrap();
         uninstall_named(&["codex"], dir.path());
         assert!(installed.join("SKILL.md").is_file());
+    }
+
+    fn write_glab_wrapper(skills: &Path) {
+        let tree = crate::skill::wrapper_tree_for(spec::GLAB_LAUNCHER).unwrap();
+        std::fs::create_dir_all(skills.join("orbit")).unwrap();
+        std::fs::write(skills.join("orbit/SKILL.md"), &tree["SKILL.md"]).unwrap();
+    }
+
+    #[test]
+    fn a_glab_wrapper_without_a_record_is_adopted_not_backed_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+
+        install_with_mcp(&["codex"], dir.path());
+
+        let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+        assert!(
+            manifest.contains("!`glab orbit skills get orbit`"),
+            "{manifest}"
+        );
+        assert!(skills.join(".orbit-managed").is_file());
+        assert!(!skills.join("orbit.orbit-backup").exists());
+    }
+
+    #[test]
+    fn a_glab_wrapper_survives_setup_and_gets_its_permission_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+
+        install_with_mcp(&["claude"], dir.path());
+        install_with_mcp(&["claude"], dir.path());
+
+        let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+        assert!(
+            manifest.contains("!`glab orbit skills get orbit`"),
+            "{manifest}"
+        );
+        let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
+        for rule in [
+            "Bash(glab orbit skills get orbit)",
+            "Bash(orbit skills get orbit)",
+        ] {
+            assert!(settings.contains(rule), "{settings}");
+        }
+    }
+
+    #[test]
+    fn a_full_skill_replaces_an_unrecorded_wrapper_without_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+
+        let mut options = options_with_mcp(&["duo"]);
+        options.skill = SkillRequest {
+            kind: Some(SkillKind::Full),
+            full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+        };
+        install(options, project(dir.path()), &bare_machine()).unwrap();
+
+        assert!(!skills.join("orbit.orbit-backup").exists());
+        assert!(
+            !std::fs::read_to_string(skills.join("orbit/SKILL.md"))
+                .unwrap()
+                .contains("!`glab orbit")
+        );
     }
 
     #[test]
