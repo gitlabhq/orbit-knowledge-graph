@@ -637,7 +637,7 @@
           "minimum": 0
         },
         "memory_kill_percent": {
-          "description": "Share of the pod's cgroup memory limit, in percent, at which the\nindexer cancels the in-flight code job with the most source bytes so\nthe kernel does not kill the whole pod. 0 = off.",
+          "description": "Share of the pod's cgroup memory limit, in percent, at which the\nindexer cancels the in-flight code job with the most source bytes so\nthe kernel does not kill the whole pod. 0 = off; values above 100 count\nas 100.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
