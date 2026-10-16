@@ -212,6 +212,8 @@ The policy retains source and resolver inputs. The incremental engine groups sou
 
 The code pipeline settings `source_memory_budget_bytes` and `source_compress_spill` control retained content.
 The memory budget is small, so most repositories stay in memory and a large one spills the rest to one temporary file. A job that waits for a lane holds at most that much source. Zero spills all retained content.
+
+Within one language family, the engine admits files to the parse against a source-byte budget (`max_inflight_source_bytes`, default 4 MiB) in arrival order. One file in flight costs 50 to 190 bytes of heap per source byte. The budget bounds the parse transient; the worker count does not. A file larger than the budget runs alone.
 Spill compression defaults to off.
 The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
 
@@ -437,6 +439,8 @@ A 429, 502, 503 or 504 from the archive endpoint is transient overload, not an e
 Tasks with no `branch` field resolve the default branch via `GET /api/v4/internal/orbit/project/:id/info`. That endpoint sometimes returns 404, when the project is deleted in Rails but still referenced by the dispatcher's datalake view. Then the task is acked with the same `empty_repository{reason=not_found}` counter, and no checkpoint is stored. The branch is unknown, so there is no key to write under. The ack avoids DLQ churn; the dispatcher stopping emission for deleted projects is tracked separately.
 
 A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s) gets one retry. The retry absorbs a transient slowdown, such as a busy pod or a slow Gitaly fetch. A job that times out a second time is treated as structurally stuck and dead-lettered. This avoids burning the full delivery budget on a repo that will almost certainly time out again, and wasting an indexing slot each time. (A transient write failure is different: that is retried in the writer with backoff, above, and does not dead-letter the job.) Abandoning the job also stops the indexing work it started, so the pod releases the CPU and memory rather than holding them until it restarts. The stop is not instantaneous. Work already in flight on one file finishes first. A Rust job waiting for the interner sweep described above finishes that wait first.
+
+A memory watchdog guards the pod. Every 100 ms the indexer reads its own cgroup limit and anonymous memory. At `memory_kill_percent` of the limit (default 90, 0 = off) it cancels one job. The victim is the job with the most source bytes among the jobs that hold an indexing lane, the newest on a tie. A job that waits for a lane holds little memory and is never the victim. A job cancelled while it was the only one holding memory follows the timeout policy: one retry, then the dead-letter queue. A job cancelled while other jobs held memory may fit alone, so it gets three retries before the dead-letter queue. After a cancelled job unwinds, the watchdog waits 750 ms before it cancels another. Without it, the kernel's OOM killer ends the whole pod and every co-scheduled job with it.
 
 #### Flow visual representation
 

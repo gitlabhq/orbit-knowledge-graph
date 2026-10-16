@@ -36,19 +36,24 @@ const JOB_TIMEOUT_RETRY: GlobalRetry = GlobalRetry {
     dead_letter: true,
 };
 
-/// A job cancelled while others shared the pod may fit alone, so only a kill
-/// taken alone spends one of the two attempts; the topic policy still bounds
-/// the shared case.
+/// A job cancelled while others shared the pod may fit alone, so it gets more
+/// retries than a job cancelled alone; both still dead-letter.
+const MEMORY_SHARED_RETRY: GlobalRetry = GlobalRetry {
+    max_attempts: 4,
+    dead_letter: true,
+};
+
 fn memory_failure(attempt: u32, kill: MemoryKill) -> HandlerError {
     let message = format!(
         "code indexing job cancelled under pod memory pressure ({} of {} bytes in use)",
         kill.pressure.used, kill.pressure.limit
     );
-    if kill.alone {
-        JOB_TIMEOUT_RETRY.global_failure(attempt, message)
+    let policy = if kill.alone {
+        JOB_TIMEOUT_RETRY
     } else {
-        HandlerError::Processing(message)
-    }
+        MEMORY_SHARED_RETRY
+    };
+    policy.global_failure(attempt, message)
 }
 
 fn project_lock_key(project_id: i64, branch: &str) -> String {
@@ -644,6 +649,13 @@ mod tests {
         assert!(matches!(
             memory_failure(2, kill(false)),
             HandlerError::Processing(_)
+        ));
+        assert!(matches!(
+            memory_failure(4, kill(false)),
+            HandlerError::Permanent {
+                action: PermanentAction::DeadLetter,
+                ..
+            }
         ));
     }
 
