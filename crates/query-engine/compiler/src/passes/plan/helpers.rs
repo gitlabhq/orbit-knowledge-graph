@@ -70,6 +70,7 @@ pub fn bind_filter(
             .map(|property| model.property_selectivity(property))
             .unwrap_or_default(),
         in_sort_key,
+        text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
     }
 }
 
