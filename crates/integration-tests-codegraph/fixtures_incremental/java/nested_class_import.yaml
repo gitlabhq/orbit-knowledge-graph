@@ -1,0 +1,73 @@
+name: "Java: an import of a nested class reaches its members"
+
+fixtures:
+  - path: pkg/Outer.java
+    content: |
+      package pkg;
+
+      class Helper {
+          static class Inner {
+              static int make() {
+                  return 2;
+              }
+          }
+      }
+
+      public class Outer {
+          public static class Mid {
+              public static class Inner {
+                  public static int make() {
+                      return 3;
+                  }
+              }
+          }
+
+          public static class Inner {
+              public static int make() {
+                  return 1;
+              }
+          }
+      }
+
+  - path: pkg/Use.java
+    content: |
+      package pkg;
+
+      import pkg.Outer.Inner;
+
+      public class Use {
+          int run() {
+              return Inner.make();
+          }
+      }
+
+  - path: other/UseMid.java
+    content: |
+      package other;
+
+      import pkg.Outer.Mid.Inner;
+
+      public class UseMid {
+          int runMid() {
+              return Inner.make();
+          }
+      }
+
+tests:
+  - name: a call through the imported nested class reaches the method on the import path
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "run" AND callee.name = "make"
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "pkg.Outer.Inner.make" } }
+
+  - name: a deeper nested class import walks the path, not the first class with that name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "runMid" AND callee.name = "make"
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "pkg.Outer.Mid.Inner.make" } }

@@ -8,9 +8,9 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, ROOT_PATH, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
-use crate::file_tree::LookupConfig;
+use crate::file_tree::{Distance, LookupConfig, Roots};
 use crate::intern::Lang;
 use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
@@ -69,8 +69,10 @@ pub struct ResolveResult {
 
 #[derive(Default)]
 pub struct FileIndex {
-    /// A file, or a top-level def in one when the key is the def's name.
-    keys: FxHashMap<String, Loc>,
+    /// Every file or top-level def with this key, in tree order: a file by
+    /// its path, stem, package, or module path; a def by its package or
+    /// module path and name.
+    keys: FxHashMap<String, SmallVec<[Loc; 1]>>,
     dirs: FxHashMap<String, Vec<u32>>,
 }
 
@@ -78,17 +80,25 @@ impl FileIndex {
     fn insert(&mut self, key: String, loc: Loc) {
         let dir = key.rsplit_once(PATH_SEP).map_or("", |(d, _)| d);
         self.dirs.entry(dir.to_string()).or_default().push(loc.fi);
-        self.keys.entry(key).or_insert(loc);
+        self.insert_key(key, loc);
     }
 
-    fn get(&self, key: &str) -> Option<Loc> {
-        self.keys.get(key).copied()
+    fn insert_key(&mut self, key: String, loc: Loc) {
+        let locs = self.keys.entry(key).or_default();
+        if !locs.contains(&loc) {
+            locs.push(loc);
+        }
+    }
+
+    fn get(&self, key: &str) -> &[Loc] {
+        self.keys.get(key).map_or(&[], SmallVec::as_slice)
     }
 
     fn insert_entrypoints(&mut self, entrypoints: &[(String, String)]) {
         for (directory, path) in entrypoints {
-            if let Some(target) = self.get(path) {
-                self.keys.insert(directory.clone(), target);
+            if let Some(&target) = self.get(path).first() {
+                self.keys
+                    .insert(directory.clone(), SmallVec::from_elem(target, 1));
             }
         }
     }
@@ -175,52 +185,100 @@ impl Resolver {
         env: &Env,
         entrypoints: &[(String, String)],
     ) -> FileIndex {
-        let mut index = build_file_index(trees, &env.lang, env.lang_id, env.lang_id.index_names());
+        let mut index = build_file_index(trees, env, env.lang_id.index_names());
         index.insert_entrypoints(entrypoints);
         std::mem::replace(&mut self.file_index, index)
     }
 
+    /// The files whose cross-file pass must run again: the dirty ones, every
+    /// importer whose import answers changed, importers of files that first
+    /// resolve now, and their dependents.
     fn invalidate(
         &self,
         previous_index: &FileIndex,
         trees: &[Tree],
         dirty_fis: &FxHashSet<u32>,
-        lookup: &LookupConfig,
-        env: &Env,
+        paths: &PathLookup,
     ) -> FxHashSet<u32> {
         if self.visible.is_empty() {
             return (0..trees.len() as u32).collect();
         }
-        let mut invalidated: FxHashSet<u32> = self
-            .reqs
-            .iter()
-            .filter(|req| {
-                self.lookup != *lookup
-                    || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
-                        .contains(&Loc::new(req.target_fi as usize, req.anchor))
-            })
-            .map(|req| req.fi)
-            .chain(dirty_fis.iter().copied())
-            .collect();
+        let mut invalidated: FxHashSet<u32> = dirty_fis.iter().copied().collect();
+        let lookup_changed = self.lookup != *paths.lookup;
+        if lookup_changed {
+            invalidated.extend(self.reqs.iter().map(|req| req.fi));
+        } else {
+            let mut known: FxHashMap<(u32, u32), SmallVec<[Loc; 1]>> = FxHashMap::default();
+            for req in &self.reqs {
+                known
+                    .entry((req.fi, req.node))
+                    .or_default()
+                    .push(Loc::new(req.target_fi as usize, req.anchor));
+            }
+            let mut names_of: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
+            for (&(fi, node), targets) in &known {
+                if invalidated.contains(&fi) {
+                    continue;
+                }
+                let import = trees[fi as usize].cursor(node);
+                let now: SmallVec<[Loc; 1]> = paths
+                    .resolve(fi, import)
+                    .iter()
+                    .map(|hit| hit.loc)
+                    .collect();
+                if targets.iter().any(|target| !now.contains(target)) {
+                    invalidated.insert(fi);
+                    continue;
+                }
+                let gained = now.iter().filter(|loc| !targets.contains(loc));
+                let claims = |name: u32, from: u32| match self.visible[fi as usize].get(&name) {
+                    None => true,
+                    Some(held) if held.fi == fi => false,
+                    Some(held) => {
+                        paths.roots.distance(fi, from) <= paths.roots.distance(fi, held.fi)
+                    }
+                };
+                let gained_names: FxHashSet<u32> = gained
+                    .flat_map(|loc| {
+                        names_of
+                            .entry(loc.fi)
+                            .or_insert_with(|| {
+                                gather_visible_one(
+                                    &trees[loc.fi as usize],
+                                    loc.fi as usize,
+                                    self.tags.exports,
+                                )
+                                .into_keys()
+                                .collect()
+                            })
+                            .iter()
+                            .copied()
+                            .filter(|&name| claims(name, loc.fi))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                if !gained_names.is_empty()
+                    && trees[fi as usize]
+                        .root()
+                        .descendants()
+                        .any(|node| gained_names.contains(&node.sym()))
+                {
+                    invalidated.insert(fi);
+                }
+            }
+        }
         let added_keys = self
             .file_index
             .keys
             .keys()
             .any(|key| !previous_index.keys.contains_key(key));
-        if added_keys || self.lookup != *lookup {
+        if added_keys || lookup_changed {
             let known_imports: FxHashSet<_> =
                 self.reqs.iter().map(|req| (req.fi, req.node)).collect();
             let discovery_files = (0..trees.len() as u32)
                 .filter(|fi| !dirty_fis.contains(fi))
                 .collect();
-            let (discovered, _) = gather_imports_for(
-                trees,
-                &env.lang,
-                &self.file_index,
-                lookup,
-                &env.resolve.config,
-                &discovery_files,
-            );
+            let (discovered, _) = gather_imports_for(trees, paths, &discovery_files);
             invalidated.extend(
                 discovered
                     .iter()
@@ -322,8 +380,10 @@ impl Resolver {
         run: &Sentinel,
     ) -> Result<ResolveResult, Killed> {
         let index_names = support_lang.index_names();
+        let roots = Roots::build(trees, lang);
         let previous_index = self.rebuild_file_index(trees, env, entrypoints);
-        let dirty_fis = &self.invalidate(&previous_index, trees, dirty_fis, lookup, env);
+        let paths = PathLookup::new(trees, env, &self.file_index, lookup, &roots);
+        let dirty_fis = &self.invalidate(&previous_index, trees, dirty_fis, &paths);
         self.lookup = lookup.clone();
         edges.retain(|edge| edge.from_tree == edge.to_tree || !dirty_fis.contains(&edge.from_tree));
 
@@ -335,20 +395,25 @@ impl Resolver {
             }
         }
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
-        let (new_reqs, mut cross_edges) =
-            gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
+        let (new_reqs, mut cross_edges) = gather_imports_for(trees, &paths, dirty_fis);
+        drop(paths);
         self.reqs.extend(new_reqs);
         let packages: Vec<_> = match config.merge_same_named_types {
             true => trees.iter().map(package_owners).collect(),
             false => Vec::new(),
         };
+        let scope = Scope {
+            env,
+            roots: &roots,
+            tags: self.tags,
+            wildcard_sym: self.wildcard_sym,
+            owners: &packages,
+        };
         let (ambiguous, too_many_names) = propagate_reexports(
             trees,
             &self.reqs,
             &mut self.visible,
-            self.wildcard_sym,
-            self.tags,
-            &packages,
+            &scope,
             run,
             env.limits.max_cross_file_names,
         );
@@ -838,102 +903,39 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
 
 fn gather_imports_for(
     trees: &[Tree],
-    lang: &Lang,
-    file_index: &FileIndex,
-    lookup: &LookupConfig,
-    config: &ResolveConfig,
+    paths: &PathLookup,
     dirty_fis: &FxHashSet<u32>,
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let tags = ReservedTags::new(lang);
-    let resolved_tag_key = tags.resolved_source;
-    let root_relative = lang.syms.lookup("source_root_rel");
-    let declared_roots: FxHashSet<_> = trees
-        .iter()
-        .filter_map(|tree| {
-            let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
-            tree.label
-                .strip_suffix(relative)
-                .map(|root| root.trim_end_matches(PATH_SEP))
-        })
-        .collect();
-    let stdlib_prefixes: Vec<_> = lookup
-        .prefixes
-        .iter()
-        .filter(|prefix| declared_roots.contains(prefix.as_str()))
-        .cloned()
-        .collect();
     let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
         .map(|&fi| {
-            let tree = &trees[fi as usize];
-            tree.root()
-                .fold_tree((Vec::new(), Vec::new()), |(reqs, edges), cur, _w| {
+            trees[fi as usize].root().fold_tree(
+                (Vec::new(), Vec::new()),
+                |(reqs, edges), cur, _w| {
                     if cur.kind() != C::Import && cur.kind() != C::ImportType {
                         return;
                     }
-                    let Some(source_sym) = cur
-                        .tag(tags.original_source_path)
-                        .or_else(|| cur.child_sym(C::SourcePath))
-                    else {
-                        return;
-                    };
-                    let source_str = lang.syms.resolve(source_sym);
-                    let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
-                        return;
-                    };
-                    let raw_path = lang.syms.resolve(resolved_sym);
-                    let mapped = lookup.aliases.iter().find_map(|alias| {
-                        if alias.scope.is_some() && alias.scope != cur.tag(tags.alias_scope) {
-                            return None;
-                        }
-                        let path = apply_alias(source_str, &alias.pattern, &alias.replacement)?;
-                        (!alias.if_exists || !resolve_glob(&path, file_index, &[]).is_empty())
-                            .then_some(path)
-                    });
-                    if mapped.is_none() && is_external(source_str, &config.external) {
-                        return;
-                    }
-                    let node_idx = cur.index();
-                    let stdlib = mapped.is_none() && is_external(source_str, &config.stdlib);
-                    let prefixes = if stdlib {
-                        &stdlib_prefixes
-                    } else {
-                        &lookup.prefixes
-                    };
-                    let target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
-                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
-                    direct.retain(|loc| loc.fi != fi);
-                    if direct.is_empty() && stdlib {
-                        return;
-                    }
-                    let candidates = match direct.is_empty() {
-                        false => Either::Left(
-                            direct
-                                .into_iter()
-                                .map(|loc| (loc, target_path.clone(), false)),
-                        ),
-                        true => Either::Right(cur.names().flat_map(|c| {
-                            let submod =
-                                format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
-                            resolve_glob(&submod, file_index, &lookup.prefixes)
-                                .into_iter()
-                                .map(move |loc| (loc, submod.clone(), true))
-                        })),
-                    };
-                    for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
-                        if is_sub {
-                            edges.push(Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports));
+                    for hit in paths.resolve(fi, cur) {
+                        if hit.route == Route::Submodule {
+                            edges.push(Edge::new(
+                                fi,
+                                cur.index(),
+                                hit.loc.fi,
+                                0,
+                                EdgeKind::Imports,
+                            ));
                         }
                         reqs.push(ImportReq {
                             fi,
-                            node: node_idx,
-                            target_fi: loc.fi,
-                            anchor: loc.node,
-                            target_path: path,
+                            node: cur.index(),
+                            target_fi: hit.loc.fi,
+                            anchor: hit.loc.node,
+                            target_path: hit.path,
                         });
                     }
-                })
+                },
+            )
         })
         .collect();
     let mut all_reqs = Vec::new();
@@ -943,6 +945,340 @@ fn gather_imports_for(
         all_edges.extend(edges);
     }
     (all_reqs, all_edges)
+}
+
+/// The step of the lookup that found a target.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Route {
+    /// The path names a file, a directory, or a top-level def.
+    Direct,
+    /// The path plus an imported name names a file.
+    Submodule,
+    /// A segment of the path is a name an import binds in the file before
+    /// it; the lookup went on from that import's source.
+    ImportHop,
+    /// The path names defs inside a file, one per trailing segment.
+    DefClimb,
+}
+
+struct Hit {
+    loc: Loc,
+    path: String,
+    route: Route,
+}
+
+/// One lookup for every import path: the gather and the stale check ask it
+/// the same question and get the same answer.
+struct PathLookup<'a> {
+    trees: &'a [Tree],
+    lang: &'a Lang,
+    config: &'a ResolveConfig,
+    file_index: &'a FileIndex,
+    lookup: &'a LookupConfig,
+    roots: &'a Roots,
+    tags: ReservedTags,
+    stdlib_prefixes: Vec<String>,
+}
+
+impl<'a> PathLookup<'a> {
+    fn new(
+        trees: &'a [Tree],
+        env: &'a Env,
+        file_index: &'a FileIndex,
+        lookup: &'a LookupConfig,
+        roots: &'a Roots,
+    ) -> Self {
+        let declared: FxHashSet<&str> = roots.paths().collect();
+        let stdlib_prefixes = lookup
+            .prefixes
+            .iter()
+            .filter(|prefix| declared.contains(prefix.as_str()))
+            .cloned()
+            .collect();
+        Self {
+            trees,
+            lang: &env.lang,
+            config: &env.resolve.config,
+            file_index,
+            lookup,
+            roots,
+            tags: ReservedTags::new(&env.lang),
+            stdlib_prefixes,
+        }
+    }
+
+    /// Every target an import of file `fi` names, found by the first step
+    /// that answers: alias, direct, submodule, import hop, then def climb.
+    fn resolve(&self, fi: u32, import: Cursor) -> Vec<Hit> {
+        let tree = &self.trees[fi as usize];
+        let Some(source_sym) = import
+            .tag(self.tags.original_source_path)
+            .or_else(|| import.child_sym(C::SourcePath))
+        else {
+            return Vec::new();
+        };
+        let source = self.lang.syms.resolve(source_sym);
+        let Some(resolved) = tree.get_tag(import.index(), self.tags.resolved_source) else {
+            return Vec::new();
+        };
+        let raw = self.lang.syms.resolve(resolved);
+        let mapped = self.lookup.aliases.iter().find_map(|alias| {
+            if alias.scope.is_some() && alias.scope != import.tag(self.tags.alias_scope) {
+                return None;
+            }
+            let path = apply_alias(source, &alias.pattern, &alias.replacement)?;
+            (!alias.if_exists || !self.files(fi, &path, &[]).is_empty()).then_some(path)
+        });
+        if mapped.is_none() && is_external(source, &self.config.external) {
+            return Vec::new();
+        }
+        let stdlib = mapped.is_none() && is_external(source, &self.config.stdlib);
+        let prefixes = match stdlib {
+            true => &self.stdlib_prefixes,
+            false => &self.lookup.prefixes,
+        };
+        let path = mapped.unwrap_or_else(|| self.rooted(fi, raw));
+        let names: Vec<u32> = import.names().map(|name| name.sym()).collect();
+        let hits = |locs: Vec<Loc>, path: &str, route| -> Vec<Hit> {
+            locs.into_iter()
+                .map(|loc| Hit {
+                    loc,
+                    path: path.to_owned(),
+                    route,
+                })
+                .collect()
+        };
+        let direct = self.files(fi, &path, prefixes);
+        if !direct.is_empty() {
+            return hits(direct, &path, Route::Direct);
+        }
+        if stdlib {
+            return Vec::new();
+        }
+        let submodules: Vec<Hit> = names
+            .iter()
+            .flat_map(|&name| {
+                let submodule = format!("{path}{PATH_SEP}{}", self.lang.syms.resolve(name));
+                let found = self.files(fi, &submodule, prefixes);
+                hits(found, &submodule, Route::Submodule)
+            })
+            .collect();
+        if !submodules.is_empty() {
+            return submodules;
+        }
+        if let Some((bound, found)) = self.follow_bindings(fi, &path, prefixes) {
+            return hits(found, &bound, Route::ImportHop);
+        }
+        self.defs_on_path(fi, &path, &names, prefixes)
+    }
+
+    /// A source path with the own-root segment replaced by the root of `fi`:
+    /// `.` is the root itself and `./a/b` is `a/b` below it.
+    fn rooted(&self, fi: u32, raw: &str) -> String {
+        let own = self.roots.path(fi).unwrap_or_default();
+        match (raw, raw.split_once(PATH_SEP)) {
+            (ROOT_PATH, _) => own.to_owned(),
+            (_, Some((ROOT_PATH, rest))) if own.is_empty() => rest.to_owned(),
+            (_, Some((ROOT_PATH, rest))) => format!("{own}{PATH_SEP}{rest}"),
+            _ => raw.to_owned(),
+        }
+    }
+
+    /// The files or defs a path names from file `fi`, nearest root first:
+    /// every file of a directory for a glob, else the one best match.
+    fn files(&self, fi: u32, path: &str, prefixes: &[String]) -> Vec<Loc> {
+        let keyed = |key: &str| -> Vec<Loc> {
+            std::iter::once(key.to_owned())
+                .chain(
+                    prefixes
+                        .iter()
+                        .filter(|prefix| !prefix.is_empty())
+                        .map(|prefix| format!("{prefix}{PATH_SEP}{key}")),
+                )
+                .flat_map(|key| self.file_index.get(&key).to_vec())
+                .collect()
+        };
+        let glob = path
+            .strip_suffix(WILDCARD)
+            .map(|dir| dir.trim_end_matches(PATH_SEP));
+        let mut found: Vec<Loc> = match glob {
+            Some(dir) => std::iter::once(dir.to_owned())
+                .chain(prefixes.iter().map(|p| format!("{p}{PATH_SEP}{dir}")))
+                .filter_map(|dir| self.file_index.dirs.get(&dir))
+                .flatten()
+                .map(|&fi| Loc { fi, node: 0 })
+                .collect(),
+            None => keyed(path),
+        };
+        found.retain(|loc| loc.fi != fi);
+        found = found.into_iter().unique().collect();
+        found.sort_by_key(|loc| (self.roots.distance(fi, loc.fi), loc.node != 0));
+        if glob.is_none() {
+            found.truncate(1);
+        }
+        found
+    }
+
+    /// The file an empty path names from `fi`: the index file of its own
+    /// root, else of the first lookup prefix that has one.
+    fn root_file(&self, fi: u32, prefixes: &[String]) -> Option<Loc> {
+        self.roots
+            .path(fi)
+            .into_iter()
+            .chain(prefixes.iter().map(String::as_str))
+            .find_map(|root| {
+                self.file_index
+                    .get(root)
+                    .iter()
+                    .find(|loc| loc.node == 0)
+                    .copied()
+            })
+    }
+
+    /// Follows the imports that bind a segment of `path` until the path
+    /// names files. A binding seen twice is a cycle, and the walk stops.
+    fn follow_bindings(
+        &self,
+        fi: u32,
+        path: &str,
+        prefixes: &[String],
+    ) -> Option<(String, Vec<Loc>)> {
+        let mut visited: FxHashSet<(u32, u32)> = FxHashSet::default();
+        let mut path = path.to_owned();
+        loop {
+            let (bound, binding) = self.bind_once(fi, &path, prefixes)?;
+            if !visited.insert(binding) {
+                return None;
+            }
+            path = bound;
+            let found = self.files(fi, &path, prefixes);
+            if !found.is_empty() {
+                return Some((path, found));
+            }
+        }
+    }
+
+    /// Rewrites `path` through the import that binds its last bound
+    /// segment: the file at the head of the path imports a name that equals
+    /// the next segment, so the path goes on from that import's source.
+    fn bind_once(&self, fi: u32, path: &str, prefixes: &[String]) -> Option<(String, (u32, u32))> {
+        let segments: Vec<&str> = path.split(PATH_SEP).collect();
+        (0..segments.len()).rev().find_map(|i| {
+            let segment = segments[i];
+            if segment.is_empty() || segment == WILDCARD {
+                return None;
+            }
+            let name = self.lang.syms.lookup(segment);
+            if name == 0 {
+                return None;
+            }
+            let file = match i {
+                0 => self.root_file(fi, prefixes),
+                _ => self
+                    .files(fi, &segments[..i].join(PATH_SEP), prefixes)
+                    .into_iter()
+                    .next(),
+            }
+            .filter(|loc| loc.node == 0)?;
+            let tree = &self.trees[file.fi as usize];
+            let (import, original) = tree
+                .root()
+                .descendants_pruned(|c| c.is(C::Def))
+                .filter(|c| c.is(C::Import))
+                .find_map(|import| {
+                    let bound = import
+                        .names()
+                        .find(|n| n.child_sym(C::Alias).unwrap_or(n.sym()) == name)?;
+                    Some((import, bound.sym()))
+                })?;
+            let source = self
+                .lang
+                .syms
+                .resolve(tree.get_tag(import.index(), self.tags.resolved_source)?);
+            let mut next = self.rooted(file.fi, source);
+            let rest = segments[i + 1..].iter().copied();
+            for part in std::iter::once(self.lang.syms.resolve(original)).chain(rest) {
+                if !next.is_empty() {
+                    next.push_str(PATH_SEP);
+                }
+                next.push_str(part);
+            }
+            Some((next, (file.fi, name)))
+        })
+    }
+
+    /// A path whose tail names defs inside a file, `use crate::errors::Error::Kind`
+    /// with `enum Error { Kind }` in `errors.rs`: the longest head that names a
+    /// file or a def, then one def per remaining segment. An import whose one
+    /// name is the last segment anchors at the def that holds it.
+    fn defs_on_path(&self, fi: u32, path: &str, names: &[u32], prefixes: &[String]) -> Vec<Hit> {
+        let imported = (names.len() == 1).then(|| names[0]);
+        let mut prefix = path;
+        let mut tail = Vec::new();
+        while let Some((head, last)) = prefix.rsplit_once(PATH_SEP) {
+            tail.push(self.lang.syms.lookup(last));
+            let found = self.files(fi, head, prefixes);
+            if !found.is_empty() {
+                let rest = &path[head.len()..];
+                let head_name = self
+                    .lang
+                    .syms
+                    .lookup(head.rsplit_once(PATH_SEP).map_or(head, |(_, last)| last));
+                return found
+                    .into_iter()
+                    .filter_map(|loc| {
+                        let mut node = self.trees[loc.fi as usize].cursor(loc.node);
+                        if loc.node == 0 {
+                            node = node.child_def(head_name).unwrap_or(node);
+                        }
+                        for &name in tail.iter().rev() {
+                            node = node.child_def(name)?;
+                        }
+                        if imported.is_some_and(|name| tail.first() == Some(&name))
+                            && let Some(parent) = node.parent().filter(|parent| parent.is(C::Def))
+                        {
+                            node = parent;
+                        }
+                        Some(Hit {
+                            loc: Loc::new(loc.fi as usize, node.index()),
+                            path: format!("{head}{rest}"),
+                            route: Route::DefClimb,
+                        })
+                    })
+                    .collect();
+            }
+            prefix = head;
+        }
+        Vec::new()
+    }
+}
+
+/// What `propagate_reexports` reads besides the requests: the per-file rule
+/// config, the roots, and the C# partial-class owners.
+struct Scope<'a> {
+    env: &'a Env,
+    roots: &'a Roots,
+    tags: ReservedTags,
+    wildcard_sym: u32,
+    owners: &'a [FxHashMap<u32, u32>],
+}
+
+/// How strongly an export claims a name: a nearer source root beats a
+/// farther one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Claim {
+    distance: Distance,
+}
+
+impl Claim {
+    /// Whether this claim beats `other`; `None` when neither does.
+    fn beats(self, other: Claim) -> Option<bool> {
+        match self.distance.cmp(&other.distance) {
+            std::cmp::Ordering::Less => Some(true),
+            std::cmp::Ordering::Greater => Some(false),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
@@ -977,21 +1313,19 @@ fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<FxHashMap<u32, 
         .clone()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn propagate_reexports(
     trees: &[Tree],
     reqs: &[ImportReq],
     visible: &mut VisibleMap,
-    wildcard_sym: u32,
-    tags: ReservedTags,
-    owners: &[FxHashMap<u32, u32>],
+    scope: &Scope,
     run: &Sentinel,
     max_names: usize,
 ) -> (FxHashSet<(u32, u32)>, Option<Killed>) {
+    let (tags, wildcard_sym) = (scope.tags, scope.wildcard_sym);
     let mut ambiguous: FxHashSet<(u32, u32)> = FxHashSet::default();
     let mut names: usize = visible.iter().map(FxHashMap::len).sum();
     let mut too_many_names = None;
-    let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), owners);
+    let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), scope.owners);
 
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
@@ -1006,28 +1340,45 @@ fn propagate_reexports(
         }
     }
     let (via, packages) = package_imports(trees, reqs, wildcard_sym);
+    let import_of = |req: &ImportReq| trees[req.fi as usize].cursor(req.node);
     'propagate: loop {
         if run.check().is_err() {
             break;
         }
         let mut unions: Vec<Option<PackageExports>> = vec![None; packages.len()];
-        let mut new_exports: indexmap::IndexMap<(usize, u32), Loc, rustc_hash::FxBuildHasher> =
-            Default::default();
+        let mut new_exports: indexmap::IndexMap<
+            (usize, u32),
+            (Loc, Claim),
+            rustc_hash::FxBuildHasher,
+        > = Default::default();
         let added = std::cell::Cell::new(0);
         let mut export = |fi: usize, name, loc: Loc| {
             if visible[fi].contains_key(&name) {
                 return;
             }
+            let claim = Claim {
+                distance: scope.roots.distance(fi as u32, loc.fi),
+            };
             match new_exports.entry((fi, name)) {
                 indexmap::map::Entry::Vacant(entry) => {
-                    entry.insert(loc);
+                    entry.insert((loc, claim));
                     added.set(added.get() + 1);
                 }
-                indexmap::map::Entry::Occupied(entry) => {
-                    let existing = *entry.get();
-                    if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
-                        ambiguous
-                            .insert((u32::try_from(fi).expect("file index exceeds u32"), name));
+                indexmap::map::Entry::Occupied(mut entry) => {
+                    let (existing, held) = *entry.get();
+                    if existing == loc || key(existing).is_some() && key(existing) == key(loc) {
+                        return;
+                    }
+                    let id = (u32::try_from(fi).expect("file index exceeds u32"), name);
+                    match claim.beats(held) {
+                        Some(true) => {
+                            entry.insert((loc, claim));
+                            ambiguous.remove(&id);
+                        }
+                        Some(false) => {}
+                        None => {
+                            ambiguous.insert(id);
+                        }
                     }
                 }
             }
@@ -1040,6 +1391,7 @@ fn propagate_reexports(
                 too_many_names = Some(Killed::limit("names", "", names + added.get(), max_names));
                 break 'propagate;
             }
+            let import = import_of(req);
             match via[i] {
                 Via::Own => {}
                 Via::Package(package) => {
@@ -1055,7 +1407,7 @@ fn propagate_reexports(
                 Via::Covered => continue,
             }
             let exports = req.exports(trees, visible);
-            for c in trees[req.fi as usize].cursor(req.node).names() {
+            for c in import.names() {
                 let ns = wildcard_or_name(wildcard_sym, c);
                 if ns == wildcard_sym {
                     if let Some(alias) = namespace_alias(wildcard_sym, c)
@@ -1103,7 +1455,7 @@ fn propagate_reexports(
             break;
         }
         names += new_exports.len();
-        for ((fi, ns), loc) in new_exports {
+        for ((fi, ns), (loc, _)) in new_exports {
             visible[fi].insert(ns, loc);
         }
     }
@@ -1255,16 +1607,27 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             continue;
         };
         let exports = req.exports(ctx.trees, ctx.visible);
-        let target_file = name_target(ctx, req, name)
+        let named = name_target(ctx, req, name);
+        let member = named
+            .filter(|target| req.anchor != 0 && target.node != 0)
+            .and_then(|target| {
+                members_of(ctx, ctx.corpus.jump(target.fi, target.node))
+                    .get(&m.sym())
+                    .map(|&node| ctx.corpus.jump(target.fi, node))
+            });
+        let target_file = named
             .filter(|target| target.node == 0)
             .map_or(tfi, |target| target.fi as usize);
-        let target = if target_file == tfi {
-            exports.get(&m.sym())
-        } else {
-            ctx.visible[target_file].get(&m.sym())
-        }
-        .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
-        .filter(|tgt| tgt.has_tag(ctx.tags.callable));
+        let target = member
+            .or_else(|| {
+                if target_file == tfi {
+                    exports.get(&m.sym())
+                } else {
+                    ctx.visible[target_file].get(&m.sym())
+                }
+                .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
+            })
+            .filter(|tgt| tgt.has_tag(ctx.tags.callable));
         if let Some(target) = target {
             if namespace_alias(ctx.wildcard_sym, name).is_some() {
                 edges.push(name.edge_to(target, EdgeKind::Imports));
@@ -1332,6 +1695,17 @@ fn wildcard_uses<'a>(
             .get(&sym)
             .filter(|_| !ctx.ambiguous.contains(&(req.target_fi, sym)))
             .filter(|loc| loc.fi as usize != fi)
+            .filter(|&&loc| match ctx.visible[fi].get(&sym) {
+                Some(&held)
+                    if held != loc
+                        && held.fi as usize != fi
+                        && !ctx.ambiguous.contains(&(req.fi, sym)) =>
+                {
+                    let key = |l: Loc| partial_key(ctx.corpus.jump(l.fi, l.node), ctx.packages);
+                    key(held).is_some() && key(held) == key(loc)
+                }
+                _ => true,
+            })
             .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
     };
     let mut imported: FxHashSet<(u32, u32)> = FxHashSet::default();
@@ -1595,7 +1969,7 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
         chain(ctx, c, &|r| {
             resolve_reference(ctx, r)
                 .or_else(|| enclosing_alias(ctx, r))
-                .or_else(|| visible_type(ctx, r.fi(), r.sym()))
+                .or_else(|| visible_type(ctx, r.fi(), r.sym()).filter(|_| !imported_inline(r)))
         })
     });
     if !CUT.get() {
@@ -1612,6 +1986,19 @@ fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<C
     .skip(1)
     .map(|(fi, node)| ctx.corpus.jump(fi, node))
     .find(|node| node.is(C::Def))
+}
+
+/// A callee whose call carries an inline import of that very name, as a
+/// `std::fs::FileTimes::new()` path call does: the import names the target,
+/// so a same-named local def is not it.
+fn imported_inline(callee: Cursor) -> bool {
+    callee.parent().is_some_and(|call| {
+        call.is(C::Call)
+            && call
+                .children()
+                .filter(|child| child.is(C::Import))
+                .any(|import| import.names().any(|name| name.sym() == callee.sym()))
+    })
 }
 
 /// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
@@ -2089,13 +2476,10 @@ fn destructure_calls<'a>(
         .collect()
 }
 
-fn build_file_index(
-    trees: &[Tree],
-    lang: &Lang,
-    support_lang: SupportLang,
-    index_names: &[String],
-) -> FileIndex {
+fn build_file_index(trees: &[Tree], env: &Env, index_names: &[String]) -> FileIndex {
+    let (lang, support_lang) = (&env.lang, env.lang_id);
     let mut idx = FileIndex::default();
+    let mut module_defs = Vec::new();
     let sep = support_lang.fqn_separator();
     for (fi, (tree, path)) in trees.iter().map(|t| (t, t.label.as_str())).enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
@@ -2103,6 +2487,7 @@ fn build_file_index(
         let file = Loc::new(fi, 0);
         idx.insert(path.to_string(), file);
         idx.insert(stem.to_string(), file);
+        let mut module = stem;
         for name in index_names {
             if let Some(pkg) = stem
                 .strip_suffix(name.as_str())
@@ -2111,8 +2496,10 @@ fn build_file_index(
                 if !pkg.is_empty() {
                     idx.insert(pkg.to_string(), file);
                 }
+                module = pkg;
             } else if stem == name.as_str() {
                 idx.insert(String::new(), file);
+                module = "";
             }
         }
         let root = tree.root();
@@ -2121,27 +2508,17 @@ fn build_file_index(
         });
         let defs = root.children().filter(|d| d.is(C::Def));
         for (name, d) in defs.filter_map(|d| Some((d.child_sym(C::DefName)?, d))) {
-            let key = format!("{pkg}{}", lang.syms.resolve(name).replace(sep, PATH_SEP));
-            idx.insert(key, Loc::new(fi, d.index()));
+            let name = lang.syms.resolve(name).replace(sep, PATH_SEP);
+            if pkg.is_empty() && !module.is_empty() {
+                module_defs.push((format!("{module}{PATH_SEP}{name}"), Loc::new(fi, d.index())));
+            }
+            idx.insert(format!("{pkg}{name}"), Loc::new(fi, d.index()));
         }
     }
+    for (key, loc) in module_defs {
+        idx.insert_key(key, loc);
+    }
     idx
-}
-
-fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> {
-    let Some(dir) = target
-        .strip_suffix(WILDCARD)
-        .map(|d| d.trim_end_matches(PATH_SEP))
-    else {
-        return resolve_path(target, idx, prefixes).into_iter().collect();
-    };
-    let dirs = std::iter::once(dir.to_string())
-        .chain(prefixes.iter().map(|p| format!("{p}{PATH_SEP}{dir}")));
-    dirs.filter_map(|d| idx.dirs.get(&d))
-        .flatten()
-        .unique()
-        .map(|&fi| Loc { fi, node: 0 })
-        .collect()
 }
 
 fn is_external(source_str: &str, external: &[String]) -> bool {
@@ -2150,22 +2527,6 @@ fn is_external(source_str: &str, external: &[String]) -> bool {
             || source_str
                 .strip_prefix(module.as_str())
                 .is_some_and(|suffix| suffix.starts_with(PATH_SEP))
-    })
-}
-
-fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<Loc> {
-    file_index.get(target).or_else(|| {
-        let mut key = String::new();
-        prefixes
-            .iter()
-            .filter(|prefix| !prefix.is_empty())
-            .find_map(|prefix| {
-                key.clear();
-                key.push_str(prefix);
-                key.push_str(PATH_SEP);
-                key.push_str(target);
-                file_index.get(&key)
-            })
     })
 }
 
@@ -2185,6 +2546,7 @@ fn resolve_submodule(
     })?;
     file_index
         .get(&format!("{dir}{PATH_SEP}{name}"))
+        .first()
         .map(|loc| loc.fi as usize)
 }
 

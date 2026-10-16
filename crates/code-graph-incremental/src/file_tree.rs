@@ -7,7 +7,8 @@ use crate::intern::Lang;
 use crate::pattern;
 use crate::pipeline::SourceFile;
 use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
-use crate::tree::{Cursor, Node, Step, Tag, Tree};
+use crate::tags::ReservedTags;
+use crate::tree::{Cursor, Node, Step, Storage, Tag, Tree};
 
 pub struct WalkResult {
     pub entrypoints: Vec<(String, String)>,
@@ -32,6 +33,73 @@ pub struct ImportAlias {
     pub replacement: String,
     pub if_exists: bool,
     pub scope: Option<u32>,
+}
+
+pub type RootId = u32;
+
+/// How far a file lies from the one that looks it up: in its own source
+/// root, one that encloses it, or one below it; or in any other root.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Distance {
+    Own,
+    Other,
+}
+
+/// The source roots of one pass. A file's root is the path above its
+/// `source_root_rel` tag; a file directly below the repository root has the
+/// empty root.
+#[derive(Default)]
+pub struct Roots {
+    paths: Vec<String>,
+    of_file: Vec<Option<RootId>>,
+}
+
+impl Roots {
+    pub fn build<S: Storage<Node = Node>>(trees: &[Tree<S>], lang: &Lang) -> Self {
+        let key = ReservedTags::new(lang).source_root_rel;
+        let mut ids: FxHashMap<&str, RootId> = FxHashMap::default();
+        let mut paths: Vec<String> = Vec::new();
+        let of_file = trees
+            .iter()
+            .map(|tree| {
+                let rel = lang.syms.resolve(tree.root().tag(key)?);
+                let root = tree.label.strip_suffix(rel)?.trim_end_matches(PATH_SEP);
+                Some(*ids.entry(root).or_insert_with(|| {
+                    paths.push(root.to_owned());
+                    paths.len() as RootId - 1
+                }))
+            })
+            .collect();
+        Self { paths, of_file }
+    }
+
+    pub fn of(&self, fi: u32) -> Option<RootId> {
+        self.of_file.get(fi as usize).copied().flatten()
+    }
+
+    pub fn path(&self, fi: u32) -> Option<&str> {
+        self.of(fi).map(|root| self.paths[root as usize].as_str())
+    }
+
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.paths.iter().map(String::as_str)
+    }
+
+    pub fn distance(&self, from: u32, hit: u32) -> Distance {
+        let (Some(own), Some(other)) = (self.path(from), self.path(hit)) else {
+            return Distance::Other;
+        };
+        let below = |path: &str, root: &str| {
+            root.is_empty()
+                || path
+                    .strip_prefix(root)
+                    .is_some_and(|rest| rest.starts_with(PATH_SEP))
+        };
+        match own == other || below(other, own) || below(own, other) {
+            true => Distance::Own,
+            false => Distance::Other,
+        }
+    }
 }
 
 pub struct ProjectTree<'a> {
@@ -137,7 +205,9 @@ impl<'a> ProjectTree<'a> {
         });
         entries
             .map(|entry| entry.key)
-            .chain(std::iter::once(self.lang.syms.intern("source_root_rel")))
+            .chain(std::iter::once(
+                ReservedTags::new(self.lang).source_root_rel,
+            ))
             .collect()
     }
 
@@ -307,7 +377,7 @@ impl<'a> ProjectTree<'a> {
 
     fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
         let markers = &self.config.lookup_from;
-        let source_root_rel = self.lang.syms.intern("source_root_rel");
+        let source_root_rel = ReservedTags::new(self.lang).source_root_rel;
         let is_source_root =
             |n: Cursor| n.is(C::Root) || n.children().any(|c| markers.contains(&c.kind()));
         self.tree.root().fold_tree(Vec::new(), |out, file, _w| {

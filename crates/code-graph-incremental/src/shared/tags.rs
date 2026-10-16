@@ -16,6 +16,7 @@ pub struct ReservedTags {
     pub alias_scope: u32,
     pub visible_from: u32,
     pub implicit_self: u32,
+    pub source_root_rel: u32,
 }
 
 impl ReservedTags {
@@ -33,6 +34,7 @@ impl ReservedTags {
             alias_scope: k("alias_scope"),
             visible_from: k("visible_from"),
             implicit_self: k("implicit_self"),
+            source_root_rel: k("source_root_rel"),
         }
     }
 }
@@ -45,10 +47,11 @@ mod tests {
             ("linker.rs", include_str!("../linker.rs")),
             ("resolver.rs", include_str!("../resolver.rs")),
             ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
+            ("file_tree.rs", include_str!("../file_tree.rs")),
         ] {
             for (i, line) in src.lines().enumerate() {
                 assert!(
-                    !line.contains("syms.intern(\""),
+                    !line.contains("syms.intern(\"") && !line.contains("syms.lookup(\""),
                     "{name}:{}: engine-read tag keys belong in tags.rs",
                     i + 1
                 );

@@ -438,3 +438,318 @@ fn file_stats_keep_files_killed_by_the_resolve_budget() {
     assert!(skipped.iter().all(|killed| killed.label == "resolve"));
     assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
+
+fn write_tree(root: &Path, files: &[(&str, &str)]) {
+    for (path, content) in files {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+}
+
+/// Saves and loads the state, then reindexes with no change: no file parses
+/// or resolves again, and the cross-file calls stay.
+fn noop_reindex(env: &Env, state: &State, lang: SupportLang) -> (Env, Resolved) {
+    let calls = cross_file(env, state, EdgeKind::Calls);
+    let snapshot = tempfile::NamedTempFile::new().unwrap();
+    state.save(env, snapshot.path()).unwrap();
+    let (env, state) = State::load(snapshot.path(), lang).unwrap();
+    let (context, resolved) = templates::reindex(
+        Context::new(
+            &env,
+            common::load(orbit_utils::vfs::sources::Memory(vec![])),
+        ),
+        state,
+        vec![],
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.skipped.is_empty());
+    assert!(context.report.files.is_empty());
+    assert!(resolved.resolved.is_empty());
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+    (env, resolved)
+}
+
+/// Writes `files` into the repository and reindexes those paths. Returns the
+/// files that parsed again and the new state.
+fn reindex_files(
+    env: &Env,
+    state: State,
+    root: &Path,
+    files: &[(&str, &str)],
+) -> (Vec<String>, Resolved) {
+    write_tree(root, files);
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root,
+        paths: files.iter().map(|(path, _)| (*path).into()).collect(),
+    });
+    let (context, resolved) = templates::reindex(Context::new(env, changes), state, vec![])
+        .unwrap()
+        .finish();
+    assert!(context.report.skipped.is_empty());
+    let mut parsed: Vec<String> = context.report.files.keys().cloned().collect();
+    parsed.sort();
+    (parsed, resolved)
+}
+
+const CARGO: &str = "[package]\nname = \"NAME\"\nversion = \"0.1.0\"\nedition = \"2021\"\n";
+
+/// Every Rust import shape the lookup serves, in a two-crate workspace: the
+/// crate root, a module-path key, a glob through a re-exported module, a
+/// path through a type, a submodule behind inline modules, and a glob of a
+/// module that both crates have.
+#[test]
+fn rust_import_shapes_resolve_once_and_stay_resolved() {
+    let repo = tempfile::tempdir().unwrap();
+    let a = CARGO.replace("NAME", "a");
+    let b = CARGO.replace("NAME", "b");
+    write_tree(
+        repo.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"crates/a\", \"crates/b\"]\n",
+            ),
+            ("crates/a/Cargo.toml", &a),
+            (
+                "crates/a/src/lib.rs",
+                "pub mod errors;\nmod gen;\npub mod link;\npub mod marks;\npub mod ops;\nmod outer {\n    pub mod foo {\n        pub mod bar;\n    }\n}\npub mod user;\n\npub use crate::gen::consts;\n\npub fn load() {}\n",
+            ),
+            ("crates/a/src/link/mod.rs", "pub fn open() {}\n"),
+            (
+                "crates/a/src/marks.rs",
+                "pub struct Mark;\n\nimpl Mark {\n    pub fn new() -> Mark {\n        Mark\n    }\n}\n",
+            ),
+            ("crates/a/src/gen/mod.rs", "pub mod consts;\n"),
+            (
+                "crates/a/src/gen/consts.rs",
+                "pub struct Zero;\n\nimpl Zero {\n    pub fn new() -> Zero {\n        Zero\n    }\n}\n",
+            ),
+            (
+                "crates/a/src/errors.rs",
+                "pub enum Error {\n    MigrationError(String),\n    Other,\n}\n",
+            ),
+            (
+                "crates/a/src/ops.rs",
+                "use crate::errors::Error::MigrationError;\nuse crate::load;\n\npub fn run() {\n    use crate::consts::*;\n    load();\n    crate::marks::Mark::new();\n    Zero::new();\n}\n\npub fn plain(e: String) -> crate::errors::Error {\n    crate::errors::Error::MigrationError(e)\n}\n\npub fn imported(e: String) -> crate::errors::Error {\n    MigrationError(e)\n}\n",
+            ),
+            ("crates/a/src/outer/foo/bar.rs", "pub fn f() {}\n"),
+            (
+                "crates/a/src/user.rs",
+                "use crate::outer::foo::bar;\n\npub fn run() {\n    bar::f();\n}\n",
+            ),
+            ("crates/b/Cargo.toml", &b),
+            (
+                "crates/b/src/lib.rs",
+                "pub mod link;\nmod outer {\n    pub mod foo {\n        pub mod bar;\n    }\n}\npub mod store;\npub mod user;\n",
+            ),
+            ("crates/b/src/link/mod.rs", "pub fn open() {}\n"),
+            ("crates/b/src/outer/foo/bar.rs", "pub fn f() {}\n"),
+            (
+                "crates/b/src/store.rs",
+                "use crate::link::*;\n\npub fn start() {\n    open();\n}\n",
+            ),
+            (
+                "crates/b/src/user.rs",
+                "use crate::outer::foo::bar;\n\npub fn run() {\n    bar::f();\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let (resolved, skipped) = resolve_repo(&env, repo.path());
+    assert!(skipped.is_empty());
+    let calls = [
+        pair(
+            "crates/a/src/ops.rs:imported",
+            "crates/a/src/errors.rs:MigrationError",
+        ),
+        pair(
+            "crates/a/src/ops.rs:plain",
+            "crates/a/src/errors.rs:MigrationError",
+        ),
+        pair("crates/a/src/ops.rs:run", "crates/a/src/gen/consts.rs:new"),
+        pair("crates/a/src/ops.rs:run", "crates/a/src/lib.rs:load"),
+        pair("crates/a/src/ops.rs:run", "crates/a/src/marks.rs:new"),
+        pair(
+            "crates/a/src/user.rs:run",
+            "crates/a/src/outer/foo/bar.rs:f",
+        ),
+        pair(
+            "crates/b/src/store.rs:start",
+            "crates/b/src/link/mod.rs:open",
+        ),
+        pair(
+            "crates/b/src/user.rs:run",
+            "crates/b/src/outer/foo/bar.rs:f",
+        ),
+    ];
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+
+    let (env, resolved) = noop_reindex(&env, &resolved.state, SupportLang::Rust);
+
+    let (parsed, resolved) = reindex_files(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[(
+            "crates/a/src/gen/consts.rs",
+            "pub struct Zero;\n\nimpl Zero {\n    pub fn new() -> Zero {\n        Zero\n    }\n}\n\npub fn extra() {}\n",
+        )],
+    );
+    assert_eq!(parsed, ["crates/a/src/gen/consts.rs"]);
+    assert_eq!(
+        resolved_paths(&resolved),
+        [
+            "crates/a/src/gen/consts.rs",
+            "crates/a/src/gen/mod.rs",
+            "crates/a/src/lib.rs",
+            "crates/a/src/ops.rs"
+        ]
+    );
+    assert_eq!(cross_file(&env, &resolved.state, EdgeKind::Calls), calls);
+}
+
+const CHECKS: &str = "package com.acme.base;\npublic final class Checks { public static void checkState(boolean ok) {} }\n";
+const LISTS: &str = "package com.acme.coll;\nimport com.acme.base.*;\npublic class Lists { void set() { Checks.checkState(true); } }\n";
+
+/// A Java tree with a package copied under two source roots, a nested-class
+/// import, and a package glob: an importer moves to its own copy when that
+/// copy appears, and a file added to a package re-resolves only the
+/// importers that use a name it declares.
+#[test]
+fn java_two_root_tree_resolves_once_and_stays_resolved() {
+    let repo = tempfile::tempdir().unwrap();
+    write_tree(
+        repo.path(),
+        &[
+            ("android/lib/src/com/acme/base/Checks.java", CHECKS),
+            ("lib/src/com/acme/coll/Lists.java", LISTS),
+            (
+                "lib/src/com/acme/misc/Other.java",
+                "package com.acme.misc;\npublic class Other {}\n",
+            ),
+            (
+                "lib/src/com/acme/base/Names.java",
+                "package com.acme.base;\npublic final class Names { public static void name() {} }\n",
+            ),
+            (
+                "lib/src/com/acme/app/Worker.java",
+                "package com.acme.app;\nimport com.acme.base.*;\npublic class Worker { public void work() { Names.name(); Later.later(); } }\n",
+            ),
+            (
+                "lib/src/pkg/Outer.java",
+                "package pkg;\n\npublic class Outer {\n    public static class Inner {\n        public static int make() {\n            return 1;\n        }\n    }\n}\n",
+            ),
+            (
+                "lib/src/pkg/Use.java",
+                "package pkg;\n\nimport pkg.Outer.Inner;\n\npublic class Use {\n    int run() {\n        return Inner.make();\n    }\n}\n",
+            ),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Java, Limits::UNLIMITED).unwrap();
+    let (resolved, skipped) = resolve_repo(&env, repo.path());
+    assert!(skipped.is_empty());
+    let other_copy = pair(
+        "lib/src/com/acme/coll/Lists.java:set",
+        "android/lib/src/com/acme/base/Checks.java:checkState",
+    );
+    let own_copy = pair(
+        "lib/src/com/acme/coll/Lists.java:set",
+        "lib/src/com/acme/base/Checks.java:checkState",
+    );
+    let names = pair(
+        "lib/src/com/acme/app/Worker.java:work",
+        "lib/src/com/acme/base/Names.java:name",
+    );
+    let later = pair(
+        "lib/src/com/acme/app/Worker.java:work",
+        "lib/src/com/acme/base/Later.java:later",
+    );
+    let nested = [
+        pair("lib/src/pkg/Use.java:run", "lib/src/pkg/Outer.java:Inner"),
+        pair("lib/src/pkg/Use.java:run", "lib/src/pkg/Outer.java:make"),
+    ];
+    let calls = |extra: &[(String, String)]| {
+        let mut all: Vec<_> = std::iter::once(names.clone())
+            .chain(nested.iter().cloned())
+            .chain(extra.iter().cloned())
+            .collect();
+        all.sort();
+        all
+    };
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        calls(&[other_copy])
+    );
+
+    let (env, resolved) = noop_reindex(&env, &resolved.state, SupportLang::Java);
+
+    let (parsed, resolved) = reindex_files(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[("lib/src/com/acme/base/Checks.java", CHECKS)],
+    );
+    assert_eq!(parsed, ["lib/src/com/acme/base/Checks.java"]);
+    assert_eq!(
+        resolved_paths(&resolved),
+        [
+            "lib/src/com/acme/base/Checks.java",
+            "lib/src/com/acme/coll/Lists.java"
+        ]
+    );
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        calls(&[own_copy.clone()])
+    );
+
+    let (_, resolved) = reindex_files(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[(
+            "lib/src/com/acme/misc/Other.java",
+            "package com.acme.misc;\npublic class Other { void ping() {} }\n",
+        )],
+    );
+    assert_eq!(
+        resolved_paths(&resolved),
+        ["lib/src/com/acme/misc/Other.java"]
+    );
+
+    let (_, resolved) = reindex_files(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[(
+            "lib/src/com/acme/base/Extra.java",
+            "package com.acme.base;\npublic final class Extra {}\n",
+        )],
+    );
+    assert_eq!(
+        resolved_paths(&resolved),
+        ["lib/src/com/acme/base/Extra.java"]
+    );
+
+    let (_, resolved) = reindex_files(
+        &env,
+        resolved.state,
+        repo.path(),
+        &[(
+            "lib/src/com/acme/base/Later.java",
+            "package com.acme.base;\npublic final class Later { public static void later() {} }\n",
+        )],
+    );
+    assert_eq!(
+        resolved_paths(&resolved),
+        [
+            "lib/src/com/acme/app/Worker.java",
+            "lib/src/com/acme/base/Later.java"
+        ]
+    );
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        calls(&[own_copy, later])
+    );
+}

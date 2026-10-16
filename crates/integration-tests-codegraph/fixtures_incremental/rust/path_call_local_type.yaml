@@ -1,0 +1,61 @@
+name: "Rust: a crate or super path call to a local constructor types its value"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod child;
+      pub mod marks;
+
+      pub fn build() {
+          let m = crate::marks::Mark::new();
+          m.set_accessed();
+      }
+
+  - path: src/marks.rs
+    content: |
+      pub struct Mark;
+
+      impl Mark {
+          pub fn new() -> Self {
+              Mark
+          }
+
+          pub fn set_accessed(&self) {}
+      }
+
+  - path: src/child.rs
+    content: |
+      pub fn build() {
+          let m = super::marks::Mark::new();
+          m.set_accessed();
+      }
+
+tests:
+  - name: "a crate path call reaches the constructor and types its value"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'build' AND caller.file_path = 'src/lib.rs'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: new } }
+      - { row: { callee: set_accessed } }
+
+  - name: "a super path call reaches the constructor and types its value"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'build' AND caller.file_path = 'src/child.rs'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: new } }
+      - { row: { callee: set_accessed } }

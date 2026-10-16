@@ -1,0 +1,39 @@
+name: "Ruby: an import inside a class body does not replace that class for importers of its file"
+
+fixtures:
+  - path: app/services/rules/remover.rb
+    content: |
+      module Rules
+        class Remover
+          def execute
+            ::Guards::Remover.new.execute
+          end
+        end
+      end
+
+  - path: app/services/guards/remover.rb
+    content: |
+      module Guards
+        class Remover
+          def execute
+          end
+        end
+      end
+
+  - path: app/graphql/delete_rule.rb
+    content: |
+      class DeleteRule
+        def resolve
+          ::Rules::Remover.new.execute
+        end
+      end
+
+tests:
+  - name: "the caller reaches the class it names, not the one its body imports"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'DeleteRule::resolve' AND callee.name = 'execute'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Rules::Remover::execute" } }

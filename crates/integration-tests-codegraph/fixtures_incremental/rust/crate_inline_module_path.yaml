@@ -1,0 +1,109 @@
+name: "Rust: a crate path reaches an inline module of the crate root"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["alpha", "beta"]
+
+  - path: alpha/Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: alpha/src/lib.rs
+    content: |
+      pub mod net;
+      pub mod tools;
+
+      pub mod kit {
+          pub use crate::tools::Tool;
+      }
+
+  - path: alpha/src/net/mod.rs
+    content: |
+      #[path = "wire/mod.rs"]
+      mod imp;
+
+      pub mod wire {
+          pub use super::imp::send;
+      }
+
+  - path: alpha/src/net/wire/mod.rs
+    content: |
+      pub fn send() {}
+
+  - path: alpha/src/post.rs
+    content: |
+      use crate::net::wire::send;
+
+      pub fn deliver() {
+          send();
+      }
+
+  - path: alpha/src/tools.rs
+    content: |
+      pub struct Tool;
+
+      impl Tool {
+          pub fn make() -> Tool {
+              Tool
+          }
+      }
+
+  - path: alpha/src/faults.rs
+    content: |
+      pub enum Fault {
+          Broken(u8),
+      }
+
+  - path: alpha/src/run.rs
+    content: |
+      pub fn fail() -> crate::faults::Fault {
+          crate::faults::Fault::Broken(1)
+      }
+
+  - path: beta/Cargo.toml
+    content: |
+      [package]
+      name = "beta"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: beta/src/lib.rs
+    content: |
+      use alpha::kit::*;
+
+      pub fn build() {
+          Tool::make();
+      }
+
+tests:
+  - name: "a glob of the inline module reaches its re-export"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'build'
+      RETURN callee.name AS name, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: make, file: alpha/src/tools.rs } }
+
+  - name: "a path through a module file reaches the enum variant"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'fail'
+      RETURN callee.name AS name, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Broken, file: alpha/src/faults.rs } }
+
+  - name: "a module file wins over a same-path inline module"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'deliver'
+      RETURN callee.name AS name, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: send, file: alpha/src/net/wire/mod.rs } }

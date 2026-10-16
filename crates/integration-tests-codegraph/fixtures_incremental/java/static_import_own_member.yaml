@@ -1,0 +1,48 @@
+name: "Java: a class member shadows a static import of the same name, inside the class and for its importers"
+
+fixtures:
+  - path: a/A.java
+    content: |
+      package a;
+
+      import static b.B.helper;
+
+      public class A {
+          public static void helper() {}
+
+          public static void run() {
+              helper();
+          }
+      }
+
+  - path: b/B.java
+    content: |
+      package b;
+
+      public class B {
+          public static void helper() {}
+      }
+
+  - path: c/C.java
+    content: |
+      package c;
+
+      import static a.A.helper;
+
+      public class C {
+          void go() {
+              helper();
+          }
+      }
+
+tests:
+  - name: "run and go both call A.helper"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN caller.name AS caller, callee.file_path AS file
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: go, file: a/A.java } }
+      - { row: { caller: run, file: a/A.java } }

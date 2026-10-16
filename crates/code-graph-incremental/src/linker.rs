@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::smallvec;
 
 use crate::canonical::Canonical as C;
-use crate::constants::{PATH_SEP, RED_ZONE, STACK_SEGMENT, WILDCARD};
+use crate::constants::{PATH_SEP, RED_ZONE, ROOT_PATH, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
@@ -443,7 +443,9 @@ impl<'t> Fold<'t> {
             return None;
         }
         let path = self.syms.resolve(import.child_sym(C::SourcePath)?);
-        let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
+        let mut segments = path
+            .split(PATH_SEP)
+            .filter(|s| !s.is_empty() && *s != ROOT_PATH);
         let Some(first) = segments.next() else {
             return Some(self.tree.root());
         };
@@ -455,7 +457,7 @@ impl<'t> Fold<'t> {
                     _ => None,
                 })?;
         for segment in segments {
-            module = child_def(module, self.syms.lookup(segment))?;
+            module = module.child_def(self.syms.lookup(segment))?;
         }
         Some(module)
     }
@@ -469,7 +471,8 @@ impl<'t> Fold<'t> {
                 .filter(|d| d.is(C::Def))
                 .filter_map(|d| Some((d.child_sym(C::DefName)?, d.index())))
                 .collect(),
-            false => child_def(module, name.sym())
+            false => module
+                .child_def(name.sym())
                 .map(|d| (local, d.index()))
                 .into_iter()
                 .collect(),
@@ -1574,10 +1577,4 @@ fn is_name(value: &Value) -> bool {
         value,
         Value::LocalDef(_) | Value::ImportRef(_) | Value::Type(_)
     )
-}
-
-fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
-    module
-        .children()
-        .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
 }

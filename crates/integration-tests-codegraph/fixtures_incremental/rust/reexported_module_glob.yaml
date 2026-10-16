@@ -1,0 +1,196 @@
+name: "Rust: a path through a module that the crate root re-exports reaches its items"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "alpha"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      mod gen;
+      mod layer;
+      pub mod cycle_a;
+      pub mod cycle_b;
+      pub mod named;
+      pub mod ops;
+
+      pub use crate::gen::consts;
+      pub use crate::gen::consts as c;
+      pub use crate::layer::deep;
+      pub use crate::{gen::more, ops::build};
+
+  - path: src/gen/mod.rs
+    content: |
+      pub mod consts;
+      pub mod deep;
+      pub mod more;
+
+  - path: src/gen/consts.rs
+    content: |
+      pub struct Zero;
+
+      impl Zero {
+          pub fn new() -> Zero {
+              Zero
+          }
+      }
+
+  - path: src/gen/more.rs
+    content: |
+      pub struct Term;
+
+      impl Term {
+          pub fn new() -> Term {
+              Term
+          }
+      }
+
+  - path: src/gen/deep.rs
+    content: |
+      pub struct Deep;
+
+      impl Deep {
+          pub fn new() -> Deep {
+              Deep
+          }
+      }
+
+  - path: src/layer.rs
+    content: |
+      pub use crate::gen::deep;
+
+  - path: src/cycle_a.rs
+    content: |
+      pub use crate::cycle_b::item;
+
+  - path: src/cycle_b.rs
+    content: |
+      pub use crate::cycle_a::item;
+
+  - path: src/ops.rs
+    content: |
+      pub fn build() {
+          use crate::consts::*;
+          let z = Zero::new();
+      }
+
+      pub fn aliased() {
+          use crate::c::*;
+          let z = Zero::new();
+      }
+
+      pub fn chained() {
+          use crate::deep::*;
+          let d = Deep::new();
+      }
+
+      pub fn cyclic() {
+          use crate::cycle_a::item::*;
+          let t = Thing::new();
+      }
+
+      #[cfg(test)]
+      mod tests {
+          use crate::more::*;
+
+          fn pow_test() {
+              let t = Term::new();
+          }
+      }
+
+  - path: src/named.rs
+    content: |
+      use crate::consts::Zero;
+      use std::{borrow::Cow, collections::HashMap as Map, fmt};
+
+      pub fn make() -> Zero {
+          Zero::new()
+      }
+
+      pub fn run() {
+          crate::build();
+      }
+
+tests:
+  - name: a glob through the re-exported module reaches the item
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'build'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/consts.rs } }
+
+  - name: a glob through a module re-exported in a use group reaches the item from a nested test module
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'pow_test'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/more.rs } }
+
+  - name: a named import through the re-exported module reaches the item
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'make' AND callee.name = 'new'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/consts.rs } }
+
+  - name: a function re-exported in a use group resolves through the crate root
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: build, file: src/ops.rs } }
+
+  - name: a glob through an aliased re-export reaches the item
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'aliased'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/consts.rs } }
+
+  - name: a glob through two re-exports in a chain reaches the item
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'chained'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: new, file: src/gen/deep.rs } }
+
+  - name: a re-export cycle ends with no edge
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'cyclic'
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 0 }
+
+  - name: a use-group entry with a path binds its last segment
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/named.rs' AND i.import_path = 'std::borrow::Cow'
+      RETURN i.identifier_name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Cow } }
+
+  - name: an aliased use-group entry with a path binds its last segment under the alias
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/named.rs' AND i.import_path = 'std::collections::HashMap'
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { name: HashMap, alias: Map } }

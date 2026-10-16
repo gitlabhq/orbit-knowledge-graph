@@ -1,0 +1,119 @@
+name: "Rust: a path call inside the arguments of another call keeps its edge"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "nested"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod errors;
+
+      use errors::Error;
+
+      pub struct Wrapper(pub Error);
+
+      pub struct List {
+          items: Vec<Error>,
+      }
+
+      impl List {
+          pub fn push(&mut self, error: Error) {
+              self.items.push(error);
+          }
+      }
+
+      pub fn as_argument(e: String) -> Result<(), Error> {
+          Err(crate::errors::Error::MigrationError(e))
+      }
+
+      pub fn as_argument_imported(e: String) -> Result<(), Error> {
+          Err(Error::MigrationError(e))
+      }
+
+      pub fn nested_twice(e: String) -> Option<Result<(), Error>> {
+          Some(Err(crate::errors::Error::MigrationError(e)))
+      }
+
+      pub fn tuple_struct(e: String) -> Wrapper {
+          Wrapper(crate::errors::Error::MigrationError(e))
+      }
+
+      pub fn method_argument(e: String, list: &mut List) {
+          list.push(crate::errors::Error::MigrationError(e));
+      }
+
+      pub fn method_argument_imported(e: String, list: &mut List) {
+          list.push(Error::MigrationError(e));
+      }
+
+      pub fn plain(e: String) -> Error {
+          crate::errors::Error::MigrationError(e)
+      }
+
+      pub fn module_function(e: String) -> Error {
+          crate::errors::make(e)
+      }
+
+      pub fn imported_variant(e: String) -> Error {
+          use crate::errors::Error::MigrationError;
+          MigrationError(e)
+      }
+
+  - path: src/errors.rs
+    content: |
+      pub enum Error {
+          MigrationError(String),
+          Other,
+      }
+
+      pub fn make(e: String) -> Error {
+          Error::MigrationError(e)
+      }
+
+      pub fn via_self(e: String) -> Error {
+          use self::Error::MigrationError;
+          MigrationError(e)
+      }
+
+tests:
+  - name: a path call reaches the enum variant from every argument position
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'MigrationError'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { column_values: { field: caller, values: ["as_argument", "as_argument_imported", "imported_variant", "make", "method_argument", "method_argument_imported", "nested_twice", "plain", "tuple_struct"] } }
+
+  - name: the outer calls keep their own edges
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['tuple_struct', 'method_argument'] AND callee.name IN ['Wrapper', 'push']
+      RETURN caller.name AS caller, callee.fqn AS callee
+      ORDER BY caller
+    assert:
+      - { row: { caller: "method_argument", callee: "List::push" } }
+      - { row: { caller: "tuple_struct", callee: "Wrapper" } }
+
+  - name: a same-file path through a type reaches the variant
+    # Known gap: `use self::Error::Kind` stays in the importing file, where the linker
+    # walks a path as defs of this file and does not map the relative module path.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'via_self'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "errors::Error::MigrationError" } }
+
+  - name: a path call through a module function keeps its edge
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'module_function'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "errors::make" } }

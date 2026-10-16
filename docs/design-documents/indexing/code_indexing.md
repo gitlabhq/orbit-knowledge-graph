@@ -321,10 +321,22 @@ standard-library classification on reindex. Language YAML distinguishes builtin
 callable names, external module roots, and shadowable standard-library roots.
 Loading rebuilds the file index from saved trees and manifests before edits apply.
 
-Import discovery scans retained files only when the file index gains keys.
-Existing imports are checked separately for changed targets. Dirty files and
-redirected imports seed one reverse-dependency traversal with a shared visited set.
-Each affected file resolves once, including when dependency paths overlap or cycle.
+One lookup answers every import path, in the first pass and in the stale
+check. It tries five steps in order. First, an alias from the project tree.
+Second, the path in the importer's own source root, then in another root.
+Third, the path plus an imported name. Fourth, the import that binds a
+segment of the path in the file at its head, followed to its source. Fifth,
+one def per trailing segment inside the file the head names. A reindex asks
+that lookup again for every retained import. It resolves the importer again
+when a target is gone. It also does so when a glob gains a file that declares
+a name the importer mentions and that can win in its scope. Import discovery
+scans retained files only when the file index gains keys. Dirty files and
+those importers seed one reverse-dependency traversal with a shared visited
+set. Each affected file resolves once, including when dependency paths
+overlap or cycle.
+
+A def of a file comes before any import in that file's scope. Among imports,
+a nearer source root beats a farther one. Equal claims make the name ambiguous.
 
 An empty `__declaration` marker introduces a binding after its initializer.
 A named marker selects a matching scope label. The linker registers these names

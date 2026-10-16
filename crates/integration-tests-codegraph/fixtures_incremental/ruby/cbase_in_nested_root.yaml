@@ -1,0 +1,37 @@
+name: "Ruby: a cbase constant in a nested policies directory imports the top-level class"
+
+fixtures:
+  - path: app/policies/group_policy.rb
+    content: |
+      class GroupPolicy
+      end
+
+  - path: app/policies/packages/policies/group_policy.rb
+    content: |
+      module Packages
+        module Policies
+          class GroupPolicy
+          end
+        end
+      end
+
+  - path: app/policies/packages/policies/proxy/group_policy.rb
+    content: |
+      module Packages
+        module Policies
+          module Proxy
+            class GroupPolicy < ::GroupPolicy
+            end
+          end
+        end
+      end
+
+tests:
+  - name: "the cbase import names the top-level GroupPolicy"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'app/policies/packages/policies/proxy/group_policy.rb'
+      RETURN d.fqn AS target, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { target: GroupPolicy, file: app/policies/group_policy.rb } }

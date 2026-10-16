@@ -1,0 +1,54 @@
+name: "Java: a wildcard import in one of two copies of a package reaches only its own copy"
+
+fixtures:
+  - path: android/lib/src/com/acme/base/Checks.java
+    content: |
+      package com.acme.base;
+
+      public final class Checks {
+          public static void checkState(boolean ok) {}
+      }
+
+  - path: android/lib/src/com/acme/coll/Lists.java
+    content: |
+      package com.acme.coll;
+
+      import com.acme.base.*;
+
+      public class Lists {
+          void set() {
+              Checks.checkState(true);
+          }
+      }
+
+  - path: lib/src/com/acme/base/Checks.java
+    content: |
+      package com.acme.base;
+
+      public final class Checks {
+          public static void checkState(boolean ok) {}
+      }
+
+  - path: lib/src/com/acme/coll/Lists.java
+    content: |
+      package com.acme.coll;
+
+      import com.acme.base.*;
+
+      public class Lists {
+          void set() {
+              Checks.checkState(true);
+          }
+      }
+
+tests:
+  - name: "each copy calls its own checkState"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'set' AND callee.name = 'checkState'
+      RETURN caller.file_path AS caller, callee.file_path AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: android/lib/src/com/acme/coll/Lists.java, callee: android/lib/src/com/acme/base/Checks.java } }
+      - { row: { caller: lib/src/com/acme/coll/Lists.java, callee: lib/src/com/acme/base/Checks.java } }

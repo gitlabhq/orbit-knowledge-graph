@@ -1,0 +1,62 @@
+name: "Java: a static import used in an anonymous class reaches only its own copy of the package"
+
+fixtures:
+  - path: android/lib/src/com/acme/base/Checks.java
+    content: |
+      package com.acme.base;
+
+      public final class Checks {
+          public static void checkState(boolean ok) {}
+      }
+
+  - path: android/lib/src/com/acme/coll/Lists.java
+    content: |
+      package com.acme.coll;
+
+      import static com.acme.base.Checks.checkState;
+
+      public class Lists {
+          Runnable anon() {
+              return new Runnable() {
+                  public void run() {
+                      checkState(true);
+                  }
+              };
+          }
+      }
+
+  - path: lib/src/com/acme/base/Checks.java
+    content: |
+      package com.acme.base;
+
+      public final class Checks {
+          public static void checkState(boolean ok) {}
+      }
+
+  - path: lib/src/com/acme/coll/Lists.java
+    content: |
+      package com.acme.coll;
+
+      import static com.acme.base.Checks.checkState;
+
+      public class Lists {
+          Runnable anon() {
+              return new Runnable() {
+                  public void run() {
+                      checkState(true);
+                  }
+              };
+          }
+      }
+
+tests:
+  - name: "each copy calls its own checkState"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'checkState'
+      RETURN caller.name AS caller, caller.file_path AS from_file, callee.file_path AS to_file
+      ORDER BY from_file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: run, from_file: android/lib/src/com/acme/coll/Lists.java, to_file: android/lib/src/com/acme/base/Checks.java } }
+      - { row: { caller: run, from_file: lib/src/com/acme/coll/Lists.java, to_file: lib/src/com/acme/base/Checks.java } }
