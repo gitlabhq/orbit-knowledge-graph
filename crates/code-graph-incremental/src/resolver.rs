@@ -1513,7 +1513,7 @@ fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
     } else if let Some(ty) = target.child(C::SsaReturnType) {
         resolve_chain(ctx, ty)
     } else if let Some(branch) = target
-        .descendants_pruned(|n| n.is(C::Def))
+        .descendants_pruned(|n| n.is(C::Def) || n.is(C::Lambda))
         .find(|n| n.is(C::SsaReturn))
         .and_then(|r| r.child(C::SsaBranch))
     {

@@ -150,7 +150,7 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
     }
     let mut bindings = rustc_hash::FxHashMap::default();
     def.walk().run(|node, walk| {
-        if node.is(C::Def) && node.index() != def.index() {
+        if node.is(C::Def) && node.index() != def.index() || node.is(C::Lambda) {
             walk.skip_subtree();
             return ControlFlow::Continue(());
         }

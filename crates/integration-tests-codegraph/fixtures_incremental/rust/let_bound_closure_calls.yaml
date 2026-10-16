@@ -45,6 +45,18 @@ fixtures:
           h(Bar);
       }
 
+      fn returns_inside() {
+          let make = |flag: bool| {
+              return if flag { Foo { x: 1 } } else { Foo { x: 2 } };
+          };
+          make(true);
+      }
+
+      fn user() {
+          let r = returns_inside();
+          r.run();
+      }
+
 tests:
   - name: every closure body call reaches helper from the enclosing function
     query: |
@@ -60,7 +72,7 @@ tests:
     queries:
       - query: |
           MATCH (d:Definition)
-          WHERE d.name IN ['f', 'g', 'h']
+          WHERE d.name IN ['f', 'g', 'h', 'make']
           RETURN d.name AS name
         assert:
           - { empty: true }
@@ -78,3 +90,13 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       - { empty: true }
+
+  # `returns_inside` returns unit, so `r.run()` is ill-typed on purpose: the engine
+  # must not take the closure's `return` as the function's return value.
+  - name: a return inside a closure is not the function's return value
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'user'
+      RETURN callee.name AS callee
+    assert:
+      - { column_values: { field: callee, values: ["returns_inside"] } }
