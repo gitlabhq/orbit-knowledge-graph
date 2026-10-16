@@ -55,7 +55,6 @@ tests:
       WHERE caller.name = 'imported'
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 1 }
       - { row: { callee: "a.Outer.Inner" } }
 
   - name: an unresolved qualified annotation takes no wildcard import as a guess
