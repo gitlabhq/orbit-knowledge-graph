@@ -23,6 +23,7 @@ use orbit_server::proto::{
 };
 use orbit_server_config::AppConfig;
 use orbit_server_config::query::{QueryConfig, QuerySettings};
+use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
@@ -62,6 +63,22 @@ async fn unparsable_datetime_filter_is_a_caller_error() {
             )
             .await;
     }
+}
+
+// The pipeline binds dates as parameters, so this error shape only comes from generated SQL.
+#[tokio::test]
+async fn date_parse_inside_sql_is_a_server_error() {
+    let graph = TestContext::new(&[]).await;
+
+    let error = graph
+        .create_client()
+        .query_arrow("SELECT toDateTime64('garbage', 6, 'UTC')")
+        .await
+        .unwrap_err();
+    let error = PipelineError::Execution(error.to_string());
+
+    assert_eq!(error.failure_reason().as_str(), "execution");
+    assert_eq!(error.outcome(), "server_error");
 }
 
 #[tokio::test]
