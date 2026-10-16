@@ -5,7 +5,6 @@ use serde::Serialize;
 use tonic::Status;
 use tracing::debug;
 
-// Status pages poll while a namespace indexes, so a cached result would hide new progress.
 pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
     sql: &str,
