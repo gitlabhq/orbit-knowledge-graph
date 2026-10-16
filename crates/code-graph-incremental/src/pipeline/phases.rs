@@ -204,9 +204,11 @@ where
                 let item = item?;
                 let path = item.label().to_string();
                 let bytes = item.bytes();
-                let _slot = Slot::admit(admission, bytes);
                 let started = Instant::now();
-                let outcome = phase.run(env, run, item);
+                let outcome = match Slot::admit(admission, bytes, run) {
+                    Ok(_slot) => phase.run(env, run, item),
+                    Err(killed) => Err(killed),
+                };
                 Ok((outcome, path, bytes, started.elapsed()))
             })
             .collect();
@@ -249,16 +251,15 @@ where
     }
 }
 
-/// Holds an item's admission for the span of its phases.
 struct Slot<'a> {
     admission: &'a dyn Admission,
     bytes: u64,
 }
 
 impl<'a> Slot<'a> {
-    fn admit(admission: &'a dyn Admission, bytes: u64) -> Self {
-        admission.admit(bytes);
-        Self { admission, bytes }
+    fn admit(admission: &'a dyn Admission, bytes: u64, run: &Sentinel) -> Result<Self, Killed> {
+        admission.admit(bytes, run)?;
+        Ok(Self { admission, bytes })
     }
 }
 

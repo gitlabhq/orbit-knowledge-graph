@@ -3,10 +3,12 @@
 //! than the budget runs alone.
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
-use code_graph_incremental::{Admission, Unbounded};
+use code_graph_incremental::{Admission, Killed, Sentinel, Unbounded};
 
-/// The engine's admission for `max_inflight_source_bytes`; 0 = unbounded.
+const POLL: Duration = Duration::from_millis(50);
+
 pub fn budget(bytes: u64) -> Arc<dyn Admission> {
     if bytes == 0 {
         Arc::new(Unbounded)
@@ -29,7 +31,7 @@ struct Queue {
 }
 
 impl InflightBudget {
-    pub fn new(budget: u64) -> Self {
+    fn new(budget: u64) -> Self {
         Self {
             budget,
             queue: Mutex::default(),
@@ -43,19 +45,32 @@ impl InflightBudget {
 }
 
 impl Admission for InflightBudget {
-    fn admit(&self, bytes: u64) {
+    fn admit(&self, bytes: u64, run: &Sentinel) -> Result<(), Killed> {
         let mut queue = self.lock();
         let ticket = queue.next;
         queue.next += 1;
-        while queue.serving != ticket || (queue.used > 0 && queue.used + bytes > self.budget) {
+        loop {
+            let killed = run.check().err();
+            if queue.serving == ticket {
+                if let Some(killed) = killed {
+                    queue.serving += 1;
+                    self.changed.notify_all();
+                    return Err(killed);
+                }
+                if queue.used == 0 || queue.used + bytes <= self.budget {
+                    break;
+                }
+            }
             queue = self
                 .changed
-                .wait(queue)
-                .unwrap_or_else(PoisonError::into_inner);
+                .wait_timeout(queue, POLL)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
         queue.serving += 1;
         queue.used += bytes;
         self.changed.notify_all();
+        Ok(())
     }
 
     fn release(&self, bytes: u64) {
@@ -90,8 +105,24 @@ mod tests {
     }
 
     fn hold(budget: &InflightBudget, bytes: u64) -> Held<'_> {
-        budget.admit(bytes);
+        budget
+            .admit(bytes, &Sentinel::disabled())
+            .unwrap_or_else(|e| panic!("{e}"));
         Held(budget, bytes)
+    }
+
+    #[test]
+    fn a_cancelled_waiter_leaves_with_the_kill_and_frees_its_turn() {
+        let budget = InflightBudget::new(2 * MIB);
+        let first = hold(&budget, 2 * MIB);
+        let cancelled = Sentinel::new("run", "", u64::MAX).with_cancellation(Arc::new(|| true));
+        let killed = match budget.admit(MIB, &cancelled) {
+            Err(killed) => killed,
+            Ok(()) => panic!("a cancelled waiter must not be admitted"),
+        };
+        assert!(killed.cancelled);
+        drop(first);
+        let _next = hold(&budget, MIB);
     }
 
     #[test]
@@ -240,7 +271,9 @@ mod tests {
     #[test]
     fn a_zero_budget_is_unbounded() {
         let admission = budget(0);
-        admission.admit(u64::MAX);
+        admission
+            .admit(u64::MAX, &Sentinel::disabled())
+            .unwrap_or_else(|e| panic!("{e}"));
         admission.release(u64::MAX);
     }
 }
