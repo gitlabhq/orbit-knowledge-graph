@@ -1783,16 +1783,21 @@ fn wildcard_uses<'a>(
             edges.push(name.edge_to(target, EdgeKind::Imports));
         }
     };
-    let root = |r: Cursor<'a>| {
-        let local = resolve_reference(ctx, r).or_else(|| enclosing_name(ctx, r, r.sym()));
-        match local {
-            Some(_) => None,
-            None => qualified(ctx, r.sym(), &provided),
-        }
-    };
+    let root = |r: Cursor<'a>| qualified(ctx, r.sym(), &provided);
+    let local =
+        |r: Cursor<'a>| resolve_reference(ctx, r).or_else(|| enclosing_name(ctx, r, r.sym()));
     for from in referrers.iter().map(|&n| ctx.corpus.jump(fi as u32, n)) {
         for call in from.calls() {
-            let Some(target) = call.child(C::Callee).and_then(|c| chain(ctx, c, &root)) else {
+            let Some(callee) = call.child(C::Callee) else {
+                continue;
+            };
+            if let Some(target) = chain(ctx, callee, &local) {
+                if target.has_tag(ctx.tags.callable) {
+                    edges.push(call_edge(from, target, Some(call.index())));
+                }
+                continue;
+            }
+            let Some(target) = chain(ctx, callee, &root) else {
                 continue;
             };
             import(target, &mut edges);
