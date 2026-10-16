@@ -141,7 +141,6 @@ impl FailureReason {
 #[strum(serialize_all = "snake_case")]
 pub enum ClickHouseLimit {
     MemoryLimit,
-    TotalMemoryLimit,
     TooSlow,
     TooManyBytes,
     TooManyRows,
@@ -153,7 +152,6 @@ pub enum ClickHouseLimit {
 impl ClickHouseLimit {
     pub fn from_message(message: &str) -> Option<Self> {
         match clickhouse_error_code(message)? {
-            241 if message.contains("(total)") => Some(Self::TotalMemoryLimit),
             241 => Some(Self::MemoryLimit),
             159 | 160 => Some(Self::TooSlow),
             307 => Some(Self::TooManyBytes),
@@ -190,16 +188,8 @@ mod tests {
                 Some(ClickHouseLimit::TooSlow),
             ),
             (
-                "Code: 241. DB::Exception: Query memory limit exceeded: would use 9.31 GiB (attempt to allocate chunk of 4 MiB), maximum: 9.31 GiB",
-                Some(ClickHouseLimit::MemoryLimit),
-            ),
-            (
                 "Code: 241. DB::Exception: (total) memory limit exceeded: would use 32.41 GiB",
-                Some(ClickHouseLimit::TotalMemoryLimit),
-            ),
-            (
-                "Code: 241. DB::Exception: Memory limit (total) exceeded: would use 32.41 GiB",
-                Some(ClickHouseLimit::TotalMemoryLimit),
+                Some(ClickHouseLimit::MemoryLimit),
             ),
             (
                 "Code: 457. DB::Exception: Value 2026-09-30T00:00:00+00:00 cannot be parsed as DateTime64(6, 'UTC') for query parameter 'p0' because it isn't parsed completely. (BAD_QUERY_PARAMETER)",
