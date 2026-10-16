@@ -1219,6 +1219,11 @@ impl<'t> Fold<'t> {
 
     fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) {
         let mut targets = self.lookup(sym);
+        for target in &mut targets {
+            if let Value::LocalDef(d) = target {
+                *d = crate::tree::callable_target(self.tree.cursor(*d)).index();
+            }
+        }
         if targets.is_empty() {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
@@ -1366,7 +1371,14 @@ impl<'t> Fold<'t> {
             return bound
                 .into_iter()
                 .map(|r| match r {
-                    Value::LocalDef(d) => self.field_value(d).unwrap_or(r),
+                    Value::LocalDef(d) => {
+                        let d = match c.is(C::Callee) {
+                            true => crate::tree::callable_target(self.tree.cursor(d)),
+                            false => crate::tree::field_target(self.tree.cursor(d)),
+                        }
+                        .index();
+                        self.field_value(d).unwrap_or(Value::LocalDef(d))
+                    }
                     _ => r,
                 })
                 .collect();

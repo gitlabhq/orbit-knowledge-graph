@@ -201,28 +201,39 @@ pub fn find_method_in<'a, S: Storage<Node = Node>>(
     })
 }
 
+fn same_name_member<'a, S: Storage<Node = Node>>(
+    target: Cursor<'a, S>,
+    field: bool,
+) -> Option<Cursor<'a, S>> {
+    let name = target.child_sym(C::DefName)?;
+    let class = target.ancestors().find(|node| node.is_class())?;
+    class.descend(|node| {
+        if node.is(C::Def)
+            && node.index() != class.index()
+            && node.child_sym(C::DefName) == Some(name)
+            && node.is_field() == field
+        {
+            return Step::Out(node);
+        }
+        if node.is_class() && node.index() != class.index() && !node.has(C::ImplBlock) {
+            return Step::Over;
+        }
+        Step::Into
+    })
+}
+
 pub fn callable_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cursor<'a, S> {
-    let Some(name) = target.child_sym(C::DefName).filter(|_| target.is_field()) else {
-        return target;
-    };
-    let Some(class) = target.ancestors().find(|node| node.is_class()) else {
-        return target;
-    };
-    class
-        .descend(|node| {
-            if node.is(C::Def)
-                && node.index() != class.index()
-                && node.child_sym(C::DefName) == Some(name)
-                && !node.is_field()
-            {
-                return Step::Out(node);
-            }
-            if node.is_class() && node.index() != class.index() && !node.has(C::ImplBlock) {
-                return Step::Over;
-            }
-            Step::Into
-        })
-        .unwrap_or(target)
+    match target.is_field() {
+        true => same_name_member(target, false).unwrap_or(target),
+        false => target,
+    }
+}
+
+pub fn field_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cursor<'a, S> {
+    match target.is_field() {
+        true => target,
+        false => same_name_member(target, true).unwrap_or(target),
+    }
 }
 
 pub fn members_by_level<N, I, T>(

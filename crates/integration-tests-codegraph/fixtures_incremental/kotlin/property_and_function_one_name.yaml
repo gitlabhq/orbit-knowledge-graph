@@ -1,0 +1,56 @@
+name: "Kotlin: a property and a function of one name keep separate bindings"
+
+fixtures:
+  - path: Main.kt
+    content: |
+      class Other {
+          fun b() {}
+      }
+
+      class Box {
+          val x: Other = Other()
+
+          fun x(): Box = this
+
+          fun b() {}
+
+          fun go() = x.b()
+
+          fun goCall() = x().b()
+
+          fun callOnly() = x()
+      }
+
+tests:
+  - name: the function x has no self edge
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'x' AND t.name = 'x'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: a read of x types the receiver by the property, not by the function of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'go'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Function" } }
+
+  - name: a call of x() targets the function and types the receiver by its return
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Box.b", "Box.x"] } }
+
+  - name: a call of x() alone targets the function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'callOnly'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: kind, values: ["Function"] } }
