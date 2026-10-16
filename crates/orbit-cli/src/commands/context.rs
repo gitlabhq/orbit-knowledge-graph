@@ -139,7 +139,12 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let Some(pending) = pending else {
         return Ok(());
     };
-    let mut bytes = pending.await??;
+    let bytes = pending.await??;
+    let home = repo.or_else(|| crate::remote::origin::project(&dir).map(|(_, project)| project));
+    let mut bytes = match home {
+        Some(home) => shorten(&String::from_utf8_lossy(&bytes), &home).into_bytes(),
+        None => bytes,
+    };
     if !bytes.ends_with(b"\n") {
         bytes.push(b'\n');
     }
@@ -187,6 +192,11 @@ fn qualify(target: &str) -> Option<Qualified> {
         _ => return None,
     };
     Some(qualified)
+}
+
+fn shorten(text: &str, project: &str) -> String {
+    text.replace(&format!("mr:{project}!"), "mr:")
+        .replace(&format!("issue:{project}#"), "issue:")
 }
 
 fn gitlab_project(
@@ -876,6 +886,17 @@ fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn references_in_the_current_project_are_short() {
+        assert_eq!(
+            shorten(
+                "- mr:g/p!4 found=true\n  linked_issues=\"issue:g/p#7 x; issue:g/pp#2 y\"",
+                "g/p"
+            ),
+            "- mr:4 found=true\n  linked_issues=\"issue:7 x; issue:g/pp#2 y\""
+        );
+    }
 
     #[test]
     fn qualified_targets_use_what_gitlab_shows() {
