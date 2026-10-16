@@ -1,9 +1,20 @@
 name: "Rust: the head of a scoped path names a module or type, never a value binding"
 
 fixtures:
-  - path: main.rs
+  - path: Cargo.toml
     content: |
+      [package]
+      name = "heads"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      mod remote;
+
       use std::ptr;
+
+      use crate::remote::Remote;
 
       struct Slot {
           value: u32,
@@ -13,6 +24,10 @@ fixtures:
           fn read(&self) -> u32 {
               self.value
           }
+      }
+
+      trait Reader {
+          fn read_all() -> u32;
       }
 
       fn closure_param(slot: *mut u32) {
@@ -41,6 +56,14 @@ fixtures:
           unsafe { ptr::read(&ptr) }
       }
 
+      fn remote_param(ptr: Remote) -> Remote {
+          unsafe { ptr::read(&ptr) }
+      }
+
+      fn type_param<T: Reader>(_value: T) -> u32 {
+          T::read_all()
+      }
+
       fn receiver(ptr: Slot) -> u32 {
           ptr.read()
       }
@@ -48,6 +71,16 @@ fixtures:
       fn closure_receiver(slot: Slot) -> u32 {
           let read = |ptr: Slot| ptr.read();
           read(slot)
+      }
+
+  - path: src/remote.rs
+    content: |
+      pub struct Remote;
+
+      impl Remote {
+          pub fn read(&self) -> u32 {
+              0
+          }
       }
 
 tests:
@@ -58,17 +91,26 @@ tests:
       RETURN caller.name AS caller
       ORDER BY caller
     assert:
-      - { row_count: 5 }
-      - { column_values: { field: caller, values: ["closure_argument", "closure_param", "fn_param", "local_binding", "typed_param"] } }
+      - { row_count: 6 }
+      - { column_values: { field: caller, values: ["closure_argument", "closure_param", "fn_param", "local_binding", "remote_param", "typed_param"] } }
 
   - name: a scoped call does not reach a method of the shadowing parameter's type
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.name IN ['closure_argument', 'closure_param', 'fn_param', 'local_binding', 'typed_param']
+      WHERE caller.name IN ['closure_argument', 'closure_param', 'fn_param', 'local_binding', 'remote_param', 'typed_param']
         AND callee.name = 'read'
       RETURN caller.name AS caller
     assert:
       - { empty: true }
+
+  - name: a scoped call on a type parameter reaches the method of its bound
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'type_param'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Reader::read_all" } }
 
   - name: a bare receiver of the same name still binds to the parameter
     query: |

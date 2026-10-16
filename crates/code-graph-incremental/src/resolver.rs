@@ -1601,7 +1601,8 @@ fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>>
         }
         let bound = d
             .children()
-            .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
+            .filter(|c| c.is(C::Binding) && c.sym() == sym)
+            .filter(|c| c.has(C::Qualifier) || (!r.has(C::Qualifier) && c.children().count() == 1))
             .find_map(|c| c.child(C::SsaTyped))
             .filter(|bound| bound.sym() != sym)?;
         resolve_chain(ctx, bound)

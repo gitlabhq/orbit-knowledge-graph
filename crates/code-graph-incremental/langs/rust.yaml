@@ -134,7 +134,7 @@ stages:
     rules:
       # `T: Pinger` binds T to its first bound
       - match: '(type_parameter name: $T bounds: (trait_bounds **/$B:type_identifier))'
-        replace: '(__binding @$T (__ssa_typed @$B))'
+        replace: '(__binding @$T (__qualifier) (__ssa_typed @$B))'
 
   - name: imports
     rules:

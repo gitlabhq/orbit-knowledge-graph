@@ -670,6 +670,10 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_binding(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) -> bool {
+        if c.has(C::Qualifier) {
+            self.declare_static(c, c.sym(), Value::Call(c.index()));
+            return true;
+        }
         let field = self.member_binding(c).map(|(root, field)| {
             let key = self.key(BindingKey::Field(root, field));
             *self

@@ -336,7 +336,8 @@ on language names.
 
 A `__qualifier` marker on the object of a member names a module or type, as in
 `ptr::write`. The linker resolves that object through declared items and imports
-only. A parameter or local with the same name does not shadow it.
+only. A parameter or local with the same name does not shadow it. The same marker
+on a binding, as on a bounded type parameter, adds that binding to those items.
 
 C and C++ compound statements, Java and C# blocks, and Lua blocks retain lexical boundaries. Their
 local declarations introduce bindings independently of assignments to outer names.
