@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use code_graph::v2::CancellationToken;
 use tracing::{info, warn};
@@ -14,6 +14,8 @@ use tracing::{info, warn};
 use super::metrics::CodeMetrics;
 
 const INTERVAL: Duration = Duration::from_millis(100);
+/// Freed memory shows up in the cgroup a little after a cancelled job unwinds.
+const SETTLE_AFTER_UNWIND: Duration = Duration::from_millis(750);
 const UNREADABLE_SAMPLES_BEFORE_GIVING_UP: u32 = 10;
 /// cgroup v1 reports "no limit" as a value near i64::MAX; at or above this
 /// threshold there is none.
@@ -67,6 +69,7 @@ pub struct MemoryWatchdog {
     metrics: CodeMetrics,
     jobs: Mutex<Vec<Job>>,
     holding: Arc<AtomicUsize>,
+    settled_at: Mutex<Option<Instant>>,
     next_id: AtomicU64,
     watching: AtomicBool,
 }
@@ -97,6 +100,14 @@ impl Registration {
 impl Drop for Registration {
     fn drop(&mut self) {
         self.watchdog.jobs().retain(|job| job.id != self.id);
+        if self.killed.get().is_some() {
+            *self
+                .watchdog
+                .settled_at
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some(Instant::now() + SETTLE_AFTER_UNWIND);
+        }
     }
 }
 
@@ -110,10 +121,11 @@ impl MemoryWatchdog {
     pub fn new(cgroup: Cgroup, metrics: CodeMetrics, kill_at_percent: u64) -> Arc<Self> {
         Arc::new(Self {
             cgroup,
-            kill_at_percent,
+            kill_at_percent: kill_at_percent.min(100),
             metrics,
             jobs: Mutex::new(Vec::new()),
             holding: Arc::new(AtomicUsize::new(0)),
+            settled_at: Mutex::new(None),
             next_id: AtomicU64::new(0),
             watching: AtomicBool::new(false),
         })
@@ -192,6 +204,14 @@ impl MemoryWatchdog {
             || u128::from(pressure.used) * 100
                 < u128::from(pressure.limit) * u128::from(self.kill_at_percent)
         {
+            return None;
+        }
+        let settling = self
+            .settled_at
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some_and(|until| Instant::now() < until);
+        if settling {
             return None;
         }
         let jobs = self.jobs();
@@ -382,8 +402,26 @@ mod tests {
             "one cancellation unwinds at a time"
         );
         drop(newest_job);
+        assert_eq!(
+            watchdog.tick(pressure(&dir)),
+            None,
+            "freed memory needs a moment to show in the cgroup"
+        );
+        std::thread::sleep(SETTLE_AFTER_UNWIND);
         assert_eq!(watchdog.tick(pressure(&dir)), Some((kill, 50)));
         assert!(big.is_cancelled() && !small.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn a_percent_above_one_hundred_counts_as_one_hundred() {
+        let dir = cgroup("1000", 999);
+        let watchdog = MemoryWatchdog::new(v2(&dir), CodeMetrics::new(), 150);
+        let _hold = watchdog.hold();
+        let only = CancellationToken::new();
+        let _job = watchdog.register(7, only.clone());
+        assert_eq!(watchdog.tick(pressure(&dir)), None);
+        set(&dir, "1000", 1000);
+        assert!(watchdog.tick(pressure(&dir)).is_some() && only.is_cancelled());
     }
 
     #[tokio::test]
@@ -401,6 +439,7 @@ mod tests {
         assert!(only.is_cancelled());
         assert_eq!((bytes, job.exceeded()), (7, Some(kill)));
         drop(job);
+        std::thread::sleep(SETTLE_AFTER_UNWIND);
 
         drop(flushing);
         let again = CancellationToken::new();

@@ -275,6 +275,25 @@ impl MockGitlabServer {
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {
+        self.insert_project(project_id, default_branch, files, false);
+    }
+
+    pub fn add_project_with_slow_archive_files(
+        &self,
+        project_id: i64,
+        default_branch: &str,
+        files: &[(&str, &str)],
+    ) {
+        self.insert_project(project_id, default_branch, files, true);
+    }
+
+    fn insert_project(
+        &self,
+        project_id: i64,
+        default_branch: &str,
+        files: &[(&str, &str)],
+        slow_archive: bool,
+    ) {
         let archive_files: Vec<(String, Vec<u8>)> = files
             .iter()
             .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
@@ -285,7 +304,7 @@ impl MockGitlabServer {
                 default_branch: default_branch.to_string(),
                 archive_files,
                 empty_archive_responses: 0,
-                slow_archive: false,
+                slow_archive,
                 archive_status: None,
             },
         );

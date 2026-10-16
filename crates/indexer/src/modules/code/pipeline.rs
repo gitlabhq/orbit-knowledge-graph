@@ -319,14 +319,14 @@ impl CodeIndexer {
         }
     }
 
-    /// Derived inflight cap for the engine listen loop: a download can pre-fetch ahead of
-    /// every indexing lane. Returns `None` when any limit is unbounded (0), so the global
-    /// default applies.
     pub fn with_memory_watchdog(mut self, memory: Arc<MemoryWatchdog>) -> Self {
         self.memory = memory;
         self
     }
 
+    /// Derived inflight cap for the engine listen loop: a download can pre-fetch ahead of
+    /// every indexing lane. Returns `None` when any limit is unbounded (0), so the global
+    /// default applies.
     pub fn max_inflight(&self) -> Option<usize> {
         let small = self.pipeline_config.small_indexing_slots();
         let big = self.pipeline_config.big_indexing_slots();
@@ -380,16 +380,12 @@ impl CodeIndexer {
 
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
+        let lane = self
+            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
+            .await?;
         let memory = self
             .memory
             .register(repository.source_bytes(), cancel.clone());
-        let lane = match self
-            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
-            .await
-        {
-            Ok(lane) => lane,
-            Err(error) => return Err(unless_killed(&memory, error)),
-        };
 
         let indexed = clock
             .run(self.index_fetched(
