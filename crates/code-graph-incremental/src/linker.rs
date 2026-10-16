@@ -657,11 +657,14 @@ impl<'t> Fold<'t> {
                 self.resolve_name(sym, from, Wildcards::All);
             }
         }
-        let callee = (!c.has(C::Property)).then(|| callee_name(callee)).flatten();
-        self.finish_call(first, c.index(), callee);
+        self.finish_call(first, c.index());
     }
 
-    fn finish_call(&mut self, first: usize, site: u32, callee: Option<u32>) {
+    fn finish_call(&mut self, first: usize, site: u32) {
+        let call = self.tree.cursor(site);
+        let callee = (!call.has(C::Property))
+            .then(|| call.child(C::Callee).and_then(callee_name))
+            .flatten();
         for i in first..self.edges.len() {
             let target = self.tree.cursor(self.edges[i].to_node);
             let remap = callee.is_some()
@@ -1529,8 +1532,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
             );
         }
         f.emit_targets(&targets, from);
-        let callee = tree.cursor(site).child(C::Callee).and_then(callee_name);
-        f.finish_call(first, site, callee);
+        f.finish_call(first, site);
     }
 
     f.cur = entry;

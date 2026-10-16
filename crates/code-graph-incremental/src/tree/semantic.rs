@@ -210,7 +210,11 @@ pub fn callable_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cu
     };
     class
         .descend(|node| {
-            if node.is(C::Def) && node.child_sym(C::DefName) == Some(name) && !node.is_field() {
+            if node.is(C::Def)
+                && node.index() != class.index()
+                && node.child_sym(C::DefName) == Some(name)
+                && !node.is_field()
+            {
                 return Step::Out(node);
             }
             if node.is_class() && node.index() != class.index() && !node.has(C::ImplBlock) {
