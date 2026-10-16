@@ -89,11 +89,6 @@ pub struct CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    /// Flush buffered writes and wait until durable. For tests and shutdown.
-    pub async fn flush(&self) -> Result<(), HandlerError> {
-        self.pipeline.flush().await
-    }
-
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -555,7 +550,6 @@ mod tests {
                 table_names,
                 Arc::new(ontology),
                 crate::testkit::builders::test_pipeline_configuration(),
-                tokio_util::sync::CancellationToken::new(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(

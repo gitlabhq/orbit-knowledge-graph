@@ -40,7 +40,6 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
-    pub shutdown: tokio_util::sync::CancellationToken,
     cache_dir: tempfile::TempDir,
 }
 
@@ -98,22 +97,15 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-        let writer = Arc::new(indexer::clickhouse::ClickHouseWriter::new(
-            clickhouse.config.clone().build_client("graph"),
-            Arc::new(indexer::metrics::EngineMetrics::new()),
-        ));
-
-        let shutdown = tokio_util::sync::CancellationToken::new();
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
-            writer,
+            writer_for(clickhouse.config.clone()),
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
             table_names,
             Arc::new(ontology),
             pipeline_config,
-            shutdown.clone(),
         ));
 
         Self {
@@ -122,7 +114,6 @@ impl CodeIndexingDeps {
             checkpoint_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
-            shutdown,
             cache_dir,
         }
     }
@@ -134,6 +125,14 @@ impl CodeIndexingDeps {
     pub fn code_indexing_task_handler_with_writer(
         &self,
         writer: Arc<indexer::clickhouse::ClickHouseWriter>,
+    ) -> CodeIndexingTaskHandler {
+        self.handler_with_writer_and_lock_ttl(writer, std::time::Duration::from_secs(60))
+    }
+
+    fn handler_with_writer_and_lock_ttl(
+        &self,
+        writer: Arc<indexer::clickhouse::ClickHouseWriter>,
+        lock_ttl: std::time::Duration,
     ) -> CodeIndexingTaskHandler {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
@@ -159,14 +158,13 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             config,
-            self.shutdown.clone(),
         ));
         CodeIndexingTaskHandler::new(
             pipeline,
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
-            std::time::Duration::from_secs(60),
+            lock_ttl,
             CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
@@ -190,6 +188,26 @@ impl CodeIndexingDeps {
             indexer::analytics::IndexingAnalytics::disabled(),
         )
     }
+}
+
+pub fn writer_for(
+    config: orbit_server_config::ClickHouseConfiguration,
+) -> Arc<indexer::clickhouse::ClickHouseWriter> {
+    Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+        config.build_client("graph"),
+        Arc::new(indexer::metrics::EngineMetrics::new()),
+    ))
+}
+
+async fn serve(app: Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind failed");
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+    format!("http://{addr}")
 }
 
 struct MockState {
@@ -232,17 +250,9 @@ impl MockGitlabServer {
             )
             .with_state(Arc::clone(&state));
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind failed");
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-
         Self {
+            base_url: serve(app).await,
             state,
-            base_url: format!("http://{addr}"),
         }
     }
 
