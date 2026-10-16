@@ -18,7 +18,7 @@ fixtures:
       end
 
 tests:
-  - name: the block form is owned by run and the stabby lambda is a def
+  - name: the stabby lambda is a def; an identifier assigned a lambda block stays a Kernel#lambda call owned by run (engine gap)
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE callee.name = 'helper'
