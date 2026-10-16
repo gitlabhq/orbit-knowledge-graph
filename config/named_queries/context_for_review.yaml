@@ -1,0 +1,25 @@
+name: context_for_review
+description: "Merge request context: expand_merge_request neighbors plus approvers, the merge commit, and mentioned MRs and work items. Cut at limit in no set order; check pagination.truncated."
+parameters:
+  node_ids:
+    schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
+    example: [1]
+  limit:
+    schema: { type: integer, minimum: 1, maximum: 500 }
+    example: 100
+query:
+  json:
+    query_type: neighbors
+    nodes:
+      - id: center
+        entity: MergeRequest
+        node_ids: { $param: node_ids }
+    neighbors:
+      direction: both
+      rel_types: [AUTHORED, ASSIGNED, REVIEWER, APPROVED, HAS_LABEL, IN_PROJECT, HAS_HEAD_PIPELINE, CLOSES, MENTIONS, MERGED_AT_COMMIT]
+    limit: { $param: limit }
+  gql: |
+    MATCH (center:MergeRequest)-[:AUTHORED|ASSIGNED|REVIEWER|APPROVED|HAS_LABEL|IN_PROJECT|HAS_HEAD_PIPELINE|CLOSES|MENTIONS|MERGED_AT_COMMIT]-(neighbor)
+    WHERE center.id IN {{ param("node_ids") }}
+    RETURN center, neighbor
+    LIMIT {{ param("limit") }}
