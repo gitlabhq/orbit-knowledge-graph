@@ -9,6 +9,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
@@ -170,7 +171,6 @@ type Token = Arc<dyn FlushToken>;
 enum Msg {
     Submit(String, RecordBatch, Token),
     Flush(tokio::sync::oneshot::Sender<()>),
-    FlushFor(Token),
 }
 
 /// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
@@ -193,7 +193,11 @@ pub struct BufferedWriterConfig {
 }
 
 impl BufferedWriter {
-    pub fn spawn(writer: Arc<ClickHouseWriter>, config: BufferedWriterConfig) -> Self {
+    pub fn spawn(
+        writer: Arc<ClickHouseWriter>,
+        config: BufferedWriterConfig,
+        shutdown: CancellationToken,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(config.channel_capacity.max(1));
         tokio::spawn(drain(
             writer,
@@ -205,6 +209,7 @@ impl BufferedWriter {
                 max_age: config.max_age,
             },
             config.max_concurrent.max(1),
+            shutdown,
         ));
         Self { tx }
     }
@@ -234,13 +239,6 @@ impl BufferedWriter {
         rx.await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
-
-    pub async fn start_flush(&self, token: Token) -> Result<(), WriteError> {
-        self.tx
-            .send(Msg::FlushFor(token))
-            .await
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
-    }
 }
 
 #[derive(Default)]
@@ -263,7 +261,9 @@ async fn drain(
     mut rx: mpsc::Receiver<Msg>,
     limits: DrainLimits,
     max_concurrent: usize,
+    shutdown: CancellationToken,
 ) {
+    let mut draining = false;
     let mut pending: HashMap<String, TableBuffer> = HashMap::new();
     let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
     // Parts write concurrently and may land out of order. That is safe: the edge tables are
@@ -285,13 +285,6 @@ async fn drain(
                     }
                     while writes.join_next().await.is_some() {}
                     let _ = ack.send(());
-                }
-                Some(Msg::FlushFor(token)) => {
-                    let holding = pending
-                        .extract_if(|_, buf| buf.tokens.iter().any(|t| Arc::ptr_eq(t, &token)));
-                    for (table, buf) in holding {
-                        spawn_write(&mut writes, &sem, &writer, table, buf);
-                    }
                 }
                 Some(Msg::Submit(table, batch, token)) => {
                     let buf = pending.entry(table.clone()).or_default();
@@ -324,8 +317,16 @@ async fn drain(
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
             }
+            _ = shutdown.cancelled(), if !draining => {
+                draining = true;
+            }
             // Reap finished writes so the JoinSet does not grow unbounded between flushes.
             Some(_) = writes.join_next(), if !writes.is_empty() => {}
+        }
+        if draining {
+            for (table, buf) in std::mem::take(&mut pending) {
+                spawn_write(&mut writes, &sem, &writer, table, buf);
+            }
         }
     }
 
@@ -473,6 +474,7 @@ mod tests {
                 max_age: Duration::from_secs(3600),
                 max_concurrent: 1,
             },
+            CancellationToken::new(),
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -499,6 +501,7 @@ mod tests {
                 max_age: Duration::from_secs(3600),
                 max_concurrent: 4,
             },
+            CancellationToken::new(),
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -524,6 +527,7 @@ mod tests {
                 max_age: Duration::from_secs(3600),
                 max_concurrent: 1,
             },
+            CancellationToken::new(),
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -552,6 +556,7 @@ mod tests {
                 max_age: Duration::from_millis(60),
                 max_concurrent: 1,
             },
+            CancellationToken::new(),
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -577,6 +582,7 @@ mod tests {
                 max_age: Duration::from_secs(3600),
                 max_concurrent: 1,
             },
+            CancellationToken::new(),
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -590,7 +596,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn start_flush_writes_only_the_tables_holding_the_tokens_rows() {
+    async fn a_cancelled_drain_flushes_without_waiting_for_the_age_cap() {
+        let shutdown = CancellationToken::new();
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
             BufferedWriterConfig {
@@ -601,23 +608,29 @@ mod tests {
                 max_age: Duration::from_secs(3600),
                 max_concurrent: 1,
             },
+            shutdown.clone(),
         );
-        let first: Arc<CountToken> = Arc::new(CountToken::default());
-        let second: Arc<CountToken> = Arc::new(CountToken::default());
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
 
-        submit(&w, "gl_edge", batch(10), first.clone()).await;
-        submit(&w, "gl_definition", batch(10), second.clone()).await;
-        w.start_flush(first.clone()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(first.flushed.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            second.flushed.load(Ordering::SeqCst),
-            0,
-            "another producer's table must keep pooling"
-        );
+        submit(&w, "gl_definition", batch(10), token.clone()).await;
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while token.flushed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a shutdown must flush the buffered rows at once");
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
 
-        w.flush().await.unwrap();
-        assert_eq!(second.flushed.load(Ordering::SeqCst), 1);
+        submit(&w, "gl_definition", batch(10), token.clone()).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while token.flushed.load(Ordering::SeqCst) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("rows submitted after the shutdown signal flush at once too");
     }
 
     #[test]
