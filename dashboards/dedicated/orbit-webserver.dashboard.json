@@ -528,7 +528,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of all queries in the selected time range that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.",
+      "description": "Share of all queries in the selected time range that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -577,7 +577,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[$__range])) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range]))",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"compile_error|security_error\"}[$__range])) or vector(0)) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range]))",
           "instant": true,
           "legendFormat": "Rejected",
           "range": false,
@@ -592,7 +592,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "All queries that reached the pipeline in the selected time range, including rejected client queries. The curve shows volume per 5 minutes or more.",
+      "description": "All queries that reached the pipeline in the selected time range, including rejected client queries and excluding schema calls. The curve shows volume per 5 minutes or more.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -636,7 +636,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", query_type!=\"unknown\"}[$__interval])) + sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[$__interval]))",
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__interval])) - (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type=\"unknown\"}[$__interval])) or vector(0))",
           "legendFormat": "Queries",
           "refId": "A"
         }
@@ -758,7 +758,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[$__interval]))",
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"compile_error|security_error\"}[$__interval])) or vector(0)",
           "legendFormat": "Rejected",
           "refId": "C"
         }

@@ -52,6 +52,8 @@ local VALID = 'status!~"compile_error|security_error", query_type!="unknown"';
 local SERVER_STATUS = 'execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error';
 local COMPILER_FAULT = 'lowering|enforcement|codegen|pipeline|ontology_internal|security';
 local OK = 'status="ok", query_type!="unknown"';
+local SCHEMA = 'status="ok", query_type="unknown"';
+local REJECTED = 'status=~"compile_error|security_error"';
 
 local serverErrors(range) =
   '(sum(increase(%s{%s, status=~"%s"}[%s])) or vector(0)) + (sum(increase(%s{%s, failure_reason=~"%s"}[%s])) or vector(0))'
@@ -184,14 +186,14 @@ local glance = [
   ),
   tile(
     'Rejected',
-    'Share of all queries in the selected time range that the compiler rejected as invalid client input (bad syntax, unknown schema, and so on). Not a service fault, so it stays neutral.',
-    'sum(increase(%s{%s, status="compile_error"}[$__range])) / sum(increase(%s{%s}[$__range]))' % [Q, SEL, Q, SEL],
+    'Share of all queries in the selected time range that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.',
+    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / sum(increase(%s{%s}[$__range]))' % [Q, SEL, REJECTED, Q, SEL],
     'percentunit', NEUTRAL, 1,
   ),
   volume(
     'Queries',
-    'All queries that reached the pipeline in the selected time range, including rejected client queries. The curve shows volume per 5 minutes or more.',
-    [o.target('sum(increase(%s{%s, query_type!="unknown"}[$__interval])) + sum(increase(%s{%s, status="compile_error"}[$__interval]))' % [Q, SEL, Q, SEL], 'Queries', DS, 'A')],
+    'All queries that reached the pipeline in the selected time range, including rejected client queries and excluding schema calls. The curve shows volume per 5 minutes or more.',
+    [o.target('sum(increase(%s{%s}[$__interval])) - (sum(increase(%s{%s, %s}[$__interval])) or vector(0))' % [Q, SEL, Q, SEL, SCHEMA], 'Queries', DS, 'A')],
     [], 6,
   ),
   volume(
@@ -200,7 +202,7 @@ local glance = [
     [
       o.target('sum(increase(%s{%s, %s}[$__interval]))' % [Q, SEL, OK], 'Successful', DS, 'A'),
       o.target('(%s)' % serverErrors('$__interval'), 'Server errors', DS, 'B'),
-      o.target('sum(increase(%s{%s, status="compile_error"}[$__interval]))' % [Q, SEL], 'Rejected', DS, 'C'),
+      o.target('sum(increase(%s{%s, %s}[$__interval])) or vector(0)' % [Q, SEL, REJECTED], 'Rejected', DS, 'C'),
     ],
     [['Successful', '#3987e5'], ['Server errors', '#e66767'], ['Rejected', '#8e8e9a']], 9,
   ),
