@@ -296,6 +296,12 @@
           "minimum": 0,
           "default": 900
         },
+        "query_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 7200
+        },
         "profiling": {
           "$ref": "#/$defs/ProfilingConfig"
         }

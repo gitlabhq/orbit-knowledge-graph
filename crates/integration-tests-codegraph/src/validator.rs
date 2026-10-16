@@ -20,15 +20,21 @@ pub struct Failure {
     pub message: String,
 }
 
+/// With `probe_skipped`, the queries of skipped tests still run, without
+/// their assertions.
 pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
+    probe_skipped: bool,
 ) -> Vec<Failure> {
     let mut failures = undeclared_edges(client, ontology);
     for test in &suite.tests {
         if test.skip {
             eprintln!("  [SKIP] \"{}\"", test.name);
+            if probe_skipped {
+                failures.extend(probe_test(test, client, ontology));
+            }
             continue;
         }
         failures.extend(run_test(test, client, ontology));
@@ -99,6 +105,16 @@ fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) ->
     }
 
     failures
+}
+
+/// A skipped test's queries without its assertions, so a query that no
+/// longer runs or needs a LIMIT fails the suite while it stays skipped.
+fn probe_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
+    test.all_queries()
+        .iter()
+        .filter_map(|block| run_query(&test.name, test.severity, block, client, ontology).err())
+        .flatten()
+        .collect()
 }
 
 fn execute_cypher(
@@ -235,6 +251,34 @@ fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
     eprintln!("  ╚══════════════════════════════════════════════════\n");
 }
 
+fn run_query(
+    label: &str,
+    severity: Severity,
+    block: &QueryBlock,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+) -> Result<RecordBatch, Vec<Failure>> {
+    match execute_cypher(&block.query, client, ontology) {
+        Ok((batch, has_more)) if has_more && !has_explicit_limit(&block.query) => {
+            print_result(label, &block.query, &batch);
+            Err(vec![fail(
+                label,
+                severity,
+                format!(
+                    "More than the default {} rows match; add LIMIT so the assertions see every row",
+                    batch.num_rows()
+                ),
+            )])
+        }
+        Ok((batch, _)) => Ok(batch),
+        Err(e) => Err(vec![fail(
+            label,
+            severity,
+            format!("Query execution error: {e}"),
+        )]),
+    }
+}
+
 fn run_query_block(
     label: &str,
     severity: Severity,
@@ -242,20 +286,9 @@ fn run_query_block(
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
 ) -> Vec<Failure> {
-    let batch = match execute_cypher(&block.query, client, ontology) {
-        Ok((batch, has_more)) if has_more && !has_explicit_limit(&block.query) => {
-            print_result(label, &block.query, &batch);
-            return vec![fail(
-                label,
-                severity,
-                format!(
-                    "More than the default {} rows match; add LIMIT so the assertions see every row",
-                    batch.num_rows()
-                ),
-            )];
-        }
-        Ok((batch, _)) => batch,
-        Err(e) => return vec![fail(label, severity, format!("Query execution error: {e}"))],
+    let batch = match run_query(label, severity, block, client, ontology) {
+        Ok(batch) => batch,
+        Err(failures) => return failures,
     };
 
     let failures = check_assertions(label, severity, &block.assert, &batch);

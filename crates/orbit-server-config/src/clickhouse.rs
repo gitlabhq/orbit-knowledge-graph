@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_INSERT_TIMEOUT_SECS: u64 = 900;
+pub const DEFAULT_QUERY_TIMEOUT_SECS: u64 = 7200;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -26,11 +27,17 @@ pub struct ClickHouseConfiguration {
     pub insert_settings: HashMap<String, String>,
     #[serde(default = "default_insert_timeout_secs")]
     pub insert_timeout_secs: u64,
+    #[serde(default = "default_query_timeout_secs")]
+    pub query_timeout_secs: u64,
     pub profiling: ProfilingConfig,
 }
 
 fn default_insert_timeout_secs() -> u64 {
     DEFAULT_INSERT_TIMEOUT_SECS
+}
+
+fn default_query_timeout_secs() -> u64 {
+    DEFAULT_QUERY_TIMEOUT_SECS
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

@@ -371,6 +371,8 @@ fn write_entity(
     Ok(())
 }
 
+type Enclosing = FxHashMap<(usize, (u32, u32)), Option<(u32, u32)>>;
+
 struct EdgeRow<'a> {
     source: (i64, &'a str),
     kind: &'a str,
@@ -389,15 +391,40 @@ fn write_edges(
 
     let mut located: Vec<_> = ids.iter().collect();
     located.sort_unstable();
+    let mut enclosing = Enclosing::default();
+    let mut path = Vec::new();
+    let mut current_tree = None;
     for (&(tree, node), &(id, entity, emitted)) in located {
         if !emitted {
             continue;
         }
+        if current_tree != Some(tree) {
+            current_tree = Some(tree);
+            enclosing.clear();
+        }
         for rule in plan.containment.iter().filter(|c| c.to == entity) {
-            let enclosing = forest
-                .ancestors(tree, node)
-                .find_map(|loc| ids.get(&loc).filter(|(_, e, _)| *e == rule.from));
-            if let Some(&(from_id, _, _)) = enclosing {
+            path.clear();
+            path.push((tree, node));
+            let found = loop {
+                let (tree, node) = *path.last().expect("the start location");
+                let Some(above) = forest
+                    .ancestors(tree, node)
+                    .find(|loc| ids.contains_key(loc))
+                else {
+                    break None;
+                };
+                if ids[&above].1 == rule.from {
+                    break Some(above);
+                }
+                if let Some(&known) = enclosing.get(&(rule.from, above)) {
+                    break known;
+                }
+                path.push(above);
+            };
+            for &loc in &path {
+                enclosing.insert((rule.from, loc), found);
+            }
+            if let Some(&(from_id, _, _)) = found.and_then(|loc| ids.get(&loc)) {
                 rows.push(EdgeRow {
                     source: (from_id, entity_name(rule.from)),
                     kind: &rule.kind,
