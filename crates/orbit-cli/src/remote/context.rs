@@ -37,6 +37,7 @@ async fn fetch_one(client: OrbitClient, token: String) -> Result<Vec<u8>, Remote
     let body = serde_json::to_vec(&serde_json::json!({
         "tokens": [token],
         "response_format": "llm",
+        "expand": true,
     }))
     .map_err(|error| RemoteError::new(EXIT_GENERIC, error.to_string()))?;
     client

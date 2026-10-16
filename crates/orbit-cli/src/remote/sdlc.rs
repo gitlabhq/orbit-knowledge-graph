@@ -199,7 +199,15 @@ pub(crate) async fn read(
                 pipeline_text(client, &encoded, &pipeline).await?,
             ))
         }
-        Target::Job(id) => Ok(Found::Text(job_text(client, &encoded, *id).await?)),
+        Target::Job(id) => {
+            if let Ok(body) = super::context::fetch(client.clone(), &[format!("Job[{id}]")]).await {
+                let text = String::from_utf8_lossy(&body);
+                if text.contains(" found=true") {
+                    return Ok(Found::Text(text.into_owned()));
+                }
+            }
+            Ok(Found::Text(job_text(client, &encoded, *id).await?))
+        }
         Target::Commit(sha) => Ok(Found::Text(commit_text(client, &encoded, sha).await?)),
     }
 }

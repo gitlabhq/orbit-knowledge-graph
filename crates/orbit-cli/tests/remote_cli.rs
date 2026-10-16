@@ -848,6 +848,10 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
 fn context_reads_jobs_and_commits_in_a_named_project() {
     let (base_url, handle) = serve_routes(vec![
         (
+            "orbit/context",
+            "orbit_context version=1.1.0 entities=1\n- \"Job[9]\" found=false error=unsupported_type\n",
+        ),
+        (
             "jobs/9 ",
             r#"{"id":9,"name":"unit","stage":"test","status":"failed","failure_reason":"script_failure","web_url":"https://localhost/j/9","ref":"main","pipeline":{"id":7},"commit":{"id":"0123456789abcdef"}}"#,
         ),
@@ -883,6 +887,7 @@ fn context_reads_jobs_and_commits_in_a_named_project() {
     assert!(
         requests
             .iter()
+            .filter(|request| !request.request_line.contains("orbit/context"))
             .all(|request| request.request_line.contains("/projects/other%2Flib/")),
         "{:?}",
         requests.iter().map(|r| &r.request_line).collect::<Vec<_>>()
@@ -950,4 +955,29 @@ fn grep_is_branch_lists_matching_branches_with_their_merge_requests() {
         stdout.contains("context branch:aa/show-approval-rules\n"),
         "{stdout}"
     );
+}
+
+#[test]
+fn context_reads_a_job_from_the_context_endpoint_when_it_knows_jobs() {
+    let summary = "orbit_context version=1.1.0 entities=1\n- job:9 found=true\n  name=\"unit\"\n";
+    let (base_url, handle) = serve_routes(vec![("orbit/context", summary)]);
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        dir.path(),
+        dir.path(),
+        &base_url,
+        &["context", "job:9", "repo:other/lib"],
+    );
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_str(&requests[0].body).unwrap();
+    assert_eq!(body["tokens"], serde_json::json!(["Job[9]"]));
+    assert_eq!(body["expand"], true);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), summary);
 }
