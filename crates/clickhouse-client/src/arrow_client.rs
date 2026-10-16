@@ -88,7 +88,7 @@ pub struct ArrowClickHouseClient {
     base_url: String,
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
-    insert_timeout: Duration,
+    insert_timeout: Option<Duration>,
     quorum_writes: bool,
     replicated: bool,
     circuit_breaker: CircuitBreaker,
@@ -128,7 +128,7 @@ impl ArrowClickHouseClient {
             base_url: url.to_string(),
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
-            insert_timeout: Duration::from_secs(DEFAULT_INSERT_TIMEOUT_SECS),
+            insert_timeout: Some(Duration::from_secs(DEFAULT_INSERT_TIMEOUT_SECS)),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
             circuit_breaker: CircuitBreaker::new(
@@ -151,14 +151,14 @@ impl ArrowClickHouseClient {
     }
 
     pub fn with_insert_timeout(mut self, timeout: Duration) -> Self {
-        self.insert_timeout = timeout;
+        self.insert_timeout = (!timeout.is_zero()).then_some(timeout);
         self
     }
 
     fn bounded_insert(&self, sql: &str) -> InsertFormatted {
         self.client
             .insert_formatted_with(sql)
-            .with_timeouts(Some(self.insert_timeout), Some(self.insert_timeout))
+            .with_timeouts(self.insert_timeout, self.insert_timeout)
     }
 
     pub fn database(&self) -> &str {
@@ -711,8 +711,21 @@ mod tests {
     use futures::future::BoxFuture;
     use std::collections::HashMap;
 
+    #[test]
+    fn a_zero_insert_timeout_turns_the_bound_off() {
+        let client = client_with_insert_settings(HashMap::new());
+        assert_eq!(
+            client.insert_timeout,
+            Some(Duration::from_secs(DEFAULT_INSERT_TIMEOUT_SECS))
+        );
+        let off = client.clone().with_insert_timeout(Duration::ZERO);
+        assert_eq!(off.insert_timeout, None);
+        let bounded = client.with_insert_timeout(Duration::from_secs(5));
+        assert_eq!(bounded.insert_timeout, Some(Duration::from_secs(5)));
+    }
+
     #[tokio::test]
-    async fn an_insert_the_server_never_answers_fails_on_the_insert_timeout() {
+    async fn an_insert_the_server_never_answers_fails_on_the_end_timeout() {
         use tokio::io::AsyncReadExt;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
