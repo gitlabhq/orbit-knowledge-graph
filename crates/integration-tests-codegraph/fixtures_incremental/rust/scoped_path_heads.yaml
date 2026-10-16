@@ -64,6 +64,18 @@ fixtures:
           T::read_all()
       }
 
+      fn local_import(slot: *mut u32) -> u32 {
+          use core::ptr;
+          let ptr = slot;
+          unsafe { ptr::read(ptr) }
+      }
+
+      fn local_import_only(slot: *mut u32) -> usize {
+          use std::mem;
+          let mem = slot;
+          mem::size_of_val(&mem)
+      }
+
       fn receiver(ptr: Slot) -> u32 {
           ptr.read()
       }
@@ -111,6 +123,17 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { callee: "Reader::read_all" } }
+
+  - name: a let over an import at the same depth keeps the scoped call on that import
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['local_import', 'local_import_only']
+      RETURN caller.name AS caller, target.import_path AS path
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "local_import", path: "core::ptr" } }
+      - { row: { caller: "local_import_only", path: "std::mem" } }
 
   - name: a bare receiver of the same name still binds to the parameter
     query: |

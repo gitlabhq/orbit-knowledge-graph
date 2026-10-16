@@ -815,13 +815,14 @@ impl<'t> Fold<'t> {
             return;
         };
         let previous = self.visible.insert(name, (binding, depth));
-        if previous.is_none_or(|(_, at)| at != depth) {
+        if previous.is_none_or(|(key, at)| at != depth || self.statics.contains_key(&key)) {
             self.scopes[depth].1.push((name, previous));
         }
     }
 
     fn exit_scope(&mut self) {
-        for (name, previous) in self.scopes.pop().map(|(_, undo)| undo).unwrap_or_default() {
+        let undo = self.scopes.pop().map(|(_, undo)| undo).unwrap_or_default();
+        for (name, previous) in undo.into_iter().rev() {
             match previous {
                 Some(previous) => self.visible.insert(name, previous),
                 None => self.visible.remove(&name),
@@ -860,18 +861,18 @@ impl<'t> Fold<'t> {
     }
 
     fn lookup_static(&self, sym: u32) -> Option<Value> {
-        let mut hit = self.visible.get(&sym).copied();
-        while let Some((binding, depth)) = hit {
-            if let Some(value) = self.statics.get(&binding) {
-                return Some(value.clone());
-            }
-            hit = self.scopes[depth]
-                .1
-                .iter()
-                .find_map(|&(name, previous)| (name == sym).then_some(previous))
-                .flatten();
+        let (binding, depth) = *self.visible.get(&sym)?;
+        if let Some(value) = self.statics.get(&binding) {
+            return Some(value.clone());
         }
-        None
+        self.scopes[..=depth]
+            .iter()
+            .rev()
+            .flat_map(|(_, undo)| undo.iter().rev())
+            .filter(|(name, _)| *name == sym)
+            .map(|(_, previous)| *previous)
+            .take_while(Option::is_some)
+            .find_map(|previous| self.statics.get(&previous?.0).cloned())
     }
 
     fn enter_scope(&mut self, scope: Cursor<'t>) {
