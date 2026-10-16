@@ -6,13 +6,13 @@
 # The scorers live in scripts/linting/ and are documented in
 # scripts/linting/README.md.
 #
-# The narration and MR-description jobs are advisory (allow_failure: true →
+# The narration, comments, and MR-description jobs are advisory (allow_failure: true →
 # yellow); the prose and yaml jobs block. The scripts exit non-zero on
 # findings; remove allow_failure here to promote a gate to blocking.
 #
 # This file is the CI half of the linting kill-switch: deleting it plus
 # the scripts/linting/ folder, the `- local:` include in .gitlab-ci.yml, the
-# lefthook `narration`, `prose`, and `yaml-suites` jobs, the mise `lint:prose*`
+# lefthook `narration`, `comments`, `prose`, and `yaml-suites` jobs, the mise `lint:prose*`
 # and `lint:yaml*` tasks, and the prettier dev dependency
 # removes the gates entirely.
 
@@ -76,6 +76,27 @@ lint:prose:
       else
         uv run --quiet scripts/linting/prose_lint.py --all
       fi
+
+# Comment check: lists comments the MR added or changed (the same script as the
+# lefthook `comments` job). Advisory here; CI cannot read a local COMMENTS_OK.
+lint:comments:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache git
+    - uv run --quiet scripts/linting/comment_check_test.py
+    # In a merged-results pipeline HEAD is the merge into the target tip, so the
+    # target SHA, not the old merge base, bounds the MR's own changes.
+    - |
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1
+      uv run --quiet scripts/linting/comment_check.py --range "$BASE" HEAD
 
 lint:yaml:
   stage: lint

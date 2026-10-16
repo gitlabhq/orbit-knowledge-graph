@@ -200,6 +200,23 @@ pub trait OrbitQueryModel {
             .is_some_and(|property| self.query_authorization().is_like_allowed(property.id))
     }
 
+    fn property_is_free_text(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| match property.data_type {
+                ontology::DataType::Uuid => true,
+                ontology::DataType::String => {
+                    self.property_selectivity(property.id) != ontology::FieldSelectivity::Low
+                }
+                _ => false,
+            })
+    }
+
+    fn entity_authorized_by_namespace(&self, entity: &str) -> bool {
+        self.entity_auth()
+            .get(entity)
+            .is_some_and(|auth| matches!(auth.resource_type.as_str(), "project" | "group"))
+    }
+
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
         self.query_authorization().redaction_id_column(entity)
     }

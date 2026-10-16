@@ -472,8 +472,8 @@ output column name: `{"avg": "mr.merge_duration", "as": "avg_dur"}`.
 | `count` | `"node"` (count matching rows) or `"node.property"` (count non-null values) | Any |
 | `sum` | `"node.property"` | Numeric only |
 | `avg` | `"node.property"` | Numeric only |
-| `min` | `"node.property"` | Numeric, string, boolean, `Date`, or `DateTime` |
-| `max` | `"node.property"` | Numeric, string, boolean, `Date`, or `DateTime` |
+| `min` | `"node.property"` | Numeric, boolean, enum, `Date`, or `DateTime` |
+| `max` | `"node.property"` | Numeric, boolean, enum, `Date`, or `DateTime` |
 
 Without `as`, the output column name is derived as `<function>_<node>`
 (`count_mr`) or `<function>_<node>_<property>` (`avg_mr_merge_duration`).
@@ -481,6 +481,8 @@ Reference these names in `aggregation_sort`.
 
 `sum` and `avg` reject `DateTime` properties with a validation error. To
 aggregate over dates, use `min` or `max`.
+
+In aggregations, text pattern and ordering filters need their node grouped.
 
 Use top-level `group_by` to group aggregation rows. It applies to every
 aggregation in the query. Do not put grouping inside an individual aggregation.

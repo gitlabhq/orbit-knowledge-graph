@@ -1,3 +1,28 @@
+## [0.146.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.145.0...v0.146.0) (2026-10-16)
+
+### Features
+
+* **indexer:** lease archive downloads per Gitaly storage across pods ([e1a4eca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1a4eca3822701c3ba3b78364274f3cc6d353b4e)) by Dmitry Gruzd
+* **lint:** block commits that add or change comments until acknowledged ([bddd554](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bddd5542f444919528eec73f57744ab08b468015)) by Dmitry Gruzd
+
+### Fixes
+
+* **cli:** orbit setup skill picker fetch and glab wrapper handling ([519fc55](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/519fc5541b0df46d59688ef8da8c95ce2ae1f092)) by Dmitry Gruzd
+* **compiler:** restrict aggregate functions to scalar properties ([c923e1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c923e1f413382f4a0042a8c67c9373bb043c5f85)) by Aaron Algutifan
+* **indexer:** match the storage lease to the new lock acquire result ([9d8ffa7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9d8ffa774d562c2ee2acaf3517cd6258f11802d3)) by Dmitry Gruzd
+
+### Performance
+
+* **query:** keep the fused neighbors scan for multi-id centers ([acd3e9c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/acd3e9c405634ce0c54e8369134117f083cb49a3)) by Jean-Gabriel Doyon
+* **query:** pin node ids written as WHERE filters ([d52e8ff](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d52e8ff47c3c3a660cca556377b3597ab9a5c114)) by Jean-Gabriel Doyon
+* **query:** use text indexes for equality and turn statistics off ([b48be6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b48be6ec99f0aed54344d4c72b21d8a6c8e0b58d)) by Michael Angelo Rivera
+
+### Other
+
+* **ci:** run ClickHouse tests on 26.6 to match production ([d4ddd69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d4ddd6933a9b3f9e692cbf4b220576dd501bfeec)) by Jean-Gabriel Doyon
+* **deps:** bump gitlab-xtasks to v1.6.1 ([86d9047](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/86d90477dbd6085812b4d2af249764d2a2fb2e97)) by Dmitry Gruzd
+* require ClickHouse 26.4 for Orbit ([e2b832f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e2b832f5e0df56afe43a489e7ce6643a3ba061cb)) by Michael Angelo Rivera
+
 ## [0.145.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.144.0...v0.145.0) (2026-10-16)
 
 ### Features

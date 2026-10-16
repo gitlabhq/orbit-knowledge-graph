@@ -684,7 +684,7 @@ security_identifier_025_by_project_id:
           "id": "i",
           "entity": "VulnerabilityIdentifier",
           "filters": {
-            "name": {"contains": "CVE"}
+            "external_type": "cve"
           }
         }
       ],

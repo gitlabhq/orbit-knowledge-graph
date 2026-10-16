@@ -25,7 +25,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
     };
     lowering.pattern(query.pattern)?;
     lowering.predicates(query.predicates)?;
-    lowering.promote_ids()?;
+    lowering.input.promote_id_filters()?;
     lowering.classify()?;
     lowering.project(query.projections)?;
     if let Some(sort) = query.order {
@@ -155,13 +155,6 @@ impl Lowering {
             ..Default::default()
         };
         Self::map_filters(pattern.properties, &mut node.filters);
-        if let Some(filters) = node.filters.get("id")
-            && let [filter] = filters.as_slice()
-            && let Some(id) = filter.value.as_ref().and_then(serde_json::Value::as_i64)
-        {
-            node.node_ids.push(id);
-            node.filters.remove("id");
-        }
         self.input.nodes.push(node);
         Ok(id)
     }

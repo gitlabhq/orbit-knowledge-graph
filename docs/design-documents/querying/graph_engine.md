@@ -106,7 +106,7 @@ UNION arms also retain their local CTE definitions. Empty path arrays carry fiel
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.
-Logical assertions inspect parsed, normalized Input before scope preparation.
+Logical assertions inspect parsed, normalized Input before query scope application.
 They include node and relationship filters, groups, measures, ordering, and limits.
 Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
 The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
@@ -176,12 +176,12 @@ policy provenance.
 | 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and prepares query scope, including scope-only container removal ([Security](../security.md)) |
+| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and derives immutable query scope ([Security](../security.md)) |
 | 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
-| 6 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
-| 7 | `response_policy` | Applies transport-size policy to result projections |
-| 8 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
-| 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
+| 6 | `apply_scope` | Adds scope predicates to owned reads in the relation graph |
+| 7 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
+| 8 | `response_policy` | Applies transport-size policy to result projections |
+| 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
 | 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
@@ -271,24 +271,20 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - Anchors and FK columns come from the ontology's `traversal_path_lookup` declarations and edge scope annotations (`Ontology::is_anchor`, `Ontology::anchor_fk_mappings`).
 - Anchors: `Project`, `Group`, `MergeRequest`, `Definition`, `File`, `Directory`. The code entities let "find callers" traversals scope to the symbol's own project.
 
-**How the prefix is produced** (`scope::derive_scope_prefixes`, `ScopePrefix`)
+**How the prefix is produced** (`scope::derive_scope_proofs`, `ScopeProof`)
 
 - No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
 - ID lookups use an aggregate over all matching versions. Full-path lookups use `FINAL` before filtering the mutable path, so an old name cannot resolve a renamed anchor.
 - A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
-- When scope preparation removes a container anchor, scope application adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
-- Containment elision preserves the requested direction and constrains the target's traversal-path depth. The compiler retains the target's table scan even when the query does not return its properties.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
 **Where it lands**
 
-- Scope preparation runs after restriction. It removes a scope-only container only when the target's scope and hop depth exactly replace the relationship. It stores the bounded target proof in scope state and gives planning only the target alias that needs a table scan.
-- Planning and lowering do not consume scope proofs. Edge scans retain their input relationship index, including scans inside SIP producers and bounded-hop arms.
-- Scope application walks the emitted AST after result enforcement. It uses scan provenance to add predicates inside each scan's query block, including dedup subqueries and CTEs.
-- Removed containers retain a resolved-anchor guard. Security injection then adds caller authorization filters beside the scope filters.
-- Scope application, security injection, and final checks share callback-based query walkers. The walkers cover queries nested in expressions as well as derived tables and CTEs.
+- Restriction derives immutable node and relationship proofs. Planning does not consume them.
+- Scope application runs after planning and before lowering. It wraps each owned relation read with its scope predicate.
+- Lowering emits these predicates with the read. Security injection then adds caller authorization filters.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 

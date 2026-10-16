@@ -31,14 +31,14 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.23.4"
 "cargo:ast-grep" = "0.42.0"
-"cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
+"cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.6.1"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
 # Rebuild-and-run loop for Caproni edit mode (scripts/dev/caproni-edit-mode.sh).
 watchexec = "2.8.0"
 "sccache" = "0.13.0"
 "zig" = "0.15.2"
-clickhouse = "26.3.41.4-lts"
+clickhouse = "26.6.8.7-stable"
 duckdb = "1.5.1"
 uv = "0.9.28"
 node = "26"
@@ -514,6 +514,10 @@ description = "Fix the layout of the YAML test suites"
 [tasks."lint:yaml:test"]
 run = "uv run --quiet scripts/linting/yaml_lint_test.py"
 description = "Run the YAML layout linter's unit tests"
+
+[tasks."lint:comments:test"]
+run = "uv run --quiet scripts/linting/comment_check_test.py"
+description = "Run the comment check's unit tests"
 
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:vale", "lint:links"]

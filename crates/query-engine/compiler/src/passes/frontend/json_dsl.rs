@@ -22,6 +22,7 @@ pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
     let query_hash = cursor::canonical_hash(&value);
     let mut input: Input = serde_json::from_value(value)?;
     input.lift_negated_filters()?;
+    input.promote_id_filters()?;
     Ok((input, query_hash))
 }
 

@@ -32,6 +32,7 @@ pub enum Predicate {
         filter: InputFilter,
         data_type: Option<ontology::DataType>,
         in_sort_key: bool,
+        text_indexed: bool,
     },
     Ids {
         column: Column,
