@@ -28,6 +28,8 @@ cases:
       node_count: 1
       nodes:
         MergeRequest:
+          order: [2004]
+          filters: { title: Ship feature E }
           rows:
             - { id: 2004, title: Ship feature E }
 
@@ -60,5 +62,7 @@ cases:
       node_count: 1
       nodes:
         MergeRequest:
+          order: [2004]
+          filters: { title: { in: ["Ship feature E", "ship feature f"] } }
           rows:
             - { id: 2004, title: Ship feature E }
