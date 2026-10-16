@@ -1,0 +1,32 @@
+description: Bidirectional neighbors of Group 100 when the center id is a filter instead of node_ids, matching both_directions
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "filters": {"id": 100}}],
+      "neighbors": {"direction": "both"}
+    }
+  gql: |
+    MATCH (g:Group)--(n) WHERE g.id = 100 RETURN g, n
+
+expect:
+  node_count: 9
+  referential_integrity: true
+  nodes:
+    Group:
+      ids: [100, 200]
+    User:
+      ids: [1, 2, 6]
+    Project:
+      ids: [1000, 1002]
+    WorkItem:
+      ids: [4000, 4001]
+  edge_exists:
+    MEMBER_OF:
+      - { from: User, from_id: 1, to: Group, to_id: 100 }
+    CONTAINS:
+      - { from: Group, from_id: 100, to: Group, to_id: 200 }
+    IN_GROUP:
+      - { from: WorkItem, from_id: 4000, to: Group, to_id: 100 }
+      - { from: WorkItem, from_id: 4001, to: Group, to_id: 100 }

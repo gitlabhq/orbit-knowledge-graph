@@ -14,7 +14,7 @@ pub use assertions::{
     assert_edge_tags_by_source, assert_edge_tags_by_target, assert_edges_have_traversal_path,
     assert_node_count,
 };
-pub use context::TestContext;
+pub use context::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG, TestContext};
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 

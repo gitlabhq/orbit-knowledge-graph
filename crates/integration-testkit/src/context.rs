@@ -18,8 +18,8 @@ use testcontainers::{ContainerAsync, GenericImage};
 use arrow::array::StringArray;
 use orbit_arrow::ArrowUtils;
 
-const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "26.2";
+pub const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
+pub const CLICKHOUSE_TAG: &str = "26.6";
 const CLICKHOUSE_HTTP_PORT: u16 = 8123;
 
 const TEST_DATABASE: &str = "test";

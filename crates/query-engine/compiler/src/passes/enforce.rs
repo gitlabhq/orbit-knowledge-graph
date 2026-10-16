@@ -188,9 +188,7 @@ fn enforce_lowered_return_with(
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let selectable_nodes: HashSet<&str> = match input.query_type {
-        QueryType::Aggregation => {
-            crate::input::node_group_ids(&input.aggregation.group_by).collect()
-        }
+        QueryType::Aggregation => input.aggregation_row_nodes(model),
         QueryType::Traversal | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
