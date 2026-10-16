@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowQuery, FromArrowColumn};
 use ontology::pipelines::PipelineDescriptor;
+use ontology::{EtlScope, Ontology};
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_migrations::version::prefixed_table_name;
 
@@ -73,28 +73,40 @@ impl PlanCheckpoints {
     }
 }
 
-pub fn bind_plan_checkpoints(query: ArrowQuery, version: u32, roots: &[i64]) -> ArrowQuery {
-    query
+pub fn namespaced_plans(ontology: &Ontology) -> Vec<PipelineDescriptor> {
+    ontology
+        .pipeline_descriptors()
+        .into_iter()
+        .filter(|plan| plan.scope == EtlScope::Namespaced)
+        .collect()
+}
+
+/// `query` must be built from [`PLAN_CHECKPOINTS_SQL`], optionally with SETTINGS appended.
+pub async fn fetch_plan_checkpoints(
+    query: ArrowQuery,
+    version: u32,
+    roots: &[i64],
+) -> Result<HashMap<i64, PlanCheckpoints>, CheckpointError> {
+    let batches = query
         .param("table", prefixed_table_name(CHECKPOINT_TABLE, version))
         .param("namespace_prefix", NAMESPACE_KEY_PREFIX)
         .param("roots", roots)
-}
+        .fetch_arrow()
+        .await
+        .map_err(checkpoint_error)?;
+    let batches = batches.as_slice();
 
-pub fn parse_plan_checkpoints(
-    roots: &[i64],
-    batches: &[RecordBatch],
-) -> Result<HashMap<i64, PlanCheckpoints>, CheckpointError> {
     let mut checkpoints: HashMap<i64, PlanCheckpoints> = roots
         .iter()
         .map(|root| (*root, PlanCheckpoints::default()))
         .collect();
 
-    let roots = i64::extract_column(batches, 0).map_err(extraction_error)?;
-    let plans = String::extract_column(batches, 1).map_err(extraction_error)?;
+    let roots = i64::extract_column(batches, 0).map_err(checkpoint_error)?;
+    let plans = String::extract_column(batches, 1).map_err(checkpoint_error)?;
     let indexed_at =
-        Option::<DateTime<Utc>>::extract_column(batches, 2).map_err(extraction_error)?;
-    let attempts = i64::extract_column(batches, 3).map_err(extraction_error)?;
-    let written_at = DateTime::<Utc>::extract_column(batches, 4).map_err(extraction_error)?;
+        Option::<DateTime<Utc>>::extract_column(batches, 2).map_err(checkpoint_error)?;
+    let attempts = i64::extract_column(batches, 3).map_err(checkpoint_error)?;
+    let written_at = DateTime::<Utc>::extract_column(batches, 4).map_err(checkpoint_error)?;
 
     for ((((root, plan), indexed_at), attempts), written_at) in roots
         .into_iter()
@@ -117,6 +129,6 @@ pub fn parse_plan_checkpoints(
     Ok(checkpoints)
 }
 
-fn extraction_error(error: impl std::fmt::Display) -> CheckpointError {
+fn checkpoint_error(error: impl std::fmt::Display) -> CheckpointError {
     CheckpointError::Store(error.to_string())
 }

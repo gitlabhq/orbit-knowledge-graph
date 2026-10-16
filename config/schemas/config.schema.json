@@ -860,7 +860,7 @@
           "$ref": "#/$defs/StaleEdgeReconciliationConfig"
         },
         "namespace-freshness": {
-          "$ref": "#/$defs/ScheduleConfiguration"
+          "$ref": "#/$defs/NamespaceFreshnessConfig"
         }
       },
       "additionalProperties": false,
@@ -1007,7 +1007,7 @@
         "lookback_secs"
       ]
     },
-    "ScheduleConfiguration": {
+    "NamespaceFreshnessConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
@@ -1015,7 +1015,6 @@
           "$ref": "#/$defs/CronSchedule"
         }
       },
-      "additionalProperties": false,
       "required": [
         "cron"
       ]

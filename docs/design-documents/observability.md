@@ -108,7 +108,7 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 
 *Namespace freshness metrics:*
 
-The dispatcher reads the served schema version's checkpoints for every enabled namespace, using the same phase rules as the indexing status view. A replica exports these gauges only while its last snapshot is younger than three task intervals, so a missing series means no replica refreshed them.
+The dispatcher reads the served schema version's checkpoints for every enabled namespace, using the same phase rules as the indexing status view. A replica exports these gauges only while its last snapshot is younger than three task intervals. A missing series means no replica refreshed them. After the cadence lock moves, two replicas can export for up to three intervals. Aggregate across pods with `max`, not `sum`.
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|

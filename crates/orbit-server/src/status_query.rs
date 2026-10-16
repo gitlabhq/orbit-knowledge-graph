@@ -11,15 +11,23 @@ pub(crate) async fn fetch_status_query_batches(
     label: &str,
     bind_params: impl FnOnce(ArrowQuery) -> ArrowQuery,
 ) -> Result<Vec<RecordBatch>, Status> {
+    bind_params(status_query(client, sql, label)?)
+        .fetch_arrow()
+        .await
+        .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
+}
+
+pub(crate) fn status_query(
+    client: &ArrowClickHouseClient,
+    sql: &str,
+    label: &str,
+) -> Result<ArrowQuery, Status> {
     let sql = append_query_settings(sql)
         .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
     debug!(sql, label, "Status query");
 
-    bind_params(client.query(&sql))
-        .fetch_arrow()
-        .await
-        .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
+    Ok(client.query(&sql))
 }
 
 pub(crate) fn build_prefix_match_condition(

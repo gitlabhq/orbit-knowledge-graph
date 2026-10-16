@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
-use ontology::EtlScope;
 use ontology::pipelines::PipelineDescriptor;
 use orbit_utils::traversal_path::TraversalPath;
 use tracing::warn;
@@ -20,7 +19,7 @@ pub use indexer::indexing_status::Phase;
 
 use self::projects::PROJECT_NODE;
 use crate::active_schema::SchemaSnapshot;
-use indexer::indexing_status::{PlanCheckpoints, combine_phases};
+use indexer::indexing_status::{PlanCheckpoints, combine_phases, namespaced_plans};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopeStatus {
@@ -70,12 +69,7 @@ impl IndexingStatusService {
             .ok();
 
         let now = Utc::now();
-        let plans: Vec<PipelineDescriptor> = schema
-            .ontology
-            .pipeline_descriptors()
-            .into_iter()
-            .filter(|plan| plan.scope == EtlScope::Namespaced)
-            .collect();
+        let plans = namespaced_plans(&schema.ontology);
 
         scopes
             .iter()

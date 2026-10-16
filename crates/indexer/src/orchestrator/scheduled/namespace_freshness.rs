@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
-use ontology::EtlScope;
 use ontology::pipelines::PipelineDescriptor;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::AsyncInstrument;
@@ -11,16 +11,16 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::completion::fetch_enabled_top_level_namespaces;
 use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::freshness as spec;
-use orbit_server_config::ScheduleConfiguration;
+use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::indexing_status::{
-    PLAN_CHECKPOINTS_SQL, Phase, PlanCheckpoints, bind_plan_checkpoints, combine_phases,
-    parse_plan_checkpoints,
+    PLAN_CHECKPOINTS_SQL, Phase, PlanCheckpoints, combine_phases, fetch_plan_checkpoints,
+    namespaced_plans,
 };
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 
-const ROOTS_PER_QUERY: usize = 1_000;
+const ROOTS_PER_QUERY: usize = 10_000;
 const PHASES: [Phase; 4] = [
     Phase::NotStarted,
     Phase::Syncing,
@@ -35,7 +35,7 @@ const READY_AGE_BANDS: [(&str, TimeDelta); 5] = [
     ("16h", TimeDelta::hours(16)),
 ];
 // A replica that stops winning the cadence lock must stop exporting instead of repeating an old snapshot.
-const SNAPSHOT_TTL_INTERVALS: i32 = 3;
+const SNAPSHOT_TTL_INTERVALS: u32 = 3;
 
 type Snapshot = Arc<Mutex<Option<Freshness>>>;
 
@@ -43,7 +43,7 @@ pub struct NamespaceFreshness {
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
     catalog: OntologyCatalog,
-    schedule: ScheduleConfiguration,
+    config: NamespaceFreshnessConfig,
     snapshot: Snapshot,
 }
 
@@ -52,17 +52,19 @@ impl NamespaceFreshness {
         graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
         catalog: OntologyCatalog,
-        schedule: ScheduleConfiguration,
+        config: NamespaceFreshnessConfig,
     ) -> Self {
         let snapshot = Snapshot::default();
-        let ttl = TimeDelta::from_std(schedule.interval_hint()).unwrap_or(TimeDelta::MAX)
-            * SNAPSHOT_TTL_INTERVALS;
+        let ttl = config
+            .schedule
+            .interval_hint()
+            .saturating_mul(SNAPSHOT_TTL_INTERVALS);
         register_gauges(&snapshot, ttl);
         Self {
             graph,
             datalake,
             catalog,
-            schedule,
+            config,
             snapshot,
         }
     }
@@ -81,11 +83,12 @@ impl NamespaceFreshness {
             .map_err(TaskError::new)?
             .load_ontology()
             .map_err(TaskError::new)?;
-        let plans: Vec<PipelineDescriptor> = ontology
-            .pipeline_descriptors()
-            .into_iter()
-            .filter(|plan| plan.scope == EtlScope::Namespaced)
-            .collect();
+        let plans = namespaced_plans(&ontology);
+        if plans.is_empty() {
+            return Err(TaskError::new(format!(
+                "schema version {version} has no namespaced plans"
+            )));
+        }
         let roots = fetch_enabled_top_level_namespaces(&self.datalake)
             .await
             .map_err(TaskError::new)?
@@ -93,12 +96,10 @@ impl NamespaceFreshness {
 
         let mut freshness = Freshness::new(Utc::now());
         for chunk in roots.chunks(ROOTS_PER_QUERY) {
-            let batches =
-                bind_plan_checkpoints(self.graph.query(PLAN_CHECKPOINTS_SQL), version, chunk)
-                    .fetch_arrow()
+            let checkpoints =
+                fetch_plan_checkpoints(self.graph.query(PLAN_CHECKPOINTS_SQL), version, chunk)
                     .await
                     .map_err(TaskError::new)?;
-            let checkpoints = parse_plan_checkpoints(chunk, &batches).map_err(TaskError::new)?;
             for namespace in checkpoints.values() {
                 freshness.add(namespace, &plans);
             }
@@ -114,7 +115,7 @@ impl ScheduledTask for NamespaceFreshness {
     }
 
     fn schedule(&self) -> &ScheduleConfiguration {
-        &self.schedule
+        &self.config.schedule
     }
 
     async fn run(&self) -> Result<(), TaskError> {
@@ -192,7 +193,7 @@ impl Freshness {
     }
 }
 
-fn register_gauges(snapshot: &Snapshot, ttl: TimeDelta) {
+fn register_gauges(snapshot: &Snapshot, ttl: Duration) {
     let meter = orbit_observability::meter();
     spec::NAMESPACES.build_observable_gauge_i64(
         &meter,
@@ -210,17 +211,62 @@ fn register_gauges(snapshot: &Snapshot, ttl: TimeDelta) {
 
 fn observe_recent(
     snapshot: &Snapshot,
-    ttl: TimeDelta,
+    ttl: Duration,
     observe: fn(&Freshness, &dyn AsyncInstrument<i64>),
 ) -> impl Fn(&dyn AsyncInstrument<i64>) + Send + Sync + 'static {
-    let snapshot = Arc::clone(snapshot);
+    let snapshot = Arc::downgrade(snapshot);
     move |observer| {
+        let Some(snapshot) = Weak::upgrade(&snapshot) else {
+            return;
+        };
         let snapshot = snapshot.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(freshness) = snapshot
-            .as_ref()
-            .filter(|freshness| Utc::now() - freshness.computed_at <= ttl)
-        {
+        let recent = |freshness: &&Freshness| {
+            (Utc::now() - freshness.computed_at)
+                .to_std()
+                .is_ok_and(|age| age <= ttl)
+        };
+        if let Some(freshness) = snapshot.as_ref().filter(recent) {
             observe(freshness, observer);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<i64>>);
+
+    impl AsyncInstrument<i64> for Recorder {
+        fn observe(&self, measurement: i64, _attributes: &[KeyValue]) {
+            self.0.lock().unwrap().push(measurement);
+        }
+    }
+
+    fn observations_of_snapshot_aged(age: TimeDelta) -> usize {
+        let snapshot = Snapshot::default();
+        *snapshot.lock().unwrap() = Some(Freshness::new(Utc::now() - age));
+        let recorder = Recorder::default();
+        let observe = observe_recent(
+            &snapshot,
+            Duration::from_secs(900),
+            Freshness::observe_namespaces,
+        );
+        observe(&recorder);
+        recorder.0.lock().unwrap().len()
+    }
+
+    #[test]
+    fn recent_snapshot_is_exported() {
+        assert_eq!(
+            observations_of_snapshot_aged(TimeDelta::minutes(5)),
+            PHASES.len()
+        );
+    }
+
+    #[test]
+    fn expired_snapshot_is_not_exported() {
+        assert_eq!(observations_of_snapshot_aged(TimeDelta::minutes(20)), 0);
     }
 }

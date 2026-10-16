@@ -80,6 +80,14 @@ are also dropped. These are rename-orphans like `v56_gl_edge_v2` and removed ent
 applies: an object survives if its base name (after stripping the `v<N>_` prefix) matches a
 `gc_preserve_patterns` regex from the ontology settings.
 
+### Namespace freshness
+
+`orchestrator::scheduled::NamespaceFreshness` is a DispatchIndexing-mode `ScheduledTask` that reads the
+served schema version's checkpoints for every enabled top-level namespace. It applies the phase rules in
+`indexing_status`, which the webserver status view shares. It exports observable gauges for phase
+counts, checkpoint age bands and the oldest completion per plan. Each replica exports only while its
+last snapshot is younger than three task intervals, so a missing series means no replica refreshed it.
+
 ### Stale FK-edge reconciliation
 
 `orchestrator::scheduled::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones

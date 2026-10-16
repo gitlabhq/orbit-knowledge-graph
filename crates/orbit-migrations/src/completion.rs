@@ -119,7 +119,7 @@ pub async fn fetch_enabled_top_level_namespaces(
     if !split.skipped.is_empty() {
         tracing::warn!(
             skipped = ?split.skipped,
-            "excluding non-top-level namespace paths from completion gate"
+            "excluding non-top-level enabled namespace paths"
         );
     }
 

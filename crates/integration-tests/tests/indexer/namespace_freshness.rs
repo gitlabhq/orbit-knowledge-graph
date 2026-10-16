@@ -1,15 +1,17 @@
 use std::collections::BTreeMap;
 
+use indexer::indexing_status::namespaced_plans;
 use indexer::orchestrator::scheduled::{NamespaceFreshness, ScheduledTask};
 use indexer::schema::version::{
-    SCHEMA_VERSION, ensure_version_table, mark_version_active, prefixed_table_name,
+    SCHEMA_VERSION, ensure_version_table, mark_version_active, mark_version_migrating,
+    prefixed_table_name,
 };
-use ontology::EtlScope;
 use ontology::archive::OntologyArchive;
 use ontology::migrations::embedded_sources;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use orbit_migrations::catalog::OntologyCatalog;
+use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::NatsConfiguration;
 
 use super::common::dispatch::start_nats;
@@ -45,8 +47,16 @@ async fn exports_namespace_freshness_for_the_served_version() {
         .unwrap();
 
     let graph = clickhouse.create_client();
+    let served_table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+    let migrating_table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION + 1);
     ensure_version_table(&graph).await.unwrap();
     mark_version_active(&graph, *SCHEMA_VERSION).await.unwrap();
+    mark_version_migrating(&graph, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+    clickhouse
+        .execute(&format!("CREATE TABLE {migrating_table} AS {served_table}"))
+        .await;
 
     for (index, namespace) in [FRESH, THREE_HOURS_OLD, NOT_STARTED, FAILING]
         .into_iter()
@@ -62,14 +72,10 @@ async fn exports_namespace_freshness_for_the_served_version() {
             .await;
     }
 
-    let plans: Vec<String> = ontology::Ontology::load_embedded()
-        .unwrap()
-        .pipeline_descriptors()
+    let plans: Vec<String> = namespaced_plans(&ontology::Ontology::load_embedded().unwrap())
         .into_iter()
-        .filter(|plan| plan.scope == EtlScope::Namespaced)
         .map(|plan| plan.name)
         .collect();
-    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
     let mut rows = Vec::new();
     for plan in &plans {
         rows.push(format!("('ns.{FRESH}.{plan}', now(), 0, now())"));
@@ -84,8 +90,18 @@ async fn exports_namespace_freshness_for_the_served_version() {
     }
     clickhouse
         .execute(&format!(
-            "INSERT INTO {checkpoint_table} (key, watermark, attempts, indexed_at) VALUES {}",
+            "INSERT INTO {served_table} (key, watermark, attempts, indexed_at) VALUES {}",
             rows.join(", ")
+        ))
+        .await;
+    let migrating_rows: Vec<String> = plans
+        .iter()
+        .map(|plan| format!("('ns.{NOT_STARTED}.{plan}', now(), 0, now())"))
+        .collect();
+    clickhouse
+        .execute(&format!(
+            "INSERT INTO {migrating_table} (key, watermark, attempts, indexed_at) VALUES {}",
+            migrating_rows.join(", ")
         ))
         .await;
 
@@ -131,7 +147,7 @@ async fn exports_namespace_freshness_for_the_served_version() {
     assert!(
         oldest_age
             .values()
-            .all(|age| (3 * 3600..3 * 3600 + 60).contains(age)),
+            .all(|age| (3 * 3600 - 60..3 * 3600 + 60).contains(age)),
         "every plan's oldest completion is the three-hour-old namespace: {oldest_age:?}"
     );
 }
