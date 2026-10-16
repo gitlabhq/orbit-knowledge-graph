@@ -932,19 +932,18 @@ fn gather_imports_for(
                                 .resolve
                                 .same_path_same_type
                         };
-                        let dedupe = |path: &str, mut hits: Vec<Loc>| -> Vec<Loc> {
+                        let dedupe = |mut hits: Vec<Loc>| -> Vec<Loc> {
                             if !config.same_path_same_type || hits.iter().all(inside) {
                                 hits.retain(|loc| loc.fi != fi);
                                 return hits;
                             }
-                            let glob = path.ends_with(WILDCARD);
                             let keyed: Vec<_> = hits
                                 .into_iter()
                                 .map(|loc| (loc, below_root(&loc)))
                                 .collect();
                             let own: FxHashSet<&str> = keyed
                                 .iter()
-                                .filter(|(loc, _)| inside(loc) && (glob || loc.fi != fi))
+                                .filter(|(loc, _)| inside(loc))
                                 .map(|&(_, rel)| rel)
                                 .collect();
                             keyed
@@ -964,14 +963,14 @@ fn gather_imports_for(
                                         .is_none_or(|rest| !rest.starts_with(PATH_SEP))
                             })
                         };
-                        let hits = dedupe(&path, hits);
+                        let hits = dedupe(hits);
                         if mapped.is_none()
                             && !hits.is_empty()
                             && !hits.iter().any(inside)
                             && hits.iter().all(sibling)
                         {
                             let local = format!("{prefix}{path}");
-                            let found = dedupe(&local, resolve_glob(&local, file_index, prefixes));
+                            let found = dedupe(resolve_glob(&local, file_index, prefixes));
                             if !found.is_empty() {
                                 return (local, found);
                             }
