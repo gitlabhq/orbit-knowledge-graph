@@ -90,9 +90,38 @@ pub struct ResolveConfig {
     /// Same-named class defs in one package are parts of one type, keyed by
     /// generic arity. True for C#, where a non-partial duplicate cannot compile.
     pub merge_same_named_types: bool,
+    /// The order in which names claim a file's scope; a later entry never
+    /// replaces an earlier one, and an entry outside the list replaces
+    /// nothing. Empty means `[own_def, nested_def]`: a def always wins over
+    /// an import, as a Java class member does over a static import. Rust
+    /// puts `named_import` before `nested_def`: a `use` at module level wins
+    /// over a same-named item inside an inline `mod`.
+    pub precedence: Vec<ExportVia>,
 }
 
+/// What claims a name in a file's scope.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportVia {
+    OwnDef,
+    NestedDef,
+    NamedImport,
+    Glob,
+}
+
+const DEFAULT_PRECEDENCE: &[ExportVia] = &[ExportVia::OwnDef, ExportVia::NestedDef];
+
 impl ResolveConfig {
+    /// Whether a name arriving `via` replaces the one `held` in a file's scope.
+    pub fn outranks(&self, via: ExportVia, held: ExportVia) -> bool {
+        let order = match self.precedence.is_empty() {
+            true => DEFAULT_PRECEDENCE,
+            false => self.precedence.as_slice(),
+        };
+        let rank = |v| order.iter().position(|&o| o == v);
+        matches!((rank(via), rank(held)), (Some(new), Some(old)) if new < old)
+    }
+
     pub fn merge(&mut self, other: &Self) {
         for name in &other.stdlib {
             if !self.stdlib.contains(name) {
@@ -115,6 +144,9 @@ impl ResolveConfig {
             }
         }
         self.merge_same_named_types |= other.merge_same_named_types;
+        if self.precedence.is_empty() {
+            self.precedence = other.precedence.clone();
+        }
     }
 }
 
@@ -149,6 +181,8 @@ struct ResolveSettingsSection {
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+    #[serde(default)]
+    precedence: Vec<ExportVia>,
 }
 
 #[derive(serde::Deserialize)]
@@ -294,6 +328,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             .map(parse_file)
             .collect::<Result<_, _>>()?,
         merge_same_named_types: r.merge_same_named_types,
+        precedence: r.precedence.clone(),
     };
     Ok(Config { link, resolve })
 }

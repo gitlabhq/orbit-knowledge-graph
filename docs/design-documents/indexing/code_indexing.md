@@ -335,8 +335,11 @@ those importers seed one reverse-dependency traversal with a shared visited
 set. Each affected file resolves once, including when dependency paths
 overlap or cycle.
 
-A def of a file comes before any import in that file's scope. Among imports,
-a nearer source root beats a farther one. Equal claims make the name ambiguous.
+A name enters a file's scope by precedence. A def of the file comes before an
+import, unless the language's `resolve.precedence` list says otherwise. Rust
+puts a module-level `use` before an item nested in an inline module. Among
+imports, a nearer source root beats a farther one. Equal claims make the name
+ambiguous.
 
 An empty `__declaration` marker introduces a binding after its initializer.
 A named marker selects a matching scope label. The linker registers these names

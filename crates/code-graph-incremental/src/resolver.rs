@@ -12,7 +12,7 @@ use crate::constants::{PATH_SEP, RED_ZONE, ROOT_PATH, STACK_SEGMENT, WILDCARD};
 use crate::env::Env;
 use crate::file_tree::{Distance, LookupConfig, Roots};
 use crate::intern::Lang;
-use crate::rules::ResolveConfig;
+use crate::rules::{ExportVia, ResolveConfig};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
@@ -1326,6 +1326,7 @@ fn propagate_reexports(
     let mut names: usize = visible.iter().map(FxHashMap::len).sum();
     let mut too_many_names = None;
     let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), scope.owners);
+    let config = |fi: usize| &scope.env.rules_for(&trees[fi].label).config.resolve;
 
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
@@ -1341,6 +1342,7 @@ fn propagate_reexports(
     }
     let (via, packages) = package_imports(trees, reqs, wildcard_sym);
     let import_of = |req: &ImportReq| trees[req.fi as usize].cursor(req.node);
+    let file_level = |import: Cursor| import.enclosing(|p| p.is(C::Def)).is_none();
     'propagate: loop {
         if run.check().is_err() {
             break;
@@ -1352,9 +1354,26 @@ fn propagate_reexports(
             rustc_hash::FxBuildHasher,
         > = Default::default();
         let added = std::cell::Cell::new(0);
-        let mut export = |fi: usize, name, loc: Loc| {
-            if visible[fi].contains_key(&name) {
-                return;
+        let mut export = |fi: usize, name, loc: Loc, via: Option<ExportVia>| {
+            if let Some(&held) = visible[fi].get(&name) {
+                let held_via = match held.fi as usize == fi {
+                    true if trees[fi]
+                        .cursor(held.node)
+                        .enclosing(|p| p.is(C::Def))
+                        .is_some() =>
+                    {
+                        Some(ExportVia::NestedDef)
+                    }
+                    true => Some(ExportVia::OwnDef),
+                    false => None,
+                };
+                let replaces = held != loc
+                    && via
+                        .zip(held_via)
+                        .is_some_and(|(via, held)| config(fi).outranks(via, held));
+                if !replaces {
+                    return;
+                }
             }
             let claim = Claim {
                 distance: scope.roots.distance(fi as u32, loc.fi),
@@ -1392,6 +1411,7 @@ fn propagate_reexports(
                 break 'propagate;
             }
             let import = import_of(req);
+            let claim = |kind| file_level(import).then_some(kind);
             match via[i] {
                 Via::Own => {}
                 Via::Package(package) => {
@@ -1399,7 +1419,7 @@ fn propagate_reexports(
                         .get_or_insert_with(|| package_exports(&packages[package], visible));
                     for (&name, locs) in union.iter() {
                         for &loc in locs {
-                            export(req.fi as usize, name, loc);
+                            export(req.fi as usize, name, loc, claim(ExportVia::Glob));
                         }
                     }
                     continue;
@@ -1417,14 +1437,20 @@ fn propagate_reexports(
                             req.fi as usize,
                             alias,
                             Loc::new(req.target_fi as usize, req.anchor),
+                            None,
                         );
                         continue;
                     }
                     for (&ds, &loc) in exports.iter() {
-                        export(req.fi as usize, ds, loc);
+                        export(req.fi as usize, ds, loc, claim(ExportVia::Glob));
                     }
                 } else if let Some(&loc) = exports.get(&ns) {
-                    export(req.fi as usize, c.child_sym(C::Alias).unwrap_or(ns), loc);
+                    export(
+                        req.fi as usize,
+                        c.child_sym(C::Alias).unwrap_or(ns),
+                        loc,
+                        claim(ExportVia::NamedImport),
+                    );
                 }
             }
         }
@@ -1438,7 +1464,7 @@ fn propagate_reexports(
             {
                 let source_fi = loc.fi as usize;
                 for (&ds, &dloc) in &visible[source_fi] {
-                    export(fi, ds, dloc);
+                    export(fi, ds, dloc, None);
                 }
             }
         }
@@ -1447,7 +1473,7 @@ fn propagate_reexports(
             for &n in &declared[req.target_fi as usize] {
                 let own = visible[req.fi as usize].get(&n).filter(|l| l.fi == req.fi);
                 if let Some(&loc) = own {
-                    export(req.target_fi as usize, n, loc);
+                    export(req.target_fi as usize, n, loc, None);
                 }
             }
         }

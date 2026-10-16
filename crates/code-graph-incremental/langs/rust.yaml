@@ -32,6 +32,7 @@ config:
     lookup_from:
       - __source_root
       - __crate_root
+    precedence: [own_def, named_import, nested_def]
 
 stages:
   - name: normalize
