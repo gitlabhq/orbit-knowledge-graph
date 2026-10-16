@@ -318,19 +318,19 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true", definition_span: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "true", hoisted: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
         tag: { callable: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { scoped: "true", hoisted: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { scoped: "true", hoisted: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { scoped: "true", hoisted: "true" }
 
   - name: tag-file-dir
     rules:

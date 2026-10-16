@@ -1700,11 +1700,7 @@ fn chain<'a>(
     root: &dyn Fn(Cursor<'a>) -> Option<Cursor<'a>>,
 ) -> Option<Cursor<'a>> {
     let c = c.reference();
-    let Some(m) = c
-        .has(C::Object)
-        .then_some(c)
-        .or_else(|| c.value_child(C::Member))
-    else {
+    let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.chain_member()) else {
         return value_type(ctx, root(c)?);
     };
     if c.labelled()

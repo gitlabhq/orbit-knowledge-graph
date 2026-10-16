@@ -588,10 +588,18 @@ impl<'t> Fold<'t> {
         self.def_stack.push(c.index());
         for decorator in c.children().filter(|node| node.is(C::Decorator)) {
             self.handle_inline_imports(decorator);
-            if decorator.sym_opt().is_some() || decorator.value_child(C::Member).is_some() {
+            let head = decorator.chain_member();
+            if decorator.sym_opt().is_some() || head.is_some() {
                 let before = self.edges.len();
-                let targets = self.lookup_chain(decorator);
-                self.emit_targets(&targets, c.index());
+                for target in self.lookup_chain(decorator) {
+                    match target {
+                        Value::LocalDef(node) => {
+                            self.edges
+                                .push(Edge::local(c.index(), node, EdgeKind::Calls))
+                        }
+                        other => self.emit(&other, c.index()),
+                    }
+                }
                 for edge in &mut self.edges[before..] {
                     if edge.kind == EdgeKind::Imports && edge.site.is_none() {
                         edge.site = Some(decorator.index());
@@ -602,7 +610,7 @@ impl<'t> Fold<'t> {
             stack.extend(
                 decorator
                     .children_rev()
-                    .filter(|node| !node.is(C::Member))
+                    .filter(|node| Some(node.index()) != head.map(|h| h.index()))
                     .map(|node| WorkItem::Visit(node.index())),
             );
             self.run(stack);
@@ -1578,11 +1586,7 @@ impl<'t> Fold<'t> {
             return vec![Value::Call(call.index())];
         }
         let c = c.reference();
-        let Some(m) = c
-            .has(C::Object)
-            .then_some(c)
-            .or_else(|| c.value_child(C::Member))
-        else {
+        let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.chain_member()) else {
             if c.has(C::Qualifier) {
                 return self.lookup_static(c.sym()).into_iter().collect();
             }

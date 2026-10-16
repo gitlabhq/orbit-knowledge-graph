@@ -42,6 +42,16 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.children()
             .find(|node| node.is_value() && self.stands_for(*node))
     }
+    /// A named node is its own chain root, so a member lifted into it is an
+    /// argument, not its member.
+    pub fn chain_member(self) -> Option<Self> {
+        match self.sym_opt() {
+            Some(_) => self
+                .children()
+                .find(|node| node.is(C::Member) && !node.lifted()),
+            None => self.value_child(C::Member),
+        }
+    }
     pub fn field(self) -> u16 {
         self.node().field
     }
@@ -103,7 +113,7 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.sym_opt().is_some() && !self.has(C::Member) && !self.has(C::Ivar)
     }
     pub fn decorator_head(self) -> Option<Self> {
-        if self.sym_opt().is_some() || self.has(C::Member) {
+        if self.sym_opt().is_some() || self.chain_member().is_some() {
             return Some(self);
         }
         self.value_child(C::Call)?

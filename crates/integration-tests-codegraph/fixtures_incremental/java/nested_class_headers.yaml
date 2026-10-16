@@ -1,0 +1,44 @@
+name: "Java: an annotation on a nested class sees the class body it sits in"
+
+fixtures:
+  - path: com/example/Outer.java
+    content: |
+      package com.example;
+
+      public class Outer {
+          @Component(Own.BEAN_NAME)
+          static class Own {
+              static final String BEAN_NAME = "own";
+          }
+
+          @Later
+          static class Early {
+          }
+
+          @interface Later {
+          }
+
+          @interface Component {
+              String value();
+          }
+      }
+
+tests:
+  - name: an annotation argument names a constant of the annotated nested class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'Own'
+      RETURN t.name AS target
+      ORDER BY target
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: target, values: ["BEAN_NAME", "Component"] } }
+
+  - name: an annotation on a nested class names a sibling annotation type declared later
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'Early'
+      RETURN t.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Later } }
