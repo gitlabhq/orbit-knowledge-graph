@@ -12,7 +12,10 @@ fixtures:
 
       class Box
       {
-          public function __construct(protected Other $x) {}
+          public function __construct(protected Other $x)
+          {
+              $this->x();
+          }
 
           public function x(): Box
           {
@@ -37,6 +40,15 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'go' AND t.name = 'x'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box\\x", kind: "Method" } }
+
+  - name: a call on this of the shared name inside the constructor targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = '__construct' AND t.name = 'x'
       RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { row_count: 1 }
