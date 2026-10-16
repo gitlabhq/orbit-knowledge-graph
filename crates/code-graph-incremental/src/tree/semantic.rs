@@ -207,6 +207,13 @@ fn same_name_member<'a, S: Storage<Node = Node>>(
 ) -> Option<Cursor<'a, S>> {
     let name = target.child_sym(C::DefName)?;
     let class = target.ancestors().find(|node| node.is_class())?;
+    let nearest = target
+        .ancestors()
+        .find(|node| node.is(C::Def))
+        .map(|node| node.index());
+    if !target.is_field() && nearest != Some(class.index()) {
+        return None;
+    }
     class.descend(|node| {
         if node.is(C::Def)
             && node.index() != class.index()
@@ -226,13 +233,6 @@ pub fn callable_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cu
     match target.is_field() {
         true => same_name_member(target, false).unwrap_or(target),
         false => target,
-    }
-}
-
-pub fn field_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cursor<'a, S> {
-    match target.is_field() {
-        true => target,
-        false => same_name_member(target, true).unwrap_or(target),
     }
 }
 

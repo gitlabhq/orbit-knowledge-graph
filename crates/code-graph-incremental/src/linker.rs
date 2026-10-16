@@ -74,6 +74,8 @@ enum Wildcards {
     Callable,
 }
 
+type MemberIndex = FxHashMap<u32, (u32, Option<u32>, Option<u32>)>;
+
 struct Fold<'t> {
     tree: &'t Tree,
     max_edges: usize,
@@ -83,7 +85,7 @@ struct Fold<'t> {
     defs: Vec<u32>,
     defs_by_name: FxHashMap<u32, Vec<u32>>,
     /// Per class: member name to first def, and ivar name to its typed binding.
-    members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
+    members: RefCell<FxHashMap<u32, MemberIndex>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
     wildcards: WildcardImports,
@@ -1221,7 +1223,7 @@ impl<'t> Fold<'t> {
         let mut targets = self.lookup(sym);
         for target in &mut targets {
             if let Value::LocalDef(d) = target {
-                *d = crate::tree::callable_target(self.tree.cursor(*d)).index();
+                *d = self.sibling_member(*d, false);
             }
         }
         if targets.is_empty() {
@@ -1313,6 +1315,15 @@ impl<'t> Fold<'t> {
 
     /// `find_method_in` for one container, indexed on first use.
     fn member_of(&self, container: u32, name: u32) -> Option<u32> {
+        self.member_slots(container, name).map(|slots| slots.0)
+    }
+
+    fn member_slot(&self, container: u32, name: u32, field: bool) -> Option<u32> {
+        self.member_slots(container, name)
+            .and_then(|slots| if field { slots.1 } else { slots.2 })
+    }
+
+    fn member_slots(&self, container: u32, name: u32) -> Option<(u32, Option<u32>, Option<u32>)> {
         let mut members = self.members.borrow_mut();
         let index = members.entry(container).or_insert_with(|| {
             let class = self.tree.cursor(container);
@@ -1320,12 +1331,37 @@ impl<'t> Fold<'t> {
             let nested = |n: Cursor| n.index() != container && n.is_class() && !n.has(C::ImplBlock);
             for n in class.descendants_pruned(nested).filter(|n| n.is(C::Def)) {
                 if let Some(dn) = n.child_sym(C::DefName) {
-                    m.entry(dn).or_insert(n.index());
+                    let slots = m.entry(dn).or_insert((n.index(), None, None));
+                    let slot = if n.is_field() {
+                        &mut slots.1
+                    } else {
+                        &mut slots.2
+                    };
+                    slot.get_or_insert(n.index());
                 }
             }
             m
         });
         index.get(&name).copied()
+    }
+
+    fn sibling_member(&self, def: u32, field: bool) -> u32 {
+        let target = self.tree.cursor(def);
+        if target.is_field() == field {
+            return def;
+        }
+        let class = target.ancestors().find(|node| node.is_class());
+        let nearest = target
+            .ancestors()
+            .find(|node| node.is(C::Def))
+            .map(|node| node.index());
+        if !target.is_field() && nearest != class.map(|node| node.index()) {
+            return def;
+        }
+        class
+            .zip(target.child_sym(C::DefName))
+            .and_then(|(class, name)| self.member_slot(class.index(), name, field))
+            .unwrap_or(def)
     }
 
     fn chain_is_class(&mut self, c: Cursor) -> bool {
@@ -1372,11 +1408,7 @@ impl<'t> Fold<'t> {
                 .into_iter()
                 .map(|r| match r {
                     Value::LocalDef(d) => {
-                        let d = match c.is(C::Callee) {
-                            true => crate::tree::callable_target(self.tree.cursor(d)),
-                            false => crate::tree::field_target(self.tree.cursor(d)),
-                        }
-                        .index();
+                        let d = self.sibling_member(d, !c.is(C::Callee));
                         self.field_value(d).unwrap_or(Value::LocalDef(d))
                     }
                     _ => r,
