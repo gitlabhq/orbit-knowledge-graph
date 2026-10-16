@@ -270,11 +270,16 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
             predicates.extend(membership);
+            let identity = predicates
+                .iter()
+                .filter(|predicate| filters_sort_key(predicate, sort_key))
+                .cloned()
+                .collect();
             return Ok(PhysicalSource::Latest {
                 sort_key: sort_key.to_vec(),
                 alias: alias.clone(),
                 aggregate_condition: predicates,
-                input: Box::new(scan(false)),
+                input: Box::new(scan(false).filter(identity)),
             });
         }
         let edge = if multi_hop {
@@ -323,4 +328,13 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         }
         Ok(edge.filter(predicates))
     }
+}
+
+fn filters_sort_key(predicate: &Predicate, sort_key: &[String]) -> bool {
+    let column = match predicate {
+        Predicate::RelationshipKinds { .. } => RELATIONSHIP_KIND_COLUMN,
+        Predicate::EntityKind { column, .. } => column.name.as_str(),
+        _ => return false,
+    };
+    sort_key.iter().any(|key| key == column)
 }

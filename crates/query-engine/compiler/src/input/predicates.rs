@@ -307,6 +307,50 @@ impl Input {
         Ok(())
     }
 
+    pub(crate) fn promote_id_filters(&mut self) -> crate::error::Result<()> {
+        for node in &mut self.nodes {
+            let Some(filters) = node.filters.get_mut("id") else {
+                continue;
+            };
+            if node.node_ids.is_empty()
+                && let Some((index, ids)) = filters
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, filter)| Some((index, pinned_ids(filter)?)))
+            {
+                node.node_ids = ids?;
+                filters.remove(index);
+            }
+            if node.id_range.is_none()
+                && let [left, right] = filters.as_slice()
+            {
+                let lower = [left, right]
+                    .into_iter()
+                    .find(|f| matches!(f.op, Some(FilterOp::Gte | FilterOp::Gt)));
+                let upper = [left, right]
+                    .into_iter()
+                    .find(|f| matches!(f.op, Some(FilterOp::Lte | FilterOp::Lt)));
+                if let (Some(lower), Some(upper)) = (lower, upper)
+                    && let (Some(start), Some(end)) = (
+                        lower.value.as_ref().and_then(serde_json::Value::as_i64),
+                        upper.value.as_ref().and_then(serde_json::Value::as_i64),
+                    )
+                {
+                    let start = start.checked_add(i64::from(lower.op == Some(FilterOp::Gt)));
+                    let end = end.checked_sub(i64::from(upper.op == Some(FilterOp::Lt)));
+                    if let (Some(start), Some(end)) = (start, end) {
+                        node.id_range = Some(InputIdRange { start, end });
+                        filters.clear();
+                    }
+                }
+            }
+            if filters.is_empty() {
+                node.filters.remove("id");
+            }
+        }
+        Ok(())
+    }
+
     pub fn remove_relationship(&mut self, index: usize) -> InputRelationship {
         for root in &mut self.predicates {
             root.visit_mut(&mut |condition| {
@@ -319,4 +363,29 @@ impl Input {
         }
         self.relationships.remove(index)
     }
+}
+
+fn pinned_ids(filter: &InputFilter) -> Option<crate::error::Result<Vec<i64>>> {
+    match (&filter.op, filter.value.as_ref()?) {
+        (Some(FilterOp::In), serde_json::Value::Array(values)) if !values.is_empty() => Some(
+            values
+                .iter()
+                .map(|value| {
+                    node_id(value).ok_or_else(|| {
+                        crate::error::QueryError::Validation(
+                            "node IDs must be signed 64-bit integers".into(),
+                        )
+                    })
+                })
+                .collect(),
+        ),
+        (None | Some(FilterOp::Eq), value) => node_id(value).map(|id| Ok(vec![id])),
+        _ => None,
+    }
+}
+
+fn node_id(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
 }
