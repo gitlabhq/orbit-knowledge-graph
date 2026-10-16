@@ -4,6 +4,10 @@ use futures::stream;
 
 use std::sync::Arc;
 
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
 use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
 use super::metrics::SdlcMetrics;
 use super::plan::Transformation;
@@ -14,6 +18,44 @@ use crate::handler::HandlerError;
 
 pub(crate) fn test_metrics() -> SdlcMetrics {
     SdlcMetrics::with_meter(&crate::testkit::test_meter())
+}
+
+pub(crate) struct RecordedMetrics {
+    provider: SdkMeterProvider,
+    exporter: InMemoryMetricExporter,
+}
+
+impl RecordedMetrics {
+    pub(crate) fn new() -> Self {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .build();
+        Self { provider, exporter }
+    }
+
+    pub(crate) fn sdlc_metrics(&self) -> SdlcMetrics {
+        SdlcMetrics::with_meter(&self.provider.meter("test"))
+    }
+
+    pub(crate) fn histogram_count(&self, name: &str) -> u64 {
+        self.provider.force_flush().unwrap();
+        self.exporter
+            .get_finished_metrics()
+            .unwrap()
+            .iter()
+            .flat_map(|resource| resource.scope_metrics())
+            .flat_map(|scope| scope.metrics())
+            .filter(|metric| metric.name() == name)
+            .map(|metric| match metric.data() {
+                AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
+                    .data_points()
+                    .map(|point| point.count())
+                    .sum::<u64>(),
+                _ => panic!("{name} is not an f64 histogram"),
+            })
+            .sum()
+    }
 }
 
 struct PassthroughTransform {
@@ -97,12 +139,25 @@ impl DatalakeQuery for FailingDatalake {
     }
 }
 
-pub(crate) struct MockCheckpointStore;
+#[derive(Default)]
+pub(crate) struct MockCheckpointStore {
+    checkpoint: Option<Checkpoint>,
+}
+
+impl MockCheckpointStore {
+    pub(crate) fn completed_at(watermark: chrono::DateTime<chrono::Utc>) -> Self {
+        let mut checkpoint = Checkpoint::new(watermark);
+        checkpoint.complete(watermark);
+        Self {
+            checkpoint: Some(checkpoint),
+        }
+    }
+}
 
 #[async_trait]
 impl CheckpointStore for MockCheckpointStore {
     async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-        Ok(None)
+        Ok(self.checkpoint.clone())
     }
 
     async fn save(

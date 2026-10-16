@@ -125,6 +125,7 @@ toml = "1.0.0"
 toml_edit = "0.25"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
 tracing = "0.1.44"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
 uuid = { version = "1.19.0", features = ["v4", "serde"] }

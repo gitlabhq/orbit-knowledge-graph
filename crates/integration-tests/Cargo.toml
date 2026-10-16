@@ -65,6 +65,6 @@ health-check = { path = "../health-check" }
 labkit = { workspace = true, features = ["health", "tls"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio", "testing"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 sqlparser.workspace = true
 uuid = { workspace = true }
