@@ -68,6 +68,9 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_dispatch_contract(self) -> bool {
         self.has(C::Trait) || self.has(C::Interface)
     }
+    pub fn is_field(self) -> bool {
+        self.has(C::FieldDef) || self.has(C::Property)
+    }
     pub fn reference(self) -> Self {
         self.child(C::Call)
             .filter(|call| call.has(C::Property))
@@ -196,6 +199,26 @@ pub fn find_method_in<'a, S: Storage<Node = Node>>(
         }
         Step::Into
     })
+}
+
+pub fn callable_target<'a, S: Storage<Node = Node>>(target: Cursor<'a, S>) -> Cursor<'a, S> {
+    let Some(name) = target.child_sym(C::DefName).filter(|_| target.is_field()) else {
+        return target;
+    };
+    let Some(class) = target.ancestors().find(|node| node.is_class()) else {
+        return target;
+    };
+    class
+        .descend(|node| {
+            if node.is(C::Def) && node.child_sym(C::DefName) == Some(name) && !node.is_field() {
+                return Step::Out(node);
+            }
+            if node.is_class() && node.index() != class.index() && !node.has(C::ImplBlock) {
+                return Step::Over;
+            }
+            Step::Into
+        })
+        .unwrap_or(target)
 }
 
 pub fn members_by_level<N, I, T>(

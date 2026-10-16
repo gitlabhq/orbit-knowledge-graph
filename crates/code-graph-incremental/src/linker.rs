@@ -657,8 +657,21 @@ impl<'t> Fold<'t> {
                 self.resolve_name(sym, from, Wildcards::All);
             }
         }
-        for edge in &mut self.edges[first..] {
-            edge.site = Some(c.index());
+        let callee = (!c.has(C::Property)).then(|| callee_name(callee)).flatten();
+        self.finish_call(first, c.index(), callee);
+    }
+
+    fn finish_call(&mut self, first: usize, site: u32, callee: Option<u32>) {
+        for i in first..self.edges.len() {
+            let target = self.tree.cursor(self.edges[i].to_node);
+            let remap = callee.is_some()
+                && self.edges[i].kind == EdgeKind::Calls
+                && target.child_sym(C::DefName) == callee;
+            let edge = &mut self.edges[i];
+            edge.site = Some(site);
+            if remap {
+                edge.to_node = crate::tree::callable_target(target).index();
+            }
         }
     }
 
@@ -1516,9 +1529,8 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
             );
         }
         f.emit_targets(&targets, from);
-        for edge in &mut f.edges[first..] {
-            edge.site = Some(site);
-        }
+        let callee = tree.cursor(site).child(C::Callee).and_then(callee_name);
+        f.finish_call(first, site, callee);
     }
 
     f.cur = entry;
@@ -1567,6 +1579,14 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         }
     }
     Ok((f.edges, f.limited))
+}
+
+fn callee_name(callee: Cursor) -> Option<u32> {
+    callee
+        .child(C::Member)
+        .map(|member| member.sym())
+        .or_else(|| callee.child(C::Ivar).map(|ivar| ivar.sym()))
+        .or_else(|| callee.sym_opt())
 }
 
 fn is_name(value: &Value) -> bool {

@@ -1,0 +1,33 @@
+name: "JavaScript: a call on an arrow field reaches the field"
+
+fixtures:
+  - path: main.js
+    content: |
+      class Widget {
+        handler = () => {};
+
+        count = 0;
+
+        run() {
+          this.handler();
+        }
+
+        size() {
+          return this.count;
+        }
+      }
+
+      function use(widget) {
+        widget.handler();
+        widget.size();
+      }
+
+tests:
+  - name: a call on an arrow field keeps the field as its target
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'run'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Widget::handler", kind: "Property" } }

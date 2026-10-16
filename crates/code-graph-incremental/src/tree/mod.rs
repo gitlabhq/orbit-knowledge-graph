@@ -14,7 +14,9 @@ pub use cursor::{Cursor, Step, Walk};
 pub use node::{Node, Tag};
 #[cfg(feature = "pretty-print")]
 pub use print::pretty_print;
-pub use semantic::{find_method_in, infer_return_type, members_by_level, reachable};
+pub use semantic::{
+    callable_target, find_method_in, infer_return_type, members_by_level, reachable,
+};
 pub(crate) use storage::Entry as CompactNode;
 pub use storage::{Compact, Mutable, Storage};
 

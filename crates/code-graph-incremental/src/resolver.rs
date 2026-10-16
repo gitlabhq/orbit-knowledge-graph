@@ -16,8 +16,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    CallResolution, Compact, Edge, EdgeKind, find_method_in, infer_return_type, members_by_level,
-    reachable,
+    CallResolution, Compact, Edge, EdgeKind, callable_target, find_method_in, infer_return_type,
+    members_by_level, reachable,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -1411,6 +1411,13 @@ fn call_edges<'a>(
     targets.into_iter().map(move |t| call_edge(from, t, site))
 }
 
+fn callee_targets<'a>(call: Cursor<'a>, targets: Vec<Cursor<'a>>) -> Vec<Cursor<'a>> {
+    match call.has(C::Property) {
+        true => targets,
+        false => targets.into_iter().map(callable_target).collect(),
+    }
+}
+
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let uses = |site| Some((site, ctx.type_uses.get(&(ce.from_tree, site))?));
     let Some((site, uses)) = ce.site.and_then(uses) else {
@@ -1475,7 +1482,11 @@ fn dispatch(
                     |name| method_up(ctx, class, name, usage.from_fi()),
                 ),
             };
-            Some(Either::Right(call_edges(from, targets, usage.site)))
+            Some(Either::Right(call_edges(
+                from,
+                callee_targets(call, targets),
+                usage.site,
+            )))
         })
         .flatten()
         .collect()
@@ -1975,13 +1986,13 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 {
                     out.extend(call_edges(
                         from,
-                        member_targets(ctx, m, target),
+                        callee_targets(node, member_targets(ctx, m, target)),
                         Some(node.index()),
                     ));
                 }
                 Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
-                    let members = method_up(ctx, target, m.sym(), fi);
+                    let members = callee_targets(node, method_up(ctx, target, m.sym(), fi));
                     out.extend(call_edges(from, members, Some(node.index())));
                 }
                 None => {
@@ -2033,7 +2044,8 @@ fn inherited_calls<'a>(
         }
         for parent in parents {
             let site = Some(call.index());
-            out.extend(call_edges(from, method_up(ctx, *parent, name, fi), site));
+            let targets = callee_targets(call, method_up(ctx, *parent, name, fi));
+            out.extend(call_edges(from, targets, site));
         }
     }
     out
