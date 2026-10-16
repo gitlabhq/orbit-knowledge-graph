@@ -1,4 +1,4 @@
-use strum::{EnumProperty, IntoEnumIterator};
+use strum::EnumProperty;
 
 use crate::tree::Cursor;
 
@@ -280,10 +280,7 @@ pub fn is_scoped_def(cursor: Cursor) -> bool {
 
 impl Canonical {
     pub fn try_from_u16(kind: u16) -> Option<Self> {
-        if kind < CANONICAL_BASE {
-            return None;
-        }
-        Self::iter().find(|c| *c as u16 == kind)
+        Self::from_repr(kind)
     }
 }
 

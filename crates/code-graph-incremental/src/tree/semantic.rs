@@ -69,8 +69,7 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.has(C::Trait) || self.has(C::Interface)
     }
     pub fn def_kind(self) -> Option<C> {
-        self.children()
-            .find_map(|child| C::from_repr(child.kind()).filter(|kind| kind.is_def_type()))
+        crate::canonical::def_type_of(self)
     }
     pub fn has_role(self, role: Role) -> bool {
         self.def_kind().is_some_and(|kind| match role {
