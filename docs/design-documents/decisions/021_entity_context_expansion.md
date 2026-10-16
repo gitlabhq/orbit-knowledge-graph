@@ -1,5 +1,5 @@
 ---
-title: "GKG ADR 020: Entity context expansion for the Orbit context endpoint"
+title: "GKG ADR 021: Entity context expansion for the Orbit context endpoint"
 creation-date: "2026-09-30"
 authors: [ "@dgruzd", "@aalgutifan" ]
 toc_hide: true
