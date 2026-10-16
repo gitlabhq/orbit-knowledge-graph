@@ -230,8 +230,6 @@ pub struct Rewrite {
     pub guards: Vec<(u16, u16, bool)>,
     pub slots: HashMap<Box<str>, u16>,
     pub unique: Option<(Pat, u16, usize)>,
-    /// Per slot: the template places it as a node somewhere, so a text label
-    /// of the same slot must not move it again.
     pub placed: Vec<bool>,
 }
 

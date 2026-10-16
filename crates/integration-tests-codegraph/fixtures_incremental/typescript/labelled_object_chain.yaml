@@ -1,0 +1,59 @@
+name: "TypeScript: a labelled object resolves by its text first, then by its chain"
+
+fixtures:
+  - path: barrel.ts
+    content: |
+      export { default as Suggestions } from "./suggestions";
+
+  - path: suggestions.ts
+    content: |
+      export default class Suggestions {
+        static configure() {
+          return "configured";
+        }
+      }
+
+  - path: svc.ts
+    content: |
+      export class Svc {
+        run() {
+          return 1;
+        }
+      }
+
+      export function makeSvc(): Svc {
+        return new Svc();
+      }
+
+  - path: consumer.ts
+    content: |
+      import * as extensions from "./barrel";
+      import { makeSvc } from "./svc";
+
+      export function viaText() {
+        return extensions.Suggestions.configure();
+      }
+
+      export function viaChain() {
+        return makeSvc().run();
+      }
+
+tests:
+  - name: a dotted namespace chain resolves through the text of the labelled object
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'viaText'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Suggestions::configure" } }
+
+  - name: a chain whose root is a call resolves through the chain, not the text
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'viaChain'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["makeSvc", "run"] } }
