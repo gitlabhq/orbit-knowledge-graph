@@ -130,6 +130,14 @@ stages:
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
+      # The heritage wrapper's supertypes belong to the class itself
+      - match: '(class_heritage $$$S (implements_clause $$$I:__supertype))'
+        replace: '(class_heritage $$$S $$$I)'
+      - match: '(class_declaration name: $N (class_heritage $$$H) body: $B $$$REST)'
+        replace: '(class_declaration $N $$$H $B $$$REST)'
+      - match: '(abstract_class_declaration name: $N (class_heritage $$$H) body: $B $$$REST)'
+        replace: '(abstract_class_declaration $N $$$H $B $$$REST)'
+
       # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier (type) name: $N alias: $A)'
         replace: '(import_specifier @$N (__alias @$A))'
@@ -347,9 +355,9 @@ stages:
         replace: '(__def (__defname @$N) (__enum) $B)'
 
       # Classes (last — body contains already-canonical methods)
-      - match: '(class_declaration name: $N body: $B $$$ANN:__supertype)'
+      - match: '(class_declaration name: $N $$$ANN:__supertype body: $B)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
-      - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
+      - match: '(abstract_class_declaration name: $N $$$ANN:__supertype body: $B)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
         tag: { flavor: abstract }
 
