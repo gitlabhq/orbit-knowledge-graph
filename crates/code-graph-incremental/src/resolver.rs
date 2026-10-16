@@ -678,6 +678,7 @@ fn expand(
         ctx.run.check()?;
         for e in wave.iter().filter(|e| e.kind == EdgeKind::Calls) {
             if let Some(site) = e.site
+                && ctx.type_uses.contains_key(&(e.from_tree, site))
                 && !ctx.call_at_site.contains_key(&(e.from_tree, site))
             {
                 ctx.wave_callees

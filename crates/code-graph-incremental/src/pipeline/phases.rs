@@ -464,7 +464,6 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
                 _ if skipped.contains_key(path) => match skipped[path] {
                     "tree-sitter" => "skip_timeout_parse",
-                    "depth" => "skip_deeply_nested",
                     "stack" => "skip_stack_limit",
                     "rewrite" => "skip_timeout_walk",
                     "link" => "skip_timeout_ssa",
