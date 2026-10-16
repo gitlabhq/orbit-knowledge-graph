@@ -10,7 +10,7 @@ use orbit_server_config::CodeIndexingPipelineConfig;
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
@@ -387,8 +387,6 @@ impl CodeIndexer {
                     .into());
                 }
                 warn!(
-                    project_id = request.project_id,
-                    branch = %request.branch,
                     reason = %reason,
                     detail,
                     "checkpointing repository as indexed-empty"
@@ -513,7 +511,6 @@ impl CodeIndexer {
         let rows_written = self.record_indexing_results(
             &result,
             observer,
-            request,
             indexing_start,
             metered_bytes.load(Ordering::Relaxed),
         );
@@ -594,9 +591,11 @@ impl CodeIndexer {
             ));
             let max_rows = self.pipeline_config.write_slice_rows.max(1);
             let runtime = tokio::runtime::Handle::current();
+            let span = tracing::Span::current();
             move |table: &str,
                   batch: arrow::record_batch::RecordBatch|
                   -> Result<(), code_graph::v2::SinkError> {
+                let _entered = span.enter();
                 if batch.num_rows() == 0 {
                     return Ok(());
                 }
@@ -617,13 +616,13 @@ impl CodeIndexer {
                         .block_on(slots.clone().acquire_owned())
                         .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
                     let (writer, table) = (writer.clone(), table.to_string());
-                    inserts.lock().spawn_on(
-                        async move {
-                            let _slot = slot;
-                            writer.write_durable(&table, slice).await
-                        },
-                        &runtime,
-                    );
+                    let insert = async move {
+                        let _slot = slot;
+                        writer.write_durable(&table, slice).await
+                    };
+                    inserts
+                        .lock()
+                        .spawn_on(insert.instrument(span.clone()), &runtime);
                     offset += len;
                 }
                 Ok(())
@@ -693,7 +692,6 @@ impl CodeIndexer {
         &self,
         result: &IndexingReport,
         observer: &mut dyn IndexingObserver,
-        request: &IndexingRequest,
         indexing_start: Instant,
         written_bytes: u64,
     ) -> u64 {
@@ -761,8 +759,6 @@ impl CodeIndexer {
             );
             if skipped.path.is_empty() {
                 warn!(
-                    project_id = request.project_id,
-                    branch = %request.branch,
                     family = skipped.family.as_deref().unwrap_or_default(),
                     reason = skipped.kind.as_metric_label(),
                     detail = %skipped.detail,
@@ -770,8 +766,6 @@ impl CodeIndexer {
                 );
             } else {
                 debug!(
-                    project_id = request.project_id,
-                    branch = %request.branch,
                     path = %skipped.path,
                     reason = skipped.kind.as_metric_label(),
                     "file skipped during code indexing"
@@ -786,8 +780,6 @@ impl CodeIndexer {
                 limited.family.as_deref(),
             );
             warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
                 path = %limited.path,
                 reason = limited.kind.as_metric_label(),
                 detail = %limited.detail,
@@ -801,8 +793,6 @@ impl CodeIndexer {
         }
         if !result.faults.is_empty() {
             warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
                 count = result.faults.len(),
                 "files faulted during code indexing"
             );

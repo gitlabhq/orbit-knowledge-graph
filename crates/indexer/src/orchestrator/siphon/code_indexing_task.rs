@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, info_span, warn};
 
 use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -117,26 +117,28 @@ impl Route for CodeIndexingTaskRoute {
                 TaskError::new(error)
             })?;
 
-            match self
+            let span = info_span!(
+                "dispatch_code_indexing_task",
+                task_id = request.task_id,
+                gl_project_id = request.project_id,
+                gl_root_namespace_id = request.traversal_path.top_level_namespace_id(),
+                traversal_path = request.traversal_path.as_str(),
+            );
+            let published = self
                 .nats
                 .publish(&request.publish_subscription(), &envelope)
-                .await
-            {
+                .instrument(span.clone())
+                .await;
+            match published {
                 Ok(()) => {
                     outcome.dispatched += 1;
-                    debug!(
-                        task_id = request.task_id,
-                        project_id = request.project_id,
-                        "dispatched code indexing task request"
-                    );
+                    span.in_scope(|| debug!("dispatched code indexing task request"));
                 }
                 Err(crate::nats::NatsError::PublishDuplicate) => {
                     outcome.skipped += 1;
-                    debug!(
-                        task_id = request.task_id,
-                        project_id = request.project_id,
-                        "skipped code indexing task request, already in-flight"
-                    );
+                    span.in_scope(|| {
+                        debug!("skipped code indexing task request, already in-flight")
+                    });
                 }
                 Err(error) => {
                     self.metrics.record_error(METRIC_NAME, "publish");

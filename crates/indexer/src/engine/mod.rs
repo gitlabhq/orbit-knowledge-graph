@@ -218,9 +218,11 @@ impl Engine {
                         .is_some_and(|policy| policy.should_redeliver(message.envelope.attempt));
                     let span = tracing::info_span!(
                         "process_message",
-                        correlation_id = %message.envelope.id.0,
-                        topic = %topic_name,
+                        correlation_id = &*message.envelope.id.0,
+                        nats_subscription = topic_name.as_str(),
                         attempt = message.envelope.attempt,
+                        gl_root_namespace_id = tracing::field::Empty,
+                        traversal_path = tracing::field::Empty,
                     );
                     inflight.spawn(process_message(
                         message,
@@ -414,7 +416,7 @@ async fn run_handlers(
         let runtime = runtime.clone();
         let concurrency_group = concurrency_group.clone();
 
-        tasks.spawn(async move {
+        let task = async move {
             let _permit = if handler.requires_worker_pool() {
                 match runtime
                     .worker_pool
@@ -485,7 +487,8 @@ async fn run_handlers(
 
             error!(handler = handler.name(), %error, "handler failed");
             HandlerTaskOutcome::TransientError(error.to_string())
-        });
+        };
+        tasks.spawn(task.in_current_span());
     }
 
     let mut exhausted_error: Option<String> = None;
