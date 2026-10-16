@@ -84,6 +84,7 @@ pub(crate) async fn install(
         "Orbit setup ({})",
         summary::join_component_labels(&selection.components)
     ))?;
+    crate::skill::warn_inside_setup_frame();
 
     if interactive {
         let location_hints = summary::detected_location_hints(&detected_agents, machine);
@@ -292,6 +293,8 @@ pub(crate) enum SkillKind {
 pub(crate) struct SkillRequest {
     pub(crate) kind: Option<SkillKind>,
     pub(crate) full_tree: Option<BTreeMap<String, Vec<u8>>>,
+    /// Where to look for the other launcher's program; the process `PATH` when unset.
+    pub(crate) search_path: Option<std::ffi::OsString>,
 }
 
 /// Whether the final agent selection ends up with the full skill, so the instance's tree is
@@ -402,6 +405,7 @@ mod tests {
         let wrapper = SkillRequest {
             kind: Some(SkillKind::Wrapper),
             full_tree: None,
+            search_path: None,
         };
         assert!(!needs_instance_skill(&wrapper, &duo, &target));
     }
@@ -806,6 +810,7 @@ mod tests {
             skill: SkillRequest {
                 kind: Some(SkillKind::Full),
                 full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+                search_path: None,
             },
             ..options_for(&["codex"])
         };
@@ -857,13 +862,30 @@ mod tests {
         std::fs::write(skills.join("orbit/SKILL.md"), &tree["SKILL.md"]).unwrap();
     }
 
+    /// A search path holding an executable named `program`, or nothing at all.
+    fn search_path_with(program: Option<&str>) -> (tempfile::TempDir, std::ffi::OsString) {
+        let bin = tempfile::tempdir().unwrap();
+        if let Some(program) = program {
+            std::fs::write(bin.path().join(program), "").unwrap();
+        }
+        let path = bin.path().as_os_str().to_owned();
+        (bin, path)
+    }
+
+    fn install_with_search_path(names: &[&str], dir: &Path, search_path: std::ffi::OsString) {
+        let mut options = options_with_mcp(names);
+        options.skill.search_path = Some(search_path);
+        install(options, project(dir), &bare_machine()).unwrap();
+    }
+
     #[test]
-    fn a_glab_wrapper_without_a_record_is_adopted_not_backed_up() {
+    fn a_glab_wrapper_without_a_record_is_adopted_when_glab_runs() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
         write_glab_wrapper(&skills);
+        let (_bin, path) = search_path_with(Some("glab"));
 
-        install_with_mcp(&["codex"], dir.path());
+        install_with_search_path(&["codex"], dir.path(), path);
 
         let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
         assert!(
@@ -875,13 +897,30 @@ mod tests {
     }
 
     #[test]
+    fn a_glab_wrapper_is_replaced_when_glab_cannot_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join(".agents/skills");
+        write_glab_wrapper(&skills);
+        let (_bin, path) = search_path_with(None);
+
+        install_with_search_path(&["claude"], dir.path(), path);
+
+        let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
+        assert!(manifest.contains("!`orbit skills get orbit`"), "{manifest}");
+        assert!(!skills.join("orbit.orbit-backup").exists());
+        let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
+        assert!(!settings.contains("glab orbit"), "{settings}");
+    }
+
+    #[test]
     fn a_glab_wrapper_survives_setup_and_gets_its_permission_rule() {
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".agents/skills");
         write_glab_wrapper(&skills);
+        let (_bin, path) = search_path_with(Some("glab"));
 
-        install_with_mcp(&["claude"], dir.path());
-        install_with_mcp(&["claude"], dir.path());
+        install_with_search_path(&["claude"], dir.path(), path.clone());
+        install_with_search_path(&["claude"], dir.path(), path);
 
         let manifest = std::fs::read_to_string(skills.join("orbit/SKILL.md")).unwrap();
         assert!(
@@ -907,6 +946,7 @@ mod tests {
         options.skill = SkillRequest {
             kind: Some(SkillKind::Full),
             full_tree: Some(crate::skill::embedded_full_tree().unwrap()),
+            search_path: None,
         };
         install(options, project(dir.path()), &bare_machine()).unwrap();
 
@@ -971,6 +1011,7 @@ mod tests {
             skill: SkillRequest {
                 kind: Some(SkillKind::Wrapper),
                 full_tree: None,
+                search_path: None,
             },
             ..options_with_mcp(&["claude"])
         };

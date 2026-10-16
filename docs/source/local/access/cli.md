@@ -210,14 +210,16 @@ For every agent it configures, `orbit setup`:
   `SKILL.md.orbit-backup` so it stops loading. Setup also removes the
   `orbit-cli` skill and link that earlier releases installed, including the real
   copy they wrote where symlinks fail. A wrapper that
-  `glab skills install` or `glab skills update` wrote is kept as it is, so the
-  two tools do not swap it back and forth, and a lone wrapper without a
-  `.orbit-managed` file is adopted instead of moved aside.
+  `glab skills` wrote for the other launcher is kept as it is when that
+  launcher's program is on `PATH`, so the two tools do not swap it back and
+  forth. A lone wrapper without a `.orbit-managed` file is replaced or adopted
+  instead of moved aside.
 - For Claude Code, adds `Bash(orbit skills get orbit)` and
   `Bash(orbit skills get orbit *)` to `permissions.allow` in `settings.json`, so
-  the wrapper skill loads without a permission prompt. Under `glab orbit`, or when the kept
-  wrapper runs through it, the rules read `Bash(glab orbit skills get orbit)`
-  and `Bash(glab orbit skills get orbit *)`.
+  the wrapper skill loads without a permission prompt. Under `glab orbit` the
+  rules read `Bash(glab orbit skills get orbit)` and
+  `Bash(glab orbit skills get orbit *)`. When setup keeps a wrapper for the
+  other launcher, it adds that launcher's rules too.
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
 - Adds entries to that agent's JSON configuration, where the agent

@@ -912,6 +912,7 @@ async fn dispatch(
                 commands::setup::SkillRequest {
                     kind: skill,
                     full_tree: None,
+                    search_path: None,
                 },
             );
             let run = commands::setup::install(options, target, &machine).await?;

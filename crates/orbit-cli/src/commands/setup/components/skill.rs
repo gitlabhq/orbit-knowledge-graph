@@ -21,6 +21,7 @@ const MARKER_FILE: &str = ".orbit-managed";
 static NO_REQUEST: SkillRequest = SkillRequest {
     kind: None,
     full_tree: None,
+    search_path: None,
 };
 
 pub(super) static WITHOUT_FILES: Skill<'static> = Skill {
@@ -166,16 +167,18 @@ impl Installer for Skill<'_> {
                 ));
             }
             let tree = self.tree_for(kind)?;
+            let keep_other = self.other_launcher_runs();
             write_skill_files(
                 &skill.root,
                 &skill.label,
                 kind,
                 &skill.agents,
                 &tree,
+                keep_other,
                 report,
             )?;
             if let Some(link) = &skill.link {
-                link_skill_dir(link, &skill, kind, &tree, symlink_dir, report)?;
+                link_skill_dir(link, &skill, kind, &tree, keep_other, symlink_dir, report)?;
             }
             // An adopted wrapper may run through the other launcher.
             launchers.extend(read_tree(&skill.root).and_then(|tree| wrapper_launcher(&tree)));
@@ -257,6 +260,25 @@ impl Skill<'_> {
             return SkillKind::Full;
         }
         read_marker(&skill.root).map_or(SkillKind::Wrapper, |marker| marker.kind)
+    }
+
+    /// Whether a wrapper for the launcher setup does not use can run here, so keeping it
+    /// leaves the skill working.
+    fn other_launcher_runs(&self) -> bool {
+        let other = match spec::launcher() {
+            spec::GLAB_LAUNCHER => spec::DIRECT_LAUNCHER,
+            _ => spec::GLAB_LAUNCHER,
+        };
+        let program = other.split(' ').next().unwrap_or(other);
+        let search_path = self
+            .request
+            .search_path
+            .clone()
+            .or_else(|| std::env::var_os("PATH"));
+        search_path
+            .iter()
+            .flat_map(std::env::split_paths)
+            .any(|dir| dir.join(program).is_file() || dir.join(format!("{program}.exe")).is_file())
     }
 
     fn tree_for(&self, kind: SkillKind) -> Result<BTreeMap<String, Vec<u8>>> {
@@ -411,6 +433,7 @@ fn write_skill_files(
     kind: SkillKind,
     agents: &BTreeSet<String>,
     tree: &BTreeMap<String, Vec<u8>>,
+    keep_other_launcher: bool,
     report: &mut Report,
 ) -> Result<()> {
     let mut owners = read_marker(skill_root)
@@ -425,7 +448,10 @@ fn write_skill_files(
     // A tree identical to ours (for example one `glab skills install` wrote) is adopted as is,
     // and so is a wrapper for the other launcher, which `glab skills update` would swap back.
     if let Some(current) = read_tree(skill_root).filter(|current| {
-        current == tree || (kind == SkillKind::Wrapper && is_other_launcher_wrapper(current, tree))
+        current == tree
+            || (kind == SkillKind::Wrapper
+                && keep_other_launcher
+                && is_other_launcher_wrapper(current, tree))
     }) {
         write_marker(
             skill_root,
@@ -446,8 +472,8 @@ fn write_skill_files(
     Ok(())
 }
 
-/// Clears `path` for a new install. What `orbit setup` wrote, unchanged, is replaced; anything else is
-/// renamed to a sibling whose `SKILL.md` no longer loads, so the user's files survive.
+/// Clears `path` for a new install. What `orbit setup` wrote, unchanged, and a lone wrapper
+/// `SKILL.md` are replaced; anything else is renamed to a sibling whose `SKILL.md` no longer loads, so the user's files survive.
 fn make_room(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -519,6 +545,7 @@ fn link_skill_dir(
     skill: &SkillTarget,
     kind: SkillKind,
     tree: &BTreeMap<String, Vec<u8>>,
+    keep_other_launcher: bool,
     symlink: fn(&Path, &Path) -> std::io::Result<()>,
     report: &mut Report,
 ) -> Result<()> {
@@ -544,6 +571,7 @@ fn link_skill_dir(
             kind,
             &skill.link_agents,
             tree,
+            keep_other_launcher,
             report,
         ),
     }
@@ -782,6 +810,7 @@ mod tests {
             &skill,
             SkillKind::Wrapper,
             &tree,
+            false,
             no_symlinks,
             &mut report,
         )
