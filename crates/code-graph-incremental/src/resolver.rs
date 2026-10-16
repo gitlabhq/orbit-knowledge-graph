@@ -920,9 +920,7 @@ fn gather_imports_for(
                                         .is_none_or(|rest| !rest.starts_with(PATH_SEP))
                             })
                         };
-                        if direct.iter().any(inside) {
-                            direct.retain(inside);
-                        } else if direct.iter().all(sibling) {
+                        if !direct.iter().any(inside) && direct.iter().all(sibling) {
                             let local = format!("{prefix}{target_path}");
                             let mut found = resolve_glob(&local, file_index, prefixes);
                             found.retain(|loc| loc.fi != fi);
