@@ -163,11 +163,9 @@ tests:
       WHERE t.name = 'make'
       RETURN c.name AS caller
     assert:
-      - { column_values: { field: caller, values: ["caller", "cb", "lam_shadow", "q"] } }
+      - { column_values: { field: caller, values: ["caller", "cb", "lam_arg", "lam_shadow", "q"] } }
 
   - name: a lambda passed as an argument does not shadow make for the rest of the enclosing function
-    # Known gap: an inline lambda opens no scope, so its default binding hides make for the rest of lam_arg.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'lam_arg'
