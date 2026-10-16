@@ -24,12 +24,6 @@ pub struct ClickHouseConfiguration {
     /// part creation when many small or concurrent writes hit the same tables.
     #[serde(default)]
     pub insert_settings: HashMap<String, String>,
-    /// Server-side `max_execution_time` for each executed statement (DDL,
-    /// `INSERT ... SELECT`, `INSERT VALUES`), with the client waiting that
-    /// long plus up to 30 s more as a backstop for a stuck socket. 0 turns
-    /// both off. The default is not measured: two hours leaves room for the
-    /// `INSERT ... SELECT` copies a migration runs on a large tenant, which
-    /// nothing else in the code bounds.
     #[serde(default = "default_query_timeout_secs")]
     pub query_timeout_secs: u64,
     pub profiling: ProfilingConfig,

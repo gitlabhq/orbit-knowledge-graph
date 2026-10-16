@@ -291,7 +291,6 @@
           "default": {}
         },
         "query_timeout_secs": {
-          "description": "Server-side `max_execution_time` for each executed statement (DDL,\n`INSERT ... SELECT`, `INSERT VALUES`), with the client waiting that\nlong plus up to 30 s more as a backstop for a stuck socket. 0 turns\nboth off. The default is not measured: two hours leaves room for the\n`INSERT ... SELECT` copies a migration runs on a large tenant, which\nnothing else in the code bounds.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0,
