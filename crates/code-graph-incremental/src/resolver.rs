@@ -218,14 +218,8 @@ impl Resolver {
             let discovery_files = (0..trees.len() as u32)
                 .filter(|fi| !dirty_fis.contains(fi))
                 .collect();
-            let (discovered, _) = gather_imports_for(
-                trees,
-                &env.lang,
-                &self.file_index,
-                lookup,
-                &env.resolve.config,
-                &discovery_files,
-            );
+            let (discovered, _) =
+                gather_imports_for(trees, env, &self.file_index, lookup, &discovery_files);
             invalidated.extend(
                 discovered
                     .iter()
@@ -343,7 +337,7 @@ impl Resolver {
         }
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
         let (new_reqs, mut cross_edges) =
-            gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
+            gather_imports_for(trees, env, &self.file_index, lookup, dirty_fis);
         self.reqs.extend(new_reqs);
         let packages: Vec<_> = match config.merge_same_named_types {
             true => trees.iter().map(package_owners).collect(),
@@ -845,12 +839,12 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
 
 fn gather_imports_for(
     trees: &[Tree],
-    lang: &Lang,
+    env: &Env,
     file_index: &FileIndex,
     lookup: &LookupConfig,
-    config: &ResolveConfig,
     dirty_fis: &FxHashSet<u32>,
 ) -> (Vec<ImportReq>, Vec<Edge>) {
+    let (lang, config) = (&env.lang, &env.resolve.config);
     let tags = ReservedTags::new(lang);
     let resolved_tag_key = tags.resolved_source;
     let root_relative = lang.syms.lookup("source_root_rel");
@@ -867,6 +861,11 @@ fn gather_imports_for(
         .par_iter()
         .map(|&fi| {
             let tree = &trees[fi as usize];
+            let same_path_same_type = env
+                .rules_for(&tree.label)
+                .config
+                .resolve
+                .same_path_same_type;
             let own_root = root_of(tree);
             let own_prefix = own_root
                 .filter(|root| !root.is_empty())
@@ -925,7 +924,7 @@ fn gather_imports_for(
                                 .trim_start_matches(PATH_SEP)
                         };
                         let dedupe = |path: &str, mut hits: Vec<Loc>| -> Vec<Loc> {
-                            if !config.same_path_same_type || hits.iter().all(inside) {
+                            if !same_path_same_type || hits.iter().all(inside) {
                                 hits.retain(|loc| loc.fi != fi);
                                 return hits;
                             }
