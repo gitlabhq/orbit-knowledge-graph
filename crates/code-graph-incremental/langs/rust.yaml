@@ -104,6 +104,10 @@ stages:
         replace: '(__call (__callee (__member @$OP|kind|map("-:neg","!:not","*:deref") (__object @$E))))'
       - match: '(index_expression $E $I)'
         replace: '(__call (__callee (__member "index" (__object @$E))) $I)'
+      - match: '(try_expression $E:__call)'
+        replace: '$E'
+      - match: '(await_expression $E:__call)'
+        replace: '$E'
       - match: '(try_expression $E)'
         replace: '(__call (__callee (__member "branch" (__object @$E))))'
       - match: '(await_expression $E)'
@@ -237,6 +241,8 @@ stages:
   - name: classify
     rules:
       - match: '(reference_expression value: $V:__call)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:__call)'
         replace: '$V'
       - match: '(let_declaration pattern: $P:unpack_pattern value: $V)'
         replace: '(unpack (__binding @$P|child_sym("__object") (__rhs @$V $V)) $P)'
