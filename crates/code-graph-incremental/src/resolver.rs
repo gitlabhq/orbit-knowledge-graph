@@ -907,21 +907,31 @@ fn gather_imports_for(
                     if direct.is_empty() && stdlib {
                         return;
                     }
-                    let candidates = match direct.is_empty() {
-                        false => Either::Left(
-                            direct
-                                .into_iter()
-                                .map(|loc| (loc, target_path.clone(), false)),
-                        ),
-                        true => Either::Right(cur.names().flat_map(|c| {
-                            let submod =
-                                format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
-                            resolve_glob(&submod, file_index, &lookup.prefixes)
-                                .into_iter()
-                                .map(move |loc| (loc, submod.clone(), true))
-                        })),
+                    let mut candidates: Vec<(Loc, String, bool)> = match direct.is_empty() {
+                        false => direct
+                            .into_iter()
+                            .map(|loc| (loc, target_path.clone(), false))
+                            .collect(),
+                        true => cur
+                            .names()
+                            .flat_map(|c| {
+                                let submod = format!(
+                                    "{target_path}{PATH_SEP}{}",
+                                    lang.syms.resolve(c.sym())
+                                );
+                                resolve_glob(&submod, file_index, &lookup.prefixes)
+                                    .into_iter()
+                                    .map(move |loc| (loc, submod.clone(), true))
+                            })
+                            .collect(),
                     };
-                    for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
+                    if candidates.is_empty() {
+                        candidates = defs_on_path(trees, lang, file_index, prefixes, &target_path)
+                            .into_iter()
+                            .map(|(loc, path)| (loc, path, false))
+                            .collect();
+                    }
+                    for (loc, path, is_sub) in candidates.into_iter().filter(|c| c.0.fi != fi) {
                         if is_sub {
                             edges.push(Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports));
                         }
@@ -943,6 +953,40 @@ fn gather_imports_for(
         all_edges.extend(edges);
     }
     (all_reqs, all_edges)
+}
+
+/// A path whose tail names defs inside a file, `use crate::errors::Error::Kind`
+/// with `enum Error { Kind }` in `errors.rs`: the longest prefix that is a file
+/// or an inline module, then one def per remaining segment.
+fn defs_on_path(
+    trees: &[Tree],
+    lang: &Lang,
+    file_index: &FileIndex,
+    prefixes: &[String],
+    target_path: &str,
+) -> Vec<(Loc, String)> {
+    let mut prefix = target_path;
+    let mut tail = Vec::new();
+    while let Some((head, last)) = prefix.rsplit_once(PATH_SEP) {
+        tail.push(lang.syms.lookup(last));
+        let found = resolve_glob(head, file_index, prefixes);
+        if !found.is_empty() {
+            return found
+                .into_iter()
+                .filter_map(|loc| {
+                    let mut node = trees[loc.fi as usize].cursor(loc.node);
+                    for &name in tail.iter().rev() {
+                        node = node
+                            .children()
+                            .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))?;
+                    }
+                    Some((Loc::new(loc.fi as usize, node.index()), head.to_owned()))
+                })
+                .collect();
+        }
+        prefix = head;
+    }
+    Vec::new()
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
