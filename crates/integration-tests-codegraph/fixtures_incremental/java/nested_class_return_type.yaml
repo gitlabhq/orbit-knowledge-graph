@@ -1,0 +1,105 @@
+name: "Java: a method that returns a nested class types the chained call"
+
+fixtures:
+  - path: Main.java
+    content: |
+      class Main {
+          static class Box {
+              void b() {}
+
+              Box self() {
+                  return this;
+              }
+
+              void viaSelf() {
+                  self().b();
+              }
+          }
+
+          static class Outer<T> {
+              static class Inner<U> {
+                  void b() {}
+              }
+          }
+
+          Main.Box dotted() {
+              return new Main.Box();
+          }
+
+          Box simple() {
+              return new Box();
+          }
+
+          Other.Box other() {
+              return new Other.Box();
+          }
+
+          Outer.Inner<String> generic() {
+              return new Outer.Inner<String>();
+          }
+
+          void goDotted() {
+              dotted().b();
+          }
+
+          void goSimple() {
+              simple().b();
+          }
+
+          void goOther() {
+              other().b();
+          }
+
+          void goGeneric() {
+              generic().b();
+          }
+      }
+
+  - path: Other.java
+    content: |
+      class Other {
+          static class Box {
+              void b() {}
+          }
+      }
+
+tests:
+  - name: a dotted nested class return type types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.goDotted' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Box.b"] } }
+
+  - name: a nested class return type written by its simple name types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.goSimple' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Box.b"] } }
+
+  - name: a nested class method that returns its own class types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.Box.viaSelf' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Box.b"] } }
+
+  - name: a nested class of another file types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.goOther' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Other.Box.b"] } }
+
+  - name: an inner generic class return type types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.goGeneric' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Outer.Inner.b"] } }

@@ -1,0 +1,89 @@
+name: "Kotlin: a function that returns a nested class types the chained call"
+
+fixtures:
+  - path: src/main/kotlin/demo/Main.kt
+    content: |
+      package demo
+
+      class Main {
+          class Box {
+              fun b() {}
+
+              fun self(): Box = this
+
+              fun viaSelf() = self().b()
+          }
+
+          class Outer<T> {
+              class Inner<U> {
+                  fun b() {}
+              }
+          }
+
+          fun dotted(): Main.Box = Box()
+
+          fun simple(): Box = Box()
+
+          fun other(): Other.Box = Other.Box()
+
+          fun generic(): Outer.Inner<String> = Outer.Inner()
+
+          fun goDotted() = dotted().b()
+
+          fun goSimple() = simple().b()
+
+          fun goOther() = other().b()
+
+          fun goGeneric() = generic().b()
+      }
+
+  - path: src/main/kotlin/demo/Other.kt
+    content: |
+      package demo
+
+      class Other {
+          class Box {
+              fun b() {}
+          }
+      }
+
+tests:
+  - name: a dotted nested class return type types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'demo.Main.goDotted' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["demo.Main.Box.b"] } }
+
+  - name: a nested class return type written by its simple name types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'demo.Main.goSimple' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["demo.Main.Box.b"] } }
+
+  - name: a nested class function that returns its own class types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'demo.Main.Box.viaSelf' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["demo.Main.Box.b"] } }
+
+  - name: a nested class of another file types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'demo.Main.goOther' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["demo.Other.Box.b"] } }
+
+  - name: an inner generic class return type types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'demo.Main.goGeneric' AND t.name = 'b'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["demo.Main.Outer.Inner.b"] } }

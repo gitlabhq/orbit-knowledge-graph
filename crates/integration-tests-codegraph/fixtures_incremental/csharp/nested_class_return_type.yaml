@@ -1,0 +1,125 @@
+name: "C#: a method that returns a nested class types the chained call"
+
+fixtures:
+  - path: Main.cs
+    content: |
+      namespace Demo;
+
+      class Main
+      {
+          public class Box
+          {
+              public void B() {}
+
+              public Box Self()
+              {
+                  return this;
+              }
+
+              public void ViaSelf()
+              {
+                  Self().B();
+              }
+          }
+
+          public class Outer<T>
+          {
+              public class Inner<U>
+              {
+                  public void B() {}
+              }
+          }
+
+          Main.Box Dotted()
+          {
+              return new Main.Box();
+          }
+
+          Box Simple()
+          {
+              return new Box();
+          }
+
+          Other.Box OtherBox()
+          {
+              return new Other.Box();
+          }
+
+          Outer<int>.Inner<string> Generic()
+          {
+              return new Outer<int>.Inner<string>();
+          }
+
+          void GoDotted()
+          {
+              Dotted().B();
+          }
+
+          void GoSimple()
+          {
+              Simple().B();
+          }
+
+          void GoOther()
+          {
+              OtherBox().B();
+          }
+
+          void GoGeneric()
+          {
+              Generic().B();
+          }
+      }
+
+  - path: Other.cs
+    content: |
+      namespace Demo;
+
+      class Other
+      {
+          public class Box
+          {
+              public void B() {}
+          }
+      }
+
+tests:
+  - name: a dotted nested class return type types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Demo.Main.GoDotted' AND t.name = 'B'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Demo.Main.Box.B"] } }
+
+  - name: a nested class return type written by its simple name types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Demo.Main.GoSimple' AND t.name = 'B'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Demo.Main.Box.B"] } }
+
+  - name: a nested class method that returns its own class types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Demo.Main.Box.ViaSelf' AND t.name = 'B'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Demo.Main.Box.B"] } }
+
+  - name: a nested class of another file types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Demo.Main.GoOther' AND t.name = 'B'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Demo.Other.Box.B"] } }
+
+  - name: an inner generic class return type types the chained call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Demo.Main.GoGeneric' AND t.name = 'B'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Demo.Main.Outer.Inner.B"] } }
