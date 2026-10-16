@@ -80,6 +80,22 @@ fixtures:
           }
       }
 
+      class Base {
+          Base x() {
+              return new Base();
+          }
+
+          void b() {}
+      }
+
+      class Sub extends Base {
+          Other x = new Other();
+
+          void goCall() {
+              x().b();
+          }
+      }
+
       public class Main {
           static class Nested {
               Nested x() {
@@ -182,6 +198,18 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Late.goCall'
-      RETURN t.fqn AS callee
+      RETURN t.fqn AS callee, t.definition_type AS kind
     assert:
       - { column_values: { field: callee, values: ["Late.b", "Late.x"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a bare call of a field name whose method is inherited targets the inherited method
+    # Known gap: the bound field has no callable sibling in its class, so the call stops before the supertype fallback, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Sub.goCall'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["Base.b", "Base.x"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
