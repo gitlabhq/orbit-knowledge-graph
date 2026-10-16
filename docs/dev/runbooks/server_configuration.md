@@ -140,6 +140,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
 | `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
+| `graph.insert_timeout_secs` | `900` | Client bound on one INSERT request (send and response); `0` turns it off; keep it above `insert_quorum_timeout` |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Self-managed replicated clusters

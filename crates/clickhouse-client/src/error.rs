@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use circuit_breaker::CircuitBreakableError;
 use thiserror::Error;
 
@@ -8,6 +10,12 @@ pub enum ClickHouseError {
 
     #[error("insert error: {0}")]
     Insert(#[source] clickhouse::error::Error),
+
+    #[error("{operation} ran past the client bound of {after:?}")]
+    Timeout {
+        operation: &'static str,
+        after: Duration,
+    },
 
     #[error("arrow decode error: {0}")]
     ArrowDecode(#[source] arrow::error::ArrowError),

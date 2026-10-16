@@ -161,6 +161,18 @@ impl ArrowClickHouseClient {
             .with_timeouts(self.insert_timeout, self.insert_timeout)
     }
 
+    fn insert_bound_hit(&self, result: Result<(), ClickHouseError>) -> Result<(), ClickHouseError> {
+        match (result, self.insert_timeout) {
+            (Err(ClickHouseError::Insert(clickhouse::error::Error::TimedOut)), Some(after)) => {
+                Err(ClickHouseError::Timeout {
+                    operation: "insert",
+                    after,
+                })
+            }
+            (result, _) => result,
+        }
+    }
+
     pub fn database(&self) -> &str {
         &self.database
     }
@@ -273,11 +285,14 @@ impl ArrowClickHouseClient {
         self.circuit_breaker
             .call_transient(|| async {
                 let mut insert = self.bounded_insert(&sql);
-                insert
-                    .send(Bytes::from(buffer))
-                    .await
-                    .map_err(ClickHouseError::Insert)?;
-                insert.end().await.map_err(ClickHouseError::Insert)
+                let sent = async {
+                    insert
+                        .send(Bytes::from(buffer))
+                        .await
+                        .map_err(ClickHouseError::Insert)?;
+                    insert.end().await.map_err(ClickHouseError::Insert)
+                };
+                self.insert_bound_hit(sent.await)
             })
             .await
     }
@@ -304,10 +319,12 @@ impl ArrowClickHouseClient {
         self.circuit_breaker
             .call_transient(|| async move {
                 if !self.quorum_writes {
-                    return self.stream_insert(table, sql, batches).await;
+                    return self.insert_bound_hit(self.stream_insert(table, sql, batches).await);
                 }
-                retry_quorum_conflicts(true, || self.stream_insert(table, sql, batches.clone()))
-                    .await
+                retry_quorum_conflicts(true, || async {
+                    self.insert_bound_hit(self.stream_insert(table, sql, batches.clone()).await)
+                })
+                .await
             })
             .await
     }
@@ -762,10 +779,66 @@ mod tests {
         assert!(
             matches!(
                 error,
-                ClickHouseError::Insert(clickhouse::error::Error::TimedOut)
+                ClickHouseError::Timeout {
+                    operation: "insert",
+                    ..
+                }
             ),
             "{error}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_insert_is_not_retried_as_a_quorum_conflict() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let connections = Arc::new(AtomicUsize::new(0));
+        let accepted = connections.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                accepted.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut sink = [0u8; 4096];
+                    while socket.read(&mut sink).await.is_ok_and(|n| n > 0) {}
+                });
+            }
+        });
+        let client = ArrowClickHouseClient::new(
+            &url,
+            "db",
+            "default",
+            None,
+            &insert_quorum_setting(),
+            &HashMap::new(),
+            "test",
+        )
+        .with_insert_timeout(Duration::from_millis(200));
+        assert!(client.has_quorum_writes());
+        let schema = Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1]))]).unwrap();
+
+        let insert = client.insert_arrow_streaming("t", vec![batch]);
+        let error = tokio::time::timeout(Duration::from_secs(60), insert)
+            .await
+            .expect("the insert must end on its own bound, not on the test bound")
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                ClickHouseError::Timeout {
+                    operation: "insert",
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert_eq!(connections.load(Ordering::SeqCst), 1, "{error}");
     }
 
     fn client_with_insert_settings(
