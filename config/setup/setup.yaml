@@ -9,17 +9,17 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.{{remote_grep}}
+  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `is:def`/`file:x`.{{remote_grep}}
   - `{{orbit}} context path:120-180` can be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
   - MANDATORY: read all the code definitions you need in one call{{remote_context}}, plus independent searches: `{{orbit}} context a.rs:10-40{{remote_context_example}}; {{orbit}} grep 'x'`. Then follow new leads.
   - Reuse shown source instead of rereading unchanged files.
 
 remote:
-  remote_grep: " Also finds GitLab issues, MRs, branches, commits, comments, `group/project` code."
+  remote_grep: " GitLab too: `is:issue`, `is:mr`, `is:branch`, `is:commit`, `is:comment`, `repo:group/project`."
   remote_context: " and GitLab entities (`Branch:x`: its MR and CI)"
   remote_context_example: " MergeRequest[42]"
 
 nudge_search: |
-  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.
+  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `is:def`/`file:x`.
 template_vars:
   reminder: "[orbit] Grep means run {{orbit}} grep 'words'. rg output plus enclosing definitions."

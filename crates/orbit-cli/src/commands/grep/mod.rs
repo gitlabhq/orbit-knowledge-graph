@@ -1,6 +1,7 @@
 mod defs;
 mod kind;
 mod local;
+mod qualifier;
 mod rank;
 mod remote;
 mod render;
@@ -65,10 +66,11 @@ pub(crate) async fn run(
     query: Option<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
-    paths: Vec<String>,
+    mut paths: Vec<String>,
     mut filter: RecallFilter,
-    options: Options,
+    mut options: Options,
 ) -> Result<()> {
+    let query = qualifier::apply(query, &mut filter.kinds, &mut options, &mut paths);
     let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
     let exists = |path: &str| {
         Path::new(path).exists() || root.as_ref().is_some_and(|root| root.join(path).exists())
@@ -102,7 +104,7 @@ pub(crate) async fn run(
         filter.kinds.retain(|kind| scope_for(kind).is_none());
         if route.local.is_empty() && !filter.kinds.is_empty() {
             eprintln!(
-                "orbit: skipping hosted --kind {}; use `{} query`",
+                "orbit: skipping hosted is:{}; use `{} query`",
                 filter.kinds.join(", "),
                 crate::commands::setup::spec::launcher()
             );
@@ -276,7 +278,9 @@ fn local(
         header.push_str(&format!(" {path}"));
     }
     if !shown.is_empty() {
-        header.push_str(&format!(" --kind {}", shown.join(",")));
+        for kind in &shown {
+            header.push_str(&format!(" is:{kind}"));
+        }
     }
     for language in &languages {
         header.push_str(&format!(" -t {language}"));
@@ -444,11 +448,11 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
          paths or file filters. Otherwise use `{launcher} query`"
     );
     if !kinds.hosted.is_empty() {
-        eprintln!("orbit: skipping hosted --kind {hosted}; use `{launcher} query`");
+        eprintln!("orbit: skipping hosted is:{hosted}; use `{launcher} query`");
     }
     if !kinds.unknown.is_empty() {
         eprintln!(
-            "orbit: ignoring unknown --kind {}; kinds here: File, Directory, Definition, {}",
+            "orbit: ignoring unknown is:{}; kinds here: File, Directory, Definition, {}",
             kinds.unknown.join(", "),
             known.join(", ")
         );

@@ -44,7 +44,7 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ```shell
 orbit index .
-orbit grep "rate limit" src --kind Method,Function
+orbit grep "is:method rate limit" src
 orbit grep 'query_arrow|insert_batch|execute' crates/duckdb-client
 orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
@@ -63,20 +63,25 @@ before the matches. Pipe through `head` to bound output; `-m N` caps matches
 per file and `-M N` hides lines wider than N. Files that define
 a term come first, then code, tests, and config or docs. A definition the query names prints first with its source.
 The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
-`--kind` takes definition kinds such as `Class,Method`, or languages such as `py`
-and `go`, which filter files as rg `-t` does. `--kind File` and
-`--kind Directory` list where the matches are, with their definitions.
+Qualifiers work as in GitHub search. `is:` picks what to search: `is:def`,
+`is:class`, `is:method`, or `is:function` for definitions, `is:file` and `is:dir`
+to list where matches are. The other words are the search. `symbol:x` finds
+definitions named x; `file:x` keeps paths containing x, and alone lists them;
+`ext:rs` and `lang:py` filter files as rg `-g` and `-t` do. Unknown names such
+as `std::io` stay literal, and `-F` turns qualifiers off.
 
 A plain search, with no paths or file filters, also searches the GitLab project
 behind `origin` for work items, merge requests, commits, notes, and milestones.
 Those results print after the local ones as tokens such as `MergeRequest[42]`.
 Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
 project or group, including its code when there is no local checkout;
-`--kind MergeRequest,WorkItem` searches GitLab only, and `--kind Branch` finds
-branches with their merge requests and pipelines.
+`is:issue`, `is:mr`, `is:commit`, and `is:comment` search GitLab only,
+`is:branch` finds branches with their merge requests and pipelines, and
+`repo:group/project` names the project.
 
 ```shell
-orbit grep "rate limit" gitlab-org/gitlab --kind MergeRequest
+orbit grep "is:mr rate limit repo:gitlab-org/gitlab"
+orbit grep "is:branch approval rules"
 orbit context MergeRequest[42] gitlab-org/gitlab#7 src/lib.rs:120-180
 ```
 
@@ -84,7 +89,8 @@ Pass names as printed by `grep`, paths, ranges, directories, or GitLab tokens
 to `context`. GitLab tokens return entity context after the local output:
 description, comments, and for merge requests the changed files and failed CI
 jobs. `Branch:<name>` reads a branch's merge request, or its latest pipeline and
-failed job logs; bare `orbit context` reads the current branch. A `Definition:<id>` from another indexed checkout reads that checkout.
+failed job logs (`branch:x` works too); bare `orbit context` reads the current
+branch. A `Definition:<id>` from another indexed checkout reads that checkout.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
