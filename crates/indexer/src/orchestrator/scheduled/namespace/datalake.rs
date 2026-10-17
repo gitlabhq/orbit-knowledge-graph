@@ -38,8 +38,7 @@ const FRESHNESS_QUERY_SQL: &str = r#"WITH
 SELECT root_path, target, min(watermark) AS earliest, max(watermark) AS latest
 FROM changed
 WHERE root_path IN (SELECT traversal_path FROM enabled)
-GROUP BY root_path, target, toStartOfMinute(watermark)
-ORDER BY earliest"#;
+GROUP BY root_path, target, toStartOfMinute(watermark)"#;
 
 const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target, {{watermark_column}} AS watermark
     FROM {{table}}
@@ -249,14 +248,17 @@ impl NamespaceChangeQuery {
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    render_over_changes(CHANGE_QUERY_SQL, reindex_sources)
+    render_with_change_branches(CHANGE_QUERY_SQL, reindex_sources)
 }
 
 pub(super) fn render_freshness_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    render_over_changes(FRESHNESS_QUERY_SQL, reindex_sources)
+    render_with_change_branches(FRESHNESS_QUERY_SQL, reindex_sources)
 }
 
-fn render_over_changes(template: &str, reindex_sources: &BTreeSet<ReindexSource>) -> String {
+fn render_with_change_branches(
+    template: &str,
+    reindex_sources: &BTreeSet<ReindexSource>,
+) -> String {
     let branches = reindex_sources
         .iter()
         .map(render_change_branch)
