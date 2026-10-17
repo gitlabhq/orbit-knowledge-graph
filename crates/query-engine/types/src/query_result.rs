@@ -893,163 +893,66 @@ mod tests {
         }
 
         #[test]
+        fn fail_closed_null_id_denies_row() {
+            let batch = make_batch(vec![
+                (
+                    "_orbit_u_id",
+                    Arc::new(Int64Array::from(vec![Some(1), None, Some(3)])),
+                ),
+                (
+                    "_orbit_u_type",
+                    Arc::new(StringArray::from(vec!["User", "User", "User"])),
+                ),
+                (
+                    "_orbit_p_id",
+                    Arc::new(Int64Array::from(vec![100, 200, 300])),
+                ),
+                (
+                    "_orbit_p_type",
+                    Arc::new(StringArray::from(vec!["Project", "Project", "Project"])),
+                ),
+            ]);
+            let mut result = QueryResult::from_batches(&[batch], &test_ctx());
+
+            let redacted = result.apply_authorizations(&full_auth());
+
+            assert_eq!(redacted, 1);
+            assert_eq!(result.authorized_count(), 2);
+            assert!(result.rows()[0].is_authorized());
+            assert!(!result.rows()[1].is_authorized());
+            assert!(result.rows()[2].is_authorized());
+        }
+
+        #[test]
+        fn fail_closed_null_type_denies_row() {
+            let batch = make_batch(vec![
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1, 2]))),
+                (
+                    "_orbit_u_type",
+                    Arc::new(StringArray::from(vec![Some("User"), None])),
+                ),
+                ("_orbit_p_id", Arc::new(Int64Array::from(vec![100, 200]))),
+                (
+                    "_orbit_p_type",
+                    Arc::new(StringArray::from(vec!["Project", "Project"])),
+                ),
+            ]);
+            let mut result = QueryResult::from_batches(&[batch], &test_ctx());
+
+            let redacted = result.apply_authorizations(&full_auth());
+
+            assert_eq!(redacted, 1);
+            assert!(result.rows()[0].is_authorized());
+            assert!(!result.rows()[1].is_authorized());
+        }
+
+        #[test]
         fn already_unauthorized_rows_not_double_counted() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             result.rows[0].set_unauthorized();
             let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 2);
-        }
-
-        #[test]
-        fn fail_closed_dynamic_node_unresolvable_owner() {
-            let batch = make_batch(vec![
-                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1]))),
-                ("_orbit_u_type", Arc::new(StringArray::from(vec!["User"]))),
-            ]);
-
-            let mut ctx = ResultContext::new();
-            ctx.add_node("u", "User");
-            ctx.add_entity_auth(
-                "User",
-                EntityAuthConfig {
-                    resource_type: "user".to_string(),
-                    ability: "read_user".to_string(),
-                    auth_id_column: "id".to_string(),
-                    owner_entity: None,
-                    required_access_level: 20,
-                },
-            );
-            ctx.add_entity_auth(
-                "Definition",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
-                },
-            );
-
-            let mut result = QueryResult::from_batches(&[batch], &ctx);
-            result.rows[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
-
-            let authorizations = vec![
-                ResourceAuthorization {
-                    resource_type: "user".to_string(),
-                    authorized: [(1, true)].into_iter().collect(),
-                },
-                ResourceAuthorization {
-                    resource_type: "project".to_string(),
-                    authorized: [(1000, true)].into_iter().collect(),
-                },
-            ];
-
-            let redacted = result.apply_authorizations(&authorizations);
-
-            assert_eq!(
-                redacted, 1,
-                "row must be denied: Definition's owner (Project) is not in the row"
-            );
-            assert_eq!(result.authorized_count(), 0);
-        }
-
-        #[test]
-        fn dynamic_node_with_resolvable_owner_passes() {
-            let batch = make_batch(vec![
-                ("_orbit_p_id", Arc::new(Int64Array::from(vec![1000]))),
-                (
-                    "_orbit_p_type",
-                    Arc::new(StringArray::from(vec!["Project"])),
-                ),
-            ]);
-
-            let mut ctx = ResultContext::new();
-            ctx.add_node("p", "Project");
-            ctx.add_entity_auth(
-                "Project",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "id".to_string(),
-                    owner_entity: None,
-                    required_access_level: 20,
-                },
-            );
-            ctx.add_entity_auth(
-                "Definition",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
-                },
-            );
-
-            let mut result = QueryResult::from_batches(&[batch], &ctx);
-            result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
-
-            let authorizations = vec![ResourceAuthorization {
-                resource_type: "project".to_string(),
-                authorized: [(1000, true)].into_iter().collect(),
-            }];
-
-            let redacted = result.apply_authorizations(&authorizations);
-
-            assert_eq!(
-                redacted, 0,
-                "Definition should pass: owner Project 1000 is authorized"
-            );
-            assert_eq!(result.authorized_count(), 1);
-        }
-
-        #[test]
-        fn dynamic_node_resolves_owner_via_sibling_indirect_static_node() {
-            let batch = make_batch(vec![
-                ("_orbit_f_id", Arc::new(Int64Array::from(vec![1000]))),
-                ("_orbit_f_type", Arc::new(StringArray::from(vec!["File"]))),
-            ]);
-
-            let mut ctx = ResultContext::new();
-            ctx.add_node("f", "File");
-            ctx.add_entity_auth(
-                "File",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
-                },
-            );
-            ctx.add_entity_auth(
-                "Definition",
-                EntityAuthConfig {
-                    resource_type: "project".to_string(),
-                    ability: "read_code".to_string(),
-                    auth_id_column: "project_id".to_string(),
-                    owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
-                },
-            );
-
-            let mut result = QueryResult::from_batches(&[batch], &ctx);
-            result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
-
-            let authorizations = vec![ResourceAuthorization {
-                resource_type: "project".to_string(),
-                authorized: [(1000, true)].into_iter().collect(),
-            }];
-
-            let redacted = result.apply_authorizations(&authorizations);
-
-            assert_eq!(
-                redacted, 0,
-                "Definition should pass: File's _orbit_f_id (project_id=1000) \
-                 resolves as the shared Project owner"
-            );
-            assert_eq!(result.authorized_count(), 1);
         }
 
         #[test]

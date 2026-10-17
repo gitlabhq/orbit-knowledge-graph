@@ -2,9 +2,7 @@
 
 use ontology::Ontology;
 use orbit_server::redaction::QueryResult;
-use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
-};
+use query_engine::compiler::{AccessLevel, AuthorizedPath, SecurityContext};
 pub use query_engine::compiler::{compile, compile_model};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
@@ -23,18 +21,6 @@ pub fn admin_security_context() -> SecurityContext {
     )
     .expect("valid admin security context")
     .with_role(true, Some(AccessLevel::Owner as u32))
-}
-
-pub async fn compile_and_execute(
-    ctx: &TestContext,
-    json: &str,
-) -> (CompiledQueryContext, QueryResult) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&compiled.base).await;
-    let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
-    (compiled, result)
 }
 
 pub trait DummyClaims {

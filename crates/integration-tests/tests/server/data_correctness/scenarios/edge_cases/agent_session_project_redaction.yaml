@@ -1,0 +1,25 @@
+description: Agent sessions are authorized through their project
+
+config:
+  redaction: { allow: { project: [1000] }, deny: { project: [1001] } }
+  extra_seed:
+    gl_agent_session:
+      - { id: 1, flow_type: developer, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2, flow_type: chat, project_id: 1001, traversal_path: "1/101/1001/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "w", "entity": "AgentSession", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "limit": 10
+    }
+  gql: |
+    MATCH (w:AgentSession) WHERE w.id >= 1 AND w.id <= 10000 RETURN w LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    AgentSession: { ids: [1], absent: [2] }

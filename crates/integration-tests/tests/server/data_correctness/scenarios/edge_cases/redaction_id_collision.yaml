@@ -1,0 +1,35 @@
+description: A group whose id matches a user id is checked as a group
+
+config:
+  redaction: { allow: { user: [1], group: [100, 102] }, deny: { group: [1] } }
+  extra_seed:
+    gl_group:
+      - { id: 1, name: Collision Group, visibility_level: public, traversal_path: "1/1/" }
+    gl_edge:
+      - { traversal_path: "1/1/", source_id: 1, source_kind: User, relationship_kind: MEMBER_OF, target_id: 1, target_kind: Group }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "g", "entity": "Group"}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"}
+      ],
+      "limit": 20
+    }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN u, g LIMIT 30
+
+expect:
+  node_count: 3
+  nodes:
+    User: { ids: [1] }
+    Group: { ids: [100, 102], absent: [1] }
+  edges:
+    MEMBER_OF: [[1, 100], [1, 102]]
+  edge_absent:
+    MEMBER_OF: [[1, 1]]

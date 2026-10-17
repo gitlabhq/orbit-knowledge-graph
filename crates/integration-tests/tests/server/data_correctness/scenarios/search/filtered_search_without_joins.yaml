@@ -1,0 +1,27 @@
+description: A filtered user search compiles without joins and keeps only authorized users
+
+config:
+  redaction: { allow: { user: [1, 2] }, deny: { user: [3, 4] } }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "filters": {"state": {"eq": "active"}, "username": {"in": ["alice", "bob", "charlie", "diana"]}}}
+      ],
+      "order_by": "u.username",
+      "limit": 100
+    }
+  gql: |
+    MATCH (u:User) WHERE u.state = 'active' AND u.username IN ['alice', 'bob', 'charlie', 'diana'] RETURN u ORDER BY u.username LIMIT 100
+
+expect:
+  sql_not_contains: ["JOIN"]
+  node_count: 2
+  nodes:
+    User:
+      order: [1, 2]
+      filters:
+        state: active
+        username: { in: [alice, bob, charlie, diana] }

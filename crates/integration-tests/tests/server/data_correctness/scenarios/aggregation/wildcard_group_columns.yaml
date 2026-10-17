@@ -1,0 +1,33 @@
+description: Wildcard columns on a redacted grouped node return its properties
+
+config:
+  redaction: { allow: { user: [1] }, deny: { user: [2] } }
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": "*"},
+        {"id": "mr", "entity": "MergeRequest"}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "u", "to": "mr"}
+      ],
+      "group_by": ["u"],
+      "aggregations": [
+        {"count": "mr", "as": "mr_count"}
+      ],
+      "limit": 10
+    }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN properties(u), count(mr) AS mr_count LIMIT 10
+
+expect:
+  groups:
+    u:
+      count: 1
+      rows:
+        - { entity: User, id: 1, values: { mr_count: 2 }, properties: { username: alice } }
+      absent:
+        - { entity: User, id: 2 }

@@ -1,0 +1,85 @@
+cases:
+  - name: code_center_and_neighbor_allowed
+    description: A definition center and its definition neighbor are both authorized through their project
+    config:
+      redaction: { allow: { project: [1000] } }
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "d", "entity": "Definition", "node_ids": [12000]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH (d:Definition {id: 12000})-[:CALLS]->(n) RETURN d, n
+    expect:
+      node_count: 2
+      nodes:
+        Definition: { ids: [12000, 12001] }
+      edges:
+        CALLS: [[12000, 12001]]
+
+  - name: code_project_denied
+    description: Denying the project removes a definition and its definition neighbors
+    config:
+      redaction: { deny: { project: [1000] } }
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "d", "entity": "Definition", "node_ids": [12000]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH (d:Definition {id: 12000})-[:CALLS]->(n) RETURN d, n
+    expect:
+      node_count: 0
+      edge_count: { CALLS: 0 }
+      nodes:
+        Definition: { ids: [] }
+
+  - name: branch_through_project_center
+    description: A branch neighbor is authorized through the project center it belongs to
+    config:
+      redaction: { allow: { project: [1000] } }
+      extra_seed:
+        gl_branch:
+          - { id: 14000, project_id: 1000, name: main, traversal_path: "1/100/1000/" }
+        gl_code_edge:
+          - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 14000, target_kind: Branch }
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]}
+        }
+      gql: |
+        MATCH (p:Project {id: 1000})-[:CONTAINS]->(n) RETURN p, n
+    expect:
+      node_count: 2
+      nodes:
+        Project: { ids: [1000] }
+        Branch: { ids: [14000] }
+      edges:
+        CONTAINS: [[1000, 14000]]
+
+  - name: code_path_without_project
+    description: A code path with no project node on it fails closed
+    config:
+      redaction: { allow: { project: [1000] } }
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "Definition", "node_ids": [12000]},
+            {"id": "end", "entity": "Definition", "node_ids": [12001]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:Definition {id: 12000})-[:CALLS*1..1]->(`end`:Definition {id: 12001}) RETURN p
+    expect:
+      node_count: 0
+      path_count: 0
