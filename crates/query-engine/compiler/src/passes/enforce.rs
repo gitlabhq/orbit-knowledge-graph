@@ -151,15 +151,23 @@ fn enforce_lowered_return_with(
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
     match node {
-        Node::Query(q) => enforce_return_columns(
-            q,
-            input,
-            &selectable_nodes,
-            ctx,
-            &metadata.nodes,
-            model,
-            redaction_column,
-        )?,
+        Node::Query(q) => {
+            for node in &input.nodes {
+                if selectable_nodes.contains(node.id.as_str())
+                    && let Some(entity) = &node.entity
+                {
+                    ctx.add_node(&node.id, entity);
+                }
+            }
+            enforce_return_columns(
+                q,
+                input,
+                &selectable_nodes,
+                &metadata.nodes,
+                model,
+                redaction_column,
+            )?
+        }
         Node::Insert(_) => return Ok(()),
     }
 
@@ -248,7 +256,6 @@ fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
     selectable_nodes: &HashSet<&str>,
-    ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
@@ -265,7 +272,6 @@ fn enforce_return_columns(
             .entity(entity)
             .map(|entity| entity.id)
             .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?;
-        ctx.add_node(&node.id, entity);
         let id_col = redaction_id_column(&node.id);
         let binding = bindings.get(&node.id).ok_or_else(|| {
             QueryError::Enforcement(format!("node '{}' has no lowered binding", node.id))
