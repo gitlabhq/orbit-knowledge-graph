@@ -189,6 +189,21 @@ fn parse_request(request: &str) -> Result<Envelope, NamedQueryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn render_request(
+        queries: &NamedQueries,
+        language: Language,
+        request: &str,
+    ) -> Result<String, NamedQueryError> {
+        queries.render_request_language(
+            request,
+            language,
+            &BindingValues {
+                current_user_id: 42,
+            },
+        )
+    }
 
     const VALID: &str = r#"
 name: q
@@ -206,8 +221,71 @@ query:
 "#;
 
     #[test]
-    fn load_embedded_contains_committed_queries() {
-        assert_eq!(NamedQueries::load_embedded().unwrap().iter().count(), 14);
+    fn json_requests_render_bindings_and_parameters() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let rendered = render_request(&queries, Language::Json, r#"{"name": "my_neighbors"}"#)
+            .expect("known named query renders");
+        assert_eq!(
+            serde_json::from_str::<Value>(&rendered).unwrap(),
+            json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "me", "entity": "User", "node_ids": [42]}],
+                "neighbors": {"direction": "both"},
+                "limit": 100
+            })
+        );
+
+        let request = r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#;
+        let rendered = render_request(&queries, Language::Json, request)
+            .expect("parameterized named query renders");
+        assert_eq!(
+            serde_json::from_str::<Value>(&rendered).unwrap(),
+            json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "center", "entity": "Project", "node_ids": [7, 9]}],
+                "neighbors": {"direction": "both"},
+                "limit": 50
+            })
+        );
+    }
+
+    #[test]
+    fn gql_requests_render_bindings_and_parameters() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let rendered = render_request(&queries, Language::Gql, r#"{"name": "my_neighbors"}"#)
+            .expect("known named query renders");
+        assert_eq!(
+            rendered,
+            "MATCH (me:User {id: 42})--(neighbor)\nRETURN me, neighbor\nLIMIT 100"
+        );
+
+        let request = r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#;
+        let rendered = render_request(&queries, Language::Gql, request)
+            .expect("parameterized named query renders");
+        assert_eq!(
+            rendered,
+            "MATCH (center:`Project`)--(neighbor)\nWHERE center.id IN [7,9]\nRETURN center, neighbor\nLIMIT 50"
+        );
+    }
+
+    #[test]
+    fn requests_reject_invalid_envelopes() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err =
+            render_request(&queries, Language::Json, r#"{"name": "nonexistent"}"#).unwrap_err();
+        assert!(err.to_string().contains("nonexistent"), "{err}");
+        assert!(err.to_string().contains("my_neighbors"), "{err}");
+
+        for request in [
+            "my_neighbors",
+            r#"{"name": "expand_neighbors", "unexpected": 1}"#,
+        ] {
+            let err = render_request(&queries, Language::Json, request).unwrap_err();
+            assert!(
+                matches!(err, NamedQueryError::InvalidRequest { .. }),
+                "{request}: {err}"
+            );
+        }
     }
 
     #[test]
