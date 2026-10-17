@@ -112,6 +112,7 @@ pub async fn register_handlers(
         if !transform_registry.is_registered(&plan.transform) {
             info!(
                 safe(ENTITY) = plan.name.as_str(),
+                safe(KIND) = plan.transform.label(),
                 "skipping handler: transform not registered"
             );
             continue;
@@ -135,6 +136,7 @@ pub async fn register_handlers(
         if !transform_registry.is_registered(&plan.transform) {
             info!(
                 safe(ENTITY) = plan.name.as_str(),
+                safe(KIND) = plan.transform.label(),
                 "skipping handler: transform not registered"
             );
             continue;

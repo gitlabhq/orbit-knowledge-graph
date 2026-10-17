@@ -2,12 +2,12 @@
 //! path, hand the entry to the hooks, and write the bytes of the files they
 //! load ([`Decision::Parse`] or [`Decision::Load`]). No filtering of its own.
 
-use orbit_log_fields::warn;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
+use orbit_log_fields::warn;
 
 use crate::fs_walk::{
     Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,

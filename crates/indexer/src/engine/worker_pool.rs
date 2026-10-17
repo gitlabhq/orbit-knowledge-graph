@@ -59,8 +59,15 @@ impl WorkerPool {
             .map(|(name, &limit)| (name.clone(), Arc::new(Semaphore::new(limit))))
             .collect();
 
+        let mut group_limits: Vec<String> = configuration
+            .concurrency_groups
+            .iter()
+            .map(|(name, limit)| format!("{name}={limit}"))
+            .collect();
+        group_limits.sort();
         info!(
             safe(CONCURRENCY) = configuration.max_concurrent_workers(),
+            safe(WORKER_GROUPS) = group_limits.join(","),
             "worker pool created"
         );
 

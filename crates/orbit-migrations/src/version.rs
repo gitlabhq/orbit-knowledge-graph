@@ -223,19 +223,19 @@ pub async fn version_tables_complete(
     let entities = list_version_entities(graph, version).await?;
     let actual: HashSet<&str> = entities.iter().map(|entity| entity.name.as_str()).collect();
 
-    let missing: Vec<&String> = expected_table_names
+    let missing: Vec<&str> = expected_table_names
         .iter()
-        .filter(|name| !actual.contains(name.as_str()))
+        .map(String::as_str)
+        .filter(|name| !actual.contains(name))
         .collect();
 
     if !missing.is_empty() {
-        for table in &missing {
-            orbit_log_fields::warn!(
-                safe(SCHEMA_VERSION) = version,
-                safe(TABLE) = table.as_str(),
-                "version table set is incomplete"
-            );
-        }
+        orbit_log_fields::warn!(
+            safe(SCHEMA_VERSION) = version,
+            safe(COUNT) = missing.len(),
+            safe(TABLES) = missing.join(","),
+            "version table set is incomplete"
+        );
         return Ok(false);
     }
 

@@ -212,6 +212,7 @@ async fn run_webserver(
 
     let grpc_listener = tokio::net::TcpListener::bind(config.grpc_bind_address).await?;
     info!(
+        // ast-grep-ignore: log-safe-field-is-plain -- a socket address from the Orbit config
         safe(TCP_ADDRESS) = config.grpc_bind_address.to_string(),
         "gRPC server bound"
     );
@@ -288,6 +289,7 @@ async fn run_webserver(
     }
 
     info!(
+        // ast-grep-ignore: log-safe-field-is-plain -- a socket address from the Orbit config
         safe(TCP_ADDRESS) = config.grpc_bind_address.to_string(),
         "gRPC server starting"
     );

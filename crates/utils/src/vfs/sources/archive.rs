@@ -2,11 +2,11 @@
 //! Entry paths are validated before stripping the archive root. Hard links name archive entries;
 //! symlink targets stay virtual. Malformed streams fail rather than returning partial contents.
 
-use orbit_log_fields::warn;
 use std::io::Read;
 use std::sync::Arc;
 
 use flate2::read::GzDecoder;
+use orbit_log_fields::warn;
 use tar::EntryType;
 use typed_path::{Utf8Component, Utf8Components, Utf8UnixComponent, Utf8UnixPath};
 
