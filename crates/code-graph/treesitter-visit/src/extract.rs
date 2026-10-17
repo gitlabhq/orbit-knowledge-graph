@@ -232,20 +232,6 @@ impl Extract {
         emit_all(&self.emit, &target)
     }
 
-    pub fn apply_all_with<D: Doc>(
-        &self,
-        node: &Node<'_, D>,
-        transform: impl Fn(String, &Node<'_, D>) -> String,
-    ) -> Vec<String> {
-        let Some(target) = self.navigate(node) else {
-            return vec![];
-        };
-        emit_all(&self.emit, &target)
-            .into_iter()
-            .map(|s| transform(s, node))
-            .collect()
-    }
-
     pub fn navigate<'r, D: Doc>(&self, node: &Node<'r, D>) -> Option<Node<'r, D>> {
         let mut cur = node.clone();
         for step in &self.steps {
@@ -305,25 +291,29 @@ fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LanguageExt, SupportLang};
+    use crate::{ParseGuard, SupportLang};
+
+    fn parse(code: &str, lang: SupportLang) -> crate::Root<crate::StrDoc<SupportLang>> {
+        crate::Root::try_new(code, lang, &ParseGuard::default()).unwrap()
+    }
 
     #[test]
     fn test_field() {
-        let root = SupportLang::Python.ast_grep("def bar(): pass");
+        let root = parse("def bar(): pass", SupportLang::Python);
         let func = root.root().children().next().unwrap();
         assert_eq!(field("name").apply(&func), Some("bar".to_string()));
     }
 
     #[test]
     fn test_default_name() {
-        let root = SupportLang::Python.ast_grep("def foo(): pass");
+        let root = parse("def foo(): pass", SupportLang::Python);
         let func = root.root().children().next().unwrap();
         assert_eq!(default_name().apply(&func), Some("foo".to_string()));
     }
 
     #[test]
     fn test_chained() {
-        let root = SupportLang::Python.ast_grep("class Foo:\n    def bar(self): pass");
+        let root = parse("class Foo:\n    def bar(self): pass", SupportLang::Python);
         let cls = root.root().children().next().unwrap();
         assert_eq!(
             field("body")
@@ -336,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_inner_succeeds() {
-        let root = SupportLang::Java.ast_grep("class Foo { List<UserService> field; }");
+        let root = parse("class Foo { List<UserService> field; }", SupportLang::Java);
         let cls = root.root().children().next().unwrap();
         assert_eq!(
             descendant("generic_type")
@@ -348,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_inner_falls_through() {
-        let root = SupportLang::Java.ast_grep("class Foo { String field; }");
+        let root = parse("class Foo { String field; }", SupportLang::Java);
         let cls = root.root().children().next().unwrap();
         assert_eq!(
             descendant("type_identifier")
@@ -360,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_then() {
-        let root = SupportLang::Python.ast_grep("class Foo:\n    def bar(self): pass");
+        let root = parse("class Foo:\n    def bar(self): pass", SupportLang::Python);
         let cls = root.root().children().next().unwrap();
         assert_eq!(
             field("body")
@@ -372,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_navigate() {
-        let root = SupportLang::Python.ast_grep("def foo(): pass");
+        let root = parse("def foo(): pass", SupportLang::Python);
         let func = root.root().children().next().unwrap();
         let node = field("name").navigate(&func).unwrap();
         assert_eq!(node.text().as_ref(), "foo");
@@ -381,7 +371,7 @@ mod tests {
     #[test]
     fn test_apply_with_computes_fqn() {
         let code = "class Outer:\n    class Inner:\n        def method(self): pass";
-        let root = SupportLang::Python.ast_grep(code);
+        let root = parse(code, SupportLang::Python);
         let method = root
             .root()
             .find(Axis::Descendant, Match::Kind("function_definition"))
@@ -407,7 +397,7 @@ mod tests {
     #[test]
     fn test_apply_all_collects_children() {
         let code = "class Foo:\n    def a(self): pass\n    def b(self): pass\n    x = 1";
-        let root = SupportLang::Python.ast_grep(code);
+        let root = parse(code, SupportLang::Python);
         let cls = root.root().children().next().unwrap();
 
         let methods = field("body")
@@ -417,28 +407,5 @@ mod tests {
         assert_eq!(methods.len(), 2);
         assert!(methods[0].contains("a"));
         assert!(methods[1].contains("b"));
-    }
-
-    #[test]
-    fn test_apply_all_with_transforms() {
-        let code = "class Foo:\n    def a(self): pass\n    def b(self): pass";
-        let root = SupportLang::Python.ast_grep(code);
-        let cls = root.root().children().next().unwrap();
-
-        let fqns = field("body")
-            .collect(Match::Kind("function_definition"))
-            .apply_all_with(&cls, |method_text, origin| {
-                let cls_name = origin.field("name").unwrap().text().to_string();
-                let fn_name = method_text
-                    .split('(')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .strip_prefix("def ")
-                    .unwrap_or("")
-                    .trim();
-                format!("{cls_name}.{fn_name}")
-            });
-        assert_eq!(fqns, vec!["Foo.a", "Foo.b"]);
     }
 }

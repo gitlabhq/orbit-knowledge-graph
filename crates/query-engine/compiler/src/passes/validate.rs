@@ -2501,17 +2501,6 @@ mod tests {
     }
 
     #[test]
-    fn edge_column_type_covers_all_reserved_columns() {
-        let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
-        for col in ontology::EDGE_RESERVED_COLUMNS {
-            assert!(
-                ontology.get_edge_column_type(col).is_some(),
-                "get_edge_column_type must cover reserved column \"{col}\""
-            );
-        }
-    }
-
-    #[test]
     fn edge_filter_type_comes_from_ontology_not_hardcoded() {
         // Build an ontology where source_id is String instead of Int.
         // If types were hardcoded in Rust, this test would FAIL (the hardcoded

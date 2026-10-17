@@ -49,13 +49,6 @@ fn dead_letter_subject_for_subject(stream: &str, subject: &str) -> String {
     format!("{}.{}.{}", DEAD_LETTER_SUBJECT_PREFIX, stream, subject)
 }
 
-pub fn dead_letter_subscription(subscription: &Subscription) -> Subscription {
-    Subscription::new(
-        DEAD_LETTER_STREAM,
-        dead_letter_subject_for_subject(&subscription.stream, &subscription.subject),
-    )
-}
-
 fn original_subject<'a>(subscription: &'a Subscription, envelope: &'a Envelope) -> &'a str {
     if envelope.subject.is_empty() {
         &subscription.subject
@@ -112,14 +105,5 @@ mod tests {
             dead_letter_subject(&subscription, &envelope),
             "dlq.siphon_db.tables.merge_requests"
         );
-    }
-
-    #[test]
-    fn dead_letter_subscription_points_to_dlq_stream() {
-        let subscription = Subscription::new("siphon_db", "tables.users");
-        let dlq = dead_letter_subscription(&subscription);
-        assert_eq!(&*dlq.stream, DEAD_LETTER_STREAM);
-        assert_eq!(&*dlq.subject, "dlq.siphon_db.tables.users");
-        assert!(dlq.manage_stream);
     }
 }
