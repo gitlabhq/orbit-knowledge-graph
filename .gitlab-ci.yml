@@ -883,7 +883,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
+    - cargo nextest run --profile ci --all-features --test containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 # Benchmark Stage
