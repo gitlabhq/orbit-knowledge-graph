@@ -418,6 +418,14 @@ pub struct MigrationCompletionConfig {
     pub schedule: ScheduleConfiguration,
 }
 
+/// Records how far indexed SDLC data trails the datalake for every enabled namespace.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct NamespaceFreshnessConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
 /// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -446,6 +454,7 @@ pub struct ScheduledTasksConfiguration {
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     pub migration_completion: MigrationCompletionConfig,
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
+    pub namespace_freshness: NamespaceFreshnessConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────
@@ -624,6 +633,10 @@ mod tests {
         assert_eq!(tasks.global.schedule.cron.expression(), "0 */1 * * * *");
         assert_eq!(tasks.namespace.schedule.cron.expression(), "*/30 * * * * *");
         assert_eq!(tasks.namespace.sweep_interval_secs, 3600);
+        assert_eq!(
+            tasks.namespace_freshness.schedule.cron.expression(),
+            "0 */5 * * * *"
+        );
         assert_eq!(tasks.code_backfill.publish_window, 200_000);
         assert_eq!(tasks.code_backfill.stale_sweeps_per_tick, 10);
         assert_eq!(

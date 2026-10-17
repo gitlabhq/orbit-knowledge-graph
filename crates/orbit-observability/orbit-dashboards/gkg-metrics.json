@@ -901,6 +901,29 @@
       "domain": "indexer.sdlc"
     },
     {
+      "otel_name": "gkg.indexer.sdlc.freshness.lag",
+      "prom_name": "gkg_indexer_sdlc_freshness_lag_seconds",
+      "description": "One observation per enabled namespace and plan: seconds its oldest unindexed datalake change has waited, 0 when in sync.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "entity"
+      ],
+      "buckets": [
+        60.0,
+        300.0,
+        900.0,
+        1800.0,
+        3600.0,
+        7200.0,
+        14400.0,
+        28800.0,
+        57600.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
       "otel_name": "gkg.indexer.sdlc.handler.duration",
       "prom_name": "gkg_indexer_sdlc_handler_duration_seconds",
       "description": "Duration of a full handler invocation across all its pipelines.",
