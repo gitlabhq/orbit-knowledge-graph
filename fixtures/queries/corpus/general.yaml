@@ -114,7 +114,7 @@ q11_4_node_user_mr_pipeline_project:
   category: traversal
   suite: general
   query: |
-    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'}), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}), (pipe:Pipeline), (mr)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'}), (mr)-[:HAS_HEAD_PIPELINE]->(pipe)
     RETURN *
     LIMIT 10
 
@@ -485,7 +485,7 @@ d4_vulnerability_occurrence_securityscan:
   category: traversal
   suite: general
   query: |
-    MATCH (v:Vulnerability)-[:HAS_FINDING]->(occ:VulnerabilityOccurrence), (v)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})<-[:IN_PROJECT]-(scan:SecurityScan)
+    MATCH (v:Vulnerability)-[:HAS_FINDING]->(occ:VulnerabilityOccurrence), (scan:SecurityScan), (v)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'}), (scan)-[:IN_PROJECT]->(p)
     RETURN *
     LIMIT 10
 

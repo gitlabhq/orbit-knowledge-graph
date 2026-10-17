@@ -202,7 +202,7 @@
   category: traversal
   suite: showcase
   query: |
-    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project), (pipe)-[:HAS_JOB]->(j:Job)
+    MATCH (pipe:Pipeline {status: 'failed'}), (j:Job), (pipe)-[:IN_PROJECT]->(p:Project), (pipe)-[:HAS_JOB]->(j)
     RETURN *
     LIMIT 50
 
