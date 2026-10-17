@@ -239,36 +239,6 @@ fn local(
                     level = parents;
                 }
             }
-            if !hits.iter().any(|hit| !hit.context)
-                && options.output == Output::Lines
-                && !options.invert
-                && !options.fixed
-                && let Some(words) = phrase_words(&terms)
-            {
-                let word_terms: Vec<term::Term> = words
-                    .iter()
-                    .map(|word| term::Term::parse(word).literal())
-                    .collect();
-                let any = term::matcher(&word_terms, &options)?;
-                let found = scan::scan(&root, &scope, &any, &options)?;
-                let together: Vec<scan::Hit> = found
-                    .iter()
-                    .filter(|hit| !hit.context && word_terms.iter().all(|t| t.mentions(&hit.text)))
-                    .cloned()
-                    .collect();
-                if !together.is_empty() {
-                    notes.push(format!(
-                        "{NOTE}no line has the phrase; showing lines with all of {}",
-                        words.join(", ")
-                    ));
-                    hits = together;
-                    terms = word_terms;
-                } else if let Some(files) = files_with_all(&found, &word_terms) {
-                    notes.push(format!(
-                        "{NOTE}no line has the phrase or all of its words; files with every word: {files}"
-                    ));
-                }
-            }
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();
@@ -332,10 +302,6 @@ fn local(
         )
         .as_deref(),
     )?;
-    let rendered = match (options.output, next_context(&hits)) {
-        (Output::Lines, Some(next)) => format!("{rendered}next: {launcher} context {next}\n"),
-        _ => rendered,
-    };
     match (options.output, rendered.split_once('\n')) {
         (Output::Lines, Some((first, rest))) if !notes.is_empty() => {
             write!(out, "{first}\n{}\n{rest}", notes.join("\n"))?
@@ -461,102 +427,6 @@ fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> 
     resolved
 }
 
-/// The matched definitions to read next by name, which returns each with its callers and callees in
-/// one call instead of a line-range read per match.
-/// Names so common that a lookup by name returns many unrelated definitions.
-const GENERIC_NAMES: &[&str] = &[
-    "initialize",
-    "__init__",
-    "constructor",
-    "new",
-    "init",
-    "setup",
-    "call",
-    "run",
-    "main",
-    "sanitize",
-    "to_s",
-    "tostring",
-    "execute",
-    "perform",
-    "handle",
-    "process",
-    "get",
-    "set",
-    "update",
-    "create",
-];
-
-fn next_context(hits: &[scan::Hit]) -> Option<String> {
-    const SHOWN: usize = 4;
-    let mut names: Vec<&str> = Vec::new();
-    for def in hits
-        .iter()
-        .filter(|hit| !hit.context)
-        .filter_map(|hit| hit.def.as_ref())
-    {
-        let generic = GENERIC_NAMES.contains(&def.name.to_ascii_lowercase().as_str());
-        if !generic
-            && !names.contains(&def.name.as_str())
-            && def.name.chars().any(char::is_alphabetic)
-        {
-            names.push(&def.name);
-        }
-    }
-    (names.len() >= 2).then(|| names.into_iter().take(SHOWN).collect::<Vec<_>>().join(" "))
-}
-
-/// The words of a plain multi-word query, which agents write to mean "code about these words".
-fn phrase_words(terms: &[term::Term]) -> Option<Vec<String>> {
-    let [term] = terms else {
-        return None;
-    };
-    if term.is_regex() {
-        return None;
-    }
-    let words: Vec<String> = term.raw.split_whitespace().map(str::to_string).collect();
-    (words.len() >= 2).then_some(words)
-}
-
-/// Files in which every word appears on some line, most matches first, as `path (word n, ...)`.
-fn files_with_all(found: &[scan::Hit], words: &[term::Term]) -> Option<String> {
-    const SHOWN: usize = 15;
-    let mut per_file: std::collections::BTreeMap<&str, Vec<usize>> = Default::default();
-    for hit in found.iter().filter(|hit| !hit.context) {
-        let counts = per_file
-            .entry(&hit.file)
-            .or_insert_with(|| vec![0; words.len()]);
-        for (count, word) in counts.iter_mut().zip(words) {
-            *count += usize::from(word.mentions(&hit.text));
-        }
-    }
-    let mut files: Vec<(&str, Vec<usize>)> = per_file
-        .into_iter()
-        .filter(|(_, counts)| counts.iter().all(|count| *count > 0))
-        .collect();
-    if files.is_empty() {
-        return None;
-    }
-    files.sort_by_key(|(file, counts)| (std::cmp::Reverse(counts.iter().sum::<usize>()), *file));
-    let more = files.len().saturating_sub(SHOWN);
-    let mut listed: Vec<String> = files
-        .iter()
-        .take(SHOWN)
-        .map(|(file, counts)| {
-            let detail: Vec<String> = words
-                .iter()
-                .zip(counts)
-                .map(|(word, count)| format!("{} {count}", word.raw))
-                .collect();
-            format!("{file} ({})", detail.join(", "))
-        })
-        .collect();
-    if more > 0 {
-        listed.push(format!("{more} more"));
-    }
-    Some(listed.join("; "))
-}
-
 fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::Kinds> {
     if requested.is_empty() {
         return Ok(kind::Kinds::default());
@@ -663,63 +533,6 @@ mod tests {
                 "» audit/request.go not found; searched staging/apiserver/pkg/audit/request.go, pkg/probe/request.go",
             ]
         );
-    }
-
-    fn hit(file: &str, text: &str, def: Option<&str>) -> scan::Hit {
-        scan::Hit {
-            file: file.into(),
-            line: 1,
-            text: text.into(),
-            def: def.map(|name| defs::Def {
-                name: name.into(),
-                start: 1,
-                end: 2,
-                id: 1,
-                kind: "Method".into(),
-            }),
-            imports: Vec::new(),
-            context: false,
-        }
-    }
-
-    #[test]
-    fn plain_multi_word_queries_fall_back_to_their_words() {
-        let terms = |raw: &str| vec![term::Term::parse(raw)];
-        assert_eq!(
-            phrase_words(&terms("usage event stream")),
-            Some(vec!["usage".into(), "event".into(), "stream".into()])
-        );
-        assert_eq!(phrase_words(&terms("UsageEvent")), None);
-        assert_eq!(phrase_words(&terms("stream.*usage")), None);
-        let words: Vec<term::Term> = ["usage", "stream"]
-            .iter()
-            .map(|w| term::Term::parse(w))
-            .collect();
-        let found = [
-            hit("a.rb", "usage = 1", None),
-            hit("a.rb", "stream it", None),
-            hit("b.rb", "usage only", None),
-        ];
-        assert_eq!(
-            files_with_all(&found, &words).as_deref(),
-            Some("a.rb (usage 1, stream 1)")
-        );
-        assert_eq!(files_with_all(&found[2..], &words), None);
-    }
-
-    #[test]
-    fn grep_points_at_matched_definitions_by_name() {
-        let hits = [
-            hit("a.rb", "x", Some("FinalAnswerDelta")),
-            hit("a.rb", "y", Some("initialize")),
-            hit("b.rb", "z", Some("FinalAnswerParser")),
-            hit("b.rb", "w", Some("FinalAnswerDelta")),
-        ];
-        assert_eq!(
-            next_context(&hits).as_deref(),
-            Some("FinalAnswerDelta FinalAnswerParser")
-        );
-        assert_eq!(next_context(&hits[..2]), None);
     }
 
     #[test]
