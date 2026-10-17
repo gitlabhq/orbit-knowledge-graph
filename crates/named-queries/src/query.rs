@@ -65,6 +65,8 @@ struct NamedQueryYaml {
     bindings: Vec<String>,
     #[serde(default)]
     parameters: BTreeMap<String, ParameterSpecYaml>,
+    #[serde(default)]
+    settings: BTreeMap<String, Value>,
     query: QueryTexts,
 }
 
@@ -138,6 +140,7 @@ pub struct NamedQuery {
     pub name: String,
     pub description: String,
     pub default: bool,
+    pub settings: Vec<(String, String)>,
     bindings: Vec<String>,
     parameters: BTreeMap<String, ParameterSpec>,
     json: Value,
@@ -181,10 +184,24 @@ impl NamedQuery {
             parameters.insert(name, spec);
         }
 
+        let settings = yaml
+            .settings
+            .into_iter()
+            .map(|(name, value)| match value {
+                Value::String(text) => Ok((name, text)),
+                Value::Number(_) | Value::Bool(_) => Ok((name, value.to_string())),
+                _ => Err(invalid(
+                    &yaml.name,
+                    format!("setting `{name}` must be a string, number, or boolean"),
+                )),
+            })
+            .collect::<Result<_, _>>()?;
+
         let query = Self {
             name: yaml.name,
             description: yaml.description,
             default: yaml.default,
+            settings,
             bindings: yaml.bindings,
             parameters,
             json: yaml.query.json,

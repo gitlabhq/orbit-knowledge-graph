@@ -69,13 +69,20 @@ fn resolve_raw_query(
     let query_type =
         QueryType::try_from(query_type).map_err(|_| format!("Unknown query_type: {query_type}"))?;
     let frontend = query_frontend(language)?;
-    let text = match query_type {
-        QueryType::Json => query,
-        QueryType::Named => named_queries
-            .render_request_language(&query, named_language(frontend), values)
-            .map_err(|e| e.to_string())?,
+    let (text, settings) = match query_type {
+        QueryType::Json => (query, Vec::new()),
+        QueryType::Named => {
+            let (named, text) = named_queries
+                .render_request_language(&query, named_language(frontend), values)
+                .map_err(|e| e.to_string())?;
+            (text, named.settings.clone())
+        }
     };
-    Ok(RawQuery { text, frontend })
+    Ok(RawQuery {
+        text,
+        frontend,
+        settings,
+    })
 }
 
 fn named_language(frontend: Frontend) -> named_queries::Language {
@@ -1436,6 +1443,39 @@ mod tests {
         }
         assert!(resolve_raw_query(99, "".into(), 0, &queries, &bindings).is_err());
         assert!(resolve_raw_query(0, "".into(), 99, &queries, &bindings).is_err());
+    }
+
+    #[test]
+    fn resolve_raw_query_carries_named_query_settings() {
+        let queries = named_queries::NamedQueries::load_embedded().unwrap();
+        let bindings = named_queries::BindingValues { current_user_id: 1 };
+        let resolve = |kind: QueryType, text: &str| {
+            resolve_raw_query(
+                kind as i32,
+                text.into(),
+                QueryLanguage::Gql as i32,
+                &queries,
+                &bindings,
+            )
+            .unwrap()
+        };
+
+        let named = resolve(
+            QueryType::Named,
+            r#"{"name":"definition_references","parameters":{"node_id":"1"}}"#,
+        );
+        assert_eq!(
+            named.settings,
+            [(
+                "use_skip_indexes_if_final_exact_mode".to_string(),
+                "0".to_string()
+            )]
+        );
+        assert!(
+            resolve(QueryType::Json, "MATCH (n:User) RETURN n")
+                .settings
+                .is_empty()
+        );
     }
 
     fn test_claims() -> Claims {

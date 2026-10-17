@@ -148,7 +148,7 @@ impl NamedQueries {
         request: &str,
         language: Language,
         values: &BindingValues,
-    ) -> Result<String, NamedQueryError> {
+    ) -> Result<(&NamedQuery, String), NamedQueryError> {
         let envelope = parse_request(request)?;
         let Some(query) = self.queries.get(&envelope.name) else {
             return Err(NamedQueryError::Unknown {
@@ -156,7 +156,8 @@ impl NamedQueries {
                 available: self.names().map(String::from).collect(),
             });
         };
-        query.render_language(language, values, &envelope.parameters)
+        let text = query.render_language(language, values, &envelope.parameters)?;
+        Ok((query, text))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &NamedQuery> {
@@ -315,6 +316,30 @@ query:
         .unwrap_err();
         assert!(err.to_string().contains("at most one"), "{err}");
         assert!(err.to_string().contains("first, second"), "{err}");
+    }
+
+    #[test]
+    fn settings_load_as_string_pairs() {
+        let yaml = VALID.replace(
+            "name: q",
+            "name: q\nsettings:\n  max_threads: 4\n  join_algorithm: hash\n  log_queries: true",
+        );
+        let queries = NamedQueries::from_files("test", [("q.yaml".to_string(), yaml)]).unwrap();
+        assert_eq!(
+            queries.get("q").unwrap().settings,
+            [
+                ("join_algorithm".to_string(), "hash".to_string()),
+                ("log_queries".to_string(), "true".to_string()),
+                ("max_threads".to_string(), "4".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_scalar_settings_are_rejected() {
+        let yaml = VALID.replace("name: q", "name: q\nsettings:\n  max_threads: [4]");
+        let err = NamedQueries::from_files("test", [("q.yaml".to_string(), yaml)]).unwrap_err();
+        assert!(err.to_string().contains("setting `max_threads`"), "{err}");
     }
 
     #[test]
