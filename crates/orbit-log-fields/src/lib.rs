@@ -17,9 +17,10 @@
 //! branch names, query text, error messages, URLs, usernames and free text.
 //! The allowlist also passes the fields of dependency log events, so a safe name
 //! must not be a generic name that a dependency uses for free text.
+//! Before you add a generic safe name, check that no dependency logs free text under it.
 //!
-//! Log with the macros of this crate. They take the same arguments as the
-//! `tracing` macros, and name each field with `safe(NAME)` or `expanded(NAME)`:
+//! Log with the macros of this crate. They take the `tracing` arguments except
+//! `parent:` and `name:` on events, and name each field with `safe(NAME)` or `expanded(NAME)`:
 //!
 //! ```
 //! use orbit_log_fields::info;
@@ -40,7 +41,7 @@
 mod macros;
 
 #[doc(hidden)]
-pub use macros::__private;
+pub use tracing as __tracing;
 
 macro_rules! fields {
     ($($(#[$doc:meta])* $name:ident = $value:expr;)*) => {
@@ -95,7 +96,7 @@ pub mod safe {
         DISPATCH_ID = "dispatch_id";
         /// Indexing campaign ID that Orbit generates (`migration-v<N>`).
         CAMPAIGN_ID = "campaign_id";
-        /// NATS message ID.
+        /// NATS message ID that Orbit builds as `<stream>.<stream_seq>.<consumer_seq>`.
         MESSAGE_ID = "message_id";
         /// ID that Orbit generates for one redaction exchange.
         RESULT_ID = "result_id";
@@ -106,11 +107,10 @@ pub mod safe {
         /// Git commit SHA at the end of a diff.
         TO_COMMIT_SHA = "to_commit_sha";
 
-
         /// Whether a trusted caller asked for expanded logs on this request.
         /// The expanded logs predicate reads it.
         EXPANDED_LOGS_REQUESTED = "expanded_logs_requested";
-        /// Cloud Connector realm (`saas` or `self-managed`).
+        /// Cloud Connector realm after Orbit normalizes it (`SaaS` or `SM`).
         REALM = "realm";
         /// Deployment type of the calling instance.
         DEPLOYMENT_TYPE = "deployment_type";
@@ -131,7 +131,6 @@ pub mod safe {
         /// Name of a query that Orbit defines, such as a scheduled or named query.
         QUERY_NAME = "query_name";
 
-
         /// GitLab version of the calling instance.
         INSTANCE_VERSION = "instance_version";
         /// Graph schema version.
@@ -150,12 +149,15 @@ pub mod safe {
         RELEASE = "release";
         /// Version of the AWS-LC FIPS module that the server links.
         AWS_LC_VERSION = "aws_lc_version";
-
+        /// Version of the Rust sysroot that the server embeds.
+        SYSROOT_VERSION = "sysroot_version";
 
         /// Gitaly storage name from the infrastructure config.
         GITALY_STORAGE = "gitaly_storage";
         /// ClickHouse table, view or dictionary name.
         TABLE = "table";
+        /// ClickHouse table names, comma separated.
+        TABLES = "tables";
         /// ClickHouse table that a statement reads from, when `table` is the target.
         SOURCE_TABLE = "source_table";
         /// ClickHouse table name prefix of a schema version.
@@ -170,7 +172,6 @@ pub mod safe {
         PLAN_TARGET = "plan_target";
         /// Ontology relationship kinds, comma separated.
         RELATIONSHIP_KINDS = "relationship_kinds";
-
 
         /// NATS JetStream stream name.
         NATS_STREAM = "nats_stream";
@@ -187,7 +188,6 @@ pub mod safe {
         /// NATS KV bucket name that Orbit defines.
         NATS_KV_BUCKET = "nats_kv_bucket";
 
-
         /// Attempt number of a retried operation, starting at 1.
         ATTEMPT = "attempt";
         /// Maximum number of attempts of a retried operation.
@@ -200,7 +200,6 @@ pub mod safe {
         BATCH_INDEX = "batch_index";
         /// Byte offset inside a file.
         BYTE_OFFSET = "byte_offset";
-
 
         /// Number of items. Use it when the message names what is counted.
         COUNT = "count";
@@ -285,7 +284,6 @@ pub mod safe {
         /// Number of tables that a schema migration seeded from the active version.
         SEEDED_TABLE_COUNT = "seeded_table_count";
 
-
         /// Duration of an operation in seconds.
         DURATION_S = labkit::DURATION_S;
         /// Duration of the parse phase of a file, in seconds.
@@ -309,7 +307,6 @@ pub mod safe {
         /// Lower time bound of an incremental scan, as a timestamp that Orbit formats.
         WATERMARK = "watermark";
 
-
         /// Size in bytes.
         SIZE_BYTES = "size_bytes";
         /// Memory limit of the container in bytes.
@@ -329,16 +326,12 @@ pub mod safe {
         /// Maximum number of operations that run at the same time.
         CONCURRENCY = "concurrency";
 
-
         /// TCP address that a server listens on, `host:port`.
         TCP_ADDRESS = labkit::TCP_ADDRESS;
         /// Name of a group of server listeners that share TLS settings.
         LISTENER_GROUP = "listener_group";
         /// Snowplow app ID of an event tracker.
         SNOWPLOW_APP_ID = "snowplow_app_id";
-        /// Deployment kind that the server reports in analytics
-        /// (`.com`, `dedicated`, `self-managed`).
-        DEPLOYMENT_KIND = "deployment_kind";
         /// Deployment environment that the server reports in analytics.
         DEPLOYMENT_ENVIRONMENT = "deployment_environment";
         /// Authentication mode of an outbound client.
@@ -357,6 +350,8 @@ pub mod safe {
         TRIGGER = "trigger";
         /// Name of a worker concurrency group.
         WORKER_GROUP = "worker_group";
+        /// Worker concurrency groups from the config, comma separated `group=limit` pairs.
+        WORKER_GROUPS = "worker_groups";
         /// Name of a server component or a dependency that Orbit deploys, probes or guards.
         COMPONENT = "component";
         /// Kubernetes namespace that Orbit is deployed to.
@@ -382,7 +377,6 @@ pub mod safe {
         /// Schema migration scope that was requested, before Orbit widens it.
         REQUESTED_MIGRATION_SCOPE = "requested_migration_scope";
 
-
         /// Whether TLS is on for a connection or listener.
         TLS_ENABLED = "tls_enabled";
         /// Whether a cache lookup found the item.
@@ -398,12 +392,11 @@ pub mod safe {
         /// Whether an error message is safe to return to the client.
         CLIENT_SAFE = "client_safe";
 
-
         /// Fixed error kind, from an error enum variant or a string literal.
         /// Never the error text.
         ERROR_TYPE = labkit::ERROR_TYPE;
         /// HTTP response status code.
-        HTTP_STATUS_CODE = labkit::HTTP_STATUS_CODE;
+        HTTP_STATUS_CODE = "http_status_code";
         /// Source location of a panic, `file:line:column` in Orbit or dependency code.
         PANIC_LOCATION = "panic_location";
     }
@@ -416,7 +409,6 @@ pub mod expanded {
     fields! {
         /// Cloud Connector global user ID.
         GLOBAL_USER_ID = "global_user_id";
-
 
         /// Cloud Connector realm value from a token, before Orbit validates it.
         RAW_REALM = "raw_realm";
@@ -443,18 +435,15 @@ pub mod expanded {
         /// Socket address of a remote server, `ip:port`.
         REMOTE_ADDR = labkit::REMOTE_ADDR;
 
-
         /// SQL text.
         SQL = "sql";
         /// Name of a parameter that is bound to a query.
         QUERY_PARAMETER = "query_parameter";
 
-
         /// NATS subject of one message. It can hold an encoded branch name.
         NATS_SUBJECT = "nats_subject";
         /// Key of a NATS KV entry or a checkpoint row.
         KV_KEY = "kv_key";
-
 
         /// Path of a file or directory inside a repository.
         FILE_PATH = "file_path";
@@ -468,7 +457,6 @@ pub mod expanded {
         BRANCH = "branch";
         /// Name of a package or dependency that a manifest declares.
         PACKAGE_NAME = "package_name";
-
 
         /// Error text. Log a fixed [`ERROR_TYPE`](super::safe::ERROR_TYPE) next to it.
         ERROR_MESSAGE = labkit::ERROR_MESSAGE;
