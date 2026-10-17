@@ -1319,14 +1319,16 @@ impl<'t> Fold<'t> {
             .ancestors()
             .filter(|node| node.is(C::Def))
             .find(|node| node.is_class());
-        let declaring =
-            |up: Cursor<'t>| up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == name;
+        let declaring = |up: Cursor<'t>| {
+            up.index() == def || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == name
+        };
         let member = class
             .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring))
             .and_then(|class| {
-                self.find_method_in(class.index(), name?, role)
-                    .first()
-                    .copied()
+                let name = name?;
+                self.parts(class.index())
+                    .into_iter()
+                    .find_map(|part| self.slots(part, name)?.get(role))
             });
         member.map_or(value, Value::LocalDef)
     }
