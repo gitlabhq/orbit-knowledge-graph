@@ -210,7 +210,7 @@ impl QueryConfig {
 ///   default:
 ///     max_execution_time: 30
 ///     use_query_cache: true
-///     query_cache_ttl: 60
+///     query_cache_ttl: 10
 ///   aggregation:
 ///     max_execution_time: 60
 /// ```
@@ -349,7 +349,7 @@ mod tests {
                     "query_cache_system_table_handling".into(),
                     "'ignore'".into()
                 ),
-                ("query_cache_ttl".into(), "60".into()),
+                ("query_cache_ttl".into(), "10".into()),
                 ("use_query_cache".into(), "1".into()),
             ]
         );

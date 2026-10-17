@@ -73,6 +73,18 @@ impl QueryPlan {
             _ => &[],
         }
     }
+
+    pub fn is_point_lookup(&self) -> bool {
+        match self {
+            Self::Traversal(Plan { nodes, .. }) | Self::Aggregation(Plan { nodes, .. }) => {
+                !nodes.is_empty()
+                    && nodes
+                        .values()
+                        .all(|node| node.selectivity == Selectivity::Pinned)
+            }
+            _ => false,
+        }
+    }
 }
 
 pub fn denormalized_facts(

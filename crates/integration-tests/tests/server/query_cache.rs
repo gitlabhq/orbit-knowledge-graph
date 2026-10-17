@@ -1,5 +1,5 @@
 use clickhouse_client::FromArrowColumn;
-use integration_testkit::{load_ontology, run_subtests};
+use integration_testkit::{load_ontology, run_subtests, t};
 use query_engine::compiler::{Frontend, compile};
 
 use super::status::fixtures::{
@@ -13,6 +13,8 @@ const GROUPS_QUERY: &str = r#"{
     "limit": 10
 }"#;
 
+const GROUP_LOOKUP: &str = "MATCH (g:Group {id: 102}) RETURN g";
+
 #[tokio::test]
 async fn query_cache() {
     use_production_query_settings();
@@ -22,6 +24,7 @@ async fn query_cache() {
     run_subtests!(
         &ctx,
         repeated_graph_query_reads_the_cache,
+        id_pinned_lookups_see_a_row_written_between_two_runs,
         uncacheable_queries_run_uncached,
     );
 }
@@ -41,6 +44,33 @@ async fn repeated_graph_query_reads_the_cache(ctx: &TestContext) {
     assert_eq!(first.iter().map(|b| b.num_rows()).sum::<usize>(), 2);
     assert_eq!(first, second);
     assert_eq!(query_cache_usage(ctx).await, ["Write", "Read"]);
+}
+
+async fn id_pinned_lookups_see_a_row_written_between_two_runs(ctx: &TestContext) {
+    let compiled = compile(
+        GROUP_LOOKUP,
+        Frontend::Gql,
+        &load_ontology(),
+        &admin_context(),
+    )
+    .expect("lookup should compile");
+
+    let before = ctx.query_parameterized(&compiled.base).await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES \
+         (102, 'Late Group', 'public', '1/102/')",
+        t("gl_group")
+    ))
+    .await;
+    let after = ctx.query_parameterized(&compiled.base).await;
+
+    assert_eq!(before.iter().map(|b| b.num_rows()).sum::<usize>(), 0);
+    assert_eq!(after.iter().map(|b| b.num_rows()).sum::<usize>(), 1);
+    assert!(
+        compiled.base.sql.contains("use_query_cache = 0"),
+        "{}",
+        compiled.base.sql
+    );
 }
 
 async fn uncacheable_queries_run_uncached(ctx: &TestContext) {

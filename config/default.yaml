@@ -191,7 +191,7 @@ query:
     max_expanded_ast_elements: 10000000
     max_ast_depth: 10000
     use_query_cache: true
-    query_cache_ttl: 60
+    query_cache_ttl: 10
 
 metrics:
   # log_level: "info"
