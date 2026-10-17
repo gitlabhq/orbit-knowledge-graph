@@ -1,10 +1,10 @@
-use orbit_log_fields::warn;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use ignore::{WalkBuilder, WalkState};
+use orbit_log_fields::warn;
 use typed_path::Utf8UnixPathBuf;
 
 use super::{Loading, Put, Source, SourceError, Tag};

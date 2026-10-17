@@ -23,6 +23,7 @@
 mod macros;
 
 #[doc(hidden)]
+// ast-grep-ignore: no-raw-tracing-macro -- the macros of this crate call tracing through this path
 pub use tracing as __tracing;
 
 macro_rules! fields {
@@ -51,6 +52,8 @@ pub mod safe {
         GL_GOVERNING_NAMESPACE_ID = "gl_governing_namespace_id";
         /// Numeric IDs, `<org_id>/<root_namespace_id>/.../`. The expanded logs predicate reads it.
         TRAVERSAL_PATH = "traversal_path";
+        /// Comma separated; the expanded logs predicate does not read it.
+        TRAVERSAL_PATHS = "traversal_paths";
         INSTANCE_ID = "instance_id";
         UNIQUE_INSTANCE_ID = "unique_instance_id";
         EVENT_ID = "event_id";

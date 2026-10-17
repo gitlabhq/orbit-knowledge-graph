@@ -84,7 +84,7 @@ mod tests {
     fn with_correlation<T>(id: &str, f: impl FnOnce() -> T) -> T {
         let subscriber = tracing_subscriber::registry().with(CorrelationCaptureLayer::new());
         tracing::subscriber::with_default(subscriber, || {
-            let span = orbit_log_fields::info_span!("test", correlation_id = id);
+            let span = tracing::info_span!("test", correlation_id = id);
             let _guard = span.enter();
             f()
         })

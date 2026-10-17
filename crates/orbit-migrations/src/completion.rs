@@ -116,11 +116,16 @@ pub async fn fetch_enabled_top_level_namespaces(
             .collect(),
     );
 
-    for (namespace_id, path) in &split.skipped {
+    if !split.skipped.is_empty() {
+        let paths: Vec<&str> = split
+            .skipped
+            .iter()
+            .map(|(_, path)| path.as_str())
+            .collect();
         orbit_log_fields::warn!(
-            safe(GL_NAMESPACE_ID) = namespace_id,
-            safe(TRAVERSAL_PATH) = path.as_str(),
-            "excluding non-top-level namespace path from completion gate"
+            safe(COUNT) = paths.len(),
+            safe(TRAVERSAL_PATHS) = paths.join(","),
+            "excluding non-top-level namespace paths from completion gate"
         );
     }
 

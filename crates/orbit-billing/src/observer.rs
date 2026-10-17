@@ -231,7 +231,8 @@ impl PipelineObserver for BillingObserver {
             match tracker.track(event) {
                 Ok(event_id) => {
                     orbit_log_fields::info!(
-                        safe(EVENT_ID) = event_id.to_string().as_str(),
+                        // ast-grep-ignore: log-safe-field-is-plain -- a UUID that Orbit generates
+                        safe(EVENT_ID) = event_id.to_string(),
                         safe(GL_USER_ID) = self.inputs.user_id,
                         safe(REALM) = realm,
                         safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),

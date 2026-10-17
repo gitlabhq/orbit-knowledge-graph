@@ -101,9 +101,8 @@ impl ActiveSchema {
             let next_change = match self.install_version(loader, target).await {
                 Ok(()) => changes.try_next().await?,
                 Err(error) => {
-                    let error = format!("{error:#}");
                     warn!(
-                        expanded(ERROR_MESSAGE) = error.as_str(),
+                        expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
                         "active schema unavailable; retrying"
                     );
                     tokio::select! {
