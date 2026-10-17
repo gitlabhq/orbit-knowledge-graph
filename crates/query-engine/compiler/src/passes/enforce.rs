@@ -1,4 +1,5 @@
-use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
+use crate::ast::visit::{visit_expressions, visit_relations};
+use crate::ast::{Expr, JoinType, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
@@ -9,7 +10,7 @@ use crate::passes::lower::sql::{
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use crate::passes::plan::helpers::{FilterOwner, ordered_filters};
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
 
@@ -294,24 +295,28 @@ fn enforce_return_columns(
                         node.id
                     ))
                 })?;
-                let scan = if node.filters.is_empty() {
-                    TableRef::scan_final(table, &node.id)
-                } else {
-                    let mut predicates: Vec<Expr> =
-                        ordered_filters(&node.filters, FilterOwner::Entity(entity_id), model)
-                            .iter()
-                            .map(|(property, bound)| filter_to_expr(&node.id, property, bound))
-                            .collect();
-                    if !node.node_ids.is_empty() {
-                        predicates.push(id_list_predicate(
-                            &node.id,
-                            DEFAULT_PRIMARY_KEY,
-                            &node.node_ids,
-                        ));
-                    }
-                    if let Some(range) = &node.id_range {
-                        predicates.push(id_range_predicate(&node.id, range));
-                    }
+                let mut predicates: Vec<Expr> =
+                    ordered_filters(&node.filters, FilterOwner::Entity(entity_id), model)
+                        .iter()
+                        .map(|(property, bound)| filter_to_expr(&node.id, property, bound))
+                        .collect();
+                if !node.node_ids.is_empty() {
+                    predicates.push(id_list_predicate(
+                        &node.id,
+                        DEFAULT_PRIMARY_KEY,
+                        &node.node_ids,
+                    ));
+                } else if let Some(keys) = keyed_edge_ids(q, identity) {
+                    predicates.push(Expr::InSelect {
+                        expr: Box::new(Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
+                        query: Box::new(keys),
+                    });
+                }
+                if let Some(range) = &node.id_range {
+                    predicates.push(id_range_predicate(&node.id, range));
+                }
+                let narrowed = !predicates.is_empty();
+                let scan = if narrowed {
                     predicates.push(deleted_false(&node.id));
                     TableRef::subquery(
                         Query {
@@ -322,6 +327,8 @@ fn enforce_return_columns(
                         },
                         &node.id,
                     )
+                } else {
+                    TableRef::scan_final(table, &node.id)
                 };
                 q.from = TableRef::join(
                     JoinType::Inner,
@@ -329,7 +336,7 @@ fn enforce_return_columns(
                     scan,
                     Expr::eq(identity.clone(), Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
                 );
-                if node.filters.is_empty() {
+                if !narrowed {
                     q.where_clause = Some(match q.where_clause.take() {
                         Some(existing) => Expr::and(existing, deleted_false(&node.id)),
                         None => deleted_false(&node.id),
@@ -388,4 +395,70 @@ fn enforce_return_columns(
         }
     }
     Ok(())
+}
+
+// Without FINAL the scan keeps every live edge row, so its keys are a superset.
+fn keyed_edge_ids(q: &Query, identity: &Expr) -> Option<Query> {
+    let Expr::Column { table: edge, .. } = identity else {
+        return None;
+    };
+    let mut edge_scan = None;
+    visit_relations(&q.from, &mut |relation| {
+        if let TableRef::Scan { alias, .. } = relation
+            && alias == edge
+        {
+            edge_scan = Some(relation.clone());
+        }
+    });
+    let mut edge_scan = edge_scan?;
+    if let TableRef::Scan { final_, .. } = &mut edge_scan {
+        *final_ = false;
+    }
+
+    let conditions: Vec<Expr> = conjuncts(q.where_clause.as_ref()?)
+        .into_iter()
+        .filter(|condition| {
+            column_refs(condition)
+                .iter()
+                .all(|(table, _)| *table == edge.as_str())
+        })
+        .cloned()
+        .collect();
+    let keyed = conditions.iter().any(|condition| {
+        column_refs(condition)
+            .iter()
+            .any(|(_, column)| [SOURCE_ID_COLUMN, TARGET_ID_COLUMN].contains(column))
+    });
+    keyed.then(|| Query {
+        select: vec![SelectExpr::new(identity.clone(), DEFAULT_PRIMARY_KEY)],
+        from: edge_scan,
+        where_clause: Expr::conjoin(conditions),
+        ..Default::default()
+    })
+}
+
+fn conjuncts(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::BinaryOp {
+            op: Op::And,
+            left,
+            right,
+        } => {
+            let mut all = conjuncts(left);
+            all.extend(conjuncts(right));
+            all
+        }
+        _ => vec![expr],
+    }
+}
+
+fn column_refs(expr: &Expr) -> Vec<(&str, &str)> {
+    let mut refs = Vec::new();
+    let _ = visit_expressions(expr, &mut |expr| {
+        if let Expr::Column { table, column } = expr {
+            refs.push((table.as_str(), column.as_str()));
+        }
+        Ok(())
+    });
+    refs
 }
