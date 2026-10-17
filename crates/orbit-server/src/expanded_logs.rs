@@ -4,14 +4,13 @@ use std::sync::LazyLock;
 use labkit::fields::{GL_ORGANIZATION_ID, GL_PROJECT_ID, GL_ROOT_NAMESPACE_ID};
 use labkit::verbose_logs::{ExpandedLogsPolicy, SpanFacts, VerboseLogsConfig};
 use orbit_server_config::ExpandedLogsConfig;
+use orbit_utils::traversal_path::TraversalPath;
 use tracing_subscriber::EnvFilter;
 
 const TRAVERSAL_PATH: &str = "traversal_path";
 const EXPANDED_LOGS_REQUESTED: &str = "expanded_logs_requested";
 const USER_ID: &str = "user_id";
 
-/// The minimal safe list until the log field registry lands: the IDs that the
-/// request span and the indexer spans record.
 const SAFE_FIELDS: &[&str] = &[
     GL_ROOT_NAMESPACE_ID,
     GL_ORGANIZATION_ID,
@@ -21,20 +20,17 @@ const SAFE_FIELDS: &[&str] = &[
     EXPANDED_LOGS_REQUESTED,
 ];
 
-/// When the Rails feature flag `gkg_verbose_logs` is on, Rails sends the
-/// `verbose_gkg_logs` token in this header on every GitLab.com request.
+/// Rails sends this token when its `gkg_verbose_logs` feature flag is on.
 pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
     VerboseLogsConfig::default()
         .with_feature_flags_header("x-gitlab-enabled-feature-flags")
         .with_target_feature_flag("verbose_gkg_logs")
 });
 
-/// rust-analyzer crates put crate names and paths of the parsed repository in
-/// their messages, and the policy cannot filter messages.
 const MESSAGE_LEAKING_TARGET: &str = "ra_ap";
 
-/// EnvFilter applies the most specific directive, so a configured
-/// `ra_ap_hir_ty=warn` would win over `ra_ap=off`.
+/// rust-analyzer writes names from the parsed repository into its messages. EnvFilter
+/// prefers the most specific directive, so configured `ra_ap*` directives are dropped.
 pub fn log_directive(configured: Option<&str>) -> String {
     let base = configured
         .filter(|directive| !directive.is_empty())
@@ -54,8 +50,7 @@ fn valid_rust_log() -> Option<String> {
         .filter(|directive| EnvFilter::try_new(directive).is_ok())
 }
 
-/// The default hook prints the panic message to stderr, and a parser panic
-/// message can hold source text of the parsed file.
+/// The default hook prints the panic text, which can hold parsed source code, to stderr.
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info.location().map(ToString::to_string);
@@ -79,8 +74,7 @@ fn is_requested(facts: &SpanFacts<'_>) -> bool {
     facts.get_bool(EXPANDED_LOGS_REQUESTED) == Some(true)
 }
 
-/// Spans can name the tenant twice, by ID and by traversal path. Both must be
-/// internal, so a customer path inside an internal span is not expanded.
+/// A customer path inside an internal span must not be expanded.
 fn is_internal_tenant(facts: &SpanFacts<'_>, internal: &HashSet<u64>) -> bool {
     let by_id = facts.get_u64(GL_ROOT_NAMESPACE_ID);
     let by_path = facts.get_str(TRAVERSAL_PATH);
@@ -89,14 +83,14 @@ fn is_internal_tenant(facts: &SpanFacts<'_>, internal: &HashSet<u64>) -> bool {
     }
     let is_internal = |id: u64| internal.contains(&id);
     let id_is_internal = by_id.is_none_or(is_internal);
-    let path_is_internal = by_path
-        .is_none_or(|path| root_namespace_id_from_traversal_path(path).is_some_and(is_internal));
+    let path_is_internal =
+        by_path.is_none_or(|path| root_namespace_id(path).is_some_and(is_internal));
     id_is_internal && path_is_internal
 }
 
-/// A traversal path is `<org_id>/<root_namespace_id>/...`.
-fn root_namespace_id_from_traversal_path(traversal_path: &str) -> Option<u64> {
-    traversal_path.split('/').nth(1)?.parse().ok()
+fn root_namespace_id(traversal_path: &str) -> Option<u64> {
+    let id = TraversalPath::new_unchecked(traversal_path).top_level_namespace_id()?;
+    u64::try_from(id).ok()
 }
 
 #[cfg(test)]
