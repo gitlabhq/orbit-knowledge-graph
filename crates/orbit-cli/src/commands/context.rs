@@ -79,13 +79,54 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         crate::remote::origin::project(&dir)
             .is_none_or(|(_, origin)| origin.trim_end_matches('/') != repo.trim_end_matches('/'))
     });
+    let origin_group = crate::remote::origin::project(&dir)
+        .map(|(_, project)| project.split('/').next().unwrap_or_default().to_string());
+    let mut remote_code: Vec<(Option<String>, crate::remote::code::Code)> = Vec::new();
     for (code, value) in code_targets {
-        if !other_project {
-            targets.push(value);
+        match other_project {
+            true => remote_code.push((None, code)),
+            false => targets.push(value),
+        }
+    }
+    let mut kept = Vec::new();
+    for target in targets {
+        if !looks_like_path(&target) || exists_locally(&dir, &target) {
+            kept.push(target);
             continue;
         }
+        if other_project {
+            remote_code.push((None, crate::remote::code::Code::parse("file", &target)));
+            continue;
+        }
+        let in_group = origin_group
+            .as_deref()
+            .is_some_and(|group| target.starts_with(&format!("{group}/")));
+        if in_group {
+            gitlab_project(&dir, &repo, &mut origin, &mut client, &target)?;
+            let found_client = client.as_ref().expect("gitlab_project sets the client");
+            let file = crate::remote::code::Code::parse("file", &target);
+            let crate::remote::code::Code::File { path, lines } = file else {
+                unreachable!("file targets parse as files")
+            };
+            if let Some((project, path)) =
+                crate::remote::code::split_project_path(found_client, &path).await
+            {
+                remote_code.push((
+                    Some(project),
+                    crate::remote::code::Code::File { path, lines },
+                ));
+                continue;
+            }
+        }
+        kept.push(target);
+    }
+    let targets = kept;
+    for (project, code) in remote_code {
         let what = code.to_string();
-        let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &what)?;
+        let project = match project {
+            Some(project) => project,
+            None => gitlab_project(&dir, &repo, &mut origin, &mut client, &what)?,
+        };
         let found_client = client.as_ref().expect("gitlab_project sets the client");
         match crate::remote::code::read(found_client, &project, &code).await {
             Ok(text) => sdlc_notes.push_str(&text),
@@ -212,6 +253,9 @@ fn qualify(target: &str) -> Option<Qualified> {
     let qualified = match (name.to_ascii_lowercase().as_str(), number) {
         ("mr" | "mrs" | "pr", Some(iid)) => Qualified::Target(format!("!{iid}")),
         ("mr" | "mrs" | "pr", None) if value.contains('!') => Qualified::Target(value.into()),
+        ("mr" | "mrs" | "pr", None) => Qualified::Sdlc(Target::Branch(
+            value.strip_prefix("branch:").unwrap_or(value).into(),
+        )),
         ("issue" | "issues", Some(iid)) => Qualified::Target(format!("#{iid}")),
         ("issue" | "issues", None) if value.contains('#') => Qualified::Target(value.into()),
         ("branch", _) => Qualified::Sdlc(Target::Branch(value.into())),
@@ -225,6 +269,35 @@ fn qualify(target: &str) -> Option<Qualified> {
         _ => return None,
     };
     Some(qualified)
+}
+
+/// Whether a target names a file: it has a directory or an extension and is not a GitLab reference.
+fn looks_like_path(target: &str) -> bool {
+    let path = strip_range(target);
+    !path.contains(['!', '#', '[', ' '])
+        && (path.contains('/')
+            || std::path::Path::new(path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    ext.len() <= 6
+                        && ext
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                }))
+}
+
+fn strip_range(target: &str) -> &str {
+    match target.rsplit_once(':') {
+        Some((path, range)) if range.chars().all(|c| c.is_ascii_digit() || c == '-') => path,
+        _ => target,
+    }
+}
+
+fn exists_locally(dir: &std::path::Path, target: &str) -> bool {
+    let path = strip_range(target);
+    dir.join(path).exists()
+        || crate::workspace::git_toplevel(dir).is_ok_and(|root| root.join(path).exists())
 }
 
 /// Bare `pipeline`, `ci`, or `pipeline:latest`: the current branch's MR and CI, which is what agents
@@ -949,6 +1022,18 @@ mod tests {
     }
 
     #[test]
+    fn paths_are_told_apart_from_names_and_references() {
+        assert!(looks_like_path("g/lib/a.go:10-20"));
+        assert!(looks_like_path("README.md"));
+        assert!(!looks_like_path("run_grep"));
+        assert!(!looks_like_path("policy.New"));
+        assert!(!looks_like_path("g/p!42"));
+        assert!(!looks_like_path("Definition[5]"));
+        assert_eq!(strip_range("a/b.rb:1-131"), "a/b.rb");
+        assert_eq!(strip_range("a/b.rb"), "a/b.rb");
+    }
+
+    #[test]
     fn bare_ci_words_mean_the_current_branch() {
         for word in ["pipeline", "CI", "pipeline:latest", "jobs"] {
             assert!(is_current_ci(word), "{word}");
@@ -980,6 +1065,16 @@ mod tests {
             code("file", "src/a.rs:10-40")
         );
         assert_eq!(
+            qualify("mr:fix/docker-platform"),
+            Some(Qualified::Sdlc(Target::Branch(
+                "fix/docker-platform".into()
+            )))
+        );
+        assert_eq!(
+            qualify("mr:branch:260456-fix"),
+            Some(Qualified::Sdlc(Target::Branch("260456-fix".into())))
+        );
+        assert_eq!(
             qualify("branch:aa/fix-ci"),
             Some(Qualified::Sdlc(Target::Branch("aa/fix-ci".into())))
         );
@@ -1001,7 +1096,6 @@ mod tests {
             "Definition:7",
             "MergeRequest:42",
             "commit:main",
-            "mr:x",
         ] {
             assert_eq!(qualify(literal), None, "{literal}");
         }

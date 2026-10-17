@@ -233,7 +233,29 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
-        let response = self.send_authenticated(request).await?;
+        let mut pending = Some(request);
+        let mut attempt = 0;
+        let response = loop {
+            attempt += 1;
+            let current = pending.take().expect("a request remains");
+            pending = current.try_clone().filter(|_| attempt < SEND_ATTEMPTS);
+            match self.send_raw(current).await {
+                Ok(response)
+                    if pending.is_some()
+                        && TRANSIENT_STATUSES.contains(&response.status().as_u16()) => {}
+                Ok(response) => break response,
+                Err(error)
+                    if pending.is_some()
+                        && (error.is_connect() || error.is_timeout() || error.is_request()) => {}
+                Err(error) => {
+                    return Err(RemoteError::new(
+                        EXIT_GENERIC,
+                        request_failure_message("Orbit request", &error),
+                    ));
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
+        };
         let status = response.status();
         if !status.is_success() {
             let retry_after = response
@@ -254,6 +276,15 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
+        self.send_raw(request)
+            .await
+            .map_err(|e| RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e)))
+    }
+
+    async fn send_raw(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> reqwest::Result<reqwest::Response> {
         let request_id = crate::telemetry::invocation_id();
         let session_id = agent_session_id();
         let mut builder = request
@@ -266,9 +297,7 @@ impl OrbitClient {
         if let Some(session_id) = &session_id {
             builder = builder.header("X-Orbit-Session-Id", session_id);
         }
-        builder.send().await.map_err(|e| {
-            RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e))
-        })
+        builder.send().await
     }
 }
 
@@ -298,6 +327,22 @@ struct CredentialHelperToken {
     token: String,
 }
 
+/// Request attempts for connection failures, timeouts, and gateway errors.
+const SEND_ATTEMPTS: u64 = 3;
+const TRANSIENT_STATUSES: &[u16] = &[502, 503, 504];
+
+/// Hosts that never leave the machine or a private network, where plain http is expected.
+fn is_local_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host == "localhost"
+        || [".localhost", ".test", ".local", ".internal"]
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 fn resolve_endpoint(
     get_env: impl Fn(&str) -> Option<String>,
     credential_helper: impl FnOnce() -> Option<ResolvedEndpoint>,
@@ -321,7 +366,7 @@ fn resolve_endpoint(
         let base_url =
             non_empty("GITLAB_URL").unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
         let url = validate_base_url("GITLAB_URL", &base_url)?;
-        if url.scheme() == "http" {
+        if url.scheme() == "http" && !url.host_str().is_some_and(is_local_host) {
             eprintln!(
                 "warning: GITLAB_URL is not https ({base_url}); the token will be sent in plaintext"
             );
@@ -473,6 +518,22 @@ async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_http_warns_only_for_hosts_that_leave_the_network() {
+        for host in [
+            "gitlab.caproni.test",
+            "localhost",
+            "gdk.localhost",
+            "127.0.0.1",
+            "ci.internal",
+        ] {
+            assert!(is_local_host(host), "{host}");
+        }
+        for host in ["gitlab.com", "gitlab.example.org", "10.0.0.5"] {
+            assert!(!is_local_host(host), "{host}");
+        }
+    }
+
     use super::*;
     use std::collections::HashMap;
 

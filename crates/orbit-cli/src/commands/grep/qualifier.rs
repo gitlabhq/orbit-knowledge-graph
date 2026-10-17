@@ -133,13 +133,44 @@ pub(super) fn parse(query: &str) -> Option<Parsed> {
     Some(parsed)
 }
 
+/// Whether an argument is a qualifier such as `is:def` or `repo:g/p` rather than a path.
+fn is_qualifier(word: &str) -> bool {
+    let Some((name, value)) = word.split_once(':') else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    !value.is_empty()
+        && [KINDS, SYMBOLS, FILES, LANGUAGES, EXTENSIONS, TARGETS]
+            .iter()
+            .any(|names| names.contains(&name.as_str()))
+}
+
+/// Agents often write `orbit grep 'words' is:def`, with the qualifier outside the quotes. Such
+/// arguments join the query unless a path by that name exists.
+fn absorb_trailing(query: Option<String>, paths: &mut Vec<String>) -> Option<String> {
+    let (qualifiers, rest): (Vec<String>, Vec<String>) = std::mem::take(paths)
+        .into_iter()
+        .partition(|path| is_qualifier(path) && !std::path::Path::new(path).exists());
+    *paths = rest;
+    if qualifiers.is_empty() {
+        return query;
+    }
+    let mut words: Vec<String> = query.into_iter().collect();
+    words.extend(qualifiers);
+    Some(words.join(" "))
+}
+
 pub(super) fn apply(
     query: Option<String>,
     kinds: &mut Vec<String>,
     options: &mut Options,
     paths: &mut Vec<String>,
 ) -> Option<String> {
-    let Some(text) = query.as_deref().filter(|_| !options.fixed) else {
+    if options.fixed {
+        return query;
+    }
+    let query = absorb_trailing(query, paths);
+    let Some(text) = query.as_deref() else {
         return query;
     };
     let Some(parsed) = parse(text) else {
@@ -158,6 +189,26 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualifiers_after_the_query_join_it() {
+        let mut paths = vec![
+            "is:def".to_string(),
+            "src/".to_string(),
+            "repo:g/p".to_string(),
+        ];
+        assert_eq!(
+            absorb_trailing(Some("diff_stats".into()), &mut paths).as_deref(),
+            Some("diff_stats is:def repo:g/p")
+        );
+        assert_eq!(paths, ["src/"]);
+        let mut plain = vec!["src/a.rs".to_string(), "note:x".to_string()];
+        assert_eq!(
+            absorb_trailing(Some("x".into()), &mut plain).as_deref(),
+            Some("x")
+        );
+        assert_eq!(plain, ["src/a.rs", "note:x"]);
+    }
 
     fn strings(list: &[&str]) -> Vec<String> {
         list.iter().map(|item| item.to_string()).collect()

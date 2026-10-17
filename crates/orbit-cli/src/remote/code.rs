@@ -56,6 +56,27 @@ impl std::fmt::Display for Code {
     }
 }
 
+/// Splits `group/project/dir/file` into its project and file path by asking GitLab which prefix is a
+/// project, shortest first. This is the form `orbit grep` prints for sibling projects' code.
+pub(crate) async fn split_project_path(
+    client: &OrbitClient,
+    path: &str,
+) -> Option<(String, String)> {
+    let parts: Vec<&str> = path.split('/').collect();
+    for end in 2..parts.len().min(MAX_PROJECT_DEPTH + 1) {
+        let project = parts[..end].join("/");
+        let found = client
+            .get_api(&format!("projects/{}", project.replace('/', "%2F")), &[])
+            .await;
+        if found.is_ok() {
+            return Some((project, parts[end..].join("/")));
+        }
+    }
+    None
+}
+
+const MAX_PROJECT_DEPTH: usize = 5;
+
 fn error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(EXIT_GENERIC, message.into())
 }
