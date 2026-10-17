@@ -1,20 +1,22 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use labkit::fields::{GL_ORGANIZATION_ID, GL_PROJECT_ID, GL_ROOT_NAMESPACE_ID, GL_USER_ID};
+use labkit::fields::{GL_ORGANIZATION_ID, GL_PROJECT_ID, GL_ROOT_NAMESPACE_ID};
 use labkit::verbose_logs::{ExpandedLogsPolicy, SpanFacts, VerboseLogsConfig};
 use orbit_server_config::ExpandedLogsConfig;
+use tracing_subscriber::EnvFilter;
 
 const TRAVERSAL_PATH: &str = "traversal_path";
 const EXPANDED_LOGS_REQUESTED: &str = "expanded_logs_requested";
+const USER_ID: &str = "user_id";
 
-/// Until log calls name their fields from a reviewed list, only the fields that
-/// the predicate and the request span need are safe.
+/// The minimal safe list until the log field registry lands: the IDs that the
+/// request span and the indexer spans record.
 const SAFE_FIELDS: &[&str] = &[
     GL_ROOT_NAMESPACE_ID,
     GL_ORGANIZATION_ID,
     GL_PROJECT_ID,
-    GL_USER_ID,
+    USER_ID,
     TRAVERSAL_PATH,
     EXPANDED_LOGS_REQUESTED,
 ];
@@ -29,15 +31,27 @@ pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
 
 /// rust-analyzer crates put crate names and paths of the parsed repository in
 /// their messages, and the policy cannot filter messages.
-const MESSAGE_LEAKING_TARGETS: &str = "ra_ap=off";
+const MESSAGE_LEAKING_TARGET: &str = "ra_ap";
 
+/// EnvFilter applies the most specific directive, so a configured
+/// `ra_ap_hir_ty=warn` would win over `ra_ap=off`.
 pub fn log_directive(configured: Option<&str>) -> String {
     let base = configured
         .filter(|directive| !directive.is_empty())
         .map(str::to_owned)
-        .or_else(|| std::env::var("RUST_LOG").ok())
+        .or_else(valid_rust_log)
         .unwrap_or_else(|| "info".to_owned());
-    format!("{base},{MESSAGE_LEAKING_TARGETS}")
+    let kept: Vec<&str> = base
+        .split(',')
+        .filter(|directive| !directive.trim_start().starts_with(MESSAGE_LEAKING_TARGET))
+        .collect();
+    format!("{},{MESSAGE_LEAKING_TARGET}=off", kept.join(","))
+}
+
+fn valid_rust_log() -> Option<String> {
+    std::env::var(EnvFilter::DEFAULT_ENV)
+        .ok()
+        .filter(|directive| EnvFilter::try_new(directive).is_ok())
 }
 
 /// The default hook prints the panic message to stderr, and a parser panic
@@ -69,14 +83,15 @@ fn is_requested(facts: &SpanFacts<'_>) -> bool {
 /// internal, so a customer path inside an internal span is not expanded.
 fn is_internal_tenant(facts: &SpanFacts<'_>, internal: &HashSet<u64>) -> bool {
     let by_id = facts.get_u64(GL_ROOT_NAMESPACE_ID);
-    let by_path = facts
-        .get_str(TRAVERSAL_PATH)
-        .map(root_namespace_id_from_traversal_path);
-    let roots: Vec<Option<u64>> = by_id.map(Some).into_iter().chain(by_path).collect();
-    !roots.is_empty()
-        && roots
-            .iter()
-            .all(|root| root.is_some_and(|id| internal.contains(&id)))
+    let by_path = facts.get_str(TRAVERSAL_PATH);
+    if by_id.is_none() && by_path.is_none() {
+        return false;
+    }
+    let is_internal = |id: u64| internal.contains(&id);
+    let id_is_internal = by_id.is_none_or(is_internal);
+    let path_is_internal = by_path
+        .is_none_or(|path| root_namespace_id_from_traversal_path(path).is_some_and(is_internal));
+    id_is_internal && path_is_internal
 }
 
 /// A traversal path is `<org_id>/<root_namespace_id>/...`.
@@ -211,6 +226,19 @@ mod tests {
         let logs = capture_with_filter(&config(true, vec![]), filter, || {
             tracing::error!(target: "ra_ap_hir_def::attrs", "unknown crate acme_secret");
             tracing::error!(target: "orbit_server", "kept");
+        });
+
+        assert!(!logs.contains("acme_secret"), "{logs}");
+        assert!(logs.contains("kept"), "{logs}");
+    }
+
+    #[test]
+    fn configured_rust_analyzer_directive_does_not_reenable_its_lines() {
+        let filter =
+            tracing_subscriber::EnvFilter::new(log_directive(Some("info,ra_ap_hir_ty=warn")));
+        let logs = capture_with_filter(&config(true, vec![]), filter, || {
+            tracing::warn!(target: "ra_ap_hir_ty::x", "unknown crate acme_secret");
+            tracing::info!(target: "orbit_server", "kept");
         });
 
         assert!(!logs.contains("acme_secret"), "{logs}");

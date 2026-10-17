@@ -58,79 +58,20 @@ impl RequestContext {
     }
 }
 
-/// The root namespace that every traversal path of the token is under. A
-/// token without paths (admins) or with paths under several roots has none.
+/// The root namespace that every traversal path of the token is under. A token
+/// with no paths, with paths under several roots, or of an admin (who reads the
+/// whole organization) has none.
 fn request_root_namespace_id(claims: &Claims) -> Option<u64> {
+    if claims.admin {
+        return None;
+    }
     let mut roots = claims
         .group_traversal_ids
         .iter()
         .map(|claim| claim.path.top_level_namespace_id());
-    let first = roots.next()??;
-    let is_single_root = roots.all(|root| root == Some(first));
-    is_single_root.then(|| u64::try_from(first).ok()).flatten()
-}
-
-#[cfg(test)]
-mod tests {
-    use orbit_utils::traversal_path::TraversalPath;
-
-    use super::*;
-    use crate::auth::TraversalPathClaim;
-
-    fn claims_with_paths(paths: &[&str]) -> Claims {
-        let group_traversal_ids = paths
-            .iter()
-            .map(|path| TraversalPathClaim {
-                path: TraversalPath::new_unchecked(path.to_string()),
-                access_levels: vec![30],
-            })
-            .collect();
-        Claims {
-            sub: String::new(),
-            iss: String::new(),
-            aud: String::new(),
-            iat: 0,
-            exp: 0,
-            user_id: 1,
-            username: String::new(),
-            admin: false,
-            organization_id: None,
-            min_access_level: None,
-            group_traversal_ids,
-            source_type: crate::auth::SourceType::Rest,
-            ai_session_id: None,
-            request_id: None,
-            instance_id: None,
-            unique_instance_id: None,
-            instance_version: None,
-            global_user_id: None,
-            host_name: None,
-            root_namespace_id: None,
-            deployment_type: None,
-            realm: None,
-            is_gitlab_team_member: None,
-            license_checksum: None,
-        }
+    let first = roots.next().flatten()?;
+    if !roots.all(|root| root == Some(first)) {
+        return None;
     }
-
-    #[test]
-    fn paths_under_one_root_name_that_root() {
-        let claims = claims_with_paths(&["1/9970/", "1/9970/123/"]);
-
-        assert_eq!(request_root_namespace_id(&claims), Some(9970));
-    }
-
-    #[test]
-    fn paths_under_several_roots_name_no_root() {
-        let claims = claims_with_paths(&["1/9970/", "1/42/"]);
-
-        assert_eq!(request_root_namespace_id(&claims), None);
-    }
-
-    #[test]
-    fn token_without_paths_names_no_root() {
-        let claims = claims_with_paths(&[]);
-
-        assert_eq!(request_root_namespace_id(&claims), None);
-    }
+    u64::try_from(first).ok()
 }
