@@ -4,7 +4,8 @@ use std::time::Duration;
 use crate::active_schema::SchemaSnapshot;
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
-use crate::proto::{ExecuteQueryMessage, ExecuteQueryResult};
+use crate::proto::ExecuteQueryMessage;
+use crate::proto::execute_query_message::Content;
 use clickhouse_client::ArrowClickHouseClient;
 use orbit_billing::{BillingObserver, BillingTracker};
 use orbit_server_config::AnalyticsConfig;
@@ -87,7 +88,7 @@ impl QueryPipelineService {
         query: RawQuery,
         tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
-        render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
+        render: impl FnOnce(QueryServiceOutput) -> Result<Vec<Content>, PipelineError>,
     ) -> Result<(), PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
@@ -193,7 +194,7 @@ impl QueryPipelineService {
 async fn deliver(
     responses: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     output: QueryServiceOutput,
-    render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
+    render: impl FnOnce(QueryServiceOutput) -> Result<Vec<Content>, PipelineError>,
 ) -> Result<Option<(usize, usize)>, PipelineError> {
     let counts = match &output {
         QueryServiceOutput::Graph(output) => Some((output.row_count, output.redacted_count)),

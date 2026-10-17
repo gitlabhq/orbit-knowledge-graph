@@ -40,7 +40,7 @@ impl GrpcServer {
             active_schema,
             client,
             cluster_health,
-            grpc_config.stream_timeout_secs,
+            &grpc_config,
             analytics_config,
         );
         Self {
