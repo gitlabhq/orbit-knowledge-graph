@@ -199,13 +199,14 @@ impl<'a> DynamicNodeColumns<'a> {
                 ids: column(batch, neighbor_id_column())?,
                 types: column(batch, neighbor_type_column())?,
             }),
-            _ => Ok(Self::Paths(
+            Some(QueryType::Traversal) => Ok(Self::Paths(
                 ctx.edges()
                     .iter()
                     .filter_map(|edge| edge.path_column.as_deref())
                     .map(|name| column(batch, name))
                     .collect::<Result<_, _>>()?,
             )),
+            _ => Ok(Self::Paths(Vec::new())),
         }
     }
 
