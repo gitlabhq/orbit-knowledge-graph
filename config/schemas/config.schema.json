@@ -1338,7 +1338,8 @@
         "result_chunk_bytes": {
           "type": "integer",
           "format": "uint",
-          "minimum": 0
+          "minimum": 65536,
+          "maximum": 4194304
         }
       },
       "additionalProperties": false,

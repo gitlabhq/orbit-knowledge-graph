@@ -120,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Mode::Webserver => {
             config.schema.validate()?;
+            config.grpc.validate()?;
             run_webserver(&config, active_schema, serving, shutdown.clone()).await
         }
     };
