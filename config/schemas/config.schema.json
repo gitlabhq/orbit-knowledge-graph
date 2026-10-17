@@ -666,38 +666,14 @@
           "format": "uint64",
           "minimum": 0
         },
-        "write_channel_capacity": {
-          "description": "In-flight batches the streaming sink holds before back-pressuring the parser.",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0
-        },
         "write_slice_rows": {
           "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending.",
           "type": "integer",
           "format": "uint",
           "minimum": 0
         },
-        "write_buffer_age_secs": {
-          "description": "Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
-        "write_min_flush_rows": {
-          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached.",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0
-        },
-        "write_max_flush_age_secs": {
-          "description": "Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
         "write_max_concurrent": {
-          "description": "Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput.",
+          "description": "Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory. Keep it at or above the number of code tables, so a small job sends every table's insert at once.",
           "type": "integer",
           "format": "uint",
           "minimum": 0
@@ -752,11 +728,7 @@
         "archive_tenant_budget",
         "archive_lease_ttl_secs",
         "archive_lease_max_wait_secs",
-        "write_channel_capacity",
         "write_slice_rows",
-        "write_buffer_age_secs",
-        "write_min_flush_rows",
-        "write_max_flush_age_secs",
         "write_max_concurrent",
         "small_repo_max_files"
       ]

@@ -60,7 +60,6 @@ async fn index_once(
     let deps = CodeIndexingDeps::new_with_pipeline_config(&mock, &clickhouse, pipeline_config);
     let handler = deps.code_indexing_task_handler();
     let outcome = handler.handle(handler_context(), backfill_envelope()).await;
-    let _ = handler.flush().await;
     (outcome, project_indexed(&clickhouse).await)
 }
 

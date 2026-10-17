@@ -137,12 +137,8 @@ engine:
         archive_tenant_budget: 8
         archive_lease_ttl_secs: 30
         archive_lease_max_wait_secs: 30
-        write_channel_capacity: 8
         write_slice_rows: 1000000
-        write_buffer_age_secs: 60
-        write_min_flush_rows: 10000
-        write_max_flush_age_secs: 120
-        write_max_concurrent: 4
+        write_max_concurrent: 8
         small_repo_max_files: 650
         # small_indexing_slots: 6  # unset = derived from container CPU count and memory limit
         # big_indexing_slots: 2    # unset = derived from container CPU count and memory limit
