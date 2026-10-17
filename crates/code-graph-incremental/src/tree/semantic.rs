@@ -68,10 +68,6 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_dispatch_contract(self) -> bool {
         self.has(C::Trait) || self.has(C::Interface)
     }
-    pub fn fills(self, role: Role, callable: u32) -> bool {
-        crate::canonical::def_type_of(self).is_some_and(|kind| kind.fills(role))
-            || (role == Role::Callable && self.has_tag(callable))
-    }
     pub fn role(self) -> Role {
         let call = match self.is(C::Callee) {
             true => self.parent(),
@@ -89,7 +85,8 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
             if up.index() == owner.index() {
                 return true;
             }
-            if up.is(C::Scope) || !(up.has(C::ImplBlock) || std::mem::take(&mut header)) {
+            let header = std::mem::take(&mut header);
+            if up.is(C::Scope) || !(up.has(C::ImplBlock) || header) {
                 return false;
             }
             node = up;
@@ -218,24 +215,30 @@ pub enum Role {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Slots {
     first: u32,
-    exact: [Option<(u32, bool)>; 2],
+    value: Option<(u32, u8)>,
+    callable: Option<(u32, u8)>,
 }
 
 impl Slots {
     pub fn get(self, role: Role) -> Option<u32> {
-        match role {
-            Role::Any => Some(self.first),
-            role => self.exact[role as usize].map(|(def, _)| def),
-        }
+        let slot = match role {
+            Role::Any => return Some(self.first),
+            Role::Value => self.value,
+            Role::Callable => self.callable,
+        };
+        slot.map(|(def, _)| def)
     }
-    pub fn pick(self, role: Role) -> u32 {
-        self.get(role).unwrap_or(self.first)
-    }
-    fn fill(&mut self, def: u32, fills: [bool; 2]) {
-        let exact = fills[0] != fills[1];
-        for (slot, has) in self.exact.iter_mut().zip(fills) {
-            if has && slot.is_none_or(|(_, was_exact)| exact && !was_exact) {
-                *slot = Some((def, exact));
+    fn fill(&mut self, def: u32, kind: C, tagged: bool) {
+        let (value, callable) = (kind.fills(Role::Value), kind.fills(Role::Callable));
+        let ranks = [
+            value.then_some(callable as u8),
+            callable.then_some(value as u8).or(tagged.then_some(2)),
+        ];
+        for (slot, rank) in [(&mut self.value, ranks[0]), (&mut self.callable, ranks[1])] {
+            if let Some(rank) = rank
+                && slot.is_none_or(|(_, held)| rank < held)
+            {
+                *slot = Some((def, rank));
             }
         }
     }
@@ -243,7 +246,7 @@ impl Slots {
 
 pub type MemberIndex = rustc_hash::FxHashMap<u32, Slots>;
 
-pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberIndex {
+pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>, callable: u32) -> MemberIndex {
     let nested = |node: Cursor<'_, S>| node.is_class() && !node.has(C::ImplBlock);
     let mut index = MemberIndex::default();
     for def in owner
@@ -260,10 +263,7 @@ pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>) -> MemberInde
         if def.is_member_of(owner)
             && let Some(kind) = crate::canonical::def_type_of(def)
         {
-            slots.fill(
-                def.index(),
-                [Role::Value, Role::Callable].map(|role| kind.fills(role)),
-            );
+            slots.fill(def.index(), kind, def.has_tag(callable));
         }
     }
     index
