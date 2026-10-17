@@ -212,8 +212,23 @@ impl OrbitClient {
         builder
             .send()
             .await
-            .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("Orbit request failed: {e}")))
+            .map_err(|e| RemoteError::new(EXIT_GENERIC, request_failure_message(&e)))
     }
+}
+
+/// `reqwest::Error`'s Display omits its source chain, so a timeout and a
+/// refused connection would otherwise read the same.
+fn request_failure_message(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return format!("Orbit request timed out: {error}");
+    }
+    let mut message = format!("Orbit request failed: {error}");
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        message.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    message
 }
 
 #[derive(Deserialize)]
@@ -374,6 +389,53 @@ async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> 
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn unresponsive_host_reports_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url: base_url.clone(),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+
+        let error = client
+            .send_authenticated(
+                client
+                    .http
+                    .get(&base_url)
+                    .timeout(Duration::from_millis(100)),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("timed out"), "{error}");
+        drop(listener);
+    }
+
+    #[tokio::test]
+    async fn refused_connection_includes_cause() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url: base_url.clone(),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+
+        let error = client
+            .send_authenticated(client.http.get(&base_url))
+            .await
+            .unwrap_err();
+
+        let message = error.to_string();
+        assert!(!message.contains("timed out"), "{message}");
+        assert!(message.contains("onnect"), "{message}");
+    }
 
     fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: HashMap<String, String> = pairs
