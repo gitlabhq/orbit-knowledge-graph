@@ -68,27 +68,35 @@ where
                 Direction::Outgoing | Direction::Both => (from_entity, to_entity),
                 Direction::Incoming => (to_entity, from_entity),
             };
-            let mut edge_tables = match relationship.direction {
-                Direction::Outgoing => {
-                    model.relationship_tables_between(&relationship.types, from_entity, to_entity)
-                }
-                Direction::Incoming => {
-                    model.relationship_tables_between(&relationship.types, to_entity, from_entity)
-                }
-                Direction::Both => {
-                    let mut tables = model.relationship_tables_between(
+            let mut edge_tables = if relationship.hops.max > 1 {
+                model.relationship_tables(&relationship.types)
+            } else {
+                match relationship.direction {
+                    Direction::Outgoing => model.relationship_tables_between(
                         &relationship.types,
                         from_entity,
                         to_entity,
-                    );
-                    tables.extend(model.relationship_tables_between(
+                    ),
+                    Direction::Incoming => model.relationship_tables_between(
                         &relationship.types,
                         to_entity,
                         from_entity,
-                    ));
-                    tables.sort();
-                    tables.dedup();
-                    tables
+                    ),
+                    Direction::Both => {
+                        let mut tables = model.relationship_tables_between(
+                            &relationship.types,
+                            from_entity,
+                            to_entity,
+                        );
+                        tables.extend(model.relationship_tables_between(
+                            &relationship.types,
+                            to_entity,
+                            from_entity,
+                        ));
+                        tables.sort();
+                        tables.dedup();
+                        tables
+                    }
                 }
             };
             if edge_tables.is_empty() {

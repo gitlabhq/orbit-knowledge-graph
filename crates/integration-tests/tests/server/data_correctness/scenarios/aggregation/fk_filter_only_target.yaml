@@ -19,6 +19,6 @@ query:
 expect:
   row_count: 1
   row_values: [{ c: 4 }]
-  sql_contains: ["_orbit_relation_1", "_orbit_edge_0.target_id IN"]
+  sql_contains: ["gl_project AS p FINAL", "p.name = 'Public Project'", "mr.project_id IN (SELECT id FROM _orbit_relation_"]
   sql_not_contains: ["gl_edge"]
   skip_requirements: ["filter:name"]

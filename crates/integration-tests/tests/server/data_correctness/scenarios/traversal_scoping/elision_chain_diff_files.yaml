@@ -16,6 +16,8 @@ config:
       - { id: 7310, merge_request_id: 7110, merge_request_diff_id: 7210, project_id: 7010, new_path: "a.rs", traversal_path: "1/701/7010/" }
       - { id: 7311, merge_request_id: 7110, merge_request_diff_id: 7210, project_id: 7010, new_path: "b.rs", traversal_path: "1/701/7010/" }
       - { id: 7312, merge_request_id: 7111, merge_request_diff_id: 7211, project_id: 7010, new_path: "c.rs", traversal_path: "1/701/7010/" }
+    gl_edge:
+      - { source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7010, target_kind: Project, traversal_path: "1/701/" }
   redaction:
     allow:
       user: [1, 2, 3, 4, 5, 6, 7]
@@ -52,8 +54,7 @@ query:
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g701'"]
-  sql_not_contains: ["gl_group AS g"]
+  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g701'", "gl_group AS g FINAL", "relationship_kind = 'CONTAINS'"]
   skip_requirements: ["filter:full_path"]
   groups:
     p:

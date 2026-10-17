@@ -114,15 +114,17 @@ fn edge_read(graph: &mut RelationGraph, relation: &EdgeRelation, alias: &str) ->
             .iter()
             .map(|table| {
                 let read = graph.shared_read(table, alias, true);
-                graph
-                    .owned(
-                        read,
-                        crate::passes::plan::physical::ReadOwner::Relationship(
-                            relation.input_index,
-                        ),
-                        alias,
-                    )
-                    .into()
+                let owned = graph.owned(
+                    read,
+                    crate::passes::plan::physical::ReadOwner::Relationship(relation.input_index),
+                    alias,
+                );
+                let outputs = EDGE_RESERVED_COLUMNS
+                    .iter()
+                    .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN, &DELETED_COLUMN])
+                    .map(|column| Projection::col(alias, column))
+                    .collect();
+                graph.from(owned).project(outputs).finish().into()
             })
             .collect();
         graph.union_all(routes, alias)

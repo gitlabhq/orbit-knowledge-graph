@@ -20,7 +20,6 @@ query:
     RETURN p.name, count(mr) AS c LIMIT 10
 
 expect:
-  sql_contains: ["gl_project AS p FINAL"]
-  sql_not_contains: ["gl_edge"]
+  sql_contains: ["gl_project AS p FINAL", "gl_edge"]
   skip_requirements: ["node_ids", "filter:star_count"]
   row_count: 0

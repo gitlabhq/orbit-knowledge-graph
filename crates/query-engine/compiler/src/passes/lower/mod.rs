@@ -11,7 +11,7 @@ use crate::ast::*;
 use crate::constants::EDGE_TYPE_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use super::plan::{EdgeRelation, Plan, QueryPlan};
 
@@ -297,15 +297,18 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             .filter_map(|node| nodes.get(&node.id))
             .map(|binding| OrderExpr::asc(binding.identity().clone()))
             .collect(),
-        QueryPlan::Traversal(plan) => plan
-            .node_edge_mappings
+        QueryPlan::Traversal(plan) => input
+            .nodes
             .iter()
-            .filter_map(|(node, source)| {
-                nodes.get(node).map(|binding| (source, binding.identity()))
+            .filter_map(|node| nodes.get(&node.id))
+            .map(|binding| binding.identity().clone())
+            .fold(Vec::new(), |mut order, identity| {
+                if !order.contains(&identity) {
+                    order.push(identity);
+                }
+                order
             })
-            .collect::<BTreeMap<_, _>>()
-            .into_values()
-            .cloned()
+            .into_iter()
             .chain(multi_type_edge_types(&node, &plan.relations))
             .map(OrderExpr::asc)
             .collect(),

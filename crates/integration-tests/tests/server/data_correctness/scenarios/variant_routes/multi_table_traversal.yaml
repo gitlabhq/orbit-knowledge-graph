@@ -15,6 +15,7 @@ query:
     MATCH (file:File {id: 11000})-[:CALLS*1..2]->(callee:Definition) RETURN file, callee LIMIT 10
 
 expect:
+  sql_contains: ["gl_edge", "gl_code_edge", "target_kind = 'Definition'"]
   node_count: 3
   nodes:
     File:
