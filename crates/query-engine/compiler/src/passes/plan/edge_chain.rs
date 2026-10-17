@@ -879,6 +879,31 @@ fn resolve_node_flags(
         }
     }
 
+    // Redaction joins these nodes anyway; planning the join lets a pinned partner narrow it.
+    if let [hop] = hops
+        && input.query_type == QueryType::Traversal
+        && hop.max_hops == 1
+        && hop.fk.is_none()
+        && hop.direction != Direction::Both
+    {
+        for (alias, partner) in [
+            (&hop.from_node, &hop.to_node),
+            (&hop.to_node, &hop.from_node),
+        ] {
+            let partner_pinned = nodes
+                .get(partner)
+                .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some());
+            if let Some(np) = nodes.get_mut(alias)
+                && partner_pinned
+                && np.hydration == HydrationStrategy::Skip
+                && !np.uses_default_pk()
+            {
+                np.hydration = HydrationStrategy::Join;
+                np.use_narrowing = true;
+            }
+        }
+    }
+
     for hop in hops {
         let Some(ref fk) = hop.fk else { continue };
         let Some(np) = nodes.get(&fk.target_node) else {

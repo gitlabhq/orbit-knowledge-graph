@@ -31,7 +31,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter ..., NOT (_orbit_edge_0.source_tags HAS ANY ['definition_type:function', 'definition_type:method']) (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"
+            - "(Filter ..., NOT (_orbit_edge_0.source_tags HAS ANY ['definition_type:function', 'definition_type:method']) (_))"
           reject:
             - "(Filter NOT (a.definition_type IN ['function', 'method']), ... (_))"
 
