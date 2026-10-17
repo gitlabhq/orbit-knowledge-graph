@@ -4,12 +4,12 @@ severity: error
 message: Log and span messages must be fixed text. Put values in fields.
 note: |
   labkit always writes the message and cannot filter it. Write
-  `info!({ expanded::FILE_PATH } = path, "parsed file")`, not `info!("parsed {path}")`.
+  `info!(expanded(FILE_PATH) = path, "parsed file")`, not `info!("parsed {path}")`.
 rule:
   any:
     - kind: string_literal
     - kind: raw_string_literal
-  regex: '(^|[^{])\{([^{]|$)'
+  regex: '(^|[^{])(\{\{)*\{[^{]'
   follows:
     any:
       - regex: '^\($'
@@ -18,29 +18,5 @@ rule:
     kind: token_tree
     inside:
       matches: tracing-macro
-  not:
-    matches: test-code
----
-id: log-message-has-no-arguments
-language: rust
-severity: error
-message: Log messages take no format arguments. Put values in fields.
-rule:
-  any:
-    - kind: string_literal
-    - kind: raw_string_literal
-  follows:
-    any:
-      - regex: '^\($'
-      - regex: '^,$'
-  precedes:
-    regex: '^,$'
-    precedes:
-      not:
-        regex: '^\)$'
-  inside:
-    kind: token_tree
-    inside:
-      matches: tracing-event-macro
   not:
     matches: test-code

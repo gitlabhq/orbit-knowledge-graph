@@ -19,15 +19,20 @@ rule:
       regex: '^\{'
       precedes:
         regex: '^=$'
-    # shorthand `%name`, `?name`, `name`
+    # shorthand `%name`, `?name.field`
+    - any:
+        - kind: identifier
+        - kind: self
+      follows:
+        regex: '^[%?]$'
+        follows:
+          any:
+            - regex: '^\($'
+            - regex: '^,$'
+    # shorthand `name`
     - kind: identifier
       follows:
         any:
-          - regex: '^[%?]$'
-            follows:
-              any:
-                - regex: '^\($'
-                - regex: '^,$'
           - regex: '^\($'
           - regex: '^,$'
       precedes:

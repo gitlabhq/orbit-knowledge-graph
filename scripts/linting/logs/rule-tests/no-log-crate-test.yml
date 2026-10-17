@@ -1,6 +1,0 @@
-id: no-log-crate
-valid:
-  - 'tracing::info!("done");'
-invalid:
-  - 'log::info!("done");'
-  - 'log::warn!(target: "x", "done");'

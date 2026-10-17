@@ -37,10 +37,18 @@ rule:
         regex: '^\{\s*(safe|expanded)::[A-Z][A-Z0-9_]*\s*\}$'
       precedes:
         regex: '^=$'
+    - any:
+        - kind: identifier
+        - kind: self
+      follows:
+        regex: '^[%?]$'
+        follows:
+          any:
+            - regex: '^\($'
+            - regex: '^,$'
     - kind: identifier
       follows:
         any:
-          - regex: '^[%?]$'
           - regex: '^\($'
           - regex: '^,$'
       precedes:
@@ -48,14 +56,6 @@ rule:
           - regex: '^,$'
           - regex: '^\)$'
   inside:
-    kind: token_tree
-    follows:
-      kind: identifier
-      regex: '^fields$'
-    inside:
-      kind: token_tree
-      inside:
-        kind: attribute
-        regex: '^(::)?(tracing::)?instrument\b'
+    matches: instrument-fields
   not:
     matches: test-code

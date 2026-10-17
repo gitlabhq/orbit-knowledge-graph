@@ -14,6 +14,11 @@ valid:
     mod helpers {
         fn h() { info!(project_id = 1, "helper"); }
     }
+  - |
+    #[cfg(all(test, feature = "x"))]
+    mod t {
+        fn f() { info!(project_id = 1, "test"); }
+    }
 invalid:
   - 'info!(project_id = id, "parsed");'
   - 'info!(foo.bar = 1, "dotted");'
@@ -30,3 +35,5 @@ invalid:
     mod prod {
         fn p() { info!(project_id = 1, "prod"); }
     }
+  - 'info!(%req.branch, "dotted shorthand");'
+  - 'info!(?self.state, "dotted debug shorthand");'
