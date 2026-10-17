@@ -1,4 +1,5 @@
 mod datalake;
+mod freshness;
 
 use std::future::Future;
 use std::sync::Arc;
@@ -21,6 +22,8 @@ use datalake::{
     NamespaceChangeDetector,
 };
 use orbit_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
+
+pub use freshness::NamespaceFreshness;
 
 pub const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 pub const SWEEP_CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.sweep";

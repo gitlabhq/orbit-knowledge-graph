@@ -332,6 +332,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each s
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations and reconciles dead versions |
 | Stale-edge reconciliation | `schedule.tasks.stale-edge-reconciliation.cron` | `0 */30 * * * *` (every 30 minutes) | Tombstones stale mutable-FK edges |
+| Namespace freshness | `schedule.tasks.namespace-freshness.cron` | `0 */5 * * * *` (every 5 minutes) | Records how far indexed SDLC data trails the datalake for every enabled namespace |
 
 The namespace dispatcher is checkpoint-driven. With no change-detection checkpoint it
 dispatches every enabled namespace once (cold start) and records a checkpoint.
