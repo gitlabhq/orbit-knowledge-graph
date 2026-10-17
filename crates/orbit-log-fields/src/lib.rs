@@ -238,7 +238,7 @@ pub mod safe {
         LANGUAGE = "language";
         LANGUAGE_FAMILY = "language_family";
         /// From a closed set that Orbit defines.
-        REASON = "reason";
+        REASON = "reason_code";
         OUTCOME = "outcome";
         PHASE = "phase";
         /// From a closed set that Orbit defines.

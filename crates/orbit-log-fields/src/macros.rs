@@ -1,6 +1,19 @@
+/// ```compile_fail
+/// orbit_log_fields::info!(safe(KIND) = ?Some("x"), "rejected");
+/// ```
+///
+/// ```compile_fail
+/// orbit_log_fields::info!(safe(KIND) = %"x", "rejected");
+/// ```
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __rewrite {
+    ($mac:ident $prefix:tt [$($out:tt)*] safe($name:ident) = ? $($rest:tt)*) => {
+        compile_error!(concat!("safe field ", stringify!($name), " takes a plain value, not `?`"))
+    };
+    ($mac:ident $prefix:tt [$($out:tt)*] safe($name:ident) = % $($rest:tt)*) => {
+        compile_error!(concat!("safe field ", stringify!($name), " takes a plain value, not `%`"))
+    };
     ($mac:ident $prefix:tt [$($out:tt)*] safe($name:ident) = $($rest:tt)*) => {
         $crate::__value!($mac $prefix [$($out)* { $crate::safe::$name } =] $($rest)*)
     };

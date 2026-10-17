@@ -120,13 +120,16 @@ fn many_fields_fit_in_one_call() {
 }
 
 #[test]
-fn debug_values_are_formatted_with_debug() {
+fn expanded_debug_values_are_formatted_with_debug() {
     let logs = capture(|| {
-        debug!(safe(PHASE) = ?Some("extract"),);
+        debug!(expanded(ADDITIONAL_DETAILS) = ?Some("extract"),);
     });
 
     assert!(logs.contains("DEBUG"), "{logs}");
-    assert!(logs.contains("phase=Some(\"extract\")"), "{logs}");
+    assert!(
+        logs.contains("additional_details=Some(\"extract\")"),
+        "{logs}"
+    );
 }
 
 #[test]
