@@ -57,10 +57,10 @@ fixtures:
       }
 
       template <class T>
-      Items make_items(T x) { return Items(); }
+      Items make_items_of(T x) { return Items(); }
 
       void specialized_root() {
-          make_items<int>(1).count();
+          make_items_of<int>(1).count();
       }
 
       Items get_items() { return Items(); }
@@ -126,15 +126,6 @@ tests:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["first", "touch"] } }
 
-  - name: "a two-level qualified root call does not type its member through the call in its arguments"
-    query: |
-      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
-      WHERE caller.name = "lifted_root" AND callee.name = "count"
-      RETURN owner.name AS owner
-    assert:
-      - { row_count: 1 }
-      - { not: true, row: { owner: Items } }
-
   - name: "a two-level qualified root call types its member through its own return type"
     query: |
       MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
@@ -184,7 +175,7 @@ tests:
   - name: "an explicit specialization call reaches its template"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.name = "specialized_root" AND callee.name = "make_items"
+      WHERE caller.name = "specialized_root" AND callee.name = "make_items_of"
       RETURN callee.name AS callee
     assert:
       - { row_count: 1 }

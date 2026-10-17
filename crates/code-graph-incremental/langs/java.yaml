@@ -63,6 +63,9 @@ stages:
 
   - name: normalize
     rules:
+      # `var x = (T) v` declares x as T
+      - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: (cast_expression type: $T:type_identifier value: $V)))'
+        replace: '(local_variable_declaration type: $T declarator: (variable_declarator name: $N value: $V))'
       - match: '(program $P:java_pkg $$$C)'
         replace: '(__source_file @$ROOT $P $$$C)'
       - match: '(program $$$C)'

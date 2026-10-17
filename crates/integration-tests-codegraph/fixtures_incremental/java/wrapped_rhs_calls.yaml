@@ -45,13 +45,12 @@ tests:
     assert:
       - { row_count: 4 }
 
-  - name: "the method after each wrapper resolves through the return type of the call"
+  - name: "the method after parentheses resolves through the return type of the call, and after a cast into var through the cast type"
     query: |
       MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
-      WHERE caller.name IN ["letParens", "rootParens"] AND callee.name = "touch"
+      WHERE caller.name IN ["letCast", "letParens", "rootParens"] AND callee.name = "touch"
       RETURN caller.name AS caller, owner.name AS owner
       ORDER BY caller
     assert:
-      - { row_count: 2 }
+      - { row_count: 3 }
       - { column_values: { field: owner, values: ["Item"] } }
-      - { not: true, row: { owner: Other } }

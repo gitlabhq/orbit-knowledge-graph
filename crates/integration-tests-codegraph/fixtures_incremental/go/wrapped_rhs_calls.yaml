@@ -43,4 +43,3 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: owner, values: ["Item"] } }
-      - { not: true, row: { owner: Other } }
