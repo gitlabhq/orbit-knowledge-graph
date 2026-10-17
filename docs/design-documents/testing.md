@@ -209,7 +209,7 @@ Orbit sends analytics and usage billing events through [labkit-rs](https://gitla
 
 The `corpus-smoke-test` job runs a large set of queries through the production query stages against seeded ClickHouse. A stub replaces the authorization stage, and a mock serves Gitaly content. The queries come from three places:
 
-- The curated corpus in [`fixtures/queries/corpus`](../../fixtures/queries/corpus).
+- The curated GQL corpus in [`fixtures/queries/corpus`](../../fixtures/queries/corpus).
 - The named queries in `config/named_queries`, each in JSON and GQL.
 - Code blocks marked `json orbit-query` or `gql orbit-query` in the docs and the Orbit skill.
 

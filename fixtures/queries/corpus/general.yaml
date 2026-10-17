@@ -1,223 +1,71 @@
 # General GKG query corpus (mixed shapes).
 #
 # Broad traversal / aggregation / path-finding / neighbors coverage.
-# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
-# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+# Canonical corpus entry: desc / category / suite / query (inline GQL).
+# Placeholders: `x.id IN $sample` / `$sample:N` bind to real in-scope ids at run time.
 
 q1_defines_traversal_file_ends_with_rb:
   desc: "DEFINES traversal (File ends_with .rb)"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "f",
-          "entity": "File",
-          "filters": {
-            "path": {"ends_with": ".rb"}
-          }
-        },
-        {
-          "id": "d",
-          "entity": "Definition",
-          "filters": {
-            "name": {"starts_with": "process"}
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "DEFINES",
-          "from": "f",
-          "to": "d"
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (f:File)-[:DEFINES]->(d:Definition)
+    WHERE f.path ENDS WITH '.rb' AND d.name STARTS WITH 'process'
+    RETURN *
+    LIMIT 20
 
 q2_datetime_range_filter_on_mr:
   desc: "DateTime range filter on MR"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "merged_at": {"gte": "2026-03-01T00:00:00Z"},
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.merged_at",
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2026-03-01T00:00:00Z' AND p.id IN $sample
+    RETURN *
+    ORDER BY mr.merged_at DESC
+    LIMIT 20
 
 q3_bidirectional_neighbors_on_project:
   desc: "Bidirectional neighbors on Project"
   category: neighbors
   suite: general
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "p",
-        "entity": "Project",
-        "node_ids": "$sample"
-      }],
-      "neighbors": {
-        "direction": "both",
-        "rel_types": [
-          "CONTAINS",
-          "IN_PROJECT"
-        ]
-      },
-      "limit": 20
-    }
+    MATCH (p:Project)-[:CONTAINS|IN_PROJECT]-(n)
+    WHERE p.id IN $sample
+    RETURN n
+    LIMIT 20
 
 q4_3_node_agg_mr_count_per_author:
   desc: "3-node agg MR count per author"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["u"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 20
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN u, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 q5_source_side_mr_count:
   desc: "Source-side MR count"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN p, count(mr) AS mr_count
+    LIMIT 10
 
 q6_user_mrs_in_project_traversal:
   desc: "User MRs in project traversal"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User",
-          "filters": {
-            "username": "stanhu"
-          }
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.merged_at",
-      "limit": 10
-    }
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    ORDER BY mr.merged_at DESC
+    LIMIT 10
 
 q7_path_finding_user_to_project:
   desc: "Path finding User to Project"
@@ -225,390 +73,104 @@ q7_path_finding_user_to_project:
   suite: general
   expect: empty # random $sample pair + wide BFS OOMs at gitlab-org scope
   query: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {
-          "id": "start",
-          "entity": "User",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "end",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "path": {
-        "type": "shortest",
-        "from": "start",
-        "to": "end",
-        "max_depth": 2,
-        "rel_types": ["AUTHORED", "IN_PROJECT", "MEMBER_OF"]
-      },
-      "limit": 10
-    }
+    MATCH path = ANY SHORTEST (src:User)-[:AUTHORED|IN_PROJECT|MEMBER_OF*1..2]->(dst:Project)
+    WHERE src.id IN $sample AND dst.id IN $sample
+    RETURN path
+    LIMIT 10
 
 q8_token_match_on_mr_title:
   desc: "token_match on MR title"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "title": {"token_match": "security"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.updated_at",
-      "limit": 15
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE token_match(mr.title, 'security') AND p.id IN $sample
+    RETURN *
+    ORDER BY mr.updated_at DESC
+    LIMIT 15
 
 q9_contains_on_mr_description:
   desc: "contains on MR description"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "description": {"contains": "performance regression"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.created_at",
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.description CONTAINS 'performance regression' AND p.id IN $sample
+    RETURN *
+    ORDER BY mr.created_at DESC
+    LIMIT 10
 
 q10_multi_hop_group_contains:
   desc: "Multi-hop Group CONTAINS"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CONTAINS",
-          "from": "g",
-          "to": "p",
-          "hops": [1, 3]
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS*1..3]->(p:Project)
+    RETURN *
+    LIMIT 20
 
 q11_4_node_user_mr_pipeline_project:
   desc: "4-node User MR Pipeline Project"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User",
-          "filters": {
-            "username": "stanhu"
-          }
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        },
-        {
-          "type": "HAS_HEAD_PIPELINE",
-          "from": "mr",
-          "to": "pipe"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'}), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+    RETURN *
+    LIMIT 10
 
 q12_failed_pipelines_per_project_in_group:
   desc: "Failed pipelines per project in group"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        },
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        },
-        {
-          "type": "CONTAINS",
-          "from": "g",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "fail_count"
-        }
-      ],
-      "aggregation_sort": "-fail_count",
-      "limit": 10
-    }
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group {full_path: 'gitlab-org'})
+    RETURN p, count(pipe) AS fail_count
+    ORDER BY fail_count DESC
+    LIMIT 10
 
 q13_all_tokens_on_workitem_title:
   desc: "all_tokens on WorkItem title"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "wi",
-          "entity": "WorkItem",
-          "filters": {
-            "title": {"all_tokens": "memory leak"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "wi",
-          "to": "p"
-        }
-      ],
-      "order_by": "-wi.updated_at",
-      "limit": 10
-    }
+    MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE all_tokens(wi.title, 'memory leak')
+    RETURN *
+    ORDER BY wi.updated_at DESC
+    LIMIT 10
 
 q14_multi_agg_avg_diff_size_count:
   desc: "Multi-agg avg diff_size + count"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["u"],
-      "aggregations": [
-        {
-          "avg": "mr.diff_size",
-          "as": "avg_diff"
-        },
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 15
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN u, avg(mr.diff_size) AS avg_diff, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 15
 
 q15_neighbors_many_rel_types:
-  desc: "Neighbors many rel_types"
+  desc: "Neighbors with many relationship types"
   category: neighbors
   suite: general
   expect: empty # User is global; random $sample picks user with no scoped edges
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "u",
-        "entity": "User",
-        "node_ids": "$sample"
-      }],
-      "neighbors": {
-        "direction": "both",
-        "rel_types": [
-          "AUTHORED",
-          "REVIEWER",
-          "APPROVED",
-          "MERGED",
-          "ASSIGNED",
-          "TRIGGERED",
-          "MEMBER_OF"
-        ]
-      },
-      "limit": 20
-    }
+    MATCH (u:User)-[:AUTHORED|REVIEWER|APPROVED|MERGED|ASSIGNED|TRIGGERED|MEMBER_OF]-(n)
+    WHERE u.id IN $sample
+    RETURN n
+    LIMIT 20
 
 q16_reviewer_count_per_mr:
   desc: "Reviewer count per MR"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "opened"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "REVIEWER",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["mr"],
-      "aggregations": [
-        {
-          "count": "u",
-          "as": "reviewer_count"
-        }
-      ],
-      "aggregation_sort": "-reviewer_count",
-      "limit": 10
-    }
+    MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN mr, count(u) AS reviewer_count
+    ORDER BY reviewer_count DESC
+    LIMIT 10
 
 q17_path_finding_user_to_user:
   desc: "Path finding User to User"
@@ -616,201 +178,61 @@ q17_path_finding_user_to_user:
   suite: general
   expect: empty # random user pair rarely connects via 2 hops in scope
   query: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {
-          "id": "start",
-          "entity": "User",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "end",
-          "entity": "User",
-          "node_ids": "$sample"
-        }
-      ],
-      "path": {
-        "type": "shortest",
-        "from": "start",
-        "to": "end",
-        "max_depth": 2,
-        "rel_types": ["AUTHORED", "REVIEWER", "APPROVED"]
-      },
-      "limit": 10
-    }
+    MATCH path = ANY SHORTEST (src:User)-[:AUTHORED|REVIEWER|APPROVED*1..2]->(dst:User)
+    WHERE src.id IN $sample AND dst.id IN $sample
+    RETURN path
+    LIMIT 10
 
 q18_wide_datetime_pipeline_agg:
   desc: "Wide DateTime pipeline agg"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "created_at": {"gte": "2025-01-01T00:00:00Z"},
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "fail_count"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (pipe:Pipeline {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.created_at >= '2025-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN p, count(pipe) AS fail_count
+    LIMIT 10
 
 q19_code_defines_by_node_id:
   desc: "Code DEFINES by node_id"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "f",
-          "entity": "File",
-          "filters": {
-            "path": {"ends_with": ".rb"}
-          }
-        },
-        {
-          "id": "d",
-          "entity": "Definition"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "DEFINES",
-          "from": "f",
-          "to": "d"
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (f:File)-[:DEFINES]->(d:Definition)
+    WHERE f.path ENDS WITH '.rb'
+    RETURN *
+    LIMIT 20
 
 q20_vulnerability_count_in_project:
   desc: "Vulnerability count in project"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vuln_count"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN p, count(v) AS vuln_count
+    LIMIT 10
 
 q21_calls_aggregation:
   desc: "CALLS aggregation"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "d1",
-          "entity": "Definition",
-          "filters": {
-            "name": {"starts_with": "create"}
-          }
-        },
-        {
-          "id": "d2",
-          "entity": "Definition"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CALLS",
-          "from": "d1",
-          "to": "d2"
-        }
-      ],
-      "group_by": ["d1"],
-      "aggregations": [
-        {
-          "count": "d2",
-          "as": "call_count"
-        }
-      ],
-      "aggregation_sort": "-call_count",
-      "limit": 10
-    }
+    MATCH (d1:Definition)-[:CALLS]->(d2:Definition)
+    WHERE d1.name STARTS WITH 'create'
+    RETURN d1, count(d2) AS call_count
+    ORDER BY call_count DESC
+    LIMIT 10
 
 q22_imports_traversal:
   desc: "IMPORTS traversal"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "f",
-          "entity": "File",
-          "filters": {
-            "path": {"ends_with": "controller.rb"}
-          }
-        },
-        {
-          "id": "imp",
-          "entity": "ImportedSymbol"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IMPORTS",
-          "from": "f",
-          "to": "imp"
-        }
-      ],
-      "limit": 15
-    }
+    MATCH (f:File)-[:IMPORTS]->(imp:ImportedSymbol)
+    WHERE f.path ENDS WITH 'controller.rb'
+    RETURN *
+    LIMIT 15
 
 q23_path_finding_with_filters:
   desc: "Path finding with filters"
@@ -818,789 +240,214 @@ q23_path_finding_with_filters:
   suite: general
   expect: empty # filtered path-finding frontier OOMs at gitlab-org scope
   query: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {
-          "id": "start",
-          "entity": "User",
-          "filters": {
-            "username": "stanhu"
-          }
-        },
-        {
-          "id": "end",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "path": {
-        "type": "shortest",
-        "from": "start",
-        "to": "end",
-        "max_depth": 2,
-        "rel_types": [
-          "AUTHORED",
-          "IN_PROJECT",
-          "MEMBER_OF",
-          "REVIEWER"
-        ]
-      },
-      "limit": 5
-    }
+    MATCH path = ANY SHORTEST (src:User {username: 'stanhu'})-[:AUTHORED|IN_PROJECT|MEMBER_OF|REVIEWER*1..2]->(dst:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN path
+    LIMIT 5
 
 q24_job_pipeline_project_agg:
   desc: "Job Pipeline Project agg"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed",
-            "failure_reason": "script_failure",
-            "created_at": {"gte": "2026-01-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PIPELINE",
-          "from": "j",
-          "to": "pipe"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["pipe"],
-      "aggregations": [
-        {
-          "count": "j",
-          "as": "fail_count"
-        }
-      ],
-      "aggregation_sort": "-fail_count",
-      "limit": 10
-    }
+    MATCH (j:Job {status: 'failed', failure_reason: 'script_failure'})-[:IN_PIPELINE]->(pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE j.created_at >= '2026-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN pipe, count(j) AS fail_count
+    ORDER BY fail_count DESC
+    LIMIT 10
 
 q25_mr_diff_project_traversal:
   desc: "MR Diff Project traversal"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged",
-            "merged_at": {"gte": "2026-04-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "diff",
-          "entity": "MergeRequestDiff"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_LATEST_DIFF",
-          "from": "mr",
-          "to": "diff"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.merged_at",
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})-[:HAS_LATEST_DIFF]->(diff:MergeRequestDiff), (mr)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2026-04-01T00:00:00Z' AND p.id IN $sample
+    RETURN *
+    ORDER BY mr.merged_at DESC
+    LIMIT 10
 
 q26_calls_with_token_match:
   desc: "CALLS with token_match"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "d1",
-          "entity": "Definition",
-          "filters": {
-            "name": {"token_match": "initialize"}
-          }
-        },
-        {
-          "id": "d2",
-          "entity": "Definition"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CALLS",
-          "from": "d1",
-          "to": "d2"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (d1:Definition)-[:CALLS]->(d2:Definition)
+    WHERE token_match(d1.name, 'initialize')
+    RETURN *
+    LIMIT 10
 
 q28_multi_hop_contains_agg:
   desc: "Multi-hop CONTAINS agg"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CONTAINS",
-          "from": "g",
-          "to": "p",
-          "hops": [1, 3]
-        }
-      ],
-      "group_by": ["g"],
-      "aggregations": [
-        {
-          "count": "p",
-          "as": "project_count"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS*1..3]->(p:Project)
+    RETURN g, count(p) AS project_count
+    LIMIT 10
 
 q29_workitem_with_label_filter:
   desc: "WorkItem with label filter"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "wi",
-          "entity": "WorkItem",
-          "filters": {
-            "state": "opened",
-            "work_item_type": "issue"
-          }
-        },
-        {
-          "id": "l",
-          "entity": "Label",
-          "filters": {
-            "title": {"contains": "bug"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_LABEL",
-          "from": "wi",
-          "to": "l"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "wi",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (wi:WorkItem {state: 'opened', work_item_type: 'issue'})-[:HAS_LABEL]->(l:Label), (wi)-[:IN_PROJECT]->(p:Project)
+    WHERE l.title CONTAINS 'bug' AND p.id IN $sample
+    RETURN *
+    LIMIT 10
 
 q30_pipeline_job_ci_chain:
   desc: "Pipeline Job CI chain"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "failed",
-            "source": "push"
-          }
-        },
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_JOB",
-          "from": "pipe",
-          "to": "j"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "order_by": "-pipe.created_at",
-      "limit": 10
-    }
+    MATCH (pipe:Pipeline {status: 'failed', source: 'push'})-[:HAS_JOB]->(j:Job {status: 'failed'}), (pipe)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    ORDER BY pipe.created_at DESC
+    LIMIT 10
 
 q31_on_branch_code_edge:
   desc: "ON_BRANCH code edge"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "f",
-          "entity": "File",
-          "filters": {
-            "path": {"ends_with": ".rb"}
-          }
-        },
-        {
-          "id": "b",
-          "entity": "Branch",
-          "filters": {
-            "name": "main"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "ON_BRANCH",
-          "from": "f",
-          "to": "b"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (f:File)-[:ON_BRANCH]->(b:Branch {name: 'main'})
+    WHERE f.path ENDS WITH '.rb'
+    RETURN *
+    LIMIT 10
 
 q32_extends_traversal:
   desc: "EXTENDS traversal"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "d1",
-          "entity": "Definition",
-          "filters": {
-            "name": {"token_match": "BaseService"}
-          }
-        },
-        {
-          "id": "d2",
-          "entity": "Definition"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "EXTENDS",
-          "from": "d2",
-          "to": "d1"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (d1:Definition)<-[:EXTENDS]-(d2:Definition)
+    WHERE token_match(d1.name, 'BaseService')
+    RETURN *
+    LIMIT 10
 
 q33_vulnerability_occurrence_chain:
   desc: "Vulnerability Occurrence chain"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": {"in": ["detected", "confirmed"]}
-          }
-        },
-        {
-          "id": "occ",
-          "entity": "VulnerabilityOccurrence"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_FINDING",
-          "from": "v",
-          "to": "occ"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (v:Vulnerability)-[:HAS_FINDING]->(occ:VulnerabilityOccurrence), (v)-[:IN_PROJECT]->(p:Project)
+    WHERE v.state IN ['detected', 'confirmed'] AND p.id IN $sample
+    RETURN *
+    LIMIT 10
 
 q34_any_tokens_on_mr_description:
   desc: "any_tokens on MR description"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "description": {"any_tokens": "timeout regression slowdown"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.updated_at",
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE any_tokens(mr.description, 'timeout regression slowdown')
+    RETURN *
+    ORDER BY mr.updated_at DESC
+    LIMIT 10
 
 q35_group_project_mr_agg:
   desc: "Group Project MR agg"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "opened"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CONTAINS",
-          "from": "g",
-          "to": "p"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "open_mrs"
-        }
-      ],
-      "aggregation_sort": "-open_mrs",
-      "limit": 10
-    }
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'opened'})
+    RETURN p, count(mr) AS open_mrs
+    ORDER BY open_mrs DESC
+    LIMIT 10
 
 a1_note_count_per_project_in_group:
   desc: "Note count per project in group"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "n",
-          "entity": "Note"
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        },
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "n",
-          "to": "p"
-        },
-        {
-          "type": "CONTAINS",
-          "from": "g",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "count": "n",
-          "as": "note_count"
-        }
-      ],
-      "aggregation_sort": "-note_count",
-      "limit": 10
-    }
+    MATCH (n:Note)-[:IN_PROJECT]->(p:Project)<-[:CONTAINS]-(g:Group {full_path: 'gitlab-org'})
+    RETURN p, count(n) AS note_count
+    ORDER BY note_count DESC
+    LIMIT 10
 
 a2_stage_count_per_pipeline:
   desc: "Stage count per Pipeline"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "s",
-          "entity": "Stage"
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "success"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_STAGE",
-          "from": "pipe",
-          "to": "s"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["pipe"],
-      "aggregations": [
-        {
-          "count": "s",
-          "as": "stage_count"
-        }
-      ],
-      "aggregation_sort": "-stage_count",
-      "limit": 10
-    }
+    MATCH (s:Stage)<-[:HAS_STAGE]-(pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN pipe, count(s) AS stage_count
+    ORDER BY stage_count DESC
+    LIMIT 10
 
 a3_user_membership_count:
   desc: "User membership count"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "MEMBER_OF",
-          "from": "u",
-          "to": "g"
-        }
-      ],
-      "group_by": ["g"],
-      "aggregations": [
-        {
-          "count": "u",
-          "as": "member_count"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group {full_path: 'gitlab-org'})
+    RETURN g, count(u) AS member_count
+    LIMIT 10
 
 b1_incoming_reviewer_for_user:
   desc: "Incoming REVIEWER for user"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "u",
-          "entity": "User",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "REVIEWER",
-          "from": "u",
-          "to": "mr"
-        }
-      ],
-      "order_by": "-mr.updated_at",
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})<-[:REVIEWER]-(u:User)
+    WHERE u.id IN $sample
+    RETURN *
+    ORDER BY mr.updated_at DESC
+    LIMIT 10
 
 b2_bidirectional_neighbors_group:
   desc: "Bidirectional neighbors Group"
   category: neighbors
   suite: general
   query: |
-    {
-      "query_type": "neighbors",
-      "nodes": [{
-        "id": "g",
-        "entity": "Group",
-        "node_ids": "$sample"
-      }],
-      "neighbors": {
-        "direction": "both"
-      },
-      "limit": 20
-    }
+    MATCH (g:Group)--(n)
+    WHERE g.id IN $sample
+    RETURN n
+    LIMIT 20
 
 c1_triple_filter_mr:
   desc: "Triple filter MR"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "opened",
-            "draft": true,
-            "created_at": {"gte": "2026-01-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest {state: 'opened', draft: true})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE mr.created_at >= '2026-01-01T00:00:00Z'
+    RETURN *
+    LIMIT 10
 
 c2_large_in_list_50_pipeline_ids:
   desc: "Large IN list 50 pipeline IDs"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "node_ids": "$sample:50"
-        },
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_JOB",
-          "from": "pipe",
-          "to": "j"
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+    WHERE pipe.id IN $sample:50
+    RETURN *
+    LIMIT 20
 
 c3_mr_source_branch_contains:
   desc: "MR source_branch contains"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "source_branch": {"contains": "fix"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "order_by": "-mr.created_at",
-      "limit": 10
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE mr.source_branch CONTAINS 'fix' AND p.id IN $sample
+    RETURN *
+    ORDER BY mr.created_at DESC
+    LIMIT 10
 
 c4_workitem_multi_text_filter:
   desc: "WorkItem multi text filter"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "wi",
-          "entity": "WorkItem",
-          "filters": {
-            "title": {"any_tokens": "security vulnerability CVE exploit"},
-            "state": "opened",
-            "work_item_type": "issue"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "wi",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (wi:WorkItem {state: 'opened', work_item_type: 'issue'})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    WHERE any_tokens(wi.title, 'security vulnerability CVE exploit')
+    RETURN *
+    LIMIT 10
 
 d1_4_hop_user_mr_pipeline_job:
   desc: "4-hop User MR Pipeline Job"
@@ -1608,106 +455,19 @@ d1_4_hop_user_mr_pipeline_job:
   suite: general
   expect: empty # 4-hop User->MR->Pipeline->Job exceeds the time/memory cap at gitlab-org scope
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User",
-          "filters": {
-            "username": "stanhu"
-          }
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        },
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "HAS_HEAD_PIPELINE",
-          "from": "mr",
-          "to": "pipe"
-        },
-        {
-          "type": "HAS_JOB",
-          "from": "pipe",
-          "to": "j"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+    RETURN *
+    LIMIT 10
 
 d2_group_project_mr_user_authors:
   desc: "Group Project MR User authors"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged",
-            "merged_at": {"gte": "2026-04-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "u",
-          "entity": "User"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CONTAINS",
-          "from": "g",
-          "to": "p"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        },
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (g:Group {full_path: 'gitlab-org'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})<-[:AUTHORED]-(u:User)
+    WHERE mr.merged_at >= '2026-04-01T00:00:00Z'
+    RETURN *
+    LIMIT 10
 
 d3_mr_pipeline_job_runner:
   desc: "MR Pipeline Job Runner"
@@ -1715,375 +475,89 @@ d3_mr_pipeline_job_runner:
   suite: general
   expect: empty # 4-hop MR->Pipeline->Job->Runner exceeds the time/memory cap at gitlab-org scope
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        },
-        {
-          "id": "j",
-          "entity": "Job"
-        },
-        {
-          "id": "r",
-          "entity": "Runner"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_HEAD_PIPELINE",
-          "from": "mr",
-          "to": "pipe"
-        },
-        {
-          "type": "HAS_JOB",
-          "from": "pipe",
-          "to": "j"
-        },
-        {
-          "type": "RUNS_ON",
-          "from": "j",
-          "to": "r"
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)-[:RUNS_ON]->(r:Runner)
+    WHERE mr.id IN $sample
+    RETURN *
+    LIMIT 20
 
 d4_vulnerability_occurrence_securityscan:
   desc: "Vulnerability Occurrence SecurityScan"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability"
-        },
-        {
-          "id": "occ",
-          "entity": "VulnerabilityOccurrence"
-        },
-        {
-          "id": "scan",
-          "entity": "SecurityScan"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_FINDING",
-          "from": "v",
-          "to": "occ"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "scan",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (v:Vulnerability)-[:HAS_FINDING]->(occ:VulnerabilityOccurrence), (v)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})<-[:IN_PROJECT]-(scan:SecurityScan)
+    RETURN *
+    LIMIT 10
 
 e1_avg_count_pipeline_duration:
   desc: "avg+count Pipeline duration"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": "success",
-            "created_at": {"gte": "2026-04-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["p"],
-      "aggregations": [
-        {
-          "avg": "pipe.duration",
-          "as": "avg_dur"
-        },
-        {
-          "count": "pipe",
-          "as": "pipe_count"
-        }
-      ],
-      "limit": 5
-    }
+    MATCH (pipe:Pipeline {status: 'success'})-[:IN_PROJECT]->(p:Project)
+    WHERE pipe.created_at >= '2026-04-01T00:00:00Z' AND p.id IN $sample
+    RETURN p, avg(pipe.duration) AS avg_dur, count(pipe) AS pipe_count
+    LIMIT 5
 
 e2_sum_lines_per_user:
   desc: "sum lines per user"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "u",
-          "entity": "User"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged",
-            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTHORED",
-          "from": "u",
-          "to": "mr"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["u"],
-      "aggregations": [
-        {
-          "sum": "mr.added_lines",
-          "as": "total_added"
-        },
-        {
-          "sum": "mr.removed_lines",
-          "as": "total_removed"
-        }
-      ],
-      "aggregation_sort": "-total_added",
-      "limit": 10
-    }
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2026-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN u, sum(mr.added_lines) AS total_added, sum(mr.removed_lines) AS total_removed
+    ORDER BY total_added DESC
+    LIMIT 10
 
 f1_workitem_epic_contains:
   desc: "WorkItem epic CONTAINS"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "parent",
-          "entity": "WorkItem",
-          "filters": {
-            "work_item_type": "epic"
-          }
-        },
-        {
-          "id": "child",
-          "entity": "WorkItem"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CONTAINS",
-          "from": "parent",
-          "to": "child"
-        }
-      ],
-      "limit": 15
-    }
+    MATCH (parent:WorkItem {work_item_type: 'epic'})-[:CONTAINS]->(child:WorkItem)
+    RETURN *
+    LIMIT 15
 
 f2_milestone_mr_count:
   desc: "Milestone MR count"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "m",
-          "entity": "Milestone"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_MILESTONE",
-          "from": "mr",
-          "to": "m"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["m"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 10
-    }
+    MATCH (m:Milestone)<-[:IN_MILESTONE]-(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN m, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 10
 
 g1_3_hop_code_chain_file_def_def:
   desc: "3-hop code chain File Def Def"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "f",
-          "entity": "File",
-          "filters": {
-            "path": {"eq": "app/models/user.rb"}
-          }
-        },
-        {
-          "id": "d1",
-          "entity": "Definition"
-        },
-        {
-          "id": "d2",
-          "entity": "Definition"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "DEFINES",
-          "from": "f",
-          "to": "d1"
-        },
-        {
-          "type": "CALLS",
-          "from": "d1",
-          "to": "d2"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (f:File {path: 'app/models/user.rb'})-[:DEFINES]->(d1:Definition)-[:CALLS]->(d2:Definition)
+    RETURN *
+    LIMIT 10
 
 g2_directory_file_count:
   desc: "Directory File count"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "dir",
-          "entity": "Directory",
-          "filters": {
-            "path": {"starts_with": "app/"}
-          }
-        },
-        {
-          "id": "f",
-          "entity": "File"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CONTAINS",
-          "from": "dir",
-          "to": "f"
-        }
-      ],
-      "group_by": ["dir"],
-      "aggregations": [
-        {
-          "count": "f",
-          "as": "file_count"
-        }
-      ],
-      "aggregation_sort": "-file_count",
-      "limit": 10
-    }
+    MATCH (dir:Directory)-[:CONTAINS]->(f:File)
+    WHERE dir.path STARTS WITH 'app/'
+    RETURN dir, count(f) AS file_count
+    ORDER BY file_count DESC
+    LIMIT 10
 
 g3_importedsymbol_resolve:
   desc: "ImportedSymbol resolve"
   category: code_graph
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "imp",
-          "entity": "ImportedSymbol",
-          "filters": {
-            "identifier_name": "ApplicationController"
-          }
-        },
-        {
-          "id": "def",
-          "entity": "Definition"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IMPORTS",
-          "from": "imp",
-          "to": "def"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (imp:ImportedSymbol {identifier_name: 'ApplicationController'})-[:IMPORTS]->(def:Definition)
+    RETURN *
+    LIMIT 10
 
 h1_path_finding_group_to_group:
   desc: "Path finding Group to Group"
@@ -2091,29 +565,10 @@ h1_path_finding_group_to_group:
   suite: general
   expect: empty # random group pair rarely connects via CONTAINS at depth 2
   query: |
-    {
-      "query_type": "path_finding",
-      "nodes": [
-        {
-          "id": "start",
-          "entity": "Group",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "end",
-          "entity": "Group",
-          "node_ids": "$sample"
-        }
-      ],
-      "path": {
-        "type": "shortest",
-        "from": "start",
-        "to": "end",
-        "max_depth": 2,
-        "rel_types": ["CONTAINS"]
-      },
-      "limit": 5
-    }
+    MATCH path = ANY SHORTEST (src:Group)-[:CONTAINS*1..2]->(dst:Group)
+    WHERE src.id IN $sample AND dst.id IN $sample
+    RETURN path
+    LIMIT 5
 
 h3_pipeline_child_of_pipeline:
   desc: "Pipeline CHILD_OF Pipeline"
@@ -2121,656 +576,179 @@ h3_pipeline_child_of_pipeline:
   suite: general
   expect: empty # gitlab-org has zero CHILD_OF (downstream pipeline) edges in v56
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "parent",
-          "entity": "Pipeline",
-          "filters": {
-            "source": "push",
-            "status": "success"
-          }
-        },
-        {
-          "id": "child",
-          "entity": "Pipeline"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "CHILD_OF",
-          "from": "child",
-          "to": "parent"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "parent",
-          "to": "p"
-        }
-      ],
-      "order_by": "-parent.created_at",
-      "limit": 10
-    }
+    MATCH (parent:Pipeline {source: 'push', status: 'success'})<-[:CHILD_OF]-(child:Pipeline), (parent)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    ORDER BY parent.created_at DESC
+    LIMIT 10
 
-h4_job_auto_canceled_by_job:
-  desc: "Job AUTO_CANCELED_BY Job"
+h4_job_auto_canceled_by_pipeline:
+  desc: "Job AUTO_CANCELED_BY Pipeline"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "j1",
-          "entity": "Job",
-          "filters": {
-            "status": "canceled"
-          }
-        },
-        {
-          "id": "j2",
-          "entity": "Job"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "AUTO_CANCELED_BY",
-          "from": "j1",
-          "to": "j2"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "j1",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (j1:Job {status: 'canceled'})-[:AUTO_CANCELED_BY]->(pl:Pipeline), (j1)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    LIMIT 10
 
 h5_deployment_environment:
   desc: "Deployment Environment"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "dep",
-          "entity": "Deployment"
-        },
-        {
-          "id": "env",
-          "entity": "Environment"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_ENVIRONMENT",
-          "from": "dep",
-          "to": "env"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "dep",
-          "to": "p"
-        }
-      ],
-      "order_by": "-dep.id",
-      "limit": 10
-    }
+    MATCH (dep:Deployment)-[:IN_ENVIRONMENT]->(env:Environment), (dep)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    ORDER BY dep.id DESC
+    LIMIT 10
 
 h7_mr_diff_difffile_chain:
   desc: "MR Diff DiffFile chain"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "node_ids": "$sample"
-        },
-        {
-          "id": "diff",
-          "entity": "MergeRequestDiff"
-        },
-        {
-          "id": "df",
-          "entity": "MergeRequestDiffFile"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_LATEST_DIFF",
-          "from": "mr",
-          "to": "diff"
-        },
-        {
-          "type": "HAS_FILE",
-          "from": "diff",
-          "to": "df"
-        }
-      ],
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest)-[:HAS_LATEST_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile)
+    WHERE mr.id IN $sample
+    RETURN *
+    LIMIT 20
 
 h8_workitem_related_to_workitem:
   desc: "WorkItem RELATED_TO WorkItem"
   category: traversal
   suite: general
   query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "wi1",
-          "entity": "WorkItem",
-          "filters": {
-            "state": "opened"
-          }
-        },
-        {
-          "id": "wi2",
-          "entity": "WorkItem"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "RELATED_TO",
-          "from": "wi1",
-          "to": "wi2"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "wi1",
-          "to": "p"
-        }
-      ],
-      "limit": 10
-    }
+    MATCH (wi1:WorkItem {state: 'opened'})-[:RELATED_TO]->(wi2:WorkItem), (wi1)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    LIMIT 10
 
 i1_job_count_by_failure:
   desc: "Job count by failure"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "j",
-          "entity": "Job",
-          "filters": {
-            "status": "failed"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "j",
-          "to": "p"
-        }
-      ],
-      "group_by": ["j"],
-      "aggregations": [
-        {
-          "count": "j",
-          "as": "fail_count"
-        }
-      ],
-      "aggregation_sort": "-fail_count",
-      "limit": 20
-    }
+    MATCH (j:Job {status: 'failed'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN j, count(j) AS fail_count
+    ORDER BY fail_count DESC
+    LIMIT 20
 
 i2_mr_count_by_target_branch:
   desc: "MR count by target_branch"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": "merged",
-            "merged_at": {"gte": "2025-01-01T00:00:00Z"}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["mr"],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 20
-    }
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.merged_at >= '2025-01-01T00:00:00Z' AND p.id IN $sample
+    RETURN mr, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 20
 
 i3_pipeline_count_by_source:
   desc: "Pipeline count by source"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "pipe",
-          "to": "p"
-        }
-      ],
-      "group_by": ["pipe"],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipe_count"
-        }
-      ],
-      "aggregation_sort": "-pipe_count",
-      "limit": 20
-    }
+    MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN pipe, count(pipe) AS pipe_count
+    ORDER BY pipe_count DESC
+    LIMIT 20
 
 i4_vulnoccurrence_per_vulnerability:
   desc: "VulnOccurrence per Vulnerability"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "occ",
-          "entity": "VulnerabilityOccurrence"
-        },
-        {
-          "id": "v",
-          "entity": "Vulnerability"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "OCCURRENCE_OF",
-          "from": "occ",
-          "to": "v"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        }
-      ],
-      "group_by": ["v"],
-      "aggregations": [
-        {
-          "count": "occ",
-          "as": "occ_count"
-        }
-      ],
-      "aggregation_sort": "-occ_count",
-      "limit": 10
-    }
+    MATCH (occ:VulnerabilityOccurrence)-[:OCCURRENCE_OF]->(v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN v, count(occ) AS occ_count
+    ORDER BY occ_count DESC
+    LIMIT 10
 
 i5_note_count_per_mr:
   desc: "Note count per MR"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "n",
-          "entity": "Note"
-        },
-        {
-          "id": "mr",
-          "entity": "MergeRequest"
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "full_path": "gitlab-org/gitlab"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_NOTE",
-          "from": "mr",
-          "to": "n"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": ["mr"],
-      "aggregations": [
-        {
-          "count": "n",
-          "as": "note_count"
-        }
-      ],
-      "aggregation_sort": "-note_count",
-      "limit": 10
-    }
+    MATCH (n:Note)<-[:HAS_NOTE]-(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN mr, count(n) AS note_count
+    ORDER BY note_count DESC
+    LIMIT 10
 
 i6_label_usage_workitem_per_label:
   desc: "Label usage WorkItem per Label"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "l",
-          "entity": "Label"
-        },
-        {
-          "id": "wi",
-          "entity": "WorkItem",
-          "filters": {
-            "state": "opened"
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "node_ids": "$sample"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "HAS_LABEL",
-          "from": "wi",
-          "to": "l"
-        },
-        {
-          "type": "IN_PROJECT",
-          "from": "wi",
-          "to": "p"
-        }
-      ],
-      "group_by": ["l"],
-      "aggregations": [
-        {
-          "count": "wi",
-          "as": "wi_count"
-        }
-      ],
-      "aggregation_sort": "-wi_count",
-      "limit": 10
-    }
+    MATCH (l:Label)<-[:HAS_LABEL]-(wi:WorkItem {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN l, count(wi) AS wi_count
+    ORDER BY wi_count DESC
+    LIMIT 10
 
 i7_vulnerability_count_by_severity:
   desc: "Vulnerability count by severity"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
-          }
-        }
-      ],
-      "group_by": ["v.severity"],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vuln_count"
-        }
-      ],
-      "aggregation_sort": "-vuln_count",
-      "limit": 20
-    }
+    MATCH (v:Vulnerability)
+    WHERE v.state IN ['detected', 'confirmed', 'resolved', 'dismissed']
+    RETURN v.severity, count(v) AS vuln_count
+    ORDER BY vuln_count DESC
+    LIMIT 20
 
 i8_security_scan_count_by_scan_type:
   desc: "Security scan count by scan type"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "s",
-          "entity": "SecurityScan",
-          "filters": {
-            "latest": true
-          }
-        }
-      ],
-      "group_by": ["s.scan_type"],
-      "aggregations": [
-        {
-          "count": "s",
-          "as": "scan_count"
-        }
-      ],
-      "aggregation_sort": "-scan_count",
-      "limit": 20
-    }
+    MATCH (s:SecurityScan {latest: true})
+    RETURN s.scan_type, count(s) AS scan_count
+    ORDER BY scan_count DESC
+    LIMIT 20
 
 i9_pipeline_count_by_status_and_source:
   desc: "Pipeline count by status and source"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "pipe",
-          "entity": "Pipeline",
-          "filters": {
-            "status": {"in": ["success", "failed", "running", "pending"]}
-          }
-        }
-      ],
-      "group_by": [
-        "pipe.status",
-        "pipe.source"
-      ],
-      "aggregations": [
-        {
-          "count": "pipe",
-          "as": "pipe_count"
-        }
-      ],
-      "aggregation_sort": "-pipe_count",
-      "limit": 30
-    }
+    MATCH (pipe:Pipeline)
+    WHERE pipe.status IN ['success', 'failed', 'running', 'pending']
+    RETURN pipe.status, pipe.source, count(pipe) AS pipe_count
+    ORDER BY pipe_count DESC
+    LIMIT 30
 
 i10_merge_request_state_draft_matrix:
   desc: "Merge request state draft matrix"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "closed", "merged"]}
-          }
-        }
-      ],
-      "group_by": [
-        "mr.state",
-        "mr.draft"
-      ],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        },
-        {
-          "avg": "mr.diff_size",
-          "as": "avg_diff_size"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 30
-    }
+    MATCH (mr:MergeRequest)
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN mr.state, mr.draft, count(mr) AS mr_count, avg(mr.diff_size) AS avg_diff_size
+    ORDER BY mr_count DESC
+    LIMIT 30
 
 i11_project_visibility_and_mr_state:
   desc: "Project visibility and MR state"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "mr",
-          "entity": "MergeRequest",
-          "filters": {
-            "state": {"in": ["opened", "closed", "merged"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "filters": {
-            "archived": false
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "mr",
-          "to": "p"
-        }
-      ],
-      "group_by": [
-        "p.visibility_level",
-        "mr.state"
-      ],
-      "aggregations": [
-        {
-          "count": "mr",
-          "as": "mr_count"
-        }
-      ],
-      "aggregation_sort": "-mr_count",
-      "limit": 30
-    }
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {archived: false})
+    WHERE mr.state IN ['opened', 'closed', 'merged']
+    RETURN p.visibility_level, mr.state, count(mr) AS mr_count
+    ORDER BY mr_count DESC
+    LIMIT 30
 
 i12_project_and_vulnerability_severity:
   desc: "Project and vulnerability severity"
   category: aggregation
   suite: general
   query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "v",
-          "entity": "Vulnerability",
-          "filters": {
-            "state": {"in": ["detected", "confirmed"]}
-          }
-        },
-        {
-          "id": "p",
-          "entity": "Project",
-          "columns": [
-            "name",
-            "full_path"
-          ]
-        }
-      ],
-      "relationships": [
-        {
-          "type": "IN_PROJECT",
-          "from": "v",
-          "to": "p"
-        }
-      ],
-      "group_by": [
-        "p",
-        "v.severity"
-      ],
-      "aggregations": [
-        {
-          "count": "v",
-          "as": "vuln_count"
-        }
-      ],
-      "aggregation_sort": "-vuln_count",
-      "limit": 20
-    }
+    MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project)
+    WHERE v.state IN ['detected', 'confirmed']
+    RETURN p{.name, .full_path}, v.severity, count(v) AS vuln_count
+    ORDER BY vuln_count DESC
+    LIMIT 20

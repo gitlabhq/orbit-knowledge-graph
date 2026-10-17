@@ -1,6 +1,6 @@
 //! Corpus smoke test.
 //!
-//! Runs every query in `fixtures/queries/corpus/` through the **same pipeline
+//! Runs every GQL query in `fixtures/queries/corpus/` through the **same pipeline
 //! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
 //! Compilation -> ClickHouseExecutor -> Extraction ->
 //! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
@@ -18,7 +18,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::common::{
     DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model,
@@ -125,36 +125,19 @@ impl ColumnResolver for MockColumnResolver {
     }
 }
 
-fn resolve_placeholders(query: &str) -> serde_json::Result<String> {
-    let token_re = regex::Regex::new(r"\{\{[^}]+\}\}").unwrap();
-    let s = token_re.replace_all(query, "1");
-
-    let mut value: serde_json::Value = serde_json::from_str(&s)?;
-    if let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-        for node in nodes.iter_mut() {
-            resolve_sample_node_ids(node);
-        }
-    }
-    if let Some(node) = value.get_mut("node") {
-        resolve_sample_node_ids(node);
-    }
-    serde_json::to_string(&value)
-}
-
-fn resolve_sample_node_ids(node: &mut serde_json::Value) {
-    let Some(obj) = node.as_object_mut() else {
-        return;
-    };
-    let count = match obj.get("node_ids").and_then(|v| v.as_str()) {
-        Some("$sample") => 1,
-        Some(s) => match s.strip_prefix("$sample:") {
-            Some(n) => n.parse().unwrap_or(1),
-            None => return,
-        },
-        None => return,
-    };
-    let ids: Vec<i64> = (1..=count).collect();
-    obj.insert("node_ids".to_string(), serde_json::json!(ids));
+fn resolve_placeholders(query: &str) -> String {
+    static TOKEN: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\{\{[^}]+\}\}").unwrap());
+    static SAMPLE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?i)(\w+)\.id\s+IN\s+\$sample(?::(\d+))?").unwrap());
+    let without_tokens = TOKEN.replace_all(query, "1");
+    SAMPLE
+        .replace_all(&without_tokens, |caps: &regex::Captures<'_>| {
+            let count: i64 = caps.get(2).map_or(1, |n| n.as_str().parse().unwrap_or(1));
+            let ids: Vec<String> = (1..=count).map(|id| id.to_string()).collect();
+            format!("{}.id IN [{}]", &caps[1], ids.join(", "))
+        })
+        .into_owned()
 }
 
 fn load_corpus() -> Vec<SmokeCase> {
@@ -183,9 +166,9 @@ fn load_corpus() -> Vec<SmokeCase> {
             let expects_error = entry.expect.as_deref() == Some("error");
             out.push(SmokeCase {
                 key: format!("{file}::{key}"),
-                query: entry.query,
+                query: resolve_placeholders(&entry.query),
                 expects_error,
-                frontend: Frontend::JsonDsl,
+                frontend: Frontend::Gql,
             });
         }
     }
@@ -484,23 +467,9 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let json = match case.frontend {
-            Frontend::Gql => Ok(case.query.clone()),
-            Frontend::JsonDsl => resolve_placeholders(&case.query),
-        };
-        let json = match json {
-            Ok(j) => j,
-            Err(e) => {
-                if !case.expects_error {
-                    failures.push(format!("{}: invalid query JSON: {e}", case.key));
-                }
-                continue;
-            }
-        };
-
         let outcome = run_pipeline(
             &ctx,
-            &json,
+            &case.query,
             case.frontend,
             (&data_model, &ontology),
             &claims,
