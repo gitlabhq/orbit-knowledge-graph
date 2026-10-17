@@ -90,6 +90,32 @@ async fn promotion_and_rollback_keep_in_flight_queries_on_their_snapshot() {
 }
 
 #[tokio::test]
+async fn chunked_results_join_to_the_same_json_as_one_result() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1]).await;
+    cluster.promote(1).await;
+    cluster.await_serving(Some(1)).await;
+
+    let whole = cluster.run_query(project_query(1)).await.unwrap();
+    let chunked = ExecuteQueryRequest {
+        chunked_result: true,
+        ..project_query(1)
+    };
+    let (chunks, result) = cluster
+        .open_query(Some(chunked))
+        .await
+        .collect()
+        .await
+        .unwrap();
+
+    assert!(chunks.len() > 1, "{chunks:?}");
+    assert_eq!(result.content, None);
+    assert_eq!(result.metadata.map(|metadata| metadata.row_count), Some(1));
+    let joined: Value = serde_json::from_str(&chunks.concat()).unwrap();
+    assert_eq!(joined, whole);
+}
+
+#[tokio::test]
 async fn named_queries_follow_the_active_schema() {
     let mut cluster = Cluster::start(2).await;
     cluster.publish_archive(1).await;
@@ -245,7 +271,7 @@ impl Cluster {
             active_schema.clone(),
             config.graph.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
-            WAIT_LIMIT.as_secs(),
+            &config.grpc,
             Arc::new(config.analytics.clone()),
         )
         .with_analytics(analytics.clone());
@@ -616,7 +642,18 @@ impl QueryStream {
         self.authorization_request = Some(required);
     }
 
-    async fn finish(mut self) -> Result<Value, ExecuteQueryError> {
+    async fn finish(self) -> Result<Value, ExecuteQueryError> {
+        let (chunks, result) = self.collect().await?;
+        let json = match result.content {
+            Some(execute_query_result::Content::ResultJson(json)) => json,
+            None => chunks.concat(),
+            other => panic!("unexpected result content {other:?}"),
+        };
+        Ok(serde_json::from_str(&json).unwrap())
+    }
+
+    async fn collect(mut self) -> Result<(Vec<String>, ExecuteQueryResult), ExecuteQueryError> {
+        let mut chunks = Vec::new();
         loop {
             if let Some(required) = self.authorization_request.take() {
                 self.authorize_everything(required).await;
@@ -625,10 +662,8 @@ impl QueryStream {
                 Content::Redaction(RedactionExchange {
                     content: Some(redaction_exchange::Content::Required(required)),
                 }) => self.authorization_request = Some(required),
-                Content::Result(ExecuteQueryResult {
-                    content: Some(execute_query_result::Content::ResultJson(json)),
-                    ..
-                }) => return Ok(serde_json::from_str(&json).unwrap()),
+                Content::ResultChunk(chunk) => chunks.push(chunk.data),
+                Content::Result(result) => return Ok((chunks, result)),
                 Content::Error(error) => return Err(error),
                 other => panic!("unexpected query message {other:?}"),
             }
@@ -737,6 +772,8 @@ fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
     config.graph = graph.config.clone();
     config.schema.version_poll_interval_secs = RETRY_INTERVAL.as_secs();
     config.nats.url = format!("nats://{nats_address}");
+    config.grpc.stream_timeout_secs = WAIT_LIMIT.as_secs();
+    config.grpc.result_chunk_bytes = 16;
     config
 }
 

@@ -102,13 +102,14 @@ service OrbitService {
 // ---------------------------------------------------------------------------
 
 // Envelope for the execute_query stream. Each message carries exactly one of:
-// request (client initial), redaction exchange (server/client), result, or error.
+// request (client initial), redaction exchange (server/client), result chunk, result, or error.
 message ExecuteQueryMessage {
   oneof content {
     ExecuteQueryRequest request = 1;
     RedactionExchange redaction = 2;
     ExecuteQueryResult result = 3;
     ExecuteQueryError error = 4;
+    ResultChunk result_chunk = 5;
   }
 }
 
@@ -128,6 +129,7 @@ message ExecuteQueryRequest {
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
   QueryType query_type = 3;
   QueryLanguage language = 4;
+  bool chunked_result = 6;     // send the result text as ordered ResultChunk messages, then a result with metadata only
 }
 
 // Server-sent final message with query results.
@@ -137,6 +139,11 @@ message ExecuteQueryResult {
     string formatted_text = 2;  // format = LLM or GQL: compact text
   }
   QueryMetadata metadata = 3;
+}
+
+// Server-sent piece of the result text when the request sets chunked_result.
+message ResultChunk {
+  string data = 1;
 }
 
 message QueryMetadata {
