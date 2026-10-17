@@ -543,7 +543,7 @@ async fn execute_output(
     redaction: &MockRedactionService,
 ) -> PipelineOutput {
     let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
 
     let checks = result.resource_checks();
     let authorizations = redaction.check(&checks);

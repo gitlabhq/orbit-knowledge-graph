@@ -109,7 +109,7 @@ fn execute(
     let batches = database
         .query_arrow(&sql)
         .unwrap_or_else(|error| panic!("{label}: {error}\n{sql}"));
-    let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     pipeline_output(
         compiled,
         query_result,

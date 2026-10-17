@@ -35,7 +35,7 @@ fn output(
         .collect();
     let arrays = columns.into_iter().map(|(_, array)| array).collect();
     let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).unwrap();
-    let query_result = QueryResult::from_batches(&[batch], &result_context);
+    let query_result = QueryResult::from_batches(&[batch], &result_context).unwrap();
     PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: 0,
