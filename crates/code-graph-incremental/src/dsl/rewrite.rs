@@ -38,14 +38,33 @@ impl Placement {
         }
     }
 
-    fn keep(&mut self, t: &mut Tree, src: NodeId, label: NodeId) {
+    fn keep(&mut self, t: &mut Tree, caps: &[Cap], placed: &[bool], src: NodeId, label: NodeId) {
         let node = t.node(src);
         let holds_nodes =
             src.children(&t.storage.0).next().is_some() || canonical::is_canonical(node.kind);
-        if self.mv && src != self.target && holds_nodes && !self.moved.contains(&src) {
+        if self.mv
+            && src != self.target
+            && holds_nodes
+            && !self.moved.contains(&src)
+            && !self.overlaps_placed(t, caps, placed, src)
+        {
             self.place(t, src, label);
             t.node_mut(label).labelled = true;
         }
+    }
+
+    fn overlaps_placed(&self, t: &Tree, caps: &[Cap], placed: &[bool], node: NodeId) -> bool {
+        let within = |inner: NodeId, outer: NodeId| {
+            inner
+                .ancestors(&t.storage.0)
+                .find(|&a| a == outer || a == self.target)
+                == Some(outer)
+        };
+        caps.iter()
+            .zip(placed)
+            .filter(|&(_, &is_placed)| is_placed)
+            .flat_map(|(cap, _)| cap.iter().copied())
+            .any(|other| within(node, other) || within(other, node))
     }
 }
 
@@ -208,9 +227,8 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
             if let Text::From(slot, _) = text
                 && !placed[*slot as usize]
                 && let Some(&labelled) = caps[*slot as usize].first()
-                && !overlaps_placed(t, caps, placed, labelled, pl.target)
             {
-                pl.keep(t, labelled, at);
+                pl.keep(t, caps, placed, labelled, at);
             }
             for k in kids {
                 materialize(t, fill, k, at, pl);
@@ -227,20 +245,6 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
         }
         Pat::Not(_) | Pat::Desc(_) => {}
     }
-}
-
-fn overlaps_placed(t: &Tree, caps: &[Cap], placed: &[bool], node: NodeId, root: NodeId) -> bool {
-    let within = |inner: NodeId, outer: NodeId| {
-        inner
-            .ancestors(&t.storage.0)
-            .find(|&a| a == outer || a == root)
-            == Some(outer)
-    };
-    caps.iter()
-        .zip(placed)
-        .filter(|&(_, &is_placed)| is_placed)
-        .flat_map(|(cap, _)| cap.iter().copied())
-        .any(|other| within(node, other) || within(other, node))
 }
 
 fn build_template(t: &mut Tree, fill: &Fill, pat: &Pat, mut pl: Placement) -> Vec<NodeId> {
