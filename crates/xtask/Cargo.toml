@@ -35,6 +35,7 @@ futures = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
+regex = { workspace = true }
 parquet = { workspace = true }
 sqlformat = { workspace = true }
 tabled = { workspace = true }
