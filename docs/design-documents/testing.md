@@ -158,7 +158,7 @@ mise test:integration
 | --- | --- |
 | `mise test:integration` | All container tests |
 | `mise test:integration:data` | Query scenarios and data correctness |
-| `mise test:integration:server` | Data correctness, hydration, redaction, and graph formatting |
+| `mise test:integration:server` | Data correctness, redaction, and graph formatting |
 | `mise test:integration:indexer` | All indexer tests |
 | `mise test:integration:indexer:sdlc:scenario <filter>` | SDLC indexer scenarios whose path contains the filter |
 | `mise test:integration:corpus` | The query corpus and the executable docs |

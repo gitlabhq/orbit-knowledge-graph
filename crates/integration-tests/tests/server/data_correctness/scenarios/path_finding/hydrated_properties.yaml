@@ -1,0 +1,116 @@
+cases:
+  - name: every_entity_hydrated
+    description: Every node on a path is hydrated with its properties
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) RETURN p
+    expect:
+      hydration: dynamic
+      node_count: 3
+      path_count: 1
+      nodes:
+        User:
+          rows:
+            - { id: 1, username: alice, name: Alice Admin }
+        Group:
+          rows:
+            - { id: 100, name: Public Group }
+        Project:
+          rows:
+            - { id: 1000, name: Public Project }
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }, { from: Group, from_id: 100, type: CONTAINS, to: Project, to_id: 1000 }]
+
+  - name: multiple_ids_same_type
+    description: Paths that start at different users hydrate every user
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [1000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project {id: 1000}) WHERE start.id IN [1, 2] RETURN p
+    expect:
+      node_count: 4
+      path_count: 2
+      nodes:
+        User:
+          ids: [1, 2]
+          rows:
+            - { id: 1, username: alice }
+            - { id: 2, username: bob }
+
+  - name: after_partial_redaction
+    description: Paths that survive redaction are still hydrated
+    config:
+      redaction: { allow: { user: [1], group: [100, 101], project: [1000, 1001] }, deny: { user: [2] } }
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "User", "node_ids": [1, 2]},
+            {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:User)-[:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE start.id IN [1, 2] AND `end`.id IN [1000, 1001] RETURN p
+    expect:
+      node_count: 3
+      path_count: 1
+      nodes:
+        User:
+          ids: [1]
+          absent: [2]
+          rows:
+            - { id: 1, username: alice }
+        Project:
+          rows:
+            - { id: 1000, name: Public Project }
+
+  - name: code_entities_by_own_id
+    description: Code entities on a path are hydrated by their own id, not by their project id
+    config:
+      extra_seed:
+        gl_branch:
+          - { id: 14000, project_id: 1000, name: main, traversal_path: "1/100/1000/" }
+        gl_code_edge:
+          - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 1000, source_kind: Project, relationship_kind: CONTAINS, target_id: 14000, target_kind: Branch }
+          - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 14000, source_kind: Branch, relationship_kind: CONTAINS, target_id: 13000, target_kind: File }
+    query:
+      json: |
+        {
+          "query_type": "path_finding",
+          "nodes": [
+            {"id": "start", "entity": "Project", "node_ids": [1000]},
+            {"id": "end", "entity": "File", "node_ids": [13000]}
+          ],
+          "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["CONTAINS"]}
+        }
+      gql: |
+        MATCH p = ANY SHORTEST (start:Project {id: 1000})-[:`CONTAINS`*1..2]->(`end`:File {id: 13000}) RETURN p
+    expect:
+      node_count: 3
+      path_count: 1
+      nodes:
+        Branch:
+          rows:
+            - { id: 14000, name: main }
+        File:
+          rows:
+            - { id: 13000, name: parser.rs, path: src/parser.rs }
