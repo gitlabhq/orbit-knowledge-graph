@@ -56,7 +56,7 @@ rule:
           - matches: log-args
           - matches: instrument-fields
     - kind: arguments
-      regex: '^\(\s*safe::\w+\s*,.*\b(display|debug|format|format_args|to_string|to_owned)\b'
+      regex: '(?s)^\(\s*safe::\w+\s*,.*\b(display|debug|format|format_args|to_string|to_owned)\b'
       inside:
         kind: call_expression
         has:
