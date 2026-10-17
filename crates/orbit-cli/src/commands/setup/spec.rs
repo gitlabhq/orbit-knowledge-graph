@@ -360,7 +360,7 @@ mod tests {
                     "{launcher}: {rendered}"
                 );
                 assert!(rendered.contains(" mr:42;") == remote, "{launcher}");
-                let budget = if remote { 130 } else { 90 };
+                let budget = if remote { 145 } else { 105 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }

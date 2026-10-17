@@ -12,7 +12,7 @@ instructions: |
   - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `is:def`/`file:x`.{{remote_gitlab}}
   - `{{orbit}} context path:120-180` can be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
   - MANDATORY: read all the code definitions you need in one call{{remote_context}}, plus independent searches: `{{orbit}} context a.rs:10-40{{remote_context_example}}; {{orbit}} grep 'x'`. Then follow new leads.
-  - Reuse shown source instead of rereading unchanged files.
+  - Reuse shown source instead of rereading unchanged files. Edit straight from `{{orbit}} context` output; no separate read is needed.
 
 remote:
   remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for GitLab instead of glab. `{{orbit}} grep` also searches GitLab (`is:mr`, `is:issue`, `is:commit`) and sibling projects' code. Read with `{{orbit}} context mr:42 branch:x job:9`, or `repo:group/project symbol:Name` for sibling code."
