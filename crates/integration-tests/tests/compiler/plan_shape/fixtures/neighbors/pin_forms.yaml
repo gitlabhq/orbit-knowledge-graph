@@ -69,7 +69,7 @@ cases:
           reject:
             - (SemiJoin e.traversal_path IN subquery (_) (_))
 
-  - name: Untyped neighbors split every routed table by the center's own kinds
+  - name: Untyped neighbors of an id-pinned center keep one arm per routed table
     query:
       json: |
         {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing"}}
@@ -81,11 +81,9 @@ cases:
           expect: ["(Neighbors center=mr direction=outgoing directional outgoing=[gl_ci_edge, gl_diff_edge, gl_edge, gl_sec_edge] ... (_))"]
         emitted:
           expect:
-            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['HAS_DIFF', 'HAS_LATEST_DIFF'], _e.traversal_path = scalar(subquery), _e._deleted = false (Scan Table(gl_diff_edge) AS _e))
+            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['HAS_DIFF', 'HAS_LATEST_DIFF'], _e._deleted = false (Scan Table(gl_diff_edge) AS _e))
             - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind = 'FIXES', _e._deleted = false (Scan Table(gl_sec_edge) AS _e))
-            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['DEPLOYED_TO', 'TRIGGERED'], _e._deleted = false (Scan Table(gl_ci_edge) AS _e))
-            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind = 'HAS_HEAD_PIPELINE', _e.traversal_path = scalar(subquery), _e._deleted = false (Scan Table(gl_ci_edge) AS _e))
-            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['CLOSES', 'HAS_NOTE', 'MENTIONS'], _e._deleted = false (Scan Table(gl_edge) AS _e))
+            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['DEPLOYED_TO', 'HAS_HEAD_PIPELINE', 'TRIGGERED'], _e._deleted = false (Scan Table(gl_ci_edge) AS _e))
+            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['CLOSES', 'HAS_LABEL', 'HAS_NOTE', 'IN_MILESTONE', 'IN_PROJECT', 'MENTIONS', 'MERGED_AT_COMMIT', 'SOURCE_PROJECT'], _e._deleted = false (Scan Table(gl_edge) AS _e))
           reject:
-            - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['CLOSES', 'HAS_NOTE', 'MENTIONS'], _e.traversal_path = scalar(subquery), _e._deleted = false (_))
             - (SemiJoin ? (_) (_))

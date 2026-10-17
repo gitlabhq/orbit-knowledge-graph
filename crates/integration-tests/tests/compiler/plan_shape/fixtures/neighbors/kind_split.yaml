@@ -1,10 +1,10 @@
-name: Pinned neighbors split each table into a center-path arm and a cross-namespace arm
+name: Filter-pinned neighbors split each table into a center-path arm and a cross-namespace arm
 
 query:
   json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["HAS_LABEL","MENTIONS","AUTHORED","CLOSES"]}}
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":1},"project_id":{"eq":1000}}}],"neighbors":{"direction":"both","rel_types":["HAS_LABEL","MENTIONS","AUTHORED","CLOSES"]}}
   gql: |
-    MATCH (mr:MergeRequest {id: 1})-[:HAS_LABEL|MENTIONS|AUTHORED|CLOSES]-(neighbor) RETURN mr, neighbor
+    MATCH (mr:MergeRequest {iid: 1, project_id: 1000})-[:HAS_LABEL|MENTIONS|AUTHORED|CLOSES]-(neighbor) RETURN mr, neighbor
 
 logical:
   expect: ["(Input neighbors (...))"]
@@ -12,15 +12,14 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Neighbors center=mr direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[HAS_LABEL, MENTIONS, AUTHORED, CLOSES] arms=[out gl_edge MENTIONS|CLOSES, out gl_edge HAS_LABEL path, in gl_edge MENTIONS, in gl_edge AUTHORED path] (_))"]
+      expect: ["(Neighbors center=mr direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=true relationships=[HAS_LABEL, MENTIONS, AUTHORED, CLOSES] arms=[out gl_edge MENTIONS|CLOSES, out gl_edge HAS_LABEL path, in gl_edge MENTIONS, in gl_edge AUTHORED path] (_))"]
     emitted:
       expect:
         - (Union ALL (_) (_))
-        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['MENTIONS', 'CLOSES'], _e._deleted = false (Scan Table(gl_edge) AS _e))
-        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind = 'HAS_LABEL', _e.traversal_path = scalar(subquery), _e._deleted = false (Scan Table(gl_edge) AS _e))
-        - (SemiJoin _e.target_id IN subquery (Filter _e.target_kind = 'MergeRequest', _e.target_id = 1, _e.relationship_kind = 'MENTIONS' (Scan Table(gl_edge) AS _e)) (Project _ctr.id AS id (Filter _ctr.id = 1, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr)))))
-        - (Filter _e.target_kind = 'MergeRequest', _e.target_id = 1, _e.relationship_kind = 'AUTHORED', _e.traversal_path = scalar(subquery), _e._deleted = false (Scan Table(gl_edge) AS _e))
+        - (SemiJoin _e.traversal_path IN subquery (Filter _e.relationship_kind = 'HAS_LABEL' (SemiJoin _e.source_id IN subquery (Filter _e.source_kind = 'MergeRequest' (Scan Table(gl_edge) AS _e)) (_))) (Project _tpd.traversal_path AS traversal_path (Filter _tpd.iid = 1, _tpd.project_id = 1000, _tpd._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _tpd)))))
+        - (SemiJoin _e.traversal_path IN subquery (Filter _e.relationship_kind = 'AUTHORED' (SemiJoin _e.target_id IN subquery (Filter _e.target_kind = 'MergeRequest' (Scan Table(gl_edge) AS _e)) (_))) (_))
+        - (Filter _e.relationship_kind IN ['MENTIONS', 'CLOSES'], _e._deleted = false (SemiJoin _e.source_id IN subquery (Filter _e.source_kind = 'MergeRequest' (Scan Table(gl_edge) AS _e)) (Project _ctr.id AS id (Filter _ctr.iid = 1, _ctr.project_id = 1000, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr))))))
+        - (Filter _e.relationship_kind = 'MENTIONS', _e._deleted = false (SemiJoin _e.target_id IN subquery (Filter _e.target_kind = 'MergeRequest' (Scan Table(gl_edge) AS _e)) (_)))
       reject:
-        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['MENTIONS', 'CLOSES'], _e.traversal_path = scalar(subquery), _e._deleted = false (_))
-        - (Filter _e.target_kind = 'MergeRequest', _e.target_id = 1, _e.relationship_kind = 'MENTIONS', _e.traversal_path = scalar(subquery) (_))
-        - (SemiJoin _e.traversal_path IN subquery (_) (_))
+        - (SemiJoin _e.traversal_path IN subquery (Filter _e.relationship_kind IN ['MENTIONS', 'CLOSES'] (_)) (_))
+        - (SemiJoin _e.traversal_path IN subquery (Filter _e.relationship_kind = 'MENTIONS' (_)) (_))

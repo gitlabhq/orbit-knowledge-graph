@@ -1,66 +1,92 @@
 description: >
-  Pinned neighbors push the center id into every edge arm and read same-path
-  kinds under the center's own traversal_path; cross-namespace kinds keep the
-  authorization prefixes, so a MENTIONS edge stored under another project is
-  still returned when the caller can see that project.
+  Filter-pinned neighbors push the center id into every edge arm and read
+  same-path kinds under the center's own traversal_path; cross-namespace kinds
+  keep the authorization prefixes, so a MENTIONS edge stored under another
+  project is still returned when the caller can see that project. Id-pinned
+  centers keep the plan main already had.
 
 config:
   redaction:
     allow:
       user: [2]
-      project: [1000]
-      merge_request: [98000, 98001]
+      project: [1000, 1001]
+      merge_request: [98000, 98001, 98002]
       work_item: [98100, 98101]
       label: [7000, 7001, 7002]
       note: [98200]
+      milestone: [6000, 6001]
+      ci_pipeline: [98300, 98301]
+      environment: [98400]
   extra_seed:
     gl_merge_request:
       - { id: 98000, iid: 900, title: anchor_old, state: opened, project_id: 1002, author_id: 2, traversal_path: "1/100/1002/", _version: "2024-01-01 00:00:00" }
       - { id: 98000, iid: 900, title: anchor_mr, state: opened, project_id: 1000, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
       - { id: 98001, iid: 901, title: deleted_mr, state: opened, project_id: 1000, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 98002, iid: 902, title: anchor_mr, state: opened, project_id: 1001, author_id: 2, traversal_path: "1/101/1001/" }
     gl_work_item:
       - { id: 98100, iid: 1, title: mentioned_wi, state: opened, project_id: 1001, traversal_path: "1/101/1001/" }
       - { id: 98101, iid: 2, title: closed_wi, state: opened, project_id: 1001, traversal_path: "1/101/1001/" }
     gl_note:
       - { id: 98200, note: same project note, noteable_type: MergeRequest, noteable_id: 98000, traversal_path: "1/100/1000/" }
+    gl_pipeline:
+      - { id: 98300, iid: 7, project_id: 1001, status: success, source: merge_request_event, traversal_path: "1/101/1001/" }
+      - { id: 98301, iid: 8, project_id: 1000, status: success, source: merge_request_event, traversal_path: "1/100/1000/" }
+    gl_environment:
+      - { id: 98400, project_id: 1000, name: nb-env, slug: nb-env, traversal_path: "1/100/1000/" }
     gl_edge:
       - { traversal_path: "1/101/1001/", source_id: 98000, source_kind: MergeRequest, relationship_kind: MENTIONS, target_id: 98100, target_kind: WorkItem }
       - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 98101, target_kind: WorkItem }
       - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7000, target_kind: Label }
       - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7001, target_kind: Label, _version: "2024-01-01 00:00:00" }
       - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7001, target_kind: Label, _version: "2024-06-01 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/1002/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7002, target_kind: Label }
       - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 98200, target_kind: Note }
+      - { traversal_path: "1/101/1001/", source_id: 98002, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 98200, target_kind: Note }
       - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
       - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 98000, target_kind: MergeRequest }
-      - { traversal_path: "1/100/1002/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7002, target_kind: Label }
       - { traversal_path: "1/100/1000/", source_id: 98001, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7000, target_kind: Label }
       - { traversal_path: "1/101/1001/", source_id: 98001, source_kind: MergeRequest, relationship_kind: MENTIONS, target_id: 98100, target_kind: WorkItem }
+      - { traversal_path: "1/101/1001/", source_id: 98002, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7002, target_kind: Label }
+      - { traversal_path: "1/101/1001/", source_id: 98002, source_kind: MergeRequest, relationship_kind: SOURCE_PROJECT, target_id: 1001, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 98002, source_kind: MergeRequest, relationship_kind: SOURCE_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/101/1001/", source_id: 98101, source_kind: WorkItem, relationship_kind: IN_MILESTONE, target_id: 6001, target_kind: Milestone }
+      - { traversal_path: "1/100/1000/", source_id: 98101, source_kind: WorkItem, relationship_kind: IN_MILESTONE, target_id: 6000, target_kind: Milestone }
+    gl_ci_edge:
+      - { traversal_path: "1/101/1001/", source_id: 98000, source_kind: MergeRequest, relationship_kind: TRIGGERED, target_id: 98300, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: TRIGGERED, target_id: 98301, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 98002, source_kind: MergeRequest, relationship_kind: TRIGGERED, target_id: 98300, target_kind: Pipeline }
+      - { traversal_path: "1/100/1000/", source_id: 98400, source_kind: Environment, relationship_kind: CREATED_FOR_MR, target_id: 98000, target_kind: MergeRequest }
+      - { traversal_path: "1/101/1001/", source_id: 98400, source_kind: Environment, relationship_kind: CREATED_FOR_MR, target_id: 98002, target_kind: MergeRequest }
 
 cases:
-  - name: pinned_by_id_keeps_cross_namespace_neighbors
+  - name: pinned_by_id_keeps_the_broad_plan
     query:
       json: |
         {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98000]}],"neighbors":{"direction":"both"}}
       gql: |
         MATCH (mr:MergeRequest {id: 98000})--(n) RETURN mr, n
     expect:
-      node_count: 7
+      node_count: 11
       nodes:
-        MergeRequest: { ids: [98000], rows: [{ id: 98000, title: anchor_mr }] }
+        MergeRequest: { ids: [98000] }
         WorkItem: { ids: [98100, 98101] }
-        Label: { ids: [7000], absent: [7001, 7002] }
+        Label: { ids: [7000, 7002], absent: [7001] }
         Note: { ids: [98200] }
         Project: { ids: [1000] }
         User: { ids: [2] }
+        Pipeline: { ids: [98300, 98301] }
+        Environment: { ids: [98400] }
       edges:
         MENTIONS: [[98000, 98100]]
         CLOSES: [[98000, 98101]]
-        HAS_LABEL: [[98000, 7000]]
+        HAS_LABEL: [[98000, 7000], [98000, 7002]]
         HAS_NOTE: [[98000, 98200]]
         IN_PROJECT: [[98000, 1000]]
         AUTHORED: [[2, 98000]]
+        TRIGGERED: [[98000, 98300], [98000, 98301]]
+        CREATED_FOR_MR: [[98400, 98000]]
 
-  - name: pinned_by_filter_matches_pinned_by_id
+  - name: pinned_by_filter_reads_same_path_kinds_under_the_current_path
     query:
       json: |
         {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":900},"project_id":{"eq":1000}}}],"neighbors":{"direction":"both"}}
@@ -68,14 +94,16 @@ cases:
         MATCH (mr:MergeRequest {iid: 900, project_id: 1000})--(n) RETURN mr, n
     expect:
       skip_requirements: ["filter:project_id"]
-      node_count: 7
+      node_count: 10
       nodes:
         MergeRequest: { ids: [98000], filters: { iid: { eq: 900 } } }
         WorkItem: { ids: [98100, 98101] }
-        Label: { ids: [7000], absent: [7001] }
+        Label: { ids: [7000], absent: [7001, 7002] }
         Note: { ids: [98200] }
         Project: { ids: [1000] }
         User: { ids: [2] }
+        Pipeline: { ids: [98300, 98301] }
+        Environment: { ids: [98400] }
       edges:
         MENTIONS: [[98000, 98100]]
         CLOSES: [[98000, 98101]]
@@ -83,24 +111,41 @@ cases:
         HAS_NOTE: [[98000, 98200]]
         IN_PROJECT: [[98000, 1000]]
         AUTHORED: [[2, 98000]]
+        TRIGGERED: [[98000, 98300], [98000, 98301]]
+        CREATED_FOR_MR: [[98400, 98000]]
 
   - name: split_arms_within_one_table
     query:
       json: |
-        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98000]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_LABEL","MENTIONS"]}}
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":900},"project_id":{"eq":1000}}}],"neighbors":{"direction":"outgoing","rel_types":["HAS_LABEL","MENTIONS"]}}
       gql: |
-        MATCH (mr:MergeRequest {id: 98000})-[:HAS_LABEL|MENTIONS]->(n) RETURN mr, n
+        MATCH (mr:MergeRequest {iid: 900, project_id: 1000})-[:HAS_LABEL|MENTIONS]->(n) RETURN mr, n
     expect:
+      skip_requirements: ["filter:project_id"]
       node_count: 3
       nodes:
-        MergeRequest: { ids: [98000] }
+        MergeRequest: { ids: [98000], filters: { iid: { eq: 900 } } }
         WorkItem: { ids: [98100] }
-        Label: { ids: [7000], absent: [7001] }
+        Label: { ids: [7000], absent: [7001, 7002] }
       edges:
         MENTIONS: [[98000, 98100]]
         HAS_LABEL: [[98000, 7000]]
 
-  - name: caller_without_the_other_namespace_loses_only_that_edge
+  - name: filter_matching_two_centers_in_different_projects_returns_both_sets
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"eq":"anchor_mr"}}}],"neighbors":{"direction":"outgoing","rel_types":["HAS_LABEL"]}}
+      gql: |
+        MATCH (mr:MergeRequest {title: 'anchor_mr'})-[:HAS_LABEL]->(n) RETURN mr, n
+    expect:
+      node_count: 4
+      nodes:
+        MergeRequest: { ids: [98000, 98002], filters: { title: { eq: anchor_mr } } }
+        Label: { ids: [7000, 7002], absent: [7001] }
+      edges:
+        HAS_LABEL: [[98000, 7000], [98002, 7002]]
+
+  - name: caller_without_the_other_namespace_loses_only_edges_stored_there
     config:
       security:
         paths: ["1/100/"]
@@ -110,37 +155,38 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 98000})--(n) RETURN mr, n
     expect:
-      node_count: 6
+      node_count: 9
       nodes:
         MergeRequest: { ids: [98000] }
         WorkItem: { ids: [98101], absent: [98100] }
-        Label: { ids: [7000] }
+        Label: { ids: [7000, 7002] }
         Note: { ids: [98200] }
         Project: { ids: [1000] }
         User: { ids: [2] }
+        Pipeline: { ids: [98301], absent: [98300] }
+        Environment: { ids: [98400] }
       edges:
         CLOSES: [[98000, 98101]]
-        HAS_LABEL: [[98000, 7000]]
+        HAS_LABEL: [[98000, 7000], [98000, 7002]]
         HAS_NOTE: [[98000, 98200]]
         IN_PROJECT: [[98000, 1000]]
         AUTHORED: [[2, 98000]]
+        TRIGGERED: [[98000, 98301]]
+        CREATED_FOR_MR: [[98400, 98000]]
       edge_absent:
         MENTIONS: [[98000, 98100]]
+        TRIGGERED: [[98000, 98300]]
 
-  - name: deleted_center_drops_anchored_edges_only
+  - name: deleted_filter_pinned_center_returns_nothing
     query:
       json: |
-        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98001]}],"neighbors":{"direction":"outgoing"}}
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":901},"project_id":{"eq":1000}}}],"neighbors":{"direction":"outgoing"}}
       gql: |
-        MATCH (mr:MergeRequest {id: 98001})-->(n) RETURN mr, n
+        MATCH (mr:MergeRequest {iid: 901, project_id: 1000})-->(n) RETURN mr, n
     expect:
-      node_count: 2
-      nodes:
-        MergeRequest: { ids: [98001] }
-        WorkItem: { ids: [98100] }
-        Label: { absent: [7000] }
-      edges:
-        MENTIONS: [[98001, 98100]]
+      skip_requirements: ["filter:iid", "filter:project_id", neighbors]
+      node_count: 0
+      total_edge_count: 0
 
   - name: caller_outside_the_center_namespace_sees_only_edges_in_its_own
     config:
@@ -152,12 +198,14 @@ cases:
       gql: |
         MATCH (mr:MergeRequest {id: 98000})--(n) RETURN mr, n
     expect:
-      node_count: 2
+      node_count: 3
       nodes:
         MergeRequest: { ids: [98000] }
         WorkItem: { ids: [98100], absent: [98101] }
+        Pipeline: { ids: [98300], absent: [98301] }
       edges:
         MENTIONS: [[98000, 98100]]
+        TRIGGERED: [[98000, 98300]]
 
   - name: incoming_mention_lands_under_the_mentioned_item
     query:
@@ -172,3 +220,91 @@ cases:
         MergeRequest: { ids: [98000, 98001] }
       edges:
         MENTIONS: [[98000, 98100], [98001, 98100]]
+
+  - name: has_note_rows_live_under_the_note
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"note","entity":"Note","filters":{"noteable_id":{"eq":98000}}}],"neighbors":{"direction":"incoming","rel_types":["HAS_NOTE"]}}
+      gql: |
+        MATCH (note:Note {noteable_id: 98000})<-[:HAS_NOTE]-(n) RETURN note, n
+    expect:
+      node_count: 2
+      nodes:
+        Note: { ids: [98200], filters: { noteable_id: { eq: 98000 } } }
+        MergeRequest: { ids: [98000], absent: [98002] }
+      edges:
+        HAS_NOTE: [[98000, 98200]]
+
+  - name: source_project_rows_live_under_the_merge_request
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":902},"project_id":{"eq":1001}}}],"neighbors":{"direction":"outgoing","rel_types":["SOURCE_PROJECT"]}}
+      gql: |
+        MATCH (mr:MergeRequest {iid: 902, project_id: 1001})-[:SOURCE_PROJECT]->(n) RETURN mr, n
+    expect:
+      skip_requirements: ["filter:project_id"]
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [98002], filters: { iid: { eq: 902 } } }
+        Project: { ids: [1001], absent: [1000] }
+      edges:
+        SOURCE_PROJECT: [[98002, 1001]]
+
+  - name: in_milestone_rows_live_under_the_work_item
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","filters":{"iid":{"eq":2},"project_id":{"eq":1001}}}],"neighbors":{"direction":"outgoing","rel_types":["IN_MILESTONE"]}}
+      gql: |
+        MATCH (w:WorkItem {iid: 2, project_id: 1001})-[:IN_MILESTONE]->(n) RETURN w, n
+    expect:
+      skip_requirements: ["filter:project_id"]
+      node_count: 2
+      nodes:
+        WorkItem: { ids: [98101], filters: { iid: { eq: 2 } } }
+        Milestone: { ids: [6001], absent: [6000] }
+      edges:
+        IN_MILESTONE: [[98101, 6001]]
+
+  - name: created_for_mr_rows_live_under_the_environment
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"env","entity":"Environment","filters":{"name":{"eq":"nb-env"}}}],"neighbors":{"direction":"outgoing","rel_types":["CREATED_FOR_MR"]}}
+      gql: |
+        MATCH (env:Environment {name: 'nb-env'})-[:CREATED_FOR_MR]->(n) RETURN env, n
+    expect:
+      node_count: 2
+      nodes:
+        Environment: { ids: [98400], filters: { name: { eq: nb-env } } }
+        MergeRequest: { ids: [98000], absent: [98002] }
+      edges:
+        CREATED_FOR_MR: [[98400, 98000]]
+
+  - name: triggered_rows_live_under_the_pipeline
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"p","entity":"Pipeline","filters":{"iid":{"eq":7},"project_id":{"eq":1001}}}],"neighbors":{"direction":"incoming","rel_types":["TRIGGERED"]}}
+      gql: |
+        MATCH (p:Pipeline {iid: 7, project_id: 1001})<-[:TRIGGERED]-(n) RETURN p, n
+    expect:
+      skip_requirements: ["filter:project_id"]
+      node_count: 2
+      nodes:
+        Pipeline: { ids: [98300], filters: { iid: { eq: 7 } } }
+        MergeRequest: { ids: [98000], absent: [98002] }
+      edges:
+        TRIGGERED: [[98000, 98300]]
+
+  - name: fork_pipeline_of_a_merge_request_is_returned
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":900},"project_id":{"eq":1000}}}],"neighbors":{"direction":"outgoing","rel_types":["TRIGGERED"]}}
+      gql: |
+        MATCH (mr:MergeRequest {iid: 900, project_id: 1000})-[:TRIGGERED]->(n) RETURN mr, n
+    expect:
+      skip_requirements: ["filter:project_id"]
+      node_count: 3
+      nodes:
+        MergeRequest: { ids: [98000], filters: { iid: { eq: 900 } } }
+        Pipeline: { ids: [98300, 98301] }
+      edges:
+        TRIGGERED: [[98000, 98300], [98000, 98301]]

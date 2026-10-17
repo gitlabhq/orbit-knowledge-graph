@@ -103,7 +103,8 @@ where
                         &incoming_relationships,
                     ))
         });
-    let pinned = (!center_np.node_ids.is_empty() || has_non_denorm) && center_np.has_traversal_path;
+    let filter_pinned = has_non_denorm && center_np.has_traversal_path;
+    let pinned = filter_pinned || (!center_np.node_ids.is_empty() && center_np.has_traversal_path);
 
     let anchors_center =
         |relationship: &str, variant: &query_data_model::RelationshipVariant, source: bool| {
@@ -114,10 +115,14 @@ where
             );
             scope.is_some_and(|scope| match source {
                 true => {
-                    scope == EdgeVariantScope::PruneToSource
-                        || scope.propagates_to_source(relationship, center_entity)
+                    filter_pinned
+                        && (scope == EdgeVariantScope::PruneToSource
+                            || scope.propagates_to_source(relationship, center_entity))
                 }
-                false => scope == EdgeVariantScope::PruneToTarget || scope.is_scope_preserving(),
+                false => {
+                    (pinned && scope.is_scope_preserving())
+                        || (filter_pinned && scope == EdgeVariantScope::PruneToTarget)
+                }
             })
         };
     let arms = |source: bool| -> Vec<NeighborArm> {
@@ -135,7 +140,7 @@ where
                     continue;
                 }
                 let anchored =
-                    pinned && variants.all(|variant| anchors_center(relationship, variant, source));
+                    variants.all(|variant| anchors_center(relationship, variant, source));
                 groups
                     .entry((route.table.to_string(), anchored))
                     .or_default()
