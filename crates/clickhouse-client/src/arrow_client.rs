@@ -111,7 +111,8 @@ impl ArrowClickHouseClient {
             .with_setting("join_use_nulls", "0")
             .with_setting("query_plan_join_swap_table", "auto")
             .with_setting("optimize_aggregation_in_order", "1")
-            .with_setting("use_statistics", "0");
+            .with_setting("use_statistics", "0")
+            .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0");
 
         if let Some(password) = password {
             client = client.with_password(password);
