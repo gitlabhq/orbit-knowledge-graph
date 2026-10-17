@@ -123,6 +123,26 @@ pub(super) fn assert_compilation(
             compiled.hydration
         );
     }
+    let settings: std::collections::BTreeMap<_, _> = compiled
+        .base
+        .query_config
+        .to_clickhouse_settings()
+        .expect("query settings render")
+        .into_iter()
+        .collect();
+    for (key, value) in &expect.settings {
+        let expected = match value {
+            Value::Null => None,
+            Value::Bool(flag) => Some(u8::from(*flag).to_string()),
+            Value::String(text) => Some(format!("'{text}'")),
+            other => Some(other.to_string()),
+        };
+        assert_eq!(
+            settings.get(key),
+            expected.as_ref(),
+            "{label}: unexpected setting {key}\nsettings: {settings:?}"
+        );
+    }
     let sql = compiled.base.render();
     for fragment in &expect.sql_contains {
         assert!(
