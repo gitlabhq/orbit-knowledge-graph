@@ -656,7 +656,7 @@ mod tests {
         result_ctx.add_node("p", "Project");
         result_ctx.query_type = Some(QueryType::Traversal);
 
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx).unwrap();
 
         PipelineOutput {
             row_count: qr.authorized_count(),
@@ -704,7 +704,7 @@ mod tests {
         .unwrap();
 
         let result_ctx = ResultContext::new().with_query_type(QueryType::Aggregation);
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx).unwrap();
 
         PipelineOutput {
             row_count: qr.authorized_count(),
@@ -900,7 +900,7 @@ mod tests {
         let mut result_ctx = ResultContext::new();
         result_ctx.add_node("p", "Project");
         result_ctx.query_type = Some(QueryType::Traversal);
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx).unwrap();
 
         let output = PipelineOutput {
             row_count: qr.authorized_count(),
@@ -1028,7 +1028,7 @@ mod tests {
 
         let mut result_ctx = ResultContext::new();
         result_ctx.query_type = Some(QueryType::PathFinding);
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx).unwrap();
 
         let output = PipelineOutput {
             row_count: qr.authorized_count(),
@@ -1126,7 +1126,7 @@ mod tests {
 
         let mut result_ctx = ResultContext::new();
         result_ctx.query_type = Some(QueryType::PathFinding);
-        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx).unwrap();
 
         let output = PipelineOutput {
             row_count: qr.authorized_count(),

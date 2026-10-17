@@ -20,9 +20,10 @@ impl PipelineStage for ExtractionStage {
             .get::<ExecutionOutput>()
             .ok_or_else(|| PipelineError::Execution("ExecutionOutput not found in phases".into()))
             .inspect_err(|e| obs.record_error(e))?;
-        Ok(ExtractionOutput {
-            query_result: QueryResult::from_batches(&input.batches, &input.result_context),
-        })
+        let query_result = QueryResult::from_batches(&input.batches, &input.result_context)
+            .map_err(|error| PipelineError::Authorization(error.to_string()))
+            .inspect_err(|e| obs.record_error(e))?;
+        Ok(ExtractionOutput { query_result })
     }
 }
 

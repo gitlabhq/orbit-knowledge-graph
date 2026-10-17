@@ -33,7 +33,7 @@ pub async fn compile_and_execute(
     let security_ctx = test_security_context();
     let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
-    let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    let result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     (compiled, result)
 }
 
