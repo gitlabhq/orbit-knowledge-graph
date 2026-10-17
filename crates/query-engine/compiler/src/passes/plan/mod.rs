@@ -75,15 +75,15 @@ impl QueryPlan {
     }
 
     pub fn is_point_lookup(&self) -> bool {
-        match self {
-            Self::Traversal(Plan { nodes, .. }) | Self::Aggregation(Plan { nodes, .. }) => {
-                !nodes.is_empty()
-                    && nodes
-                        .values()
-                        .all(|node| node.selectivity == Selectivity::Pinned)
-            }
-            _ => false,
-        }
+        let nodes = match self {
+            Self::Traversal(Plan { nodes, .. }) | Self::Aggregation(Plan { nodes, .. }) => nodes,
+            _ => return false,
+        };
+        !nodes.is_empty()
+            && nodes
+                .values()
+                .all(|node| node.selectivity == Selectivity::Pinned)
+            && self.hops().iter().all(|hop| hop.max_hops == 1)
     }
 }
 

@@ -487,7 +487,7 @@ query:
 | `query.default.max_bytes_to_read` | unset | ClickHouse `max_bytes_to_read` in bytes |
 | `query.default.max_rows_to_read` | unset | ClickHouse `max_rows_to_read` |
 | `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
-| `query.default.use_query_cache` | `true` | ClickHouse query cache for graph queries and item counts. Indexing progress reads, the indexer, and graph queries that pin every pattern node by id always skip it. Queries with non-deterministic functions or system tables run uncached |
+| `query.default.use_query_cache` | `true` | ClickHouse query cache for graph queries and item counts. Indexing progress reads, the indexer, and graph queries that pin every pattern node by ID always skip it. Queries with non-deterministic functions or system tables run uncached |
 | `query.default.query_cache_ttl` | `10` | Query cache TTL in seconds. A cached result can be this old |
 
 ## Schema management
