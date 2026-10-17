@@ -7,7 +7,8 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column, traversal_path_column,
+    HYDRATION_NODE_ALIAS, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
+    traversal_path_column,
 };
 use compiler::{
     ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
@@ -105,6 +106,47 @@ pub fn extract_dynamic_refs(
         ids.dedup();
     }
     refs
+}
+
+pub fn collect_dynamic_ref_paths(
+    result: &QueryResult,
+    static_nodes: &[compiler::RedactionNode],
+) -> HashMap<String, Vec<TraversalPath>> {
+    let mut paths: HashMap<String, Option<Vec<TraversalPath>>> = HashMap::new();
+    let mut record = |entity_type: &str, path: Option<String>| {
+        let entry = paths
+            .entry(entity_type.to_string())
+            .or_insert_with(|| Some(Vec::new()));
+        match (entry.as_mut(), path.filter(|p| !p.is_empty())) {
+            (Some(list), Some(path)) => list.push(TraversalPath::new_unchecked(path)),
+            _ => *entry = None,
+        }
+    };
+    for row in result.authorized_rows() {
+        let neighbor_path = row.get_column_string(neighbor_traversal_path_column());
+        for node_ref in row.dynamic_nodes() {
+            record(&node_ref.entity_type, neighbor_path.clone());
+        }
+        for node in static_nodes {
+            if row.get_public_id(node).is_some()
+                && let Some(entity_type) = row.get_type(node)
+            {
+                record(
+                    entity_type,
+                    row.get_column_string(&traversal_path_column(&node.alias)),
+                );
+            }
+        }
+    }
+    paths
+        .into_iter()
+        .filter_map(|(entity_type, list)| {
+            let mut list = list?;
+            list.sort_unstable();
+            list.dedup();
+            Some((entity_type, list))
+        })
+        .collect()
 }
 
 /// Caps limit at `u32::MAX` to prevent truncation.
@@ -352,6 +394,7 @@ pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
     traversal_paths: &[TraversalPath],
+    ref_paths: &HashMap<String, Vec<TraversalPath>>,
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
@@ -378,7 +421,9 @@ pub fn hydrate_dynamic(
         total_ids += capped_ids.len();
 
         let tps = if spec.has_traversal_path {
-            traversal_paths.to_vec()
+            ref_paths
+                .get(entity_type)
+                .map_or_else(|| traversal_paths.to_vec(), Clone::clone)
         } else {
             Vec::new()
         };
@@ -461,5 +506,95 @@ pub fn strip_filter_injected_static(result: &mut QueryResult, templates: &[Hydra
         for key in &col_keys {
             row.remove_column(key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use arrow::array::{ArrayRef, Int64Array, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    use compiler::{ResultContext, neighbor_id_column, neighbor_type_column};
+
+    use super::*;
+
+    fn neighbors_of_user(neighbors: &[(i64, &str, &str)]) -> (QueryResult, ResultContext) {
+        let mut ctx = ResultContext::new().with_query_type(QueryType::Neighbors);
+        ctx.add_node("c", "User");
+        let strings = |values: Vec<&str>| Arc::new(StringArray::from(values)) as ArrayRef;
+        let columns: Vec<(&str, ArrayRef)> = vec![
+            (
+                "_orbit_c_id",
+                Arc::new(Int64Array::from(vec![1; neighbors.len()])),
+            ),
+            ("_orbit_c_type", strings(vec!["User"; neighbors.len()])),
+            (
+                neighbor_id_column(),
+                Arc::new(Int64Array::from_iter_values(neighbors.iter().map(|n| n.0))),
+            ),
+            (
+                neighbor_type_column(),
+                strings(neighbors.iter().map(|n| n.1).collect()),
+            ),
+            (
+                neighbor_traversal_path_column(),
+                strings(neighbors.iter().map(|n| n.2).collect()),
+            ),
+        ];
+        let fields: Vec<Field> = columns
+            .iter()
+            .map(|(name, array)| Field::new(*name, array.data_type().clone(), true))
+            .collect();
+        let arrays = columns.into_iter().map(|(_, array)| array).collect();
+        let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).unwrap();
+        (QueryResult::from_batches(&[batch], &ctx), ctx)
+    }
+
+    fn scoped_spec(entity_type: &str) -> DynamicEntityColumns {
+        DynamicEntityColumns {
+            entity_type: entity_type.to_string(),
+            destination_table: String::new(),
+            columns: vec!["id".to_string()],
+            virtual_columns: vec![],
+            injected_columns: vec![],
+            has_traversal_path: true,
+        }
+    }
+
+    #[test]
+    fn neighbors_hydrate_by_their_own_paths_unless_one_is_missing() {
+        let (result, ctx) = neighbors_of_user(&[
+            (10, "MergeRequest", "1/2/"),
+            (11, "MergeRequest", "1/3/"),
+            (20, "WorkItem", "1/2/"),
+            (21, "WorkItem", ""),
+        ]);
+        let static_nodes: Vec<_> = ctx.nodes().cloned().collect();
+        let fallback = [TraversalPath::new_unchecked("1/")];
+
+        let (nodes, _) = hydrate_dynamic(
+            &[scoped_spec("MergeRequest"), scoped_spec("WorkItem")],
+            &extract_dynamic_refs(&result, &static_nodes),
+            &fallback,
+            &collect_dynamic_ref_paths(&result, &static_nodes),
+        )
+        .unwrap();
+
+        let paths_of = |entity: &str| {
+            nodes
+                .iter()
+                .find(|node| node.entity.as_deref() == Some(entity))
+                .map(|node| node.traversal_paths.clone())
+                .unwrap()
+        };
+        assert_eq!(
+            paths_of("MergeRequest"),
+            [
+                TraversalPath::new_unchecked("1/2/"),
+                TraversalPath::new_unchecked("1/3/")
+            ]
+        );
+        assert_eq!(paths_of("WorkItem"), fallback);
     }
 }

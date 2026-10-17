@@ -134,6 +134,8 @@ pub struct Neighbors {
     pub incoming_kinds: Vec<String>,
     pub incoming_scope_preserving: Vec<String>,
     pub incoming_cross_scope: Vec<String>,
+    pub outgoing_neighbor_paths: Vec<(String, String)>,
+    pub incoming_neighbor_paths: Vec<(String, String)>,
 }
 
 pub struct Hydration {
