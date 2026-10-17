@@ -229,8 +229,6 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
     }
 }
 
-/// A text label does not move a node that a placed capture also holds, above
-/// or below it: that node is already going where the template puts it.
 fn overlaps_placed(t: &Tree, caps: &[Cap], placed: &[bool], node: NodeId) -> bool {
     caps.iter()
         .zip(placed)

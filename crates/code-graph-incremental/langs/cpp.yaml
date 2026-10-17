@@ -224,9 +224,9 @@ stages:
       - match: '(do_statement body: $B condition: $C)'
         replace: '(__ssa_loop $B $C)'
       - match: '(for_range_loop type:? $T:type_identifier declarator: $N:identifier right: $V body: $B)'
-        replace: '(__ssa_loop $V (__binding @$N (__declaration) (__ssa_typed? @$T)) $B)'
+        replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration) (__ssa_typed? @$T)) $B))'
       - match: '(for_range_loop declarator: $N:identifier right: $V body: $B)'
-        replace: '(__ssa_loop $V (__binding @$N (__declaration)) $B)'
+        replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
       - match: '(for_range_loop right: $V body: $B)'
         replace: '(__ssa_loop $V $B)'
       # Types

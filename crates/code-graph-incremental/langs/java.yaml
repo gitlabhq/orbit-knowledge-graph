@@ -196,7 +196,7 @@ stages:
   - name: classify
     rules:
       - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
-        replace: '(__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
+        replace: '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T)))))'
       # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'

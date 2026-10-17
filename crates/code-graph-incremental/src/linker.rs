@@ -110,8 +110,7 @@ struct Fold<'t> {
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
-    pending_calls: Vec<(Value, u32, u32, Option<WildcardImports>)>,
-    loop_receivers: Vec<LoopReceiver>,
+    pending_calls: Vec<(Value, u32, u32, Deferred)>,
     shadowed_calls: FxHashSet<u32>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, Undo)>,
@@ -123,13 +122,9 @@ struct Fold<'t> {
 
 type Undo = Vec<(u32, Option<(u32, usize)>)>;
 
-struct LoopReceiver {
-    phi: Value,
-    object: u32,
-    method: u32,
-    from: u32,
-    site: u32,
-    seen: Vec<Value>,
+enum Deferred {
+    Callee(Option<WildcardImports>),
+    Receiver(u32, u32, Vec<Value>),
 }
 
 type LoopSpans = (FxHashMap<u32, u32>, FxHashMap<u32, Vec<u32>>, Vec<u32>);
@@ -223,8 +218,10 @@ impl<'t> Fold<'t> {
                 WorkItem::ExitLoop(header) => {
                     self.loops.pop();
                     self.cur = self.ssa.finish_loop(header, self.cur);
-                    if self.loops.is_empty() {
-                        self.resolve_loop_receivers();
+                    if self.loops.is_empty()
+                        && let Err(k) = self.resolve_pending()
+                    {
+                        self.killed = Some(k);
                     }
                 }
                 WorkItem::EnterLoop(node) => self.enter_loop(self.tree.cursor(node), &mut stack),
@@ -315,7 +312,7 @@ impl<'t> Fold<'t> {
             return;
         } else if k == C::SsaLoop {
             stack.push(WorkItem::EnterLoop(c.index()));
-            let header: Vec<_> = c.children().take(Self::loop_header_len(c)).collect();
+            let header: Vec<_> = c.children().take(Self::loop_var_at(c)).collect();
             stack.extend(header.into_iter().rev().map(|n| WorkItem::Visit(n.index())));
             return;
         } else if k == C::Lambda {
@@ -349,14 +346,10 @@ impl<'t> Fold<'t> {
             || c.is(C::Call) && c.children().any(|child| child.is(C::Import))
     }
 
-    /// The loop variable is a declared binding the loop rule itself places
-    /// under `__ssa_loop`; a binding lifted out of the body block is a statement.
-    fn declares_loop_var(node: Cursor<'_>) -> bool {
-        node.is(C::Binding) && node.has(C::Declaration) && !node.lifted()
-    }
-
-    fn loop_header_len(c: Cursor<'_>) -> usize {
-        c.children().position(Self::declares_loop_var).unwrap_or(0)
+    fn loop_var_at(c: Cursor<'_>) -> usize {
+        c.children()
+            .position(|node| node.is(C::Binding) && node.has(C::Declaration) && !node.lifted())
+            .unwrap_or(0)
     }
 
     fn enter_loop(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
@@ -369,19 +362,8 @@ impl<'t> Fold<'t> {
         self.loops.push((self.cur, span));
         let (header, body) = self.ssa.begin_loop(self.cur);
         self.cur = body;
-        let scoped = c
-            .children()
-            .find(|node| Self::declares_loop_var(*node))
-            .is_some_and(|node| node.child_sym(C::Declaration).is_none());
-        if scoped {
-            self.enter_scope(c);
-            stack.push(WorkItem::ExitScope {
-                wildcards: self.wildcards.len(),
-                block: None,
-            });
-        }
         stack.push(WorkItem::ExitLoop(header));
-        let rest: Vec<_> = c.children().skip(Self::loop_header_len(c)).collect();
+        let rest: Vec<_> = c.children().skip(Self::loop_var_at(c)).collect();
         stack.extend(rest.into_iter().rev().map(|n| WorkItem::Visit(n.index())));
     }
 
@@ -673,19 +655,18 @@ impl<'t> Fold<'t> {
             .field_slot(callee)
             .map(|slot| self.read_value(slot))
             .or_else(|| {
-                let sym = callee
+                callee
                     .sym_opt()
-                    .filter(|_| !c.has_tag(self.tags.implicit_self))?;
-                let block = self.name_block(sym);
-                let value = self.ssa.read_variable_internal(self.binding(sym), block);
-                matches!(value, Value::Phi(_)).then_some(value)
+                    .filter(|_| !c.has_tag(self.tags.implicit_self))
+                    .and_then(|sym| self.read_phi(sym))
             });
         if let Some(value) = value {
             let fallback = (callee.sym_opt().is_some()
                 && !callee.has(C::Member)
                 && !callee.has(C::Ivar)
-                && self.guessable(callee.sym()))
+                && is_name_text(self.syms.resolve(callee.sym())))
             .then(|| Rc::clone(&self.wildcards));
+            let fallback = Deferred::Callee(fallback);
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -693,7 +674,12 @@ impl<'t> Fold<'t> {
                 if obj.value_child(C::Member).is_some() {
                     self.flow_chain_root(obj, from);
                 }
-                self.defer_loop_receiver(obj, m.sym(), from, c.index());
+                let leaf = !self.loops.is_empty() && obj.children().next().is_none();
+                if let Some(phi) = leaf.then(|| self.read_phi(obj.sym())).flatten() {
+                    let seen = self.lookup(obj.sym());
+                    let receiver = Deferred::Receiver(obj.index(), m.sym(), seen);
+                    self.pending_calls.push((phi, from, c.index(), receiver));
+                }
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
             if let Some(cls) = self.enclosing_class(from) {
@@ -765,10 +751,7 @@ impl<'t> Fold<'t> {
         }
 
         let rhs = c.child(C::Rhs);
-        if rhs.is_none()
-            && let Some(elements) = self.loop_elements(c)
-        {
-            self.bind_elements(lhs, &elements);
+        if rhs.is_none() && self.bind_elements(c, lhs) {
             if declaration {
                 self.bind(c.sym(), lhs);
             }
@@ -788,13 +771,6 @@ impl<'t> Fold<'t> {
             declaration,
             branch: branch.is_some(),
         });
-        let after_rhs: Vec<_> = c.children().skip_while(|n| !n.is(C::Rhs)).skip(1).collect();
-        stack.extend(
-            after_rhs
-                .into_iter()
-                .rev()
-                .map(|n| WorkItem::Visit(n.index())),
-        );
         if let Some(branch) = branch {
             Self::handle_branch(branch, Some(lhs), stack);
         } else if let Some(rhs) = rhs {
@@ -803,31 +779,33 @@ impl<'t> Fold<'t> {
         true
     }
 
-    fn loop_elements(&self, c: Cursor<'t>) -> Option<Vec<u32>> {
-        let parent = c.parent().filter(|parent| parent.is(C::SsaLoop))?;
-        let value = parent
-            .children()
-            .take_while(|node| node.index() != c.index())
-            .find(|node| node.is(C::Arr))?;
-        let elements: Vec<u32> = value
-            .children()
-            .filter(|element| element.is(C::Call))
-            .map(|element| element.index())
-            .collect();
-        (!elements.is_empty()).then_some(elements)
-    }
-
-    fn bind_elements(&mut self, lhs: u32, elements: &[u32]) {
+    fn bind_elements(&mut self, c: Cursor<'t>, lhs: u32) -> bool {
+        let iterable = c
+            .parent()
+            .filter(|parent| parent.is(C::SsaLoop))
+            .and_then(|parent| {
+                parent
+                    .children()
+                    .take_while(|node| node.index() != c.index())
+                    .find(|node| node.is(C::Arr))
+            });
         let pre = self.cur;
-        let arms: Vec<BlockId> = elements
+        let arms: Vec<BlockId> = iterable
             .iter()
-            .map(|&element| {
+            .flat_map(|array| array.children())
+            .filter(|element| element.is(C::Call))
+            .map(|element| {
                 let arm = self.ssa.add_sealed_successor(pre);
-                self.ssa.write_variable(lhs, arm, Value::Call(element));
+                self.ssa
+                    .write_variable(lhs, arm, Value::Call(element.index()));
                 arm
             })
             .collect();
-        self.cur = self.ssa.add_sealed_join(arms);
+        let bound = !arms.is_empty();
+        if bound {
+            self.cur = self.ssa.add_sealed_join(arms);
+        }
+        bound
     }
 
     fn exit_binding(
@@ -1248,6 +1226,45 @@ impl<'t> Fold<'t> {
             .map_or(self.cur, |&(preheader, _)| preheader)
     }
 
+    fn resolve_pending(&mut self) -> Result<(), Killed> {
+        for (value, from, site, deferred) in std::mem::take(&mut self.pending_calls) {
+            self.run
+                .check()
+                .and_then(|()| self.file.check())
+                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))?;
+            let first = self.edges.len();
+            let mut targets = self.ssa.resolve_value(&value);
+            match deferred {
+                Deferred::Callee(fallback) => {
+                    if targets.is_empty() {
+                        targets.extend(
+                            fallback
+                                .iter()
+                                .flat_map(|w| w.iter())
+                                .map(|&w| Value::ImportRef(w)),
+                        );
+                    }
+                    self.emit_targets(&targets, from);
+                }
+                Deferred::Receiver(object, method, seen) => {
+                    targets.retain(|value| !seen.contains(value));
+                    self.resolve_values(self.tree.cursor(object), method, from, targets);
+                }
+            }
+            for edge in &mut self.edges[first..] {
+                edge.site = Some(site);
+            }
+        }
+        Ok(())
+    }
+
+    fn read_phi(&mut self, sym: u32) -> Option<Value> {
+        let value = self
+            .ssa
+            .read_variable_internal(self.binding(sym), self.name_block(sym));
+        matches!(value, Value::Phi(_)).then_some(value)
+    }
+
     fn lookup(&mut self, sym: u32) -> Vec<Value> {
         for block in [self.name_block(sym), BlockId(0)] {
             let result = self.ssa.read_variable(self.binding(sym), block);
@@ -1285,56 +1302,10 @@ impl<'t> Fold<'t> {
             return;
         }
         stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-            self.resolve_obj_inner(obj, method, from)
+            let values = self.lookup_chain(obj);
+            self.resolve_values(obj, method, from, values);
         });
         self.obj_seen.remove(&obj.index());
-    }
-
-    fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32) {
-        let values = self.lookup_chain(obj);
-        self.resolve_values(obj, method, from, values);
-    }
-
-    fn defer_loop_receiver(&mut self, obj: Cursor, method: u32, from: u32, site: u32) {
-        if self.loops.is_empty() || obj.children().next().is_some() {
-            return;
-        }
-        let phi = self
-            .ssa
-            .read_variable_internal(self.binding(obj.sym()), self.cur);
-        if matches!(phi, Value::Phi(_)) {
-            let seen = self.lookup(obj.sym());
-            self.loop_receivers.push(LoopReceiver {
-                phi,
-                object: obj.index(),
-                method,
-                from,
-                site,
-                seen,
-            });
-        }
-    }
-
-    fn resolve_loop_receivers(&mut self) {
-        for receiver in std::mem::take(&mut self.loop_receivers) {
-            if let Err(k) = self
-                .run
-                .check()
-                .and_then(|()| self.file.check())
-                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))
-            {
-                self.killed = Some(k);
-                return;
-            }
-            let first = self.edges.len();
-            let mut values = self.ssa.resolve_value(&receiver.phi);
-            values.retain(|value| !receiver.seen.contains(value));
-            let object = self.tree.cursor(receiver.object);
-            self.resolve_values(object, receiver.method, receiver.from, values);
-            for edge in &mut self.edges[first..] {
-                edge.site = Some(receiver.site);
-            }
-        }
     }
 
     fn resolve_values(&mut self, obj: Cursor, method: u32, from: u32, values: Vec<Value>) {
@@ -1384,7 +1355,7 @@ impl<'t> Fold<'t> {
 
     fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) {
         let mut targets = self.lookup(sym);
-        if targets.is_empty() && self.guessable(sym) {
+        if targets.is_empty() && is_name_text(self.syms.resolve(sym)) {
             let callable_import = |&n: &u32| {
                 let import = self.tree.cursor(n).parent();
                 import.is_some_and(|i| i.has_tag(self.tags.callable))
@@ -1396,10 +1367,6 @@ impl<'t> Fold<'t> {
             targets = wild.map(|&n| Value::ImportRef(n)).collect();
         }
         self.emit_targets(&targets, from);
-    }
-
-    fn guessable(&self, sym: u32) -> bool {
-        is_name_text(self.syms.resolve(sym))
     }
 
     fn emit_targets(&mut self, targets: &[Value], from: u32) {
@@ -1676,7 +1643,6 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
-        loop_receivers: Vec::new(),
         shadowed_calls: FxHashSet::default(),
         fields: FxHashMap::default(),
         scopes: vec![(root_label, Vec::new())],
@@ -1695,26 +1661,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 
-    for (value, from, site, fallback) in std::mem::take(&mut f.pending_calls) {
-        f.run
-            .check()
-            .and_then(|()| f.file.check())
-            .and_then(|()| edge_limit(&f.edges, f.max_edges, &tree.label))?;
-        let first = f.edges.len();
-        let mut targets = f.ssa.resolve_value(&value);
-        if targets.is_empty() {
-            targets.extend(
-                fallback
-                    .iter()
-                    .flat_map(|w| w.iter())
-                    .map(|&w| Value::ImportRef(w)),
-            );
-        }
-        f.emit_targets(&targets, from);
-        for edge in &mut f.edges[first..] {
-            edge.site = Some(site);
-        }
-    }
+    f.resolve_pending()?;
 
     f.cur = entry;
     for dn in f.defs.clone() {
