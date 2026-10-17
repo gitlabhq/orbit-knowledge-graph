@@ -28,7 +28,20 @@ SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.targe
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
 
-const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target
+const FRESHNESS_QUERY_SQL: &str = r#"WITH
+  enabled AS (
+    {{enabled_namespaces}}
+  ),
+  changed AS (
+{{branches}}
+  )
+SELECT root_path, target, min(watermark) AS earliest, max(watermark) AS latest
+FROM changed
+WHERE root_path IN (SELECT traversal_path FROM enabled)
+GROUP BY root_path, target, toStartOfMinute(watermark)
+ORDER BY earliest"#;
+
+const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target, {{watermark_column}} AS watermark
     FROM {{table}}
     WHERE {{watermark_column}} > {lower:String}
       AND {{watermark_column}} <= {upper:String}
@@ -236,13 +249,21 @@ impl NamespaceChangeQuery {
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
+    render_over_changes(CHANGE_QUERY_SQL, reindex_sources)
+}
+
+pub(super) fn render_freshness_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
+    render_over_changes(FRESHNESS_QUERY_SQL, reindex_sources)
+}
+
+fn render_over_changes(template: &str, reindex_sources: &BTreeSet<ReindexSource>) -> String {
     let branches = reindex_sources
         .iter()
         .map(render_change_branch)
         .collect::<Vec<_>>()
         .join("\nUNION ALL\n");
 
-    CHANGE_QUERY_SQL
+    template
         .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }
@@ -506,7 +527,7 @@ mod tests {
     {enabled}
   ),
   changed AS (
-    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
+    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target, _siphon_watermark AS watermark
     FROM work_items
     WHERE _siphon_watermark > {{lower:String}}
       AND _siphon_watermark <= {{upper:String}}

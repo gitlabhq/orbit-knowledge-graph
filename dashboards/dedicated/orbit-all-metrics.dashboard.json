@@ -3527,7 +3527,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Duration of a full handler invocation across all its pipelines.",
+      "description": "One observation per enabled namespace and plan: seconds its oldest unindexed datalake change has waited, 0 when in sync.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -3546,6 +3546,126 @@
         "y": 180
       },
       "id": 66,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p50 {{entity}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p95 {{entity}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p99 {{entity}}",
+          "refId": "C"
+        }
+      ],
+      "title": "gkg_indexer_sdlc_freshness_lag_seconds — p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "One observation per enabled namespace and plan: seconds its oldest unindexed datalake change has waited, 0 when in sync.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 180
+      },
+      "id": 67,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Duration of a full handler invocation across all its pipelines.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 180
+      },
+      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -3611,10 +3731,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 180
+        "x": 0,
+        "y": 188
       },
-      "id": 67,
+      "id": 69,
       "options": {
         "legend": {
           "calcs": [
@@ -3662,10 +3782,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 180
+        "x": 8,
+        "y": 188
       },
-      "id": 68,
+      "id": 70,
       "options": {
         "legend": {
           "calcs": [
@@ -3731,10 +3851,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 16,
         "y": 188
       },
-      "id": 69,
+      "id": 71,
       "options": {
         "legend": {
           "calcs": [
@@ -3782,10 +3902,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 188
+        "x": 0,
+        "y": 196
       },
-      "id": 70,
+      "id": 72,
       "options": {
         "legend": {
           "calcs": [
@@ -3833,10 +3953,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 188
+        "x": 8,
+        "y": 196
       },
-      "id": 71,
+      "id": 73,
       "options": {
         "legend": {
           "calcs": [
@@ -3884,10 +4004,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 16,
         "y": 196
       },
-      "id": 72,
+      "id": 74,
       "options": {
         "legend": {
           "calcs": [
@@ -3953,10 +4073,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 196
+        "x": 0,
+        "y": 204
       },
-      "id": 73,
+      "id": 75,
       "options": {
         "legend": {
           "calcs": [
@@ -4004,10 +4124,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 196
+        "x": 8,
+        "y": 204
       },
-      "id": 74,
+      "id": 76,
       "options": {
         "legend": {
           "calcs": [
@@ -4041,9 +4161,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 204
+        "y": 212
       },
-      "id": 75,
+      "id": 77,
       "panels": [],
       "title": "Namespace deletion (indexer)",
       "type": "row"
@@ -4069,9 +4189,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 205
+        "y": 213
       },
-      "id": 76,
+      "id": 78,
       "options": {
         "legend": {
           "calcs": [
@@ -4138,9 +4258,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 205
+        "y": 213
       },
-      "id": 77,
+      "id": 79,
       "options": {
         "legend": {
           "calcs": [
@@ -4189,9 +4309,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 205
+        "y": 213
       },
-      "id": 78,
+      "id": 80,
       "options": {
         "legend": {
           "calcs": [
@@ -4225,9 +4345,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 213
+        "y": 221
       },
-      "id": 79,
+      "id": 81,
       "panels": [],
       "title": "Scheduler (dispatcher)",
       "type": "row"
@@ -4253,9 +4373,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 214
+        "y": 222
       },
-      "id": 80,
+      "id": 82,
       "options": {
         "legend": {
           "calcs": [
@@ -4322,9 +4442,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 214
+        "y": 222
       },
-      "id": 81,
+      "id": 83,
       "options": {
         "legend": {
           "calcs": [
@@ -4373,9 +4493,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 214
+        "y": 222
       },
-      "id": 82,
+      "id": 84,
       "options": {
         "legend": {
           "calcs": [
@@ -4424,9 +4544,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 222
+        "y": 230
       },
-      "id": 83,
+      "id": 85,
       "options": {
         "legend": {
           "calcs": [
@@ -4493,9 +4613,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 222
+        "y": 230
       },
-      "id": 84,
+      "id": 86,
       "options": {
         "legend": {
           "calcs": [
@@ -4544,9 +4664,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 222
+        "y": 230
       },
-      "id": 85,
+      "id": 87,
       "options": {
         "legend": {
           "calcs": [
@@ -4595,9 +4715,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 230
+        "y": 238
       },
-      "id": 86,
+      "id": 88,
       "options": {
         "legend": {
           "calcs": [
@@ -4646,9 +4766,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 230
+        "y": 238
       },
-      "id": 87,
+      "id": 89,
       "options": {
         "legend": {
           "calcs": [
@@ -4682,9 +4802,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 238
+        "y": 246
       },
-      "id": 88,
+      "id": 90,
       "panels": [],
       "title": "Schema migration (dispatcher)",
       "type": "row"
@@ -4710,9 +4830,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 239
+        "y": 247
       },
-      "id": 89,
+      "id": 91,
       "options": {
         "legend": {
           "calcs": [
@@ -4761,9 +4881,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 239
+        "y": 247
       },
-      "id": 90,
+      "id": 92,
       "options": {
         "legend": {
           "calcs": [
@@ -4812,9 +4932,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 239
+        "y": 247
       },
-      "id": 91,
+      "id": 93,
       "options": {
         "legend": {
           "calcs": [
@@ -4863,9 +4983,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 247
+        "y": 255
       },
-      "id": 92,
+      "id": 94,
       "options": {
         "legend": {
           "calcs": [
@@ -4914,9 +5034,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 247
+        "y": 255
       },
-      "id": 93,
+      "id": 95,
       "options": {
         "legend": {
           "calcs": [
@@ -4965,9 +5085,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 247
+        "y": 255
       },
-      "id": 94,
+      "id": 96,
       "options": {
         "legend": {
           "calcs": [
@@ -5001,9 +5121,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 255
+        "y": 263
       },
-      "id": 95,
+      "id": 97,
       "panels": [],
       "title": "Query pipeline (webserver)",
       "type": "row"
@@ -5029,9 +5149,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 256
+        "y": 264
       },
-      "id": 96,
+      "id": 98,
       "options": {
         "legend": {
           "calcs": [
@@ -5098,9 +5218,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 256
+        "y": 264
       },
-      "id": 97,
+      "id": 99,
       "options": {
         "legend": {
           "calcs": [
@@ -5149,9 +5269,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 256
+        "y": 264
       },
-      "id": 98,
+      "id": 100,
       "options": {
         "legend": {
           "calcs": [
@@ -5218,9 +5338,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 264
+        "y": 272
       },
-      "id": 99,
+      "id": 101,
       "options": {
         "legend": {
           "calcs": [
@@ -5269,9 +5389,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 264
+        "y": 272
       },
-      "id": 100,
+      "id": 102,
       "options": {
         "legend": {
           "calcs": [
@@ -5338,9 +5458,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 264
+        "y": 272
       },
-      "id": 101,
+      "id": 103,
       "options": {
         "legend": {
           "calcs": [
@@ -5389,9 +5509,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 272
+        "y": 280
       },
-      "id": 102,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [
@@ -5440,9 +5560,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 272
+        "y": 280
       },
-      "id": 103,
+      "id": 105,
       "options": {
         "legend": {
           "calcs": [
@@ -5491,9 +5611,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 272
+        "y": 280
       },
-      "id": 104,
+      "id": 106,
       "options": {
         "legend": {
           "calcs": [
@@ -5560,9 +5680,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 280
+        "y": 288
       },
-      "id": 105,
+      "id": 107,
       "options": {
         "legend": {
           "calcs": [
@@ -5611,9 +5731,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 280
+        "y": 288
       },
-      "id": 106,
+      "id": 108,
       "options": {
         "legend": {
           "calcs": [
@@ -5680,9 +5800,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 280
+        "y": 288
       },
-      "id": 107,
+      "id": 109,
       "options": {
         "legend": {
           "calcs": [
@@ -5731,9 +5851,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 288
+        "y": 296
       },
-      "id": 108,
+      "id": 110,
       "options": {
         "legend": {
           "calcs": [
@@ -5800,9 +5920,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 288
+        "y": 296
       },
-      "id": 109,
+      "id": 111,
       "options": {
         "legend": {
           "calcs": [
@@ -5851,9 +5971,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 288
+        "y": 296
       },
-      "id": 110,
+      "id": 112,
       "options": {
         "legend": {
           "calcs": [
@@ -5902,9 +6022,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 296
+        "y": 304
       },
-      "id": 111,
+      "id": 113,
       "options": {
         "legend": {
           "calcs": [
@@ -5971,9 +6091,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 296
+        "y": 304
       },
-      "id": 112,
+      "id": 114,
       "options": {
         "legend": {
           "calcs": [
@@ -6022,9 +6142,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 296
+        "y": 304
       },
-      "id": 113,
+      "id": 115,
       "options": {
         "legend": {
           "calcs": [
@@ -6073,9 +6193,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 304
+        "y": 312
       },
-      "id": 114,
+      "id": 116,
       "options": {
         "legend": {
           "calcs": [
@@ -6142,9 +6262,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 304
+        "y": 312
       },
-      "id": 115,
+      "id": 117,
       "options": {
         "legend": {
           "calcs": [
@@ -6193,9 +6313,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 304
+        "y": 312
       },
-      "id": 116,
+      "id": 118,
       "options": {
         "legend": {
           "calcs": [
@@ -6262,9 +6382,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 312
+        "y": 320
       },
-      "id": 117,
+      "id": 119,
       "options": {
         "legend": {
           "calcs": [
@@ -6298,9 +6418,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 320
+        "y": 328
       },
-      "id": 118,
+      "id": 120,
       "panels": [],
       "title": "Query engine — threat counters (webserver)",
       "type": "row"
@@ -6326,9 +6446,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 321
+        "y": 329
       },
-      "id": 119,
+      "id": 121,
       "options": {
         "legend": {
           "calcs": [
@@ -6362,9 +6482,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 337
       },
-      "id": 120,
+      "id": 122,
       "panels": [],
       "title": "Content resolution (webserver)",
       "type": "row"
@@ -6390,9 +6510,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 330
+        "y": 338
       },
-      "id": 121,
+      "id": 123,
       "options": {
         "legend": {
           "calcs": [
@@ -6459,9 +6579,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 330
+        "y": 338
       },
-      "id": 122,
+      "id": 124,
       "options": {
         "legend": {
           "calcs": [
@@ -6510,9 +6630,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 330
+        "y": 338
       },
-      "id": 123,
+      "id": 125,
       "options": {
         "legend": {
           "calcs": [
@@ -6561,9 +6681,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 338
+        "y": 346
       },
-      "id": 124,
+      "id": 126,
       "options": {
         "legend": {
           "calcs": [
@@ -6612,9 +6732,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 338
+        "y": 346
       },
-      "id": 125,
+      "id": 127,
       "options": {
         "legend": {
           "calcs": [
@@ -6663,9 +6783,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 338
+        "y": 346
       },
-      "id": 126,
+      "id": 128,
       "options": {
         "legend": {
           "calcs": [
@@ -6732,9 +6852,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 346
+        "y": 354
       },
-      "id": 127,
+      "id": 129,
       "options": {
         "legend": {
           "calcs": [
@@ -6783,9 +6903,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 346
+        "y": 354
       },
-      "id": 128,
+      "id": 130,
       "options": {
         "legend": {
           "calcs": [
@@ -6852,9 +6972,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 346
+        "y": 354
       },
-      "id": 129,
+      "id": 131,
       "options": {
         "legend": {
           "calcs": [
@@ -6888,9 +7008,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 354
+        "y": 362
       },
-      "id": 130,
+      "id": 132,
       "panels": [],
       "title": "Schema watcher (webserver)",
       "type": "row"
@@ -6916,9 +7036,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 355
+        "y": 363
       },
-      "id": 131,
+      "id": 133,
       "options": {
         "legend": {
           "calcs": [
@@ -6952,9 +7072,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 363
+        "y": 371
       },
-      "id": 132,
+      "id": 134,
       "panels": [],
       "title": "Billing events (webserver)",
       "type": "row"
@@ -6980,9 +7100,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 364
+        "y": 372
       },
-      "id": 133,
+      "id": 135,
       "options": {
         "legend": {
           "calcs": [
@@ -7031,9 +7151,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 364
+        "y": 372
       },
-      "id": 134,
+      "id": 136,
       "options": {
         "legend": {
           "calcs": [
@@ -7082,9 +7202,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 364
+        "y": 372
       },
-      "id": 135,
+      "id": 137,
       "options": {
         "legend": {
           "calcs": [
@@ -7133,9 +7253,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 372
+        "y": 380
       },
-      "id": 136,
+      "id": 138,
       "options": {
         "legend": {
           "calcs": [
@@ -7184,9 +7304,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 372
+        "y": 380
       },
-      "id": 137,
+      "id": 139,
       "options": {
         "legend": {
           "calcs": [
@@ -7220,9 +7340,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 380
+        "y": 388
       },
-      "id": 138,
+      "id": 140,
       "panels": [],
       "title": "Billing quota (webserver)",
       "type": "row"
@@ -7248,9 +7368,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 381
+        "y": 389
       },
-      "id": 139,
+      "id": 141,
       "options": {
         "legend": {
           "calcs": [
@@ -7299,9 +7419,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 381
+        "y": 389
       },
-      "id": 140,
+      "id": 142,
       "options": {
         "legend": {
           "calcs": [
@@ -7350,9 +7470,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 381
+        "y": 389
       },
-      "id": 141,
+      "id": 143,
       "options": {
         "legend": {
           "calcs": [
@@ -7419,9 +7539,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 389
+        "y": 397
       },
-      "id": 142,
+      "id": 144,
       "options": {
         "legend": {
           "calcs": [
@@ -7470,9 +7590,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 389
+        "y": 397
       },
-      "id": 143,
+      "id": 145,
       "options": {
         "legend": {
           "calcs": [
@@ -7506,9 +7626,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 397
+        "y": 405
       },
-      "id": 144,
+      "id": 146,
       "panels": [],
       "title": "Circuit breaker (CH / NATS / GitLab clients)",
       "type": "row"
@@ -7534,9 +7654,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 398
+        "y": 406
       },
-      "id": 145,
+      "id": 147,
       "options": {
         "legend": {
           "calcs": [
@@ -7585,9 +7705,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 398
+        "y": 406
       },
-      "id": 146,
+      "id": 148,
       "options": {
         "legend": {
           "calcs": [
@@ -7636,9 +7756,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 398
+        "y": 406
       },
-      "id": 147,
+      "id": 149,
       "options": {
         "legend": {
           "calcs": [
@@ -7672,9 +7792,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 406
+        "y": 414
       },
-      "id": 148,
+      "id": 150,
       "panels": [],
       "title": "Siphon producers",
       "type": "row"
@@ -7700,9 +7820,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 407
+        "y": 415
       },
-      "id": 149,
+      "id": 151,
       "options": {
         "legend": {
           "calcs": [
@@ -7736,9 +7856,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 415
+        "y": 423
       },
-      "id": 150,
+      "id": 152,
       "panels": [],
       "title": "Siphon ClickHouse consumers",
       "type": "row"
@@ -7764,9 +7884,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 416
+        "y": 424
       },
-      "id": 151,
+      "id": 153,
       "options": {
         "legend": {
           "calcs": [
@@ -7800,9 +7920,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 424
+        "y": 432
       },
-      "id": 152,
+      "id": 154,
       "panels": [],
       "title": "NATS JetStream + varz",
       "type": "row"
@@ -7828,9 +7948,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 425
+        "y": 433
       },
-      "id": 153,
+      "id": 155,
       "options": {
         "legend": {
           "calcs": [
@@ -7879,9 +7999,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 425
+        "y": 433
       },
-      "id": 154,
+      "id": 156,
       "options": {
         "legend": {
           "calcs": [
@@ -7930,9 +8050,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 425
+        "y": 433
       },
-      "id": 155,
+      "id": 157,
       "options": {
         "legend": {
           "calcs": [
@@ -7981,9 +8101,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 433
+        "y": 441
       },
-      "id": 156,
+      "id": 158,
       "options": {
         "legend": {
           "calcs": [
@@ -8032,9 +8152,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 433
+        "y": 441
       },
-      "id": 157,
+      "id": 159,
       "options": {
         "legend": {
           "calcs": [
@@ -8083,9 +8203,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 433
+        "y": 441
       },
-      "id": 158,
+      "id": 160,
       "options": {
         "legend": {
           "calcs": [
@@ -8134,9 +8254,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 441
+        "y": 449
       },
-      "id": 159,
+      "id": 161,
       "options": {
         "legend": {
           "calcs": [
@@ -8185,9 +8305,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 441
+        "y": 449
       },
-      "id": 160,
+      "id": 162,
       "options": {
         "legend": {
           "calcs": [
@@ -8236,9 +8356,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 441
+        "y": 449
       },
-      "id": 161,
+      "id": 163,
       "options": {
         "legend": {
           "calcs": [
@@ -8287,9 +8407,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 449
+        "y": 457
       },
-      "id": 162,
+      "id": 164,
       "options": {
         "legend": {
           "calcs": [
@@ -8323,9 +8443,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 457
+        "y": 465
       },
-      "id": 163,
+      "id": 165,
       "panels": [],
       "title": "Rails Orbit request path",
       "type": "row"
@@ -8351,9 +8471,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 458
+        "y": 466
       },
-      "id": 164,
+      "id": 166,
       "options": {
         "legend": {
           "calcs": [
@@ -8420,9 +8540,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 458
+        "y": 466
       },
-      "id": 165,
+      "id": 167,
       "options": {
         "legend": {
           "calcs": [
@@ -8471,9 +8591,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 458
+        "y": 466
       },
-      "id": 166,
+      "id": 168,
       "options": {
         "legend": {
           "calcs": [
@@ -8522,9 +8642,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 466
+        "y": 474
       },
-      "id": 167,
+      "id": 169,
       "options": {
         "legend": {
           "calcs": [
@@ -8591,9 +8711,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 466
+        "y": 474
       },
-      "id": 168,
+      "id": 170,
       "options": {
         "legend": {
           "calcs": [
@@ -8642,9 +8762,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 466
+        "y": 474
       },
-      "id": 169,
+      "id": 171,
       "options": {
         "legend": {
           "calcs": [
@@ -8711,9 +8831,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 474
+        "y": 482
       },
-      "id": 170,
+      "id": 172,
       "options": {
         "legend": {
           "calcs": [
@@ -8762,9 +8882,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 474
+        "y": 482
       },
-      "id": 171,
+      "id": 173,
       "options": {
         "legend": {
           "calcs": [
@@ -8831,9 +8951,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 474
+        "y": 482
       },
-      "id": 172,
+      "id": 174,
       "options": {
         "legend": {
           "calcs": [
@@ -8882,9 +9002,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 482
+        "y": 490
       },
-      "id": 173,
+      "id": 175,
       "options": {
         "legend": {
           "calcs": [
@@ -8951,9 +9071,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 482
+        "y": 490
       },
-      "id": 174,
+      "id": 176,
       "options": {
         "legend": {
           "calcs": [
@@ -9002,9 +9122,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 482
+        "y": 490
       },
-      "id": 175,
+      "id": 177,
       "options": {
         "legend": {
           "calcs": [
@@ -9071,9 +9191,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 490
+        "y": 498
       },
-      "id": 176,
+      "id": 178,
       "options": {
         "legend": {
           "calcs": [
@@ -9107,9 +9227,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 498
+        "y": 506
       },
-      "id": 177,
+      "id": 179,
       "panels": [],
       "title": "Rails Orbit traversal compaction",
       "type": "row"
@@ -9135,9 +9255,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 499
+        "y": 507
       },
-      "id": 178,
+      "id": 180,
       "options": {
         "legend": {
           "calcs": [
@@ -9204,9 +9324,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 499
+        "y": 507
       },
-      "id": 179,
+      "id": 181,
       "options": {
         "legend": {
           "calcs": [
@@ -9255,9 +9375,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 499
+        "y": 507
       },
-      "id": 180,
+      "id": 182,
       "options": {
         "legend": {
           "calcs": [
@@ -9324,9 +9444,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 507
+        "y": 515
       },
-      "id": 181,
+      "id": 183,
       "options": {
         "legend": {
           "calcs": [
@@ -9375,9 +9495,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 507
+        "y": 515
       },
-      "id": 182,
+      "id": 184,
       "options": {
         "legend": {
           "calcs": [
@@ -9426,9 +9546,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 507
+        "y": 515
       },
-      "id": 183,
+      "id": 185,
       "options": {
         "legend": {
           "calcs": [
