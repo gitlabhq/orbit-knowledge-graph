@@ -208,7 +208,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
             if let Text::From(slot, _) = text
                 && !placed[*slot as usize]
                 && let Some(&labelled) = caps[*slot as usize].first()
-                && !overlaps_placed(t, caps, placed, labelled)
+                && !overlaps_placed(t, caps, placed, labelled, pl.target)
             {
                 pl.keep(t, labelled, at);
             }
@@ -229,15 +229,18 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
     }
 }
 
-fn overlaps_placed(t: &Tree, caps: &[Cap], placed: &[bool], node: NodeId) -> bool {
+fn overlaps_placed(t: &Tree, caps: &[Cap], placed: &[bool], node: NodeId, root: NodeId) -> bool {
+    let within = |inner: NodeId, outer: NodeId| {
+        inner
+            .ancestors(&t.storage.0)
+            .find(|&a| a == outer || a == root)
+            == Some(outer)
+    };
     caps.iter()
         .zip(placed)
         .filter(|&(_, &is_placed)| is_placed)
         .flat_map(|(cap, _)| cap.iter().copied())
-        .any(|other| {
-            node.ancestors(&t.storage.0).any(|a| a == other)
-                || other.ancestors(&t.storage.0).any(|a| a == node)
-        })
+        .any(|other| within(node, other) || within(other, node))
 }
 
 fn build_template(t: &mut Tree, fill: &Fill, pat: &Pat, mut pl: Placement) -> Vec<NodeId> {
