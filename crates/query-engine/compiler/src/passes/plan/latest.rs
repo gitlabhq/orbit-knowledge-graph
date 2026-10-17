@@ -11,7 +11,7 @@ use ontology::constants::{
 };
 use query_data_model::OrbitQueryModel;
 
-use crate::input::BooleanExpression;
+use crate::input::{BooleanExpression, FilterOp};
 
 use super::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use super::requirements::{Column, OutputValue, Predicate, Projection, live};
@@ -333,11 +333,31 @@ fn with_keys(source: PhysicalSource, keys: &[KeySet]) -> PhysicalSource {
         })
 }
 
-/// Kinds, tags, and enum or boolean properties have few distinct values, so
-/// they never bound a scan on their own.
+/// Kinds, tags, and enum or boolean properties have few distinct values, and
+/// text matches or negations match an unknown share of rows, so none of them
+/// bound a scan on their own.
 fn selective_filter(predicate: &Predicate) -> bool {
     match predicate {
-        Predicate::Property { selectivity, .. } => *selectivity == FieldSelectivity::High,
+        Predicate::Property {
+            selectivity,
+            filter,
+            ..
+        } => {
+            *selectivity == FieldSelectivity::High
+                && !matches!(
+                    filter.op,
+                    Some(
+                        FilterOp::Contains
+                            | FilterOp::StartsWith
+                            | FilterOp::EndsWith
+                            | FilterOp::TokenMatch
+                            | FilterOp::AllTokens
+                            | FilterOp::AnyTokens
+                            | FilterOp::Ne
+                            | FilterOp::IsNotNull
+                    )
+                )
+        }
         Predicate::Ids { .. } | Predicate::IdRange { .. } | Predicate::Membership { .. } => true,
         Predicate::Boolean(expression) => selective_expression(expression),
         _ => false,
