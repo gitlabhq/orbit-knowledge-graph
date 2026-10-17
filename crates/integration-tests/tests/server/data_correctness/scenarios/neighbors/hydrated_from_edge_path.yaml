@@ -1,0 +1,69 @@
+cases:
+  - name: owned_edge_paths_hydrate_every_namespace
+    description: A user's authored MRs in two namespaces hydrate from the edge paths they own
+    config:
+      security:
+        paths: ["1/"]
+      redaction:
+        allow:
+          user: [99002]
+          merge_request: [99000, 99001]
+      extra_seed:
+        gl_user:
+          - { id: 99002, username: author }
+        gl_merge_request:
+          - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, title: first }
+          - { id: 99001, traversal_path: "1/200/1001/", project_id: 1001, title: second }
+        gl_edge:
+          - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99000, target_kind: MergeRequest }
+          - { traversal_path: "1/200/1001/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99001, target_kind: MergeRequest }
+    query:
+      gql: |
+        MATCH (u:User {id: 99002})-[:AUTHORED]->(neighbor)
+        RETURN u, neighbor
+    expect:
+      node_count: 3
+      nodes:
+        User: { ids: [99002] }
+        MergeRequest:
+          ids: [99000, 99001]
+          rows:
+            - { id: 99000, title: first }
+            - { id: 99001, title: second }
+      edges:
+        AUTHORED: [[99002, 99000], [99002, 99001]]
+
+  - name: unowned_edge_path_keeps_type_on_all_edge_paths
+    description: A pipeline type with one unowned edge path hydrates from every edge path, not only the owned one
+    config:
+      security:
+        paths: ["1/"]
+      redaction:
+        allow:
+          ci_build: [99200]
+          ci_pipeline: [99100, 99101]
+      extra_seed:
+        gl_job:
+          - { id: 99200, name: trigger, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+        gl_pipeline:
+          - { id: 99100, project_id: 1000, status: success, source: push, traversal_path: "1/100/1000/" }
+          - { id: 99101, project_id: 1001, status: running, source: pipeline, traversal_path: "1/200/1001/" }
+        gl_ci_edge:
+          - { traversal_path: "1/100/1000/", source_id: 99200, source_kind: Job, relationship_kind: IN_PIPELINE, target_id: 99100, target_kind: Pipeline }
+          - { traversal_path: "1/200/1001/", source_id: 99200, source_kind: Job, relationship_kind: TRIGGERS_PIPELINE, target_id: 99101, target_kind: Pipeline }
+    query:
+      gql: |
+        MATCH (j:Job {id: 99200})-[:IN_PIPELINE|TRIGGERS_PIPELINE]->(neighbor)
+        RETURN j, neighbor
+    expect:
+      node_count: 3
+      nodes:
+        Job: { ids: [99200] }
+        Pipeline:
+          ids: [99100, 99101]
+          rows:
+            - { id: 99100, status: success }
+            - { id: 99101, status: running }
+      edges:
+        IN_PIPELINE: [[99200, 99100]]
+        TRIGGERS_PIPELINE: [[99200, 99101]]

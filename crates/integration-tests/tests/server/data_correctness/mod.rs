@@ -9,6 +9,10 @@ const SCENARIOS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/server/data_correctness/scenarios"
 );
+const QUERY_SETTINGS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/server/data_correctness/query_settings"
+);
 const PRESETS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/server/data_correctness/presets"
@@ -34,4 +38,13 @@ async fn data_correctness_scenarios() {
     query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
     ctx.optimize_all().await;
     query_scenario::run_dir(&ctx, SCENARIOS, PRESETS).await;
+}
+
+#[tokio::test]
+async fn query_settings_scenarios() {
+    super::status::fixtures::use_production_query_settings();
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
+    ctx.optimize_all().await;
+    query_scenario::run_dir(&ctx, QUERY_SETTINGS, PRESETS).await;
 }

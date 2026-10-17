@@ -6,7 +6,7 @@ siphon:
   chart: "2.0.0"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.143-beta"
+    tag: "0.0.150-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -14,12 +14,12 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "10.4.1-2935143241"
+  chart: "10.5.0-2957821414"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "696fef3904c18e549f85545d1b66002446a504b2"
+  ref: "6bd64988da3f1828bd9325d79b3b8d5bdc218190"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
@@ -28,18 +28,18 @@ gitlab:
   # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:e9ee13583ce50e11a9aed9bc1edff6ad8e97d984bd0be45f65d67907af444d62"
+      digest: "sha256:7fcc3db781425386bc6d68a86ff64dd6c36378b0404b46c6ea4915c77f18d08d"
     workhorse:
-      digest: "sha256:520162364bb3ffa4f730a47dfbd9b7a6cd87eabde9fcfa3bc5cd121e048e42a3"
+      digest: "sha256:c6cfe5f26969747faa6f7316f3aa49af0035b5e804a6b11fbca555f3ff65b997"
     sidekiq:
-      digest: "sha256:bc4e684a546deffc215a5cc638ff1664d2cd6f0fa4658e6de0ccf72991256912"
+      digest: "sha256:764e3e5634a0567b7c1ac880c639951a8fd12931b5798ffec21826ed6b119fec"
     toolbox:
-      digest: "sha256:14e297a8f735461e08a50c3a80c325474aa4a7296e0c37d3acdcc4c36dea8718"
+      digest: "sha256:1309483072230d05b15ac89dde7ee6218950e47ed958635c74814f41089204c7"
 gkg:
   chart: "4.1.0"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
-    tag: "0.139.0"
+    tag: "0.146.0"
 nats:
   chart: "2.15.0"
 postgresql:

@@ -1,6 +1,6 @@
 # Query corpus
 
-A categorized set of Orbit JSON queries used to exercise the query engine.
+A categorized set of Orbit GQL queries used to exercise the query engine.
 Each YAML file groups queries by origin suite; every entry is self-describing:
 
 ```yaml
@@ -11,7 +11,10 @@ mrs_open_in_project:
   suite: sdlc                # origin grouping (one file per suite)
   expect: rows               # optional: rows (default) | empty | error
   query: |
-    { ...inline Orbit query JSON... }
+    MATCH (mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN $sample
+    RETURN *
+    LIMIT 25
 ```
 
 `category` is the query *shape* and is independent of which file the entry lives
@@ -19,7 +22,7 @@ in. Two placeholder kinds keep the queries portable across environments:
 
 | Placeholder | Meaning |
 |---|---|
-| `"$sample"` / `"$sample:N"` | a node's `node_ids`, bound to real ids at run time |
+| `x.id IN $sample` / `x.id IN $sample:N` | 1 or N ids of node `x`, bound to real ids at run time |
 | `{{TOKEN}}` | a literal ID or `full_path`, substituted from a caller-supplied map |
 
 `expect` records intent:
@@ -36,7 +39,7 @@ The `corpus_smoke` test (`crates/integration-tests/tests/server/corpus_smoke.rs`
 runs in the `corpus-smoke-test` CI job. It starts ClickHouse with the graph schema
 from the ontology. Then it compiles and runs three families of queries:
 
-- every entry in this directory, as JSON. An `expect: error` entry must fail.
+- every entry in this directory, as GQL. An `expect: error` entry must fail.
 - every named query in `config/named_queries`, in JSON and in GQL.
 - every `json orbit-query` and `gql orbit-query` code block in the root Markdown files,
   `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`.
@@ -50,4 +53,4 @@ Run it locally with Docker: `mise test:integration:corpus`. See
 ## `raw_sql_ab.yaml`
 
 `raw_sql_ab.yaml` is a raw-SQL A/B suite (control vs. optimized variants of the
-same workload), not DSL. The smoke test skips it.
+same workload), not GQL. The smoke test skips it.

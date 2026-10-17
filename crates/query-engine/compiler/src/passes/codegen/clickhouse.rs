@@ -31,11 +31,9 @@ pub fn codegen(
     // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
     // (bare integers, 0/1 bools, escaped quoted strings).
     if matches!(ast, Node::Query(_)) {
-        let mut settings = query_config
+        let settings = query_config
             .to_clickhouse_settings()
             .map_err(crate::error::QueryError::Codegen)?;
-
-        settings.extend(query_config.compiler_derived.to_clickhouse_settings());
 
         if !settings.is_empty() {
             let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();

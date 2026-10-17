@@ -14,9 +14,39 @@ pub struct QueryScenario {
     pub description: Option<String>,
     #[serde(default)]
     pub config: ScenarioConfig,
+    #[serde(default)]
     pub query: BTreeMap<String, String>,
     #[serde(default)]
+    pub expect: Option<QueryExpect>,
+    #[serde(default)]
+    pub steps: Vec<QueryStep>,
+}
+
+/// One query of a multi-step scenario. `seed` rows are inserted before the
+/// query runs, so a later step can observe a write made after an earlier one.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryStep {
+    #[serde(default)]
+    pub seed: Seed,
+    pub query: BTreeMap<String, String>,
     pub expect: QueryExpect,
+}
+
+impl QueryScenario {
+    pub fn into_steps(self) -> (ScenarioConfig, Vec<QueryStep>) {
+        let steps = match (self.query.is_empty(), self.steps.is_empty()) {
+            (false, true) => vec![QueryStep {
+                seed: Seed::default(),
+                query: self.query,
+                expect: self.expect.expect("scenario declares query without expect"),
+            }],
+            (true, false) => self.steps,
+            (false, false) => panic!("scenario declares both query/expect and steps:"),
+            (true, true) => panic!("scenario declares neither query nor steps:"),
+        };
+        (self.config, steps)
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -129,6 +159,10 @@ pub struct QueryExpect {
     pub sql_contains: Vec<String>,
     #[serde(default)]
     pub hydration: Option<HydrationKind>,
+    /// Expected ClickHouse SETTINGS pairs on the compiled query, for example
+    /// `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent.
+    #[serde(default)]
+    pub settings: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     #[serde(default)]
@@ -289,6 +323,7 @@ impl QueryExpect {
                     && !page.compile_error_contains.is_configured()
                     && !page.compile_error_not_contains.is_configured()
                     && page.hydration.is_none()
+                    && page.settings.is_empty()
                     && page.sql_contains.is_empty()
                     && page.sql_not_contains.is_empty()
                     && page.indexes_used.is_empty()
