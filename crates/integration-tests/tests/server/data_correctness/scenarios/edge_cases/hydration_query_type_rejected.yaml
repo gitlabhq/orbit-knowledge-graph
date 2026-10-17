@@ -1,0 +1,12 @@
+description: A public query cannot request the internal hydration query type
+
+query:
+  json: |
+    {
+      "query_type": "hydration",
+      "nodes": [{"id": "h", "entity": "User", "node_ids": [1]}],
+      "limit": 10
+    }
+
+expect:
+  compile_error: '"hydration" is not an allowed value'
