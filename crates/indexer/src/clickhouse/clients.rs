@@ -10,8 +10,8 @@ pub struct ClickHouseClients {
 impl ClickHouseClients {
     pub fn new(graph: &ClickHouseConfiguration, datalake: &ClickHouseConfiguration) -> Self {
         Self {
-            graph: graph.build_client("graph"),
-            datalake: datalake.build_client("datalake"),
+            graph: graph.build_client("graph").without_query_cache(),
+            datalake: datalake.build_client("datalake").without_query_cache(),
         }
     }
 }

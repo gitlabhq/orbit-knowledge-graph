@@ -267,6 +267,28 @@ pub(super) fn assign_node_access(
     condition_nodes: &HashSet<String>,
     nodes: &mut HashMap<String, NodePlan>,
 ) {
+    let narrowing: HashSet<&str> = match relations {
+        [relation]
+            if input.query_type == QueryType::Traversal
+                && relation.max_hops == 1
+                && relation.node_source.is_none()
+                && relation.direction != Direction::Both =>
+        {
+            [
+                (&relation.from_node, &relation.to_node),
+                (&relation.to_node, &relation.from_node),
+            ]
+            .into_iter()
+            .filter(|(_, partner)| {
+                nodes
+                    .get(partner.as_str())
+                    .is_some_and(|node| !node.node_ids.is_empty() || node.id_range.is_some())
+            })
+            .map(|(node, _)| node.as_str())
+            .collect()
+        }
+        _ => HashSet::new(),
+    };
     for node in nodes.values_mut() {
         let group_target = input
             .aggregation
@@ -303,5 +325,8 @@ pub(super) fn assign_node_access(
             || ordered
             || local_predicate
             || uncovered_filter && !filter_only;
+        node.narrowed =
+            !node.joined && narrowing.contains(node.alias.as_str()) && !node.uses_default_pk();
+        node.joined |= node.narrowed;
     }
 }

@@ -150,11 +150,6 @@ impl SecurityContext {
         self
     }
 
-    pub fn with_scope_proofs(mut self, scope_proofs: HashMap<String, ScopeProof>) -> Self {
-        self.scope_proofs = scope_proofs;
-        self
-    }
-
     pub fn with_team_member(mut self, is_gitlab_team_member: bool) -> Self {
         self.is_gitlab_team_member = is_gitlab_team_member;
         self

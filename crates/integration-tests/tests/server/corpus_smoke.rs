@@ -1,6 +1,6 @@
 //! Corpus smoke test.
 //!
-//! Runs every query in `fixtures/queries/corpus/` through the **same pipeline
+//! Runs every GQL query in `fixtures/queries/corpus/` through the **same pipeline
 //! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
 //! Compilation -> ClickHouseExecutor -> Extraction ->
 //! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
@@ -18,7 +18,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::common::{
     DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model,
@@ -36,6 +36,7 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
 };
+use query_engine::shared::PipelineOutput;
 use query_engine::shared::content::{ColumnResolver, ColumnResolverRegistry};
 use query_engine::shared::{
     AuthorizationOutput, CompilationStage, ExtractionOutput, ExtractionStage, OutputStage,
@@ -106,6 +107,40 @@ impl PipelineStage for AuthorizeAllStage {
     }
 }
 
+const PIPELINE_STAGES: [&str; 8] = [
+    "security",
+    "compilation",
+    "execution",
+    "extraction",
+    "authorization",
+    "redaction",
+    "hydration",
+    "output",
+];
+
+struct Traced<'a, S>(&'static str, &'a S);
+
+#[derive(Default)]
+struct StageLog(Vec<&'static str>);
+
+impl<S: PipelineStage> PipelineStage for Traced<'_, S> {
+    type Input = S::Input;
+    type Output = S::Output;
+
+    async fn execute(
+        &self,
+        ctx: &mut QueryPipelineContext,
+        obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        let output = self.1.execute(ctx, obs).await?;
+        ctx.phases
+            .get_or_insert_default::<StageLog>()
+            .0
+            .push(self.0);
+        Ok(output)
+    }
+}
+
 /// Resolves any content lookup to a mock value so hydration of gitaly-backed
 /// virtual columns doesn't need a real Gitaly.
 struct MockColumnResolver;
@@ -125,36 +160,19 @@ impl ColumnResolver for MockColumnResolver {
     }
 }
 
-fn resolve_placeholders(query: &str) -> serde_json::Result<String> {
-    let token_re = regex::Regex::new(r"\{\{[^}]+\}\}").unwrap();
-    let s = token_re.replace_all(query, "1");
-
-    let mut value: serde_json::Value = serde_json::from_str(&s)?;
-    if let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-        for node in nodes.iter_mut() {
-            resolve_sample_node_ids(node);
-        }
-    }
-    if let Some(node) = value.get_mut("node") {
-        resolve_sample_node_ids(node);
-    }
-    serde_json::to_string(&value)
-}
-
-fn resolve_sample_node_ids(node: &mut serde_json::Value) {
-    let Some(obj) = node.as_object_mut() else {
-        return;
-    };
-    let count = match obj.get("node_ids").and_then(|v| v.as_str()) {
-        Some("$sample") => 1,
-        Some(s) => match s.strip_prefix("$sample:") {
-            Some(n) => n.parse().unwrap_or(1),
-            None => return,
-        },
-        None => return,
-    };
-    let ids: Vec<i64> = (1..=count).collect();
-    obj.insert("node_ids".to_string(), serde_json::json!(ids));
+fn resolve_placeholders(query: &str) -> String {
+    static TOKEN: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\{\{[^}]+\}\}").unwrap());
+    static SAMPLE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?i)(\w+)\.id\s+IN\s+\$sample(?::(\d+))?").unwrap());
+    let without_tokens = TOKEN.replace_all(query, "1");
+    SAMPLE
+        .replace_all(&without_tokens, |caps: &regex::Captures<'_>| {
+            let count: i64 = caps.get(2).map_or(1, |n| n.as_str().parse().unwrap_or(1));
+            let ids: Vec<String> = (1..=count).map(|id| id.to_string()).collect();
+            format!("{}.id IN [{}]", &caps[1], ids.join(", "))
+        })
+        .into_owned()
 }
 
 fn load_corpus() -> Vec<SmokeCase> {
@@ -183,9 +201,9 @@ fn load_corpus() -> Vec<SmokeCase> {
             let expects_error = entry.expect.as_deref() == Some("error");
             out.push(SmokeCase {
                 key: format!("{file}::{key}"),
-                query: entry.query,
+                query: resolve_placeholders(&entry.query),
                 expects_error,
-                frontend: Frontend::JsonDsl,
+                frontend: Frontend::Gql,
             });
         }
     }
@@ -415,7 +433,7 @@ async fn run_pipeline(
         &Arc<ontology::Ontology>,
     ),
     claims: &Claims,
-) -> Result<(), PipelineError> {
+) -> (Vec<&'static str>, Result<PipelineOutput, PipelineError>) {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
     server_extensions.insert(Arc::clone(data_model));
@@ -433,34 +451,50 @@ async fn run_pipeline(
         server_extensions,
         phases: TypeMap::default(),
     };
-    let mut obs = NoOpObserver;
+    let output = run_stages(&mut ctx).await;
+    let stages = ctx.phases.remove::<StageLog>().unwrap_or_default().0;
+    (stages, output)
+}
 
-    PipelineRunner::start(&mut ctx, &mut obs)
-        .then(&SecurityStage)
+async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, PipelineError> {
+    let [
+        security,
+        compilation,
+        execution,
+        extraction,
+        authorization,
+        redaction,
+        hydration,
+        output,
+    ] = PIPELINE_STAGES;
+    let executor = ClickHouseExecutor {
+        migration_version: *orbit_migrations::version::SCHEMA_VERSION,
+    };
+    let mut obs = NoOpObserver;
+    PipelineRunner::start(ctx, &mut obs)
+        .then(&Traced(security, &SecurityStage))
         .await?
-        .then(&CompilationStage)
+        .then(&Traced(compilation, &CompilationStage))
         .await?
-        .then(&ClickHouseExecutor {
-            migration_version: *orbit_migrations::version::SCHEMA_VERSION,
-        })
+        .then(&Traced(execution, &executor))
         .await?
-        .then(&ExtractionStage)
+        .then(&Traced(extraction, &ExtractionStage))
         .await?
-        .then(&AuthorizeAllStage)
+        .then(&Traced(authorization, &AuthorizeAllStage))
         .await?
-        .then(&RedactionStage)
+        .then(&Traced(redaction, &RedactionStage))
         .await?
-        .then(&HydrationStage)
+        .then(&Traced(hydration, &HydrationStage))
         .await?
-        .then(&OutputStage)
+        .then(&Traced(output, &OutputStage))
         .await?
         .finish()
-        .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
-    Ok(())
+        .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
 }
 
 #[tokio::test]
 async fn corpus_smoke() {
+    orbit_server_config::query::init(orbit_server_config::AppConfig::embedded_defaults().query);
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
@@ -483,36 +517,38 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let json = match case.frontend {
-            Frontend::Gql => Ok(case.query.clone()),
-            Frontend::JsonDsl => resolve_placeholders(&case.query),
-        };
-        let json = match json {
-            Ok(j) => j,
-            Err(e) => {
-                if !case.expects_error {
-                    failures.push(format!("{}: invalid query JSON: {e}", case.key));
-                }
-                continue;
-            }
-        };
-
-        let outcome = run_pipeline(
+        let (stages, outcome) = run_pipeline(
             &ctx,
-            &json,
+            &case.query,
             case.frontend,
             (&data_model, &ontology),
             &claims,
         )
         .await;
 
+        let ran = stages.join(" > ");
         match (case.expects_error, outcome) {
-            (false, Err(e)) => failures.push(format!("{}: {e:?}", case.key)),
-            (true, Ok(())) => failures.push(format!(
+            (false, Ok(_)) if stages != PIPELINE_STAGES => {
+                failures.push(format!("{}: ran only {ran}", case.key))
+            }
+            (false, Ok(output)) => eprintln!(
+                "corpus_smoke: {} ({:?} {}): {ran}; {} rows, {} redacted, {} ClickHouse queries",
+                case.key,
+                case.frontend,
+                output.query_type,
+                output.row_count,
+                output.redacted_count,
+                output.execution_log.len()
+            ),
+            (false, Err(e)) => failures.push(format!("{}: {e:?} after [{ran}]", case.key)),
+            (true, Ok(_)) => failures.push(format!(
                 "{}: expected a pipeline error (expect: error), but it ran",
                 case.key
             )),
-            _ => {}
+            (true, Err(e)) => eprintln!(
+                "corpus_smoke: {} rejected as expected after [{ran}]: {e}",
+                case.key
+            ),
         }
     }
 

@@ -441,6 +441,9 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     if query_plan.relations().len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
+    if query_plan.is_point_lookup() && config.use_query_cache == Some(true) {
+        config.use_query_cache = Some(false);
+    }
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.

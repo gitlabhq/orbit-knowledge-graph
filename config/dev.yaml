@@ -44,8 +44,6 @@ engine:
 query:
   default:
     use_query_cache: false
-    graph_query_cache_enabled: false
-    graph_query_cache_ttl: 60
   path_finding:
     max_execution_time: 15
     max_memory_usage: 16106127360

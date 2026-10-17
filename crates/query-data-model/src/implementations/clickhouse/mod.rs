@@ -104,11 +104,6 @@ impl ClickHouseBindings {
         self.tables.get(name)
     }
 
-    pub fn table_for_entity(&self, entity: EntityId) -> Option<&TableLayout> {
-        self.entity(entity)
-            .and_then(|layout| self.table(&layout.table))
-    }
-
     pub fn tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.tables.values()
     }

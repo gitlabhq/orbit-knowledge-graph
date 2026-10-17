@@ -111,7 +111,8 @@ impl ArrowClickHouseClient {
             .with_setting("join_use_nulls", "0")
             .with_setting("query_plan_join_swap_table", "auto")
             .with_setting("optimize_aggregation_in_order", "1")
-            .with_setting("use_statistics", "0");
+            .with_setting("use_statistics", "0")
+            .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0");
 
         if let Some(password) = password {
             client = client.with_password(password);
@@ -147,6 +148,11 @@ impl ArrowClickHouseClient {
         self
     }
 
+    pub fn without_query_cache(mut self) -> Self {
+        self.client = self.client.with_setting("use_query_cache", "0");
+        self
+    }
+
     pub fn database(&self) -> &str {
         &self.database
     }
@@ -171,14 +177,11 @@ impl ArrowClickHouseClient {
     /// Use this for `INSERT` queries so they inherit async-insert and
     /// other write-specific settings. Use `query()` for read operations.
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
-        let mut q = self.query(sql);
-        for (k, v) in &self.insert_settings {
-            if self.should_drop_async_insert_setting(k) {
-                continue;
-            }
-            q = q.with_setting(k, v);
-        }
-        q
+        self.query(sql).with_settings(
+            self.insert_settings
+                .iter()
+                .filter(|(k, _)| !self.should_drop_async_insert_setting(k)),
+        )
     }
 
     /// Sorted so the emitted `SETTINGS` clause is deterministic.
@@ -467,6 +470,15 @@ impl ArrowQuery {
     pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.inner = self.inner.with_setting(name, value);
         self
+    }
+
+    pub fn with_settings<K: Into<String>, V: Into<String>>(
+        self,
+        settings: impl IntoIterator<Item = (K, V)>,
+    ) -> Self {
+        settings
+            .into_iter()
+            .fold(self, |query, (name, value)| query.with_setting(name, value))
     }
 
     /// For statements that are not idempotent, such as `ATTACH PARTITION ... FROM`.

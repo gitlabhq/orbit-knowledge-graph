@@ -293,7 +293,7 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
+      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. The query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
       "properties": {
         "resource_type": {
           "type": "string",
@@ -301,8 +301,7 @@
         },
         "id_column": {
           "type": "string",
-          "default": "id",
-          "description": "Column containing the entity ID for redaction lookups. Defaults to 'id'."
+          "description": "Column containing the entity ID for redaction lookups."
         },
         "ability": {
           "type": "string",
@@ -322,7 +321,9 @@
         }
       },
       "required": [
-        "resource_type"
+        "resource_type",
+        "id_column",
+        "ability"
       ],
       "additionalProperties": false
     },
@@ -1223,15 +1224,8 @@
           "uniqueItems": true
         },
         "redaction": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "$ref": "#/definitions/redactionConfig"
-            }
-          ],
-          "description": "Redaction configuration for access control. Set to null if not yet configured."
+          "$ref": "#/definitions/redactionConfig",
+          "description": "Redaction configuration for access control."
         },
         "storage": {
           "$ref": "#/definitions/nodeStorage",

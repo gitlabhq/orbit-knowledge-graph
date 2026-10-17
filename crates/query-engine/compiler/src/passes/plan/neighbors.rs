@@ -74,8 +74,49 @@ where
             false => kinds,
         }
     };
+    let neighbor_paths = |source: bool| {
+        let graph = model.graph();
+        let mut pairs = Vec::new();
+        for relationship in &relationships {
+            for route in model.relationship_routes(relationship) {
+                for variant in route.variants() {
+                    let (center, neighbor) = match source {
+                        true => (variant.source, variant.target),
+                        false => (variant.target, variant.source),
+                    };
+                    if center != center_entity_id {
+                        continue;
+                    }
+                    let source_name = &graph.entity(variant.source).name;
+                    let target_name = &graph.entity(variant.target).name;
+                    let owned = model
+                        .variant_scope(relationship, source_name, target_name)
+                        .is_some_and(|scope| match source {
+                            true => scope.edge_path_is_target_path(),
+                            false => scope.edge_path_is_source_path(),
+                        });
+                    if owned {
+                        pairs.push((
+                            relationship.to_string(),
+                            graph.entity(neighbor).name.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+        pairs
+    };
     let outgoing_relationships = relationship_ids(true);
     let incoming_relationships = relationship_ids(false);
+    let direction = match (
+        config.direction,
+        outgoing_relationships.is_empty(),
+        incoming_relationships.is_empty(),
+    ) {
+        (Direction::Both, false, true) => Direction::Outgoing,
+        (Direction::Both, true, false) => Direction::Incoming,
+        (direction, _, _) => direction,
+    };
     let incoming_kinds: Vec<_> = relationships
         .iter()
         .filter(|relationship| touches(relationship, false))
@@ -138,13 +179,13 @@ where
     };
     let has_non_denorm = center_np.id_range.is_some()
         || center_np.filters.iter().any(|(_, filter)| {
-            (config.direction != Direction::Incoming
+            (direction != Direction::Incoming
                 && !covered(
                     filter,
                     query_data_model::DenormalizedDirection::Source,
                     &outgoing_relationships,
                 ))
-                || (config.direction != Direction::Outgoing
+                || (direction != Direction::Outgoing
                     && !covered(
                         filter,
                         query_data_model::DenormalizedDirection::Target,
@@ -186,7 +227,7 @@ where
     tables.extend(edge.incoming_tables.iter().cloned());
     tables.sort();
     tables.dedup();
-    let fused_table = (config.direction == Direction::Both
+    let fused_table = (direction == Direction::Both
         && !has_non_denorm
         && center_np.node_ids.len() != 1
         && center_np.uses_default_pk()
@@ -195,7 +236,7 @@ where
     context.nodes.insert(center_alias.clone(), center_np);
     Ok(context.finish(Neighbors {
         center: center_alias,
-        direction: config.direction,
+        direction,
         edge,
         has_non_denorm,
         fused_table,
@@ -203,5 +244,7 @@ where
         incoming_kinds: arm_kinds(false),
         incoming_scope_preserving,
         incoming_cross_scope,
+        outgoing_neighbor_paths: neighbor_paths(true),
+        incoming_neighbor_paths: neighbor_paths(false),
     }))
 }

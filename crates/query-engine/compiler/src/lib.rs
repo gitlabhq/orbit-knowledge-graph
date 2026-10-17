@@ -1116,12 +1116,9 @@ mod tests {
 
     #[test]
     fn scope_proofs_preserve_deeper_authorization_filters() {
-        let context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()])
-            .unwrap()
-            .with_scope_proofs(std::collections::HashMap::from([(
-                "p".into(),
-                ScopeProof::literal("1/2/"),
-            )]));
+        let mut context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()]).unwrap();
+        context.scope_proofs =
+            std::collections::HashMap::from([("p".into(), ScopeProof::literal("1/2/"))]);
         for (query, lookup, alias, literal_proof) in [
             (
                 "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",

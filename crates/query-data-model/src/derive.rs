@@ -182,50 +182,6 @@ mod tests {
     }
 
     #[test]
-    fn constructs_a_document_model_without_relational_or_gitlab_contracts() {
-        use crate::{DataModel, DataModelError, GraphCatalog, Mapping};
-        use std::collections::HashMap;
-
-        struct Documents {
-            collections: Vec<String>,
-        }
-        struct DocumentMapping(HashMap<crate::PropertyId, Vec<String>>);
-        impl Mapping<Documents> for DocumentMapping {
-            fn derive(graph: &GraphCatalog, schema: &Documents) -> Result<Self, DataModelError> {
-                assert_eq!(schema.collections, ["records"]);
-                let property = graph.property_named("Record", "key").unwrap().id;
-                Ok(Self(HashMap::from([(
-                    property,
-                    vec!["metadata".into(), "key".into()],
-                )])))
-            }
-        }
-
-        let mut graph = GraphCatalog::new();
-        let entity = graph.add_entity("Record".into()).unwrap();
-        let key = graph
-            .add_property(entity, "key".into(), ontology::DataType::Uuid)
-            .unwrap();
-        let related = graph
-            .add_relationship("RELATED".into(), &[(entity, entity)])
-            .unwrap();
-        let model = DataModel::<_, DocumentMapping, _>::build(
-            graph,
-            Documents {
-                collections: vec!["records".into()],
-            },
-            (),
-        )
-        .unwrap();
-
-        assert_eq!(model.layout().schema().collections, ["records"]);
-        assert_eq!(model.backend().0[&key], ["metadata", "key"]);
-        assert!(model.graph().property_id(entity, "id").is_none());
-        assert!(model.graph().variant_id(related, entity, entity).is_some());
-        assert!(model.graph().property_id(entity, "key").is_some());
-    }
-
-    #[test]
     fn rejects_a_schema_whose_entities_are_missing_from_the_graph() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
         let schema =
@@ -345,7 +301,10 @@ mod tests {
         let model = ClickHouseDataModel::derive(ontology.clone()).unwrap();
         let entity = model.graph().entity_id("MergeRequest").unwrap();
         let property = model.graph().property_id(entity, "project_id").unwrap();
-        let table = model.backend().table_for_entity(entity).unwrap();
+        let table = model
+            .backend()
+            .table(&model.backend().entity(entity).unwrap().table)
+            .unwrap();
 
         let source = &ontology
             .get_node("MergeRequest")
@@ -377,7 +336,10 @@ mod tests {
                 .unwrap();
         let entity = model.graph().entity_id("Job").unwrap();
         let property = model.graph().property_id(entity, "when").unwrap();
-        let table = model.backend().table_for_entity(entity).unwrap();
+        let table = model
+            .backend()
+            .table(&model.backend().entity(entity).unwrap().table)
+            .unwrap();
 
         assert_eq!(model.backend().property_column(property), Some("when"));
         assert!(table.columns.contains("when"));

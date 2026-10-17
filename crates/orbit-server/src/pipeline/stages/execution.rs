@@ -12,6 +12,7 @@ use query_engine::shared::{
 };
 
 use crate::pipeline::correlation;
+use crate::pipeline::service::QuerySettings;
 
 struct PreparedQuery {
     sql: String,
@@ -56,24 +57,20 @@ impl PipelineStage for ClickHouseExecutor {
 
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
-
-            let mut http_settings: Vec<(String, String)> = compiled
-                .base
-                .query_config
-                .to_clickhouse_settings()
-                .map_err(PipelineError::Execution)
-                .inspect_err(|e| obs.record_error(e))?;
-
             let query_id = correlation::query_id("base");
-            http_settings.push(("query_id".to_string(), query_id.clone()));
-            http_settings.push(("log_comment".to_string(), log_comment));
-
+            let mut http_settings = vec![
+                ("query_id".to_string(), query_id.clone()),
+                ("log_comment".to_string(), log_comment),
+            ];
+            if let Some(QuerySettings(settings)) = ctx.phases.get::<QuerySettings>() {
+                http_settings.extend(settings.iter().cloned());
+            }
             let prepared = PreparedQuery {
                 sql: compiled.base.sql.clone(),
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
-                query_id,
                 http_settings,
+                query_id,
             };
             (prepared, compiled.base.result_context.clone())
         };
@@ -108,10 +105,9 @@ async fn execute_query(
     prepared: &PreparedQuery,
     start: Instant,
 ) -> Result<(Vec<arrow::record_batch::RecordBatch>, QueryExecution), PipelineError> {
-    let mut query = client.query(&prepared.sql);
-    for (k, v) in &prepared.http_settings {
-        query = query.with_setting(k, v);
-    }
+    let mut query = client
+        .query(&prepared.sql)
+        .with_settings(prepared.http_settings.clone());
     for (key, param) in prepared.params.iter() {
         query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
     }

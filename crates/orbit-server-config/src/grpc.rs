@@ -19,6 +19,30 @@ pub struct GrpcConfig {
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
     pub max_header_list_size_bytes: u32,
+    #[schemars(range(min = 65536, max = 4194304))]
+    pub result_chunk_bytes: usize,
+}
+
+const RESULT_CHUNK_BYTES: std::ops::RangeInclusive<usize> = 64 * 1024..=4 * 1024 * 1024;
+
+impl GrpcConfig {
+    pub fn validate(&self) -> Result<(), GrpcConfigError> {
+        if !RESULT_CHUNK_BYTES.contains(&self.result_chunk_bytes) {
+            return Err(GrpcConfigError::ResultChunkBytesOutOfRange(
+                self.result_chunk_bytes,
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GrpcConfigError {
+    #[error(
+        "grpc.result_chunk_bytes must be between 65536 and 4194304 (got {0}); \
+         GitLab Rails rejects gRPC messages over 8 MiB"
+    )]
+    ResultChunkBytesOutOfRange(usize),
 }
 
 #[cfg(test)]
@@ -53,6 +77,16 @@ mod tests {
             err.to_string().contains("max_connection_age_grace_secs"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn result_chunk_bytes_must_stay_in_range() {
+        let mut cfg = AppConfig::embedded_defaults().grpc;
+        assert!(cfg.validate().is_ok());
+        for bytes in [0, 1, 8 * 1024 * 1024] {
+            cfg.result_chunk_bytes = bytes;
+            assert!(cfg.validate().is_err(), "{bytes} must be rejected");
+        }
     }
 
     #[test]

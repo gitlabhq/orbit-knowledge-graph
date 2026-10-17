@@ -7,7 +7,7 @@ use std::time::Duration;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
-use orbit_server_config::AnalyticsConfig;
+use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
@@ -26,7 +26,7 @@ use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
 use crate::item_counts::{ItemCountService, build_item_counts_response};
 use crate::pipeline::{
-    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request,
+    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request, result_messages,
     send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
@@ -69,13 +69,20 @@ fn resolve_raw_query(
     let query_type =
         QueryType::try_from(query_type).map_err(|_| format!("Unknown query_type: {query_type}"))?;
     let frontend = query_frontend(language)?;
-    let text = match query_type {
-        QueryType::Json => query,
+    let rendered = match query_type {
+        QueryType::Json => named_queries::RenderedQuery {
+            text: query,
+            settings: Vec::new(),
+        },
         QueryType::Named => named_queries
             .render_request_language(&query, named_language(frontend), values)
             .map_err(|e| e.to_string())?,
     };
-    Ok(RawQuery { text, frontend })
+    Ok(RawQuery {
+        text: rendered.text,
+        frontend,
+        settings: rendered.settings,
+    })
 }
 
 fn named_language(frontend: Frontend) -> named_queries::Language {
@@ -161,6 +168,7 @@ pub struct OrbitServiceImpl {
     indexing_status: IndexingStatusService,
     item_counts: ItemCountService,
     quota: Arc<QuotaService>,
+    result_chunk_bytes: usize,
 }
 
 impl OrbitServiceImpl {
@@ -169,7 +177,7 @@ impl OrbitServiceImpl {
         active_schema: Arc<ActiveSchema>,
         client: ArrowClickHouseClient,
         cluster_health: Arc<ClusterHealthChecker>,
-        stream_timeout_secs: u64,
+        grpc: &GrpcConfig,
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         let client = Arc::new(client);
@@ -177,7 +185,7 @@ impl OrbitServiceImpl {
         let pipeline = QueryPipelineService::new(
             Arc::clone(&client),
             analytics_config,
-            Duration::from_secs(stream_timeout_secs),
+            Duration::from_secs(grpc.stream_timeout_secs),
         );
         let graph_status = GraphStatusService::new(Arc::clone(&client));
         let indexing_status = IndexingStatusService::new(Arc::clone(&client));
@@ -192,6 +200,7 @@ impl OrbitServiceImpl {
             indexing_status,
             item_counts,
             quota: Arc::new(QuotaService::disabled()),
+            result_chunk_bytes: grpc.result_chunk_bytes,
         }
     }
 
@@ -202,11 +211,6 @@ impl OrbitServiceImpl {
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.pipeline = self.pipeline.with_resolver_registry(registry);
-        self
-    }
-
-    pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
-        self.pipeline = self.pipeline.with_cache_broker(broker);
         self
     }
 
@@ -411,6 +415,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let result_chunk_bytes = self.result_chunk_bytes;
         let schema = self.active_schema.snapshot()?;
         let span = tracing::Span::current();
 
@@ -470,7 +475,14 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
                 let result = pipeline
-                    .run_query(&schema, ctx, query, &tx, stream, render)
+                    .run_query(&schema, ctx, query, &tx, stream, |output| {
+                        render(output).map(|result| {
+                            result_messages(
+                                result,
+                                req.chunked_result.then_some(result_chunk_bytes),
+                            )
+                        })
+                    })
                     .await;
 
                 match result {
@@ -1029,6 +1041,10 @@ mod tests {
         test_config().build_client("graph")
     }
 
+    fn grpc_defaults() -> GrpcConfig {
+        orbit_server_config::AppConfig::embedded_defaults().grpc
+    }
+
     fn test_service() -> OrbitServiceImpl {
         test_service_on(&test_config())
     }
@@ -1039,7 +1055,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             clickhouse.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         )
     }
@@ -1170,7 +1186,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1203,7 +1219,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1242,7 +1258,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1269,7 +1285,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1290,7 +1306,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1322,7 +1338,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1360,7 +1376,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1391,7 +1407,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1441,6 +1457,39 @@ mod tests {
         }
         assert!(resolve_raw_query(99, "".into(), 0, &queries, &bindings).is_err());
         assert!(resolve_raw_query(0, "".into(), 99, &queries, &bindings).is_err());
+    }
+
+    #[test]
+    fn resolve_raw_query_carries_named_query_settings() {
+        let queries = named_queries::NamedQueries::load_embedded().unwrap();
+        let bindings = named_queries::BindingValues { current_user_id: 1 };
+        let resolve = |kind: QueryType, text: &str| {
+            resolve_raw_query(
+                kind as i32,
+                text.into(),
+                QueryLanguage::Gql as i32,
+                &queries,
+                &bindings,
+            )
+            .unwrap()
+        };
+
+        let named = resolve(
+            QueryType::Named,
+            r#"{"name":"definition_references","parameters":{"node_id":"1"}}"#,
+        );
+        assert_eq!(
+            named.settings,
+            [(
+                "use_skip_indexes_if_final_exact_mode".to_string(),
+                "0".to_string()
+            )]
+        );
+        assert!(
+            resolve(QueryType::Json, "MATCH (n:User) RETURN n")
+                .settings
+                .is_empty()
+        );
     }
 
     fn test_claims() -> Claims {
@@ -1530,7 +1579,7 @@ mod tests {
             ActiveSchema::pinned(Arc::clone(&ontology)),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 

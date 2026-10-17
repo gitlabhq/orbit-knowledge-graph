@@ -31,6 +31,8 @@ cases:
         planned:
           expect:
             - "(Filter ..., NOT (_orbit_edge_0.source_tags HAS ANY ['definition_type:function', 'definition_type:method']) (_))"
+          reject:
+            - "(Filter NOT (a.definition_type IN ['function', 'method']), ... (_))"
 
   - name: A NOT group over edge columns and non-nullable denormalized properties reads no node table
     query:

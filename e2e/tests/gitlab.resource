@@ -289,6 +289,16 @@ Add Group Member
     RETURN    ${resp.json()}
 
 Create Vulnerability
+    [Documentation]    Run `Try Create Vulnerability` until it succeeds. New GitLab builds the
+    ...                project tracked context in the background, and until then
+    ...                `vulnerabilityCreate` returns "Tracked context is being updated".
+    [Arguments]    ${project_id}    ${title}    ${severity}=CRITICAL    ${state}=DETECTED
+    ...    ${description}=role scoped authz fixture
+    ${result}=    Wait Until Keyword Succeeds    90s    3s
+    ...    Try Create Vulnerability    ${project_id}    ${title}    ${severity}    ${state}    ${description}
+    RETURN    ${result}
+
+Try Create Vulnerability
     [Documentation]    Create a manually-reported Vulnerability via the GraphQL `vulnerabilityCreate`
     ...                mutation. Requires Ultimate license (e2e/scripts/activate-license.sh) and
     ...                Maintainer+ on the project; the e2e-bot is admin so this works on any project.

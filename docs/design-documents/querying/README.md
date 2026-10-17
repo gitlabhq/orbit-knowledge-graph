@@ -65,6 +65,8 @@ Rails sends `QUERY_TYPE_NAMED` with a separate language selected by the per-user
 
 The GQL `param` function encodes strings, signed or unsigned 64-bit integers, booleans, and arrays. `identifier` accepts ASCII identifiers up to 64 bytes. `integer` accepts non-negative signed 64-bit IDs, including string-valued IDs that preserve JavaScript precision.
 
+An optional `settings` map holds ClickHouse settings. The server sends them unchanged with the base query, and SETTINGS in the compiled SQL take precedence. The code navigation queries `definition_references` and `definition_callees` set `use_skip_indexes_if_final_exact_mode: 0`. Every skip-indexed filter in them is on a sort-key column. All versions of a row share those values, so the setting is safe for them.
+
 Unknown names, missing values, and invalid parameters return client-safe errors. A JSON `"$param:name"` key lets a string parameter select a property. `ListNamedQueries`, surfaced as `GET /api/v4/orbit/templates`, lists parameterless queries with caller bindings resolved in the selected language.
 
 The build and active-schema loader validate both spellings. Compiler parity tests require identical SQL, parameters, and query types. The corpus smoke test executes both spellings.

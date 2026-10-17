@@ -3,8 +3,10 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::{error, info, warn};
 
+use crate::proto::execute_query_message::Content;
+use crate::proto::execute_query_result::Content::{FormattedText, ResultJson};
 use crate::proto::{
-    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, ExecuteQueryResult,
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, ExecuteQueryResult, ResultChunk,
     execute_query_message,
 };
 
@@ -14,14 +16,49 @@ use crate::pipeline::metrics::failure_reason;
 
 pub(super) async fn send_query_result(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-    result: ExecuteQueryResult,
+    messages: Vec<Content>,
 ) -> Result<(), PipelineError> {
     info!("Sending final query result");
-    tx.send(Ok(ExecuteQueryMessage {
-        content: Some(execute_query_message::Content::Result(result)),
-    }))
-    .await
-    .map_err(|_| PipelineError::client_closed())
+    for (index, content) in messages.into_iter().enumerate() {
+        let message = ExecuteQueryMessage {
+            content: Some(content),
+        };
+        if tx.send(Ok(message)).await.is_err() {
+            if index == 0 {
+                return Err(PipelineError::client_closed());
+            }
+            info!("Client left during the result stream");
+            break;
+        }
+    }
+    Ok(())
+}
+
+pub fn result_messages(mut result: ExecuteQueryResult, chunk_bytes: Option<usize>) -> Vec<Content> {
+    let Some(chunk_bytes) = chunk_bytes else {
+        return vec![Content::Result(result)];
+    };
+    let text = match result.content.take() {
+        Some(ResultJson(text) | FormattedText(text)) => text,
+        None => String::new(),
+    };
+    text_chunks(&text, chunk_bytes)
+        .map(|data| {
+            Content::ResultChunk(ResultChunk {
+                data: data.to_owned(),
+            })
+        })
+        .chain([Content::Result(result)])
+        .collect()
+}
+
+fn text_chunks(text: &str, max_bytes: usize) -> impl Iterator<Item = &str> {
+    let mut rest = text;
+    std::iter::from_fn(move || {
+        let (chunk, tail) = rest.split_at(rest.ceil_char_boundary(max_bytes));
+        rest = tail;
+        (!chunk.is_empty()).then_some(chunk)
+    })
 }
 
 pub async fn send_invalid_request_error(
@@ -180,6 +217,64 @@ fn classify_execution_error(msg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::QueryMetadata;
+
+    const CHUNK_BYTES: usize = 64;
+
+    fn chunked(text: &str) -> (Vec<String>, ExecuteQueryResult) {
+        let result = ExecuteQueryResult {
+            content: Some(FormattedText(text.to_owned())),
+            metadata: Some(QueryMetadata {
+                row_count: 7,
+                ..Default::default()
+            }),
+        };
+        let mut messages = result_messages(result, Some(CHUNK_BYTES));
+        let Some(Content::Result(last)) = messages.pop() else {
+            panic!("expected a final result message");
+        };
+        let chunks = messages
+            .into_iter()
+            .map(|content| match content {
+                Content::ResultChunk(chunk) => chunk.data,
+                other => panic!("expected a result chunk, got {other:?}"),
+            })
+            .collect();
+        (chunks, last)
+    }
+
+    #[test]
+    fn result_messages_split_text_on_char_boundaries_and_keep_metadata() {
+        let text = "aé€😀".repeat(CHUNK_BYTES / 4);
+        let (chunks, last) = chunked(&text);
+
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.concat(), text);
+        assert!(chunks.iter().all(|c| c.len() <= CHUNK_BYTES + 3));
+        assert_eq!(last.content, None);
+        assert_eq!(last.metadata.map(|m| m.row_count), Some(7));
+        assert!(chunked("").0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn send_query_result_fails_only_when_the_client_left_before_the_first_message() {
+        let messages = || result_messages(ExecuteQueryResult::default(), None);
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        assert!(send_query_result(&tx, messages()).await.is_err());
+
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut two = messages();
+        two.extend(messages());
+        let (sent, first) = tokio::join!(send_query_result(&tx, two), async {
+            let first = rx.recv().await;
+            rx.close();
+            first
+        });
+        assert!(sent.is_ok());
+        assert!(first.is_some());
+        assert!(rx.recv().await.is_none());
+    }
 
     #[test]
     fn classify_memory() {

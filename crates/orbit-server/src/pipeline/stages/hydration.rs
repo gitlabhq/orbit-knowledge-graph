@@ -246,8 +246,10 @@ impl PipelineStage for HydrationStage {
                             .map(|tp| tp.path.clone())
                             .collect();
                     }
+                    let ref_paths =
+                        hydration_helpers::collect_dynamic_ref_paths(&query_result, &static_nodes);
                     let (nodes, ids_count) =
-                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)
+                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps, &ref_paths)
                             .inspect_err(|e| obs.record_error(e))?;
                     let (property_map, debug, executions) =
                         Self::execute_hydration(ctx, nodes, ids_count, "dynamic")

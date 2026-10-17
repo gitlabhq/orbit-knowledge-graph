@@ -464,6 +464,7 @@ Enabling `tls.internal` changes what clients must send:
 | `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
+| `grpc.result_chunk_bytes` | `524288` (512 KiB) | Largest `ResultChunk` the server sends when a client sets `chunked_result`. Must be between 64 KiB and 4 MiB, because GitLab Rails rejects gRPC messages over 8 MiB. Chunks split on UTF-8 boundaries, so a chunk can be up to 3 bytes larger. |
 
 ### Query settings
 
@@ -474,8 +475,8 @@ query:
   default:
     max_execution_time: 30
     max_memory_usage: 1073741824
-    use_query_cache: false
-    query_cache_ttl: 60
+    use_query_cache: true
+    query_cache_ttl: 10
   aggregation:
     max_execution_time: 60
 ```
@@ -487,8 +488,8 @@ query:
 | `query.default.max_bytes_to_read` | unset | ClickHouse `max_bytes_to_read` in bytes |
 | `query.default.max_rows_to_read` | unset | ClickHouse `max_rows_to_read` |
 | `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
-| `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
-| `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
+| `query.default.use_query_cache` | `true` | ClickHouse query cache for graph queries and item counts. Indexing progress reads, the indexer, and graph queries that pin every pattern node by ID always skip it. Queries with non-deterministic functions or system tables run uncached |
+| `query.default.query_cache_ttl` | `10` | Query cache TTL in seconds. A cached result can be this old |
 
 ## Schema management
 

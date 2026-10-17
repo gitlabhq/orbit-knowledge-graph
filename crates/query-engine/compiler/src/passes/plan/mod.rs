@@ -72,6 +72,21 @@ impl QueryPlan {
             _ => &[],
         }
     }
+
+    pub fn is_point_lookup(&self) -> bool {
+        let (nodes, relations) = match self {
+            Self::Traversal(Plan {
+                nodes, relations, ..
+            })
+            | Self::Aggregation(Plan {
+                nodes, relations, ..
+            }) => (nodes, relations),
+            _ => return false,
+        };
+        !nodes.is_empty()
+            && nodes.values().all(NodePlan::is_id_pinned_only)
+            && relations.iter().all(|relation| relation.max_hops == 1)
+    }
 }
 
 pub fn denormalized_facts(
@@ -133,6 +148,8 @@ pub struct Neighbors {
     pub incoming_kinds: Vec<String>,
     pub incoming_scope_preserving: Vec<String>,
     pub incoming_cross_scope: Vec<String>,
+    pub outgoing_neighbor_paths: Vec<(String, String)>,
+    pub incoming_neighbor_paths: Vec<(String, String)>,
 }
 
 pub struct Hydration {

@@ -158,7 +158,7 @@ mise test:integration
 | --- | --- |
 | `mise test:integration` | All container tests |
 | `mise test:integration:data` | Query scenarios and data correctness |
-| `mise test:integration:server` | Data correctness, hydration, redaction, and graph formatting |
+| `mise test:integration:server` | Data correctness, redaction, and graph formatting |
 | `mise test:integration:indexer` | All indexer tests |
 | `mise test:integration:indexer:sdlc:scenario <filter>` | SDLC indexer scenarios whose path contains the filter |
 | `mise test:integration:corpus` | The query corpus and the executable docs |
@@ -209,7 +209,7 @@ Orbit sends analytics and usage billing events through [labkit-rs](https://gitla
 
 The `corpus-smoke-test` job runs a large set of queries through the production query stages against seeded ClickHouse. A stub replaces the authorization stage, and a mock serves Gitaly content. The queries come from three places:
 
-- The curated corpus in [`fixtures/queries/corpus`](../../fixtures/queries/corpus).
+- The curated GQL corpus in [`fixtures/queries/corpus`](../../fixtures/queries/corpus).
 - The named queries in `config/named_queries`, each in JSON and GQL.
 - Code blocks marked `json orbit-query` or `gql orbit-query` in the docs and the Orbit skill.
 

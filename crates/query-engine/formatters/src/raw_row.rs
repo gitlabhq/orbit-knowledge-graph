@@ -96,7 +96,7 @@ mod tests {
         let mut ctx = ResultContext::new();
         ctx.add_node("p", "Project");
 
-        (QueryResult::from_batches(&[batch], &ctx), ctx)
+        (QueryResult::from_batches(&[batch], &ctx).unwrap(), ctx)
     }
 
     #[test]
@@ -144,9 +144,14 @@ mod tests {
         .unwrap();
 
         let ctx = ResultContext::new().with_query_type(QueryType::PathFinding);
-        let mut result = QueryResult::from_batches(&[batch], &ctx);
+        let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
 
-        for node in result.rows_mut()[0].dynamic_nodes_mut() {
+        for node in result
+            .authorized_rows_mut()
+            .next()
+            .unwrap()
+            .dynamic_nodes_mut()
+        {
             node.properties
                 .insert("name".to_string(), ColumnValue::String("test".to_string()));
             node.properties

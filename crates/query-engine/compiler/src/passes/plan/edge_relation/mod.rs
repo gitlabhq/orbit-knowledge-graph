@@ -41,6 +41,7 @@ pub struct NodePlan {
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub emit_select: bool,
+    pub narrowed: bool,
 }
 
 impl NodePlan {
@@ -85,6 +86,7 @@ impl NodePlan {
                 .to_string(),
             columns,
             emit_select: true,
+            narrowed: false,
         })
     }
 
@@ -461,7 +463,12 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if relation.max_hops == 1 {
             self.bind_relation_ids(index, relation, source);
         }
-        if self.facts.relations.len() > 1 && relation.max_hops == 1 {
+        if relation.max_hops == 1
+            && (self.facts.relations.len() > 1
+                || [&relation.from_node, &relation.to_node]
+                    .into_iter()
+                    .any(|node| self.facts.nodes[node].narrowed))
+        {
             source = self.graph.from(source).bind(alias).finish();
         }
         let (start, end) = relation.direction.edge_columns();
@@ -726,7 +733,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             }
             let used_later = self.facts.relations[index + 1..]
                 .iter()
-                .any(|next| next.endpoint_column(node).is_some());
+                .any(|next| next.endpoint_column(node).is_some())
+                || self.facts.nodes[node].narrowed;
             if !used_later {
                 continue;
             }
@@ -754,7 +762,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
         let node = self.uncovered_node(alias);
         let outputs = node_outputs(&node);
-        let scan = self.node_read(&node)?;
+        let mut scan = self.node_read(&node)?;
+        if node.narrowed {
+            let (ids, key) = self.ids(alias).cloned().ok_or_else(|| {
+                QueryError::Lowering(format!("node '{alias}' has no narrowing relation"))
+            })?;
+            scan = self
+                .graph
+                .from(scan)
+                .semi_join(Column::new(alias, DEFAULT_PRIMARY_KEY), ids, key)
+                .finish();
+        }
         self.root = Some(match (self.root.take(), self.binding(alias).cloned()) {
             (Some(root), Some(binding)) => self.graph.join(
                 root,

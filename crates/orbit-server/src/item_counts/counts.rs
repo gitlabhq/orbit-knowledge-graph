@@ -19,7 +19,8 @@ pub async fn count_visible_entities(
         .map(|(index, entity)| build_entity_count_query(index, entity))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
-    let batches = fetch_status_query_batches(client, &sql, "entity counts", |query| {
+    let config = orbit_server_config::query::default_config();
+    let batches = fetch_status_query_batches(client, &sql, "entity counts", &config, |query| {
         entities
             .iter()
             .enumerate()

@@ -22,7 +22,6 @@ pub mod denormalized;
 mod entities;
 pub mod errors;
 pub mod etl;
-pub mod etl_sql;
 pub mod introspection;
 mod loading;
 pub mod migrations;
@@ -411,19 +410,6 @@ impl Ontology {
         self.edge_table_configs.get(table)
     }
 
-    #[must_use]
-    pub fn get_edge_column_type(&self, name: &str) -> Option<DataType> {
-        // Search across all edge tables, not just the default, so
-        // table-specific columns (e.g. project_id on gl_code_edge) are
-        // recognized by the validation pass.
-        for config in self.edge_table_configs.values() {
-            if let Some(col) = config.columns.iter().find(|c| c.name == name) {
-                return Some(col.data_type);
-            }
-        }
-        None
-    }
-
     pub fn get_edge_table_column_type(&self, table: &str, name: &str) -> Option<DataType> {
         self.edge_table_configs
             .get(table)
@@ -751,11 +737,6 @@ impl Ontology {
     }
 
     #[must_use]
-    pub fn has_node(&self, name: &str) -> bool {
-        self.nodes.contains_key(name)
-    }
-
-    #[must_use]
     pub fn has_edge(&self, name: &str) -> bool {
         self.edges.contains_key(name)
     }
@@ -763,11 +744,6 @@ impl Ontology {
     #[must_use]
     pub fn get_redaction_config(&self, entity_name: &str) -> Option<&RedactionConfig> {
         self.get_node(entity_name)?.redaction.as_ref()
-    }
-
-    #[must_use]
-    pub fn requires_redaction(&self, entity_name: &str) -> bool {
-        self.get_redaction_config(entity_name).is_some()
     }
 
     /// Minimum access level required to include rows of the node backing
@@ -788,17 +764,6 @@ impl Ontology {
             .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
             .and_then(|n| n.redaction.as_ref())
             .map(|r| r.required_role.as_access_level())
-    }
-
-    /// Iterator over names of `admin_only` fields on the given entity.
-    /// Returns an empty iterator if the entity does not exist.
-    pub fn admin_only_properties(&self, entity_name: &str) -> impl Iterator<Item = &str> {
-        self.get_node(entity_name).into_iter().flat_map(|node| {
-            node.fields
-                .iter()
-                .filter(|f| f.admin_only)
-                .map(|f| f.name.as_str())
-        })
     }
 
     /// Whether `field_name` on `entity_name` is marked `admin_only`.
@@ -873,11 +838,6 @@ impl Ontology {
     #[must_use]
     pub fn edge_tables(&self) -> Vec<&str> {
         self.edge_table_configs.keys().map(|s| s.as_str()).collect()
-    }
-
-    #[must_use]
-    pub fn is_edge_table(&self, table: &str) -> bool {
-        self.edge_table_configs.contains_key(table)
     }
 
     /// Collapse all edge routing to a single table. Used by the local/DuckDB
@@ -1120,19 +1080,6 @@ impl Ontology {
         node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
     }
 
-    #[must_use]
-    pub fn is_table_path_scopable(&self, table: &str) -> bool {
-        let normalized = strip_schema_version_prefix(table);
-        // A denormalized join's sort key always leads with its anchor's traversal_path.
-        if self.denormalized_join_by_table(normalized).is_some() {
-            return true;
-        }
-        self.nodes
-            .iter()
-            .find(|(_, n)| strip_schema_version_prefix(&n.destination_table) == normalized)
-            .is_some_and(|(name, _)| self.is_path_scopable(name))
-    }
-
     /// Path columns a scan of `table` is filtered on, each with its source table's role floor.
     #[must_use]
     pub fn traversal_path_columns(&self, table: &str) -> Vec<(String, Option<u32>)> {
@@ -1172,41 +1119,6 @@ impl Ontology {
         self.denormalized_joins
             .iter()
             .find(|j| strip_schema_version_prefix(&j.table) == normalized)
-    }
-
-    /// Returns `(fk_column, anchor_entity)` pairs derived from
-    /// `namespace_anchor` edge variants. When a query filters an entity by
-    /// one of these FK columns, the compiler can resolve the anchor's
-    /// `traversal_path` and scope the query.
-    ///
-    /// Example: `MergeRequest.project_id` → `("project_id", "Project")`.
-    ///
-    /// Deduplicated by FK column name. The load-time validator
-    /// (`validate_edge_scope_annotations`) guarantees that the same FK
-    /// column never maps to two different anchor entities.
-    #[must_use]
-    pub fn anchor_fk_mappings(&self) -> Vec<(&str, &str)> {
-        let mut seen = std::collections::HashMap::new();
-        let mut result = Vec::new();
-        for variants in self.edges.values() {
-            for v in variants {
-                if v.scope == Some(EdgeVariantScope::NamespaceAnchor)
-                    && let Some(fk) = v.fk_column.as_deref()
-                {
-                    if let Some(&existing_anchor) = seen.get(fk) {
-                        debug_assert_eq!(
-                            existing_anchor,
-                            v.target_kind.as_str(),
-                            "FK column '{fk}' maps to two different anchors"
-                        );
-                    } else {
-                        seen.insert(fk, v.target_kind.as_str());
-                        result.push((fk, v.target_kind.as_str()));
-                    }
-                }
-            }
-        }
-        result
     }
 
     /// Whether the specific `(relationship_kind, source_kind, target_kind)`
@@ -1327,23 +1239,6 @@ impl Ontology {
     #[must_use]
     pub fn internal_column_prefix(&self) -> &str {
         &self.internal_column_prefix
-    }
-
-    #[must_use]
-    pub fn default_version_column(&self) -> &str {
-        &self.etl_settings.version
-    }
-
-    #[must_use]
-    pub fn default_watermark_column(&self) -> &str {
-        &self.etl_settings.watermark
-    }
-
-    /// Default datalake soft-delete flag column. Loaded from `schema.yaml`'s
-    /// `default_deleted`.
-    #[must_use]
-    pub fn default_deleted_column(&self) -> &str {
-        &self.etl_settings.deleted
     }
 
     /// Physical tables of `global` nodes — non-namespaced hubs (User, Runner).
@@ -1706,55 +1601,6 @@ impl Ontology {
             .flat_map(|(k, configs)| configs.iter().map(move |c| (k.as_str(), c)))
     }
 
-    /// Returns `true` when the node exists and `field_name` is either a
-    /// reserved column (`id`) or a declared field; `false` if the node is
-    /// unknown.
-    #[must_use]
-    pub fn has_field(&self, node_name: &str, field_name: &str) -> bool {
-        let Some(node) = self.nodes.get(node_name) else {
-            return false;
-        };
-
-        if NODE_RESERVED_COLUMNS.contains(&field_name) {
-            return true;
-        }
-
-        node.fields.iter().any(|f| f.name == field_name)
-    }
-
-    /// Validate that a field exists on a node.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The entity name is empty
-    /// - The node doesn't exist in the ontology
-    /// - The field doesn't exist on the node (and isn't a reserved column)
-    pub fn validate_field(&self, node_name: &str, field_name: &str) -> Result<(), OntologyError> {
-        if node_name.is_empty() {
-            return Err(OntologyError::Validation(format!(
-                "cannot validate field \"{field_name}\" without an entity type"
-            )));
-        }
-
-        let node = self.nodes.get(node_name).ok_or_else(|| {
-            OntologyError::Validation(format!("unknown node type \"{node_name}\""))
-        })?;
-
-        if NODE_RESERVED_COLUMNS.contains(&field_name) {
-            return Ok(());
-        }
-
-        if node.fields.iter().any(|f| f.name == field_name) {
-            return Ok(());
-        }
-
-        Err(OntologyError::Validation(format!(
-            "field \"{field_name}\" does not exist on node type \"{node_name}\"{}",
-            crate::errors::describe_valid_fields(node)
-        )))
-    }
-
     /// Look up a field's [`DataType`] on a node.
     ///
     /// Returns `None` if the node or field doesn't exist. Reserved columns
@@ -1770,44 +1616,6 @@ impl Ontology {
             .iter()
             .find(|f| f.name == field_name)
             .map(|f| f.data_type)
-    }
-
-    /// Check a boolean property on a node field.
-    ///
-    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
-    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
-    /// filters pass entity names like `"relationship[0]"`.
-    #[must_use]
-    pub fn check_field_flag(
-        &self,
-        node_name: &str,
-        field_name: &str,
-        flag: impl Fn(&Field) -> bool,
-    ) -> bool {
-        if NODE_RESERVED_COLUMNS.contains(&field_name) {
-            return true;
-        }
-        let Some(node) = self.nodes.get(node_name) else {
-            return true;
-        };
-        node.fields
-            .iter()
-            .find(|f| f.name == field_name)
-            .is_some_and(&flag)
-    }
-
-    /// Validate that a type is a valid node label or edge type.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the type is neither a node label nor an edge type.
-    pub fn validate_type(&self, type_name: &str) -> Result<(), OntologyError> {
-        if self.has_node(type_name) || self.has_edge(type_name) {
-            return Ok(());
-        }
-        Err(OntologyError::Validation(format!(
-            "\"{type_name}\" is not a valid node label or relationship type"
-        )))
     }
 
     /// Get the ClickHouse table name for a node label.
@@ -2289,11 +2097,6 @@ mod tests {
             );
 
         assert_eq!(ontology.node_count(), 3);
-        assert!(ontology.has_node("User"));
-        assert!(ontology.has_node("Project"));
-        assert!(ontology.has_node("Note"));
-        assert!(!ontology.has_node("Group"));
-
         assert_eq!(ontology.edge_count(), 2);
         assert!(ontology.has_edge("AUTHORED"));
         assert!(ontology.has_edge("CONTAINS"));
@@ -2312,76 +2115,6 @@ mod tests {
     #[should_panic(expected = "node \"NonExistent\" does not exist")]
     fn test_with_fields_panics_on_missing_node() {
         let _ = Ontology::new().with_fields("NonExistent", [("field", DataType::String)]);
-    }
-
-    #[test]
-    fn test_has_field() {
-        let ontology = Ontology::new()
-            .with_nodes(["User"])
-            .with_fields("User", [("username", DataType::String)]);
-
-        assert!(ontology.has_field("User", "id"));
-        assert!(ontology.has_field("User", "username"));
-        assert!(!ontology.has_field("User", "nonexistent"));
-        assert!(!ontology.has_field("Unknown", "id"));
-        assert!(!ontology.has_field("Unknown", "field"));
-    }
-
-    #[test]
-    fn test_validate_field() {
-        let ontology = Ontology::new()
-            .with_nodes(["User"])
-            .with_fields("User", [("username", DataType::String)]);
-
-        assert!(ontology.validate_field("User", "id").is_ok());
-        assert!(ontology.validate_field("User", "username").is_ok());
-
-        let err = ontology.validate_field("Unknown", "id").unwrap_err();
-        assert!(err.to_string().contains("unknown node type"));
-        let err = ontology.validate_field("Unknown", "field").unwrap_err();
-        assert!(err.to_string().contains("unknown node type"));
-
-        let err = ontology.validate_field("User", "nonexistent").unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
-
-        let err = Ontology::new().validate_field("", "field").unwrap_err();
-        assert!(err.to_string().contains("without an entity type"));
-    }
-
-    #[test]
-    fn validate_field_lists_long_field_lists_untrimmed() {
-        let fields: Vec<(String, DataType)> = (0..20)
-            .map(|i| (format!("field_{i}"), DataType::Int))
-            .collect();
-        let ontology = Ontology::new()
-            .with_nodes(["Wide"])
-            .with_fields("Wide", fields);
-
-        let msg = ontology
-            .validate_field("Wide", "missing")
-            .unwrap_err()
-            .to_string();
-        assert!(msg.contains("Valid fields:"), "got: {msg}");
-        for i in 0..20 {
-            assert!(msg.contains(&format!("field_{i}")), "got: {msg}");
-        }
-        assert!(!msg.contains("more"), "got: {msg}");
-        assert!(!msg.contains("get_graph_schema"), "got: {msg}");
-        // Reserved "id" must not be duplicated even when a field is also named differently.
-        assert_eq!(msg.matches("field_0").count(), 1, "got: {msg}");
-    }
-
-    #[test]
-    fn test_validate_type() {
-        let ontology = Ontology::new()
-            .with_nodes(["User"])
-            .with_edges(["AUTHORED"]);
-
-        assert!(ontology.validate_type("User").is_ok());
-        assert!(ontology.validate_type("AUTHORED").is_ok());
-
-        let err = ontology.validate_type("Invalid").unwrap_err();
-        assert!(err.to_string().contains("not a valid node label"));
     }
 
     #[test]
@@ -2459,7 +2192,6 @@ mod tests {
                 ("t3_traversal_path".to_string(), Some(20)),
             ]
         );
-        assert!(ontology.is_table_path_scopable(table));
         assert_eq!(
             ontology.traversal_path_columns("gl_merge_request"),
             [("traversal_path".to_string(), Some(25))]
@@ -2586,140 +2318,9 @@ mod tests {
         let config = ontology
             .get_redaction_config(entity)
             .unwrap_or_else(|| panic!("{entity} should have redaction config"));
-        assert_eq!(
-            config.resource_type, resource_type,
-            "{entity}: resource_type mismatch"
-        );
-        assert_eq!(config.id_column, id_column, "{entity}: id_column mismatch");
-        assert_eq!(config.ability, ability, "{entity}: ability mismatch");
-    }
-
-    #[test]
-    fn redaction_config_core_nodes() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        // Temporary: aligned with source-code entities to avoid duplicate
-        // resource_type entries in the redaction callback. See #570.
-        assert_redaction(&ontology, "Project", "project", "id", "read_code");
-        assert_redaction(&ontology, "Group", "group", "id", "read_group");
-        assert_redaction(&ontology, "User", "user", "id", "read_user");
-        assert_redaction(&ontology, "Note", "note", "id", "read_note");
-    }
-
-    #[test]
-    fn redaction_config_plan_nodes() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        assert_redaction(&ontology, "WorkItem", "work_item", "id", "read_work_item");
-        assert_redaction(&ontology, "Milestone", "milestone", "id", "read_milestone");
-        assert_redaction(&ontology, "Label", "label", "id", "read_label");
-    }
-
-    #[test]
-    fn redaction_config_code_review_nodes() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        assert_redaction(
-            &ontology,
-            "MergeRequest",
-            "merge_request",
-            "id",
-            "read_merge_request",
-        );
-        assert_redaction(
-            &ontology,
-            "MergeRequestDiff",
-            "merge_request",
-            "merge_request_id",
-            "read_merge_request",
-        );
-        assert_redaction(
-            &ontology,
-            "MergeRequestDiffFile",
-            "merge_request",
-            "merge_request_id",
-            "read_merge_request",
-        );
-    }
-
-    #[test]
-    fn redaction_config_ci_nodes() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        assert_redaction(&ontology, "Pipeline", "ci_pipeline", "id", "read_pipeline");
-        assert_redaction(&ontology, "Stage", "ci_stage", "id", "read_build");
-        assert_redaction(&ontology, "Job", "ci_build", "id", "read_build");
-    }
-
-    #[test]
-    fn redaction_config_security_nodes() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        assert_redaction(
-            &ontology,
-            "Vulnerability",
-            "vulnerability",
-            "id",
-            "read_vulnerability",
-        );
-        assert_redaction(
-            &ontology,
-            "VulnerabilityOccurrence",
-            "vulnerability_occurrence",
-            "id",
-            "read_vulnerability",
-        );
-        assert_redaction(
-            &ontology,
-            "VulnerabilityScanner",
-            "vulnerability_scanner",
-            "id",
-            "read_vulnerability_scanner",
-        );
-        assert_redaction(
-            &ontology,
-            "VulnerabilityIdentifier",
-            "vulnerability_identifier",
-            "id",
-            "read_vulnerability",
-        );
-        assert_redaction(
-            &ontology,
-            "Finding",
-            "security_finding",
-            "id",
-            "read_security_resource",
-        );
-        assert_redaction(
-            &ontology,
-            "SecurityScan",
-            "security_scan",
-            "id",
-            "read_scan",
-        );
-    }
-
-    #[test]
-    fn redaction_config_source_code_nodes() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        assert_redaction(&ontology, "Branch", "project", "project_id", "read_code");
-        assert_redaction(&ontology, "File", "project", "project_id", "read_code");
-        assert_redaction(&ontology, "Directory", "project", "project_id", "read_code");
-        assert_redaction(
-            &ontology,
-            "Definition",
-            "project",
-            "project_id",
-            "read_code",
-        );
-        assert_redaction(
-            &ontology,
-            "ImportedSymbol",
-            "project",
-            "project_id",
-            "read_code",
-        );
+        assert_eq!(config.resource_type, resource_type);
+        assert_eq!(config.id_column, id_column);
+        assert_eq!(config.ability, ability);
     }
 
     #[test]
@@ -2878,14 +2479,6 @@ mod tests {
             tables.contains(&ontology.edge_table()),
             "edge_tables should include the default edge table"
         );
-    }
-
-    #[test]
-    fn is_edge_table_matches_default() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-        assert!(ontology.is_edge_table(ontology.edge_table()));
-        assert!(!ontology.is_edge_table("gl_user"));
-        assert!(!ontology.is_edge_table("nonexistent"));
     }
 
     #[test]
@@ -3086,45 +2679,6 @@ style:
     }
 
     #[test]
-    fn all_nodes_require_redaction() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
-        let expected = [
-            "Project",
-            "Group",
-            "User",
-            "Note",
-            "WorkItem",
-            "Milestone",
-            "Label",
-            "MergeRequest",
-            "MergeRequestDiff",
-            "MergeRequestDiffFile",
-            "Pipeline",
-            "Stage",
-            "Job",
-            "Vulnerability",
-            "VulnerabilityOccurrence",
-            "VulnerabilityScanner",
-            "VulnerabilityIdentifier",
-            "Finding",
-            "SecurityScan",
-            "Branch",
-            "File",
-            "Directory",
-            "Definition",
-            "ImportedSymbol",
-        ];
-
-        for entity in &expected {
-            assert!(
-                ontology.requires_redaction(entity),
-                "{entity} should require redaction"
-            );
-        }
-    }
-
-    #[test]
     fn default_columns_loaded_from_ontology() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
@@ -3274,54 +2828,6 @@ properties:
         assert_eq!(entity.sort_key, default_sort_key);
     }
 
-    fn field_flags_ontology() -> Ontology {
-        Ontology::new()
-            .with_nodes(["User"])
-            .with_fields(
-                "User",
-                [("username", DataType::String), ("email", DataType::String)],
-            )
-            .modify_field("User", "email", |f| {
-                f.like_allowed = false;
-                f.filterable = false;
-            })
-            .unwrap()
-    }
-
-    #[test]
-    fn check_field_flag_returns_true_for_reserved_columns() {
-        let ont = field_flags_ontology();
-        assert!(ont.check_field_flag("User", "id", |f| f.like_allowed));
-        assert!(ont.check_field_flag("User", "id", |f| f.filterable));
-    }
-
-    #[test]
-    fn check_field_flag_returns_true_for_allowed_field() {
-        let ont = field_flags_ontology();
-        assert!(ont.check_field_flag("User", "username", |f| f.like_allowed));
-        assert!(ont.check_field_flag("User", "username", |f| f.filterable));
-    }
-
-    #[test]
-    fn check_field_flag_returns_false_for_disallowed_field() {
-        let ont = field_flags_ontology();
-        assert!(!ont.check_field_flag("User", "email", |f| f.like_allowed));
-        assert!(!ont.check_field_flag("User", "email", |f| f.filterable));
-    }
-
-    #[test]
-    fn check_field_flag_fails_closed_for_unknown_field() {
-        let ont = field_flags_ontology();
-        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.like_allowed));
-        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.filterable));
-    }
-
-    #[test]
-    fn check_field_flag_returns_true_for_unknown_node() {
-        let ont = field_flags_ontology();
-        assert!(ont.check_field_flag("Unknown", "whatever", |f| f.like_allowed));
-    }
-
     #[test]
     fn modify_field_errors_for_unknown_node() {
         let result = Ontology::new()
@@ -3345,28 +2851,6 @@ properties:
             .unwrap()
             .modify_field("User", "is_auditor", |f| f.admin_only = true)
             .unwrap()
-    }
-
-    #[test]
-    fn admin_only_properties_yields_only_admin_only_fields() {
-        let ont = admin_only_ontology();
-        let mut got: Vec<&str> = ont.admin_only_properties("User").collect();
-        got.sort_unstable();
-        assert_eq!(got, vec!["is_admin", "is_auditor"]);
-    }
-
-    #[test]
-    fn admin_only_properties_empty_for_unknown_entity() {
-        let ont = admin_only_ontology();
-        assert_eq!(ont.admin_only_properties("Bogus").count(), 0);
-    }
-
-    #[test]
-    fn admin_only_properties_empty_when_no_admin_only_fields() {
-        let ont = Ontology::new()
-            .with_nodes(["Project"])
-            .with_fields("Project", [("name", DataType::String)]);
-        assert_eq!(ont.admin_only_properties("Project").count(), 0);
     }
 
     #[test]
@@ -3881,21 +3365,6 @@ properties:
         assert_eq!(
             def_import.scope, None,
             "ImportedSymbol is the cross-repo resolution boundary"
-        );
-    }
-
-    #[test]
-    fn anchor_fk_mappings_includes_project_id_and_group_id() {
-        let o = Ontology::load_embedded().unwrap();
-        let mappings = o.anchor_fk_mappings();
-        assert!(
-            mappings.contains(&("project_id", "Project")),
-            "project_id → Project must be in anchor_fk_mappings: {mappings:?}"
-        );
-        // IN_GROUP uses group_id on Milestone/Label and namespace_id on WorkItem.
-        assert!(
-            mappings.iter().any(|(_, anchor)| *anchor == "Group"),
-            "at least one Group anchor FK must be present: {mappings:?}"
         );
     }
 

@@ -268,6 +268,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 reader,
             )?;
 
+            if entity.redaction.is_none() {
+                return Err(OntologyError::Validation(format!(
+                    "node '{node_name}' must define redaction"
+                )));
+            }
+
             if !entity.destination_table.starts_with(&ontology.table_prefix) {
                 return Err(OntologyError::Validation(format!(
                     "node '{}' has destination_table '{}' which does not start with \
@@ -1772,6 +1778,16 @@ mod tests {
                 assert!(error.to_string().contains("already exists"), "{error}");
             }
         }
+    }
+
+    #[test]
+    fn nodes_require_redaction() {
+        let error = load_modified_sources("nodes/core/project.yaml", |node| {
+            node.as_object_mut().unwrap().remove("redaction");
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("Project"), "{error}");
+        assert!(error.to_string().contains("redaction"), "{error}");
     }
 
     #[test]

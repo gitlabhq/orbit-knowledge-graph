@@ -35,7 +35,7 @@ fn output(
         .collect();
     let arrays = columns.into_iter().map(|(_, array)| array).collect();
     let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).unwrap();
-    let query_result = QueryResult::from_batches(&[batch], &result_context);
+    let query_result = QueryResult::from_batches(&[batch], &result_context).unwrap();
     PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: 0,
@@ -75,7 +75,7 @@ fn column(name: &str, array: ArrayRef) -> (String, ArrayRef) {
 }
 
 fn hydrate(output: &mut PipelineOutput, key: &str, value: &str) {
-    for row in output.query_result.rows_mut() {
+    for row in output.query_result.authorized_rows_mut() {
         for node in row.dynamic_nodes_mut() {
             if node.entity_type == "User" {
                 node.properties

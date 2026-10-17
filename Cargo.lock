@@ -11450,6 +11450,7 @@ dependencies = [
  "parquet",
  "query-engine",
  "rand 0.10.2",
+ "regex",
  "schemars 1.2.1",
  "serde",
  "serde_json",

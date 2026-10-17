@@ -216,7 +216,7 @@ pub(super) async fn pipeline_output(
     );
 
     let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
     let redacted_count = run_redaction(&mut result, svc);
 
     let mut server_extensions = TypeMap::default();
