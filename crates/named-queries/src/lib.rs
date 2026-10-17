@@ -189,11 +189,20 @@ fn parse_request(request: &str) -> Result<Envelope, NamedQueryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn values() -> BindingValues {
-        BindingValues {
-            current_user_id: 42,
-        }
+    fn render_request(
+        queries: &NamedQueries,
+        language: Language,
+        request: &str,
+    ) -> Result<String, NamedQueryError> {
+        queries.render_request_language(
+            request,
+            language,
+            &BindingValues {
+                current_user_id: 42,
+            },
+        )
     }
 
     const VALID: &str = r#"
@@ -212,25 +221,58 @@ query:
 "#;
 
     #[test]
-    fn json_requests_render_and_validate_envelopes() {
+    fn json_requests_render_bindings_and_parameters() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let values = values();
-        let render = |request| queries.render_request_language(request, Language::Json, &values);
+        let rendered = render_request(&queries, Language::Json, r#"{"name": "my_neighbors"}"#)
+            .expect("known named query renders");
+        assert_eq!(
+            serde_json::from_str::<Value>(&rendered).unwrap(),
+            json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "me", "entity": "User", "node_ids": [42]}],
+                "neighbors": {"direction": "both"},
+                "limit": 100
+            })
+        );
 
-        let rendered = render(r#"{"name": "my_neighbors"}"#).expect("known named query renders");
-        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
-        assert!(!rendered.contains("$binding"), "{rendered}");
-
-        let rendered = render(
-            r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#,
-        )
+        let request = r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#;
+        let rendered = render_request(&queries, Language::Json, request)
             .expect("parameterized named query renders");
-        assert!(rendered.contains("\"entity\":\"Project\""), "{rendered}");
-        assert!(rendered.contains("\"node_ids\":[7,9]"), "{rendered}");
-        assert!(rendered.contains("\"limit\":50"), "{rendered}");
-        assert!(!rendered.contains("$param"), "{rendered}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&rendered).unwrap(),
+            json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "center", "entity": "Project", "node_ids": [7, 9]}],
+                "neighbors": {"direction": "both"},
+                "limit": 50
+            })
+        );
+    }
 
-        let err = render(r#"{"name": "nonexistent"}"#).unwrap_err();
+    #[test]
+    fn gql_requests_render_bindings_and_parameters() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let rendered = render_request(&queries, Language::Gql, r#"{"name": "my_neighbors"}"#)
+            .expect("known named query renders");
+        assert_eq!(
+            rendered,
+            "MATCH (me:User {id: 42})--(neighbor)\nRETURN me, neighbor\nLIMIT 100"
+        );
+
+        let request = r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#;
+        let rendered = render_request(&queries, Language::Gql, request)
+            .expect("parameterized named query renders");
+        assert_eq!(
+            rendered,
+            "MATCH (center:`Project`)--(neighbor)\nWHERE center.id IN [7,9]\nRETURN center, neighbor\nLIMIT 50"
+        );
+    }
+
+    #[test]
+    fn requests_reject_invalid_envelopes() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err =
+            render_request(&queries, Language::Json, r#"{"name": "nonexistent"}"#).unwrap_err();
         assert!(err.to_string().contains("nonexistent"), "{err}");
         assert!(err.to_string().contains("my_neighbors"), "{err}");
 
@@ -238,7 +280,7 @@ query:
             "my_neighbors",
             r#"{"name": "expand_neighbors", "unexpected": 1}"#,
         ] {
-            let err = render(request).unwrap_err();
+            let err = render_request(&queries, Language::Json, request).unwrap_err();
             assert!(
                 matches!(err, NamedQueryError::InvalidRequest { .. }),
                 "{request}: {err}"
