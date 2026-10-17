@@ -13,9 +13,7 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{
-    Compact, Edge, EdgeKind, MemberIndex, Role, Slots, member_index, members_by_level,
-};
+use crate::tree::{Compact, Edge, EdgeKind, Role, find_member_in, members_by_level, members_named};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
@@ -84,8 +82,8 @@ struct Fold<'t> {
     registered: FxHashSet<u32>,
     defs: Vec<u32>,
     defs_by_name: FxHashMap<u32, Vec<u32>>,
-    /// Per class: member name to first def, and ivar name to its typed binding.
-    members: RefCell<FxHashMap<u32, MemberIndex>>,
+    /// Per class: member name to its defs, and ivar name to its typed binding.
+    members: RefCell<FxHashMap<u32, FxHashMap<u32, Vec<u32>>>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
     wildcards: WildcardImports,
@@ -1297,14 +1295,6 @@ impl<'t> Fold<'t> {
         index.get(&attr).map(|&n| self.tree.cursor(n))
     }
 
-    fn slots(&self, container: u32, name: u32) -> Option<Slots> {
-        let mut members = self.members.borrow_mut();
-        let index = members
-            .entry(container)
-            .or_insert_with(|| member_index(self.tree.cursor(container), &self.tags));
-        index.get(&name).copied()
-    }
-
     fn member_for(&self, value: Value, site: Cursor<'t>) -> Value {
         let Value::LocalDef(def) = value else {
             return value;
@@ -1467,7 +1457,17 @@ impl<'t> Fold<'t> {
             supers.flat_map(|dn| self.parts(dn)).collect::<Vec<_>>()
         };
         members_by_level(self.parts(container), supers, |dn| {
-            self.slots(dn, name)?.get(role)
+            let mut cache = self.members.borrow_mut();
+            let index = cache.entry(dn).or_insert_with(|| {
+                let mut index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+                for (name, def) in members_named(self.tree.cursor(dn)) {
+                    index.entry(name).or_default().push(def);
+                }
+                index
+            });
+            let defs = index.get(&name).into_iter().flatten();
+            let defs = defs.map(|&def| self.tree.cursor(def));
+            find_member_in(self.tree.cursor(dn), defs, role, &self.tags)
         })
     }
 

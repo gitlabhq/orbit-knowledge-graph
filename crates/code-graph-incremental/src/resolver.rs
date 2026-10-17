@@ -16,8 +16,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    CallResolution, Compact, Edge, EdgeKind, MemberIndex, Role, infer_return_type, member_index,
-    members_by_level, reachable,
+    CallResolution, Compact, Edge, EdgeKind, Role, find_member_in, infer_return_type,
+    members_by_level, members_named, reachable,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -946,23 +946,21 @@ fn gather_imports_for(
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
-type MemberCache = std::sync::Mutex<FxHashMap<u32, std::sync::Arc<MemberIndex>>>;
+type MemberCache = std::sync::Mutex<FxHashMap<u32, std::sync::Arc<FxHashMap<u32, Vec<u32>>>>>;
 
-fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<MemberIndex> {
-    let cache = &ctx.declared_members[owner.fi() as usize];
-    if let Some(members) = cache
+fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<FxHashMap<u32, Vec<u32>>> {
+    let mut cache = ctx.declared_members[owner.fi() as usize]
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&owner.index())
-    {
-        return members.clone();
-    }
-    let members = member_index(owner, &ctx.tags);
+        .unwrap_or_else(|e| e.into_inner());
     cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
         .entry(owner.index())
-        .or_insert_with(|| std::sync::Arc::new(members))
+        .or_insert_with(|| {
+            let mut index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+            for (name, def) in members_named(owner) {
+                index.entry(name).or_default().push(def);
+            }
+            std::sync::Arc::new(index)
+        })
         .clone()
 }
 
@@ -972,7 +970,10 @@ fn member_in<'a>(
     name: u32,
     role: Role,
 ) -> Option<Cursor<'a>> {
-    let node = members_of(ctx, owner).get(&name)?.get(role)?;
+    let members = members_of(ctx, owner);
+    let defs = members.get(&name).into_iter().flatten();
+    let defs = defs.map(|&def| owner.jump(owner.fi(), def));
+    let node = find_member_in(owner, defs, role, &ctx.tags)?;
     Some(owner.jump(owner.fi(), node))
 }
 

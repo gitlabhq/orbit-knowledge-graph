@@ -213,63 +213,36 @@ pub enum Role {
     Any,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Slots {
-    first: u32,
-    value: Option<(u32, bool)>,
-    callable: Option<(u32, bool)>,
-}
-
-impl Slots {
-    pub fn get(self, role: Role) -> Option<u32> {
-        let slot = match role {
-            Role::Any => return Some(self.first),
-            Role::Value => self.value,
-            Role::Callable => self.callable,
-        };
-        slot.map(|(def, _)| def)
-    }
-    fn fill(&mut self, def: u32, value: bool, callable: bool) {
-        let slots = [
-            (&mut self.value, value, callable),
-            (&mut self.callable, callable, value),
-        ];
-        for (slot, fills, shared) in slots {
-            if fills && slot.is_none_or(|(_, held)| held && !shared) {
-                *slot = Some((def, shared));
-            }
-        }
-    }
-}
-
-pub type MemberIndex = rustc_hash::FxHashMap<u32, Slots>;
-
-pub fn member_index<S: Storage<Node = Node>>(
-    owner: Cursor<'_, S>,
-    tags: &ReservedTags,
-) -> MemberIndex {
-    let nested = |node: Cursor<'_, S>| node.is_class() && !node.has(C::ImplBlock);
-    let mut index = MemberIndex::default();
-    for def in owner
+pub fn members_named<'a, S: Storage<Node = Node>>(
+    owner: Cursor<'a, S>,
+) -> impl Iterator<Item = (u32, u32)> + 'a {
+    let nested = |node: Cursor<'a, S>| node.is_class() && !node.has(C::ImplBlock);
+    owner
         .descendants_pruned(nested)
-        .filter(|node| node.is(C::Def))
-    {
-        let Some(name) = def.child_sym(C::DefName) else {
-            continue;
-        };
-        let slots = index.entry(name).or_insert_with(|| Slots {
-            first: def.index(),
-            ..Slots::default()
-        });
-        if def.is_member_of(owner) {
-            slots.fill(
-                def.index(),
-                def.has_tag(tags.value),
-                def.has_tag(tags.callable),
-            );
-        }
-    }
-    index
+        .filter(|def| def.is(C::Def))
+        .filter_map(|def| Some((def.child_sym(C::DefName)?, def.index())))
+}
+
+pub fn find_member_in<'a, S: Storage<Node = Node>>(
+    owner: Cursor<'a, S>,
+    defs: impl Iterator<Item = Cursor<'a, S>>,
+    role: Role,
+    tags: &ReservedTags,
+) -> Option<u32> {
+    let mut defs = defs;
+    let tag = match role {
+        Role::Any => return defs.next().map(|def| def.index()),
+        Role::Value => tags.value,
+        Role::Callable => tags.callable,
+    };
+    let both = |def: Cursor<'a, S>| def.has_tag(tags.value) && def.has_tag(tags.callable);
+    let mut defs = defs.filter(|def| def.has_tag(tag) && def.is_member_of(owner));
+    let first = defs.next()?;
+    let best = match both(first) {
+        true => defs.find(|def| !both(*def)).unwrap_or(first),
+        false => first,
+    };
+    Some(best.index())
 }
 
 pub fn members_by_level<N, I, T>(
