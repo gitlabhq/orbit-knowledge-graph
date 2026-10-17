@@ -134,6 +134,18 @@ pub struct IndexedRepo {
     pub client: GraphReader,
 }
 
+/// The checkout's graph when its commit is already indexed; never starts indexing.
+pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
+    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+    let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
+    let db_path = resolve_db_path(db, &git).ok()?;
+    if graph_lacks_commit(&db_path, &git.commit_sha).unwrap_or(true) {
+        return None;
+    }
+    let client = GraphReader::open(Some(db_path)).ok()?;
+    Some(IndexedRepo { git, client })
+}
+
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let top_level = git_toplevel(&repo_path)

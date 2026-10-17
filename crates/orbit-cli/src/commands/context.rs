@@ -79,8 +79,10 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         crate::remote::origin::project(&dir)
             .is_none_or(|(_, origin)| origin.trim_end_matches('/') != repo.trim_end_matches('/'))
     });
-    let origin_group = crate::remote::origin::project(&dir)
-        .map(|(_, project)| project.split('/').next().unwrap_or_default().to_string());
+    let origin_project = crate::remote::origin::project(&dir).map(|(_, project)| project);
+    let origin_group = origin_project
+        .as_deref()
+        .map(|project| project.split('/').next().unwrap_or_default().to_string());
     let mut remote_code: Vec<(Option<String>, crate::remote::code::Code)> = Vec::new();
     for (code, value) in code_targets {
         match other_project {
@@ -169,6 +171,14 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             remote.push(token);
         }
     }
+    let anchored_from_origin = !other_project
+        && remote.iter().all(|token| {
+            origin_project.as_deref().is_none_or(|origin| {
+                !token.contains(['!', '#'])
+                    || token.starts_with(&format!("{origin}!"))
+                    || token.starts_with(&format!("{origin}#"))
+            })
+        });
     let pending = match remote.is_empty() {
         true => None,
         false => {
@@ -206,10 +216,15 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         print!("{sdlc_notes}");
         printed = false;
     }
+    let mut gitlab_text = sdlc_notes.clone();
     let Some(pending) = pending else {
+        if anchored_from_origin && !gitlab_text.is_empty() {
+            print_anchored(requested.clone(), args.db.clone(), &gitlab_text);
+        }
         return Ok(());
     };
     let bytes = pending.await??;
+    gitlab_text.push_str(&String::from_utf8_lossy(&bytes));
     let home = repo.or_else(|| crate::remote::origin::project(&dir).map(|(_, project)| project));
     let mut bytes = match home {
         Some(home) => shorten(&String::from_utf8_lossy(&bytes), &home).into_bytes(),
@@ -221,7 +236,42 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     if printed {
         println!();
     }
-    Ok(crate::remote::write_stdout_raw(&bytes)?)
+    crate::remote::write_stdout_raw(&bytes)?;
+    if anchored_from_origin {
+        print_anchored(requested.clone(), args.db.clone(), &gitlab_text);
+    }
+    Ok(())
+}
+
+/// Appends the code that GitLab text points at, from the local graph, so one `context` call on an
+/// issue, MR, branch, or job also returns the definitions it names.
+fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBuf>, text: &str) {
+    let Some(workspace::IndexedRepo { git, client }) =
+        workspace::open_indexed_if_present(repo.clone(), db.clone())
+    else {
+        return;
+    };
+    let Ok(files) = super::anchors::indexed_files(&client, &git) else {
+        return;
+    };
+    let found = super::anchors::extract(text, &git.repo_path, &files);
+    let Ok(targets) = super::anchors::targets(&client, &git, &found) else {
+        return;
+    };
+    drop(client);
+    if targets.is_empty() {
+        return;
+    }
+    if let Ok(code) = run_local(repo, db, &targets)
+        && !code.trim().is_empty()
+    {
+        println!(
+            "
+code this refers to, from the local graph:
+{}",
+            code.trim_end()
+        );
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

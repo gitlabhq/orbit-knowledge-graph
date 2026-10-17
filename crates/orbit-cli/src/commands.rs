@@ -1,5 +1,6 @@
 //! Subcommand implementations kept out of the top-level module list.
 
+pub(crate) mod anchors;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod definition;
