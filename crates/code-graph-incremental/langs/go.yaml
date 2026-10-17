@@ -111,6 +111,9 @@ stages:
 
   - name: retag-expressions
     rules:
+      # `(f())` carries the value of the call it wraps
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(selector_expression operand: $O:__member field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O:__call field: $F)'

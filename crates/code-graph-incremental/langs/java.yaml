@@ -163,6 +163,11 @@ stages:
 
   - name: retag-expressions
     rules:
+      # `(T) f()` and `(f())` carry the value of the call they wrap
+      - match: '(cast_expression value: $V:__call)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(field_access object: $O:__ivar field: $F:identifier)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_access object: $O:__member field: $F:identifier)'

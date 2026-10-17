@@ -117,6 +117,11 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
+      # a::b::c::f() and a::b::f() walk the namespaces from the outermost
+      - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: (qualified_identifier scope: $U:namespace_identifier name: $N:identifier))) arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object (__member @$U (__object (__member @$T (__object @$S))))))) $A)'
+      - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: $N:identifier)) arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object (__member @$T (__object @$S))))) $A)'
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: $N:identifier) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$S))) $A)'
       - match: '(call_expression function: (template_function name: $N:identifier) arguments: $A)'
@@ -165,10 +170,10 @@ stages:
       # Free functions
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $P) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
-      - match: '(function_definition declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
-        replace: '(__def (__defname @$N) (__function) $P $B)'
-      - match: '(function_definition declarator: (reference_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
-        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - match: '(function_definition type:? $RT:type_identifier declarator: (reference_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       # Fields
       - match: '(field_declaration type: $T:struct_specifier declarator: $N:field_identifier)'
         replace: '(field_declaration $T (__def (__defname @$N) (__field_def)))'

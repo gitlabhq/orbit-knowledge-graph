@@ -1,0 +1,46 @@
+name: "Go: a call in parentheses on the right-hand side links and types the local"
+
+fixtures:
+  - path: wrapped.go
+    content: |
+      package wrapped
+
+      type Item struct{}
+
+      func (i Item) Touch() {}
+
+      type Other struct{}
+
+      func (o Other) Touch() {}
+
+      func Make() Item { return Item{} }
+
+      func letParens() {
+          item := (Make())
+          item.Touch()
+      }
+
+      func rootParens() {
+          (Make()).Touch()
+      }
+
+tests:
+  - name: "the call in parentheses links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["letParens", "rootParens"] AND callee.name = "Make"
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+
+  - name: "the method after the parentheses resolves through the return type of the call"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name IN ["letParens", "rootParens"] AND callee.name = "Touch"
+      RETURN caller.name AS caller, owner.name AS owner
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: owner, values: ["Item"] } }
+      - { not: true, row: { owner: Other } }

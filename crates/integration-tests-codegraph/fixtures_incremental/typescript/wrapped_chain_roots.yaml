@@ -1,0 +1,63 @@
+name: "TypeScript: a wrapped call at the root of a chain links and types the chain"
+
+fixtures:
+  - path: chain.ts
+    content: |
+      class Item {
+        touch() {}
+        count(): number { return 0; }
+      }
+
+      class Other {
+        touch() {}
+        count(): number { return 1; }
+      }
+
+      function make(): Item { return new Item(); }
+
+      async function fetchItem(): Promise<Item> { return new Item(); }
+
+      async function root_await() {
+        (await fetchItem()).touch();
+      }
+
+      function root_as() {
+        (make() as Item).touch();
+      }
+
+      function root_non_null() {
+        make()!.touch();
+      }
+
+      function root_parens() {
+        (make()).touch();
+      }
+
+      function root_satisfies() {
+        (make() satisfies Item).touch();
+      }
+
+      async function root_await_in_decl() {
+        const n = (await fetchItem()).count();
+      }
+
+tests:
+  - name: "the root call behind each wrapper links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["root_await", "root_as", "root_non_null", "root_parens", "root_satisfies", "root_await_in_decl"] AND callee.name IN ["make", "fetchItem"]
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 6 }
+
+  - name: "the method after each wrapper resolves through the return type of the root call"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name IN ["root_await", "root_as", "root_non_null", "root_parens", "root_satisfies", "root_await_in_decl"] AND callee.name IN ["touch", "count"]
+      RETURN caller.name AS caller, owner.name AS owner
+      ORDER BY caller
+    assert:
+      - { row_count: 6 }
+      - { column_values: { field: owner, values: ["Item"] } }
+      - { not: true, row: { owner: Other } }

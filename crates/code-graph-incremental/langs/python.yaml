@@ -201,8 +201,8 @@ stages:
         replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
       - match: '(match_statement subject: $S body: (block $$$CASES:case_clause))'
         replace: '(__ssa_branch $S $$$CASES->__ssa_arm)'
-      - match: '(conditional_expression)'
-        replace: '(__ssa_branch)'
+      - match: '(conditional_expression $A:_*_named $COND:_*_named $B:_*_named)'
+        replace: '(__ssa_branch $COND (__ssa_arm $A) (__ssa_arm $B))'
 
       # Loops
       - match: '(for_statement left: $N:identifier right: (tuple $$$E) body: $B)'

@@ -115,8 +115,6 @@ tests:
       - { column_values: { field: callee, values: ["count", "fetch_items"] } }
 
   - name: "the call at the root of a chain behind a subscript links"
-    # Known gap: a subscript object keeps its text form; the subscript desugar is a separate decision.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "chain_through_subscript" AND callee.name = "make_list"

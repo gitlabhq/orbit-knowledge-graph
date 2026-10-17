@@ -92,8 +92,6 @@ tests:
       - { column_values: { field: callee, values: ["bar", "make"] } }
 
   - name: both lambdas of a conditional keep their body calls on the enclosing def
-    # Known gap: the conditional_expression rewrite keeps no children, so neither lambda is walked.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'as_conditional'

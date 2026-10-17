@@ -20,7 +20,14 @@ fixtures:
       namespace detail {
       Other make(Items x) { return Other(); }
       Items build_items() { return Items(); }
+      namespace deep {
+      Items build_deep() { return Items(); }
       }
+      }
+      }
+
+      void deep_qualified_root() {
+          ns::detail::deep::build_deep().count();
       }
 
       struct Box {
@@ -110,8 +117,6 @@ tests:
       - { row: { caller: chain_in_decl, callee: count } }
 
   - name: "the methods on a chain through a pointer-returning root call resolve"
-    # Known gap: a pointer-returning function gets no return type (the pointer-declarator function rule emits none), so the receiver of first() has no class; the root call itself links.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "chain_through_pointer" AND callee.name IN ["first", "touch"]
@@ -127,12 +132,10 @@ tests:
       WHERE caller.name = "lifted_root" AND callee.name = "count"
       RETURN owner.name AS owner
     assert:
-      - { empty: true }
+      - { row_count: 1 }
       - { not: true, row: { owner: Items } }
 
   - name: "a two-level qualified root call types its member through its own return type"
-    # Known gap: a two-level qualified call has no retag rule, so make resolves to nothing and count has no owner; a scoped path rule is a follow-up.
-    skip: true
     query: |
       MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
       WHERE caller.name = "lifted_root" AND callee.name = "count"
@@ -142,8 +145,6 @@ tests:
       - { row: { owner: Other } }
 
   - name: "a two-level qualified root call links the function and types its member"
-    # Known gap: a two-level qualified call has no retag rule, so build_items has no edge and no type; a scoped path rule is a follow-up.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "qualified_root"
@@ -152,6 +153,16 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["build_items", "count"] } }
+
+  - name: "a three-level qualified root call links the function and types its member"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "deep_qualified_root"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["build_deep", "count"] } }
 
   - name: "a template method root call links by its name"
     query: |
@@ -170,10 +181,7 @@ tests:
       - { empty: true }
       - { not: true, row: { owner: Items } }
 
-  - name: "an explicit specialization call reaches its template through a using directive"
-    # Known gap: the callee text `make_items<int>` is not a plain name, so it makes no glob guess through
-    # `using namespace`; main matched it by name. A specialization-aware callee is a C++ rule follow-up (R1).
-    skip: true
+  - name: "an explicit specialization call reaches its template"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "specialized_root" AND callee.name = "make_items"

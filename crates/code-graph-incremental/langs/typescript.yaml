@@ -91,6 +91,17 @@ config:
 stages:
   - name: normalize
     rules:
+      # `await f()`, `f() as T`, `f()!`, `(f())` and `f() satisfies T` carry the value of the call they wrap
+      - match: '(await_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(as_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(non_null_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(satisfies_expression $V:call_expression)'
+        replace: '$V'
       # <div> is an intrinsic element, not a component call
       - match: '(jsx_self_closing_element name: (identifier "/^[a-z]/") $$$A)'
         replace: '(jsx_intrinsic $$$A)'
