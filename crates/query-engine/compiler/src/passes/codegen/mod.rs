@@ -4,6 +4,7 @@
 pub mod clickhouse;
 pub mod ddl;
 pub mod duckdb;
+mod nofinal;
 
 use orbit_server_config::QueryConfig;
 

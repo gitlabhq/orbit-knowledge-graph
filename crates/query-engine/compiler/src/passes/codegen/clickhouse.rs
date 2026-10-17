@@ -20,7 +20,11 @@ pub fn codegen(
 ) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
     let mut sql = match ast {
-        Node::Query(q) => ctx.emit_query(q)?,
+        Node::Query(q) => {
+            let mut q = q.as_ref().clone();
+            super::nofinal::rewrite(&mut q);
+            ctx.emit_query(&q)?
+        }
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
     if let Some(error) = ctx.error {
