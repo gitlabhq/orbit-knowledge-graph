@@ -24,7 +24,7 @@ physical:
   clickhouse:
     planned:
       ctes:
-        exact_order: [_filter_a]
+        exact_order: [_filter_a, _narrow_b]
       expect:
         - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy a.traversal_path, a.project_id, a.branch, a.id (Filter ... (Scan Table(gl_definition) AS a)))))
         - (Filter _orbit_edge_0.source_id IN _filter_a.id, ... (_))
