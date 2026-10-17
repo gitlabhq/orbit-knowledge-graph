@@ -151,15 +151,23 @@ fn enforce_lowered_return_with(
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
     };
     match node {
-        Node::Query(q) => enforce_return_columns(
-            q,
-            input,
-            &selectable_nodes,
-            ctx,
-            &metadata.nodes,
-            model,
-            redaction_column,
-        )?,
+        Node::Query(q) => {
+            for node in &input.nodes {
+                if selectable_nodes.contains(node.id.as_str())
+                    && let Some(entity) = &node.entity
+                {
+                    ctx.add_node(&node.id, entity);
+                }
+            }
+            enforce_return_columns(
+                q,
+                input,
+                &selectable_nodes,
+                &metadata.nodes,
+                model,
+                redaction_column,
+            )?
+        }
         Node::Insert(_) => return Ok(()),
     }
 
@@ -244,16 +252,28 @@ fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
     }
 }
 
+fn set_output(q: &mut Query, output: SelectExpr) {
+    for arm in &mut q.union_all {
+        set_output(arm, output.clone());
+    }
+    match q
+        .select
+        .iter_mut()
+        .find(|select| select.alias == output.alias)
+    {
+        Some(existing) => *existing = output,
+        None => q.select.push(output),
+    }
+}
+
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
     selectable_nodes: &HashSet<&str>,
-    ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
-    let select_len_before = q.select.len();
     for node in &input.nodes {
         let Some(entity) = &node.entity else {
             continue;
@@ -265,7 +285,6 @@ fn enforce_return_columns(
             .entity(entity)
             .map(|entity| entity.id)
             .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?;
-        ctx.add_node(&node.id, entity);
         let id_col = redaction_id_column(&node.id);
         let binding = bindings.get(&node.id).ok_or_else(|| {
             QueryError::Enforcement(format!("node '{}' has no lowered binding", node.id))
@@ -343,48 +362,19 @@ fn enforce_return_columns(
 
         if needs_separate_pk {
             let name = primary_key_column(&node.id);
-            if !q.selects_alias(&name) {
-                q.select.push(SelectExpr::new(identity.clone(), name));
-            }
+            set_output(q, SelectExpr::new(identity.clone(), name));
             ensure_in_group_by(q, input.query_type, identity.clone());
         }
-        if !q.selects_alias(&id_col) {
-            q.select
-                .push(SelectExpr::new(authorization_id.clone(), &id_col));
-        }
+        set_output(q, SelectExpr::new(authorization_id.clone(), id_col.clone()));
         ensure_in_group_by(q, input.query_type, authorization_id);
         let type_col = redaction_type_column(&node.id);
-        if !q.selects_alias(&type_col) {
-            let position = q
-                .select
-                .iter()
-                .position(|select| select.alias.as_ref() == Some(&id_col))
-                .map_or(q.select.len(), |index| index + 1);
-            q.select
-                .insert(position, SelectExpr::new(Expr::string(entity), type_col));
-        }
+        set_output(q, SelectExpr::new(Expr::string(entity), type_col));
         if input.query_type != QueryType::Aggregation
             && model.entity_has_traversal_path(entity)
             && let Some(path) = traversal_path
         {
             let name = traversal_path_column(&node.id);
-            if !q.selects_alias(&name) {
-                q.select.push(SelectExpr::new(path.clone(), name));
-            }
-        }
-    }
-    if !q.union_all.is_empty() {
-        let added = q.select[select_len_before..].to_vec();
-        for arm in &mut q.union_all {
-            for select in &added {
-                if !arm
-                    .select
-                    .iter()
-                    .any(|existing| existing.alias == select.alias)
-                {
-                    arm.select.push(select.clone());
-                }
-            }
+            set_output(q, SelectExpr::new(path.clone(), name));
         }
     }
     Ok(())

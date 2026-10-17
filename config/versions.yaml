@@ -11,13 +11,13 @@ schema: 108
 query_dsl: 12.3.4
 
 # Response envelope of the raw (JSON) formatter.
-raw_output_format: 5.0.4
+raw_output_format: 5.0.5
 
 # Response envelope of the TOON formatter (format=llm query results).
-toon_output_format: 2.0.0
+toon_output_format: 2.0.1
 
 # Response envelope of the GQL table formatter.
-gql_output_format: 1.1.0
+gql_output_format: 1.1.1
 
 # Vendored dependencies. Each entry declares its pins, artifact location,
 # and vendor/check scripts. Vendor scripts read pins and write computed

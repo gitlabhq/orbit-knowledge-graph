@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use arrow::datatypes::Int64Type;
+use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
     edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
@@ -172,48 +172,118 @@ pub struct QueryResult {
     ctx: ResultContext,
 }
 
-impl QueryResult {
-    pub fn from_batches(batches: &[RecordBatch], ctx: &ResultContext) -> Self {
-        let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
-        let is_neighbors = ctx.query_type == Some(QueryType::Neighbors);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueryResultError;
 
-        let traversal_path_columns: Vec<&str> = ctx
-            .edges()
-            .iter()
-            .filter_map(|edge| edge.path_column.as_deref())
-            .collect();
+impl std::fmt::Display for QueryResultError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("query result has invalid dynamic authorization metadata")
+    }
+}
+
+impl std::error::Error for QueryResultError {}
+
+enum DynamicNodeColumns<'a> {
+    Paths(Vec<&'a ListArray>),
+    Neighbor {
+        ids: &'a Int64Array,
+        types: &'a StringArray,
+    },
+}
+
+impl<'a> DynamicNodeColumns<'a> {
+    fn new(batch: &'a RecordBatch, ctx: &ResultContext) -> Result<Self, QueryResultError> {
+        match ctx.query_type {
+            Some(QueryType::PathFinding) => Ok(Self::Paths(vec![column(batch, path_column())?])),
+            Some(QueryType::Neighbors) => Ok(Self::Neighbor {
+                ids: column(batch, neighbor_id_column())?,
+                types: column(batch, neighbor_type_column())?,
+            }),
+            Some(QueryType::Traversal) => Ok(Self::Paths(
+                ctx.edges()
+                    .iter()
+                    .filter_map(|edge| edge.path_column.as_deref())
+                    .map(|name| column(batch, name))
+                    .collect::<Result<_, _>>()?,
+            )),
+            _ => Ok(Self::Paths(Vec::new())),
+        }
+    }
+
+    fn nodes(&self, row: usize) -> Result<Vec<NodeRef>, QueryResultError> {
+        match self {
+            Self::Paths(paths) => {
+                let mut result = Vec::new();
+                for path in paths {
+                    result.extend(path_nodes(path, row)?);
+                }
+                Ok(result)
+            }
+            Self::Neighbor { ids, types } => {
+                if ids.is_null(row) || types.is_null(row) {
+                    return Err(QueryResultError);
+                }
+                Ok(vec![NodeRef::new(ids.value(row), types.value(row))])
+            }
+        }
+    }
+}
+
+fn column<'a, A: 'static>(batch: &'a RecordBatch, name: &str) -> Result<&'a A, QueryResultError> {
+    let index = batch
+        .schema()
+        .index_of(name)
+        .map_err(|_| QueryResultError)?;
+    batch
+        .column(index)
+        .as_any()
+        .downcast_ref()
+        .ok_or(QueryResultError)
+}
+
+fn path_nodes(path: &ListArray, row: usize) -> Result<Vec<NodeRef>, QueryResultError> {
+    if path.is_null(row) {
+        return Err(QueryResultError);
+    }
+    let values = path.value(row);
+    let nodes = values
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .ok_or(QueryResultError)?;
+    if nodes.null_count() > 0 || nodes.num_columns() < 2 {
+        return Err(QueryResultError);
+    }
+    let ids = nodes
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .ok_or(QueryResultError)?;
+    let types = nodes
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or(QueryResultError)?;
+    if ids.null_count() > 0 || types.null_count() > 0 {
+        return Err(QueryResultError);
+    }
+    Ok((0..nodes.len())
+        .map(|index| NodeRef::new(ids.value(index), types.value(index)))
+        .collect())
+}
+
+impl QueryResult {
+    pub fn from_batches(
+        batches: &[RecordBatch],
+        ctx: &ResultContext,
+    ) -> Result<Self, QueryResultError> {
+        let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
 
         let mut rows = Vec::new();
         for batch in batches {
+            let dynamic_nodes = DynamicNodeColumns::new(batch, ctx)?;
             for row_idx in 0..batch.num_rows() {
                 let columns = ArrowUtils::extract_row(batch, row_idx);
-
-                let dynamic_nodes = if is_path_finding {
-                    ArrowUtils::get_i64_string_pairs(batch, path_column(), row_idx)
-                        .into_iter()
-                        .map(|(id, t)| NodeRef::new(id, t))
-                        .collect()
-                } else if is_neighbors {
-                    let neighbor =
-                        ArrowUtils::get_column::<Int64Type>(batch, neighbor_id_column(), row_idx)
-                            .and_then(|id| {
-                                ArrowUtils::get_column_string(
-                                    batch,
-                                    neighbor_type_column(),
-                                    row_idx,
-                                )
-                                .map(|t| NodeRef::new(id, t))
-                            });
-                    neighbor.into_iter().collect()
-                } else if !traversal_path_columns.is_empty() {
-                    traversal_path_columns
-                        .iter()
-                        .flat_map(|column| ArrowUtils::get_i64_string_pairs(batch, column, row_idx))
-                        .map(|(id, t)| NodeRef::new(id, t))
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let dynamic_nodes = dynamic_nodes.nodes(row_idx)?;
 
                 let edge_kinds = if is_path_finding {
                     ArrowUtils::get_string_list(batch, edge_kinds_column(), row_idx)
@@ -225,10 +295,10 @@ impl QueryResult {
             }
         }
 
-        Self {
+        Ok(Self {
             rows,
             ctx: ctx.clone(),
-        }
+        })
     }
 
     pub fn rows(&self) -> &[QueryResultRow] {
@@ -539,7 +609,7 @@ mod tests {
 
         #[test]
         fn get_returns_column_value() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
 
             assert_eq!(row.get("_orbit_u_id"), Some(&ColumnValue::Int64(1)));
@@ -552,7 +622,7 @@ mod tests {
 
         #[test]
         fn get_id_extracts_redaction_auth_id() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
             let p = result.ctx().get("p").unwrap();
@@ -563,7 +633,7 @@ mod tests {
 
         #[test]
         fn get_public_id_falls_back_to_redaction_id_when_pk_is_absent() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
 
@@ -584,7 +654,7 @@ mod tests {
             let mut ctx = ResultContext::new();
             ctx.add_node("d", "Definition");
 
-            let result = QueryResult::from_batches(&[batch], &ctx);
+            let result = QueryResult::from_batches(&[batch], &ctx).unwrap();
             let row = &result.rows()[0];
             let d = result.ctx().get("d").unwrap();
 
@@ -598,7 +668,7 @@ mod tests {
 
         #[test]
         fn get_type_extracts_node_type() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
             let p = result.ctx().get("p").unwrap();
@@ -609,7 +679,7 @@ mod tests {
 
         #[test]
         fn node_ref_combines_id_and_type() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
             let p = result.ctx().get("p").unwrap();
@@ -625,7 +695,7 @@ mod tests {
 
         #[test]
         fn unknown_alias_returns_none() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
 
             assert!(result.ctx().get("nonexistent").is_none());
@@ -644,7 +714,7 @@ mod tests {
 
         #[test]
         fn authorized_by_default() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             for row in result.rows() {
                 assert!(row.is_authorized());
             }
@@ -652,7 +722,7 @@ mod tests {
 
         #[test]
         fn set_unauthorized() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             assert!(result.rows()[0].is_authorized());
 
             result.rows[0].set_unauthorized();
@@ -661,7 +731,7 @@ mod tests {
 
         #[test]
         fn columns_iterator_returns_all_columns() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
 
             let column_names: HashSet<&str> =
@@ -676,7 +746,7 @@ mod tests {
 
         #[test]
         fn columns_iterator_returns_correct_values() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let row = &result.rows()[0];
 
             let columns: HashMap<&str, &ColumnValue> =
@@ -696,7 +766,7 @@ mod tests {
 
         #[test]
         fn from_batches_empty() {
-            let result = QueryResult::from_batches(&[], &ResultContext::new());
+            let result = QueryResult::from_batches(&[], &ResultContext::new()).unwrap();
             assert!(result.is_empty());
             assert_eq!(result.len(), 0);
         }
@@ -721,7 +791,7 @@ mod tests {
             let mut ctx = ResultContext::new();
             ctx.add_node("u", "User");
 
-            let result = QueryResult::from_batches(&[batch1, batch2], &ctx);
+            let result = QueryResult::from_batches(&[batch1, batch2], &ctx).unwrap();
             assert_eq!(result.len(), 4);
 
             let u = result.ctx().get("u").unwrap();
@@ -731,14 +801,14 @@ mod tests {
 
         #[test]
         fn len_and_is_empty() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             assert_eq!(result.len(), 3);
             assert!(!result.is_empty());
         }
 
         #[test]
         fn iter_returns_all_rows() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
             let ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(u)).collect();
             assert_eq!(ids, vec![1, 2, 3]);
@@ -746,7 +816,7 @@ mod tests {
 
         #[test]
         fn authorized_rows_filters_correctly() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             result.rows[1].set_unauthorized();
 
             let u = result.ctx().get("u").unwrap();
@@ -759,7 +829,7 @@ mod tests {
 
         #[test]
         fn authorized_count() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             assert_eq!(result.authorized_count(), 3);
 
             result.rows[0].set_unauthorized();
@@ -776,7 +846,7 @@ mod tests {
 
         #[test]
         fn all_authorized_returns_zero_redacted() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 3);
@@ -784,7 +854,7 @@ mod tests {
 
         #[test]
         fn single_deny_redacts_one_row() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -810,7 +880,7 @@ mod tests {
 
         #[test]
         fn multiple_denies_redact_multiple_rows() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -839,7 +909,7 @@ mod tests {
             let mut ctx = ResultContext::new();
             ctx.add_node("u", "User");
             ctx.add_node("p", "Project");
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &ctx);
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &ctx).unwrap();
             let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 3);
             assert_eq!(result.authorized_count(), 0);
@@ -847,7 +917,7 @@ mod tests {
 
         #[test]
         fn fail_closed_missing_resource_authorization() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 3);
             assert_eq!(result.authorized_count(), 0);
@@ -855,7 +925,7 @@ mod tests {
 
         #[test]
         fn fail_closed_partial_resource_authorization() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "user".to_string(),
@@ -870,7 +940,7 @@ mod tests {
 
         #[test]
         fn fail_closed_missing_id_in_authorization() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -894,7 +964,7 @@ mod tests {
 
         #[test]
         fn already_unauthorized_rows_not_double_counted() {
-            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
+            let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx()).unwrap();
             result.rows[0].set_unauthorized();
             let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
@@ -931,7 +1001,7 @@ mod tests {
                 },
             );
 
-            let mut result = QueryResult::from_batches(&[batch], &ctx);
+            let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
             result.rows[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
 
             let authorizations = vec![
@@ -987,7 +1057,7 @@ mod tests {
                 },
             );
 
-            let mut result = QueryResult::from_batches(&[batch], &ctx);
+            let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
             result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
 
             let authorizations = vec![ResourceAuthorization {
@@ -1034,7 +1104,7 @@ mod tests {
                 },
             );
 
-            let mut result = QueryResult::from_batches(&[batch], &ctx);
+            let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
             result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
 
             let authorizations = vec![ResourceAuthorization {
@@ -1054,7 +1124,7 @@ mod tests {
 
         #[test]
         fn empty_result_returns_zero() {
-            let mut result = QueryResult::from_batches(&[], &ResultContext::new());
+            let mut result = QueryResult::from_batches(&[], &ResultContext::new()).unwrap();
             let redacted = result.apply_authorizations(&[]);
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 0);
@@ -1083,7 +1153,7 @@ mod tests {
                 ),
             ]);
 
-            let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
 
             assert_eq!(
                 result.rows()[0].get("_orbit_u_id"),
@@ -1112,7 +1182,7 @@ mod tests {
                 ),
             ]);
 
-            let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
 
             assert_eq!(result.rows()[0].get_id(u), Some(1));
@@ -1129,7 +1199,7 @@ mod tests {
                 ),
             ]);
 
-            let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
 
             assert_eq!(result.rows()[0].get_type(u), Some("User"));
@@ -1143,7 +1213,7 @@ mod tests {
                 ("_orbit_u_type", Arc::new(StringArray::from(vec!["User"]))),
             ]);
 
-            let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
             assert!(result.rows()[0].node_ref(u).is_none());
         }
@@ -1158,7 +1228,7 @@ mod tests {
                 ),
             ]);
 
-            let result = QueryResult::from_batches(&[batch], &user_ctx());
+            let result = QueryResult::from_batches(&[batch], &user_ctx()).unwrap();
             let u = result.ctx().get("u").unwrap();
             assert!(result.rows()[0].node_ref(u).is_none());
         }
@@ -1180,7 +1250,7 @@ mod tests {
             let mut ctx = ResultContext::new();
             ctx.add_node("u", "User");
 
-            let result = QueryResult::from_batches(&[batch], &ctx);
+            let result = QueryResult::from_batches(&[batch], &ctx).unwrap();
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
 
