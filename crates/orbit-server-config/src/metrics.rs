@@ -12,17 +12,13 @@ pub struct MetricsConfig {
     pub prometheus: PrometheusConfig,
 }
 
-/// Which log lines carry expanded fields (file paths, branch names, query text,
-/// error text). Every other line carries only the safe fields of the expanded
-/// logs policy.
+/// Which log lines carry expanded fields; other lines carry only safe fields.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExpandedLogsConfig {
-    /// Expand every log line. On by default, so a deployment keeps its full
-    /// logs until it turns the override off.
+    /// Expand every log line.
     pub global_override: bool,
-    /// Root namespace IDs whose requests and indexing work are always logged
-    /// expanded, for example GitLab's own top-level groups.
+    /// Root namespace IDs whose logs are always expanded.
     pub root_namespace_ids: Vec<u64>,
 }
 

@@ -11,8 +11,6 @@ pub struct RequestContext {
     pub user_agent: Option<String>,
 }
 
-/// The span of one RPC. It declares every field that
-/// [`RequestContext::record_in_current_span`] records after authentication.
 pub(crate) fn request_span() -> tracing::Span {
     tracing::info_span!(
         "orbit_request",
@@ -58,9 +56,7 @@ impl RequestContext {
     }
 }
 
-/// The root namespace that every traversal path of the token is under. A token
-/// with no paths, with paths under several roots, or of an admin (who reads the
-/// whole organization) has none.
+/// Admins read the whole organization, so they have no single root namespace.
 fn request_root_namespace_id(claims: &Claims) -> Option<u64> {
     if claims.admin {
         return None;
