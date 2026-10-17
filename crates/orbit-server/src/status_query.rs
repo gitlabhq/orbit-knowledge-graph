@@ -9,14 +9,16 @@ pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
     sql: &str,
     label: &str,
+    config: &QueryConfig,
     bind_params: impl FnOnce(ArrowQuery) -> ArrowQuery,
 ) -> Result<Vec<RecordBatch>, Status> {
-    let sql = append_query_settings(sql)
+    let settings = config
+        .to_http_settings()
         .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
     debug!(sql, label, "Status query");
 
-    bind_params(client.query(&sql))
+    bind_params(client.query(sql).with_settings(settings))
         .fetch_arrow()
         .await
         .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
@@ -50,20 +52,9 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
     Status::internal(error.to_string())
 }
 
-// Status pages poll while a namespace indexes, so a cached result would hide new progress.
-fn append_query_settings(sql: &str) -> Result<String, String> {
-    let config = QueryConfig {
+pub(crate) fn uncached_query_config() -> QueryConfig {
+    QueryConfig {
         use_query_cache: Some(false),
         ..orbit_server_config::query::default_config()
-    };
-    let settings = config.to_clickhouse_settings()?;
-    if settings.is_empty() {
-        return Ok(sql.to_string());
     }
-    let clause = settings
-        .iter()
-        .map(|(key, value)| format!("{key} = {value}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Ok(format!("{sql} SETTINGS {clause}"))
 }

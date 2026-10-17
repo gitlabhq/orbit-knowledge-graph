@@ -461,6 +461,7 @@ async fn run_pipeline(
 
 #[tokio::test]
 async fn corpus_smoke() {
+    orbit_server_config::query::init(orbit_server_config::AppConfig::embedded_defaults().query);
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;

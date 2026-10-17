@@ -188,15 +188,13 @@ grpc:
   stream_timeout_secs: 60
   max_header_list_size_bytes: 65536 # 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs
 
-# `default` applies to every query type; a sibling block keyed by query type (e.g. `path_finding`,
-# `aggregation`) overrides individual fields for that type only. Optional query knobs (cache flags,
-# per-type overrides, memory caps) stay unset here so a deployment opts into them explicitly.
 query:
   default:
     max_execution_time: 30
     max_ast_elements: 1000000          # 20x ClickHouse default, matches Siphon
     max_expanded_ast_elements: 10000000
     max_ast_depth: 10000
+    use_query_cache: true
     query_cache_ttl: 60
 
 metrics:

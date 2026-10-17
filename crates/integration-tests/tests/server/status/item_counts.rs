@@ -6,11 +6,14 @@ use orbit_server::item_counts::ItemCountService;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
-use super::fixtures::{admin_context, seed_namespaces};
+use super::fixtures::{
+    admin_context, query_cache_usage, seed_namespaces, use_production_query_settings,
+};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 
 #[tokio::test]
 async fn item_counts() {
+    use_production_query_settings();
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_namespaces(&ctx).await;
 
@@ -24,7 +27,8 @@ async fn item_counts() {
         security_manager_gets_vulnerability_count,
         role_on_another_path_does_not_expose_the_entity,
         missing_table_degrades_to_zero,
-        counts_rows_written_after_the_previous_count,
+        counts_written_within_the_ttl_stay_cached,
+        each_scope_gets_its_own_cache_entry,
     );
 }
 
@@ -134,7 +138,7 @@ async fn missing_table_degrades_to_zero(ctx: &TestContext) {
     assert_eq!(counts["Project"], 0);
 }
 
-async fn counts_rows_written_after_the_previous_count(ctx: &TestContext) {
+async fn counts_written_within_the_ttl_stay_cached(ctx: &TestContext) {
     let db = ctx.fork("item_counts_rows_written_later").await;
     let insert_group = |id: i64| {
         format!(
@@ -149,6 +153,16 @@ async fn counts_rows_written_after_the_previous_count(ctx: &TestContext) {
     db.execute(&insert_group(9501)).await;
     let after = count(&db, &admin_context(), &["1/950/"]).await;
 
-    assert_eq!(before["Group"], 1);
-    assert_eq!(after["Group"], 2);
+    assert_eq!((before["Group"], after["Group"]), (1, 1));
+    assert_eq!(query_cache_usage(&db).await, ["Write", "Read"]);
+}
+
+async fn each_scope_gets_its_own_cache_entry(ctx: &TestContext) {
+    let db = ctx.fork("item_counts_cache_per_scope").await;
+
+    let root = count(&db, &admin_context(), &["1/"]).await;
+    let group = count(&db, &admin_context(), &["1/100/"]).await;
+
+    assert_eq!((root["Project"], group["Project"]), (5, 2));
+    assert_eq!(query_cache_usage(&db).await, ["Write", "Write"]);
 }
