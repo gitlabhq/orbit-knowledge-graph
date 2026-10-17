@@ -588,14 +588,12 @@ impl CodeIndexer {
         let metered_bytes = Arc::new(AtomicU64::new(0));
         let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new({
             let (inserts, metered_bytes) = (inserts.clone(), metered_bytes.clone());
-            let inserter = SliceInserter {
-                writer: self.writer.clone(),
-                slots: Arc::new(Semaphore::new(
-                    self.pipeline_config.write_max_concurrent.max(1),
-                )),
-                max_rows: self.pipeline_config.write_slice_rows.max(1),
-                runtime: tokio::runtime::Handle::current(),
-            };
+            let writer = self.writer.clone();
+            let slots = Arc::new(Semaphore::new(
+                self.pipeline_config.write_max_concurrent.max(1),
+            ));
+            let max_rows = self.pipeline_config.write_slice_rows.max(1);
+            let runtime = tokio::runtime::Handle::current();
             move |table: &str,
                   batch: arrow::record_batch::RecordBatch|
                   -> Result<(), code_graph::v2::SinkError> {
@@ -610,7 +608,25 @@ impl CodeIndexer {
                     }
                 };
                 metered_bytes.fetch_add(batch_bytes, Ordering::Relaxed);
-                inserter.spawn_slices(&inserts, table, batch)
+                // The parse runs on plain threads: block for a slot so a job holds at most write_max_concurrent slices.
+                let mut offset = 0;
+                while offset < batch.num_rows() {
+                    let len = (batch.num_rows() - offset).min(max_rows);
+                    let slice = batch.slice(offset, len);
+                    let slot = runtime
+                        .block_on(slots.clone().acquire_owned())
+                        .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
+                    let (writer, table) = (writer.clone(), table.to_string());
+                    inserts.lock().spawn_on(
+                        async move {
+                            let _slot = slot;
+                            writer.write_durable(&table, slice).await
+                        },
+                        &runtime,
+                    );
+                    offset += len;
+                }
+                Ok(())
             }
         });
 
@@ -824,43 +840,6 @@ async fn acquire(
 async fn lock_lost(cancel: &CancellationToken) {
     while !cancel.is_cancelled() {
         tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-struct SliceInserter {
-    writer: Arc<ClickHouseWriter>,
-    slots: Arc<Semaphore>,
-    max_rows: usize,
-    runtime: tokio::runtime::Handle,
-}
-
-impl SliceInserter {
-    /// Blocks the parse thread for a slot, so a job never holds more than `write_max_concurrent` slices.
-    fn spawn_slices(
-        &self,
-        inserts: &Mutex<InFlightInserts>,
-        table: &str,
-        batch: arrow::record_batch::RecordBatch,
-    ) -> Result<(), code_graph::v2::SinkError> {
-        let mut offset = 0;
-        while offset < batch.num_rows() {
-            let len = (batch.num_rows() - offset).min(self.max_rows);
-            let slice = batch.slice(offset, len);
-            let slot = self
-                .runtime
-                .block_on(self.slots.clone().acquire_owned())
-                .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
-            let (writer, table) = (self.writer.clone(), table.to_string());
-            inserts.lock().spawn_on(
-                async move {
-                    let _slot = slot;
-                    writer.write_durable(&table, slice).await
-                },
-                &self.runtime,
-            );
-            offset += len;
-        }
-        Ok(())
     }
 }
 
