@@ -6,12 +6,13 @@ use orbit_utils::traversal_path::TraversalPath;
 
 use super::fixtures::{
     FAILED_FIRST_PASS, PAGING_FIRST_PASS, STALE_FIRST_PASS, pinned_schema, seed_namespaces,
-    seed_plans, seed_project_gap,
+    seed_plans, seed_project_gap, use_production_query_settings,
 };
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 
 #[tokio::test]
 async fn indexing_status() {
+    use_production_query_settings();
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_namespaces(&ctx).await;
     seed_gaps(&ctx).await;
@@ -43,6 +44,7 @@ async fn indexing_status() {
         only_the_default_branch_counts,
         last_completed_at_is_the_oldest_plan_completion,
         no_last_completed_at_while_a_first_pass_pages,
+        phase_reads_a_checkpoint_written_after_the_previous_read,
     );
 }
 
@@ -403,4 +405,18 @@ async fn no_last_completed_at_while_a_first_pass_pages(ctx: &TestContext) {
     let status = read_one(ctx, "1/101/").await;
 
     assert_eq!(status.last_completed_at, None);
+}
+
+async fn phase_reads_a_checkpoint_written_after_the_previous_read(ctx: &TestContext) {
+    let db = ctx.fork("indexing_status_read_after_write").await;
+    let before = read_one(&db, "1/101/").await.sdlc_phase;
+    db.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values, indexed_at, attempts, _version) VALUES
+         ('ns.101.MergeRequest', now(), 'null', now(), 0, now64(6) + INTERVAL 1 SECOND)",
+        t("checkpoint")
+    ))
+    .await;
+    let after = read_one(&db, "1/101/").await.sdlc_phase;
+
+    assert_eq!((before, after), (Phase::Syncing, Phase::Ready));
 }

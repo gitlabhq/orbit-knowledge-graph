@@ -9,7 +9,7 @@ use tonic::Status;
 use super::phase::Phase;
 use crate::status_query::{
     bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
-    map_column_extraction_error,
+    map_column_extraction_error, uncached_query_config,
 };
 
 pub(super) const PROJECT_NODE: &str = "Project";
@@ -78,7 +78,8 @@ pub async fn read_project_coverage(
     let in_scopes = build_prefix_match_condition("traversal_path", "scope", scopes.len());
     let sql = PROJECT_COVERAGE_SQL.replace("{in_scopes}", &in_scopes);
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
-    let batches = fetch_status_query_batches(client, &sql, "project coverage", |query| {
+    let config = uncached_query_config();
+    let batches = fetch_status_query_batches(client, &sql, "project coverage", &config, |query| {
         let query = query
             .param("project_table", project_table)
             .param("code_checkpoint_table", code_checkpoint_table)

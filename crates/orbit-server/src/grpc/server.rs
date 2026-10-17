@@ -55,11 +55,6 @@ impl GrpcServer {
         self
     }
 
-    pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
-        self.service = self.service.with_cache_broker(broker);
-        self
-    }
-
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.service = self.service.with_billing(tracker);
         self

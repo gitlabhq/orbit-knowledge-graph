@@ -6,7 +6,6 @@ use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
 use crate::proto::{ExecuteQueryMessage, ExecuteQueryResult};
 use clickhouse_client::ArrowClickHouseClient;
-use nats_client::NatsClient;
 use orbit_billing::{BillingObserver, BillingTracker};
 use orbit_server_config::AnalyticsConfig;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -41,7 +40,6 @@ pub enum QueryServiceOutput {
 pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
-    cache_broker: Option<Arc<NatsClient>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
@@ -57,7 +55,6 @@ impl QueryPipelineService {
         Self {
             client,
             resolver_registry: None,
-            cache_broker: None,
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
@@ -67,11 +64,6 @@ impl QueryPipelineService {
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.resolver_registry = Some(registry);
-        self
-    }
-
-    pub fn with_cache_broker(mut self, broker: Arc<NatsClient>) -> Self {
-        self.cache_broker = Some(broker);
         self
     }
 
@@ -121,9 +113,6 @@ impl QueryPipelineService {
         server_extensions.insert(stream);
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
-        }
-        if let Some(broker) = &self.cache_broker {
-            server_extensions.insert(Arc::clone(broker));
         }
 
         let mut ctx = QueryPipelineContext {

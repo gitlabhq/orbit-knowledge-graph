@@ -183,7 +183,7 @@ async fn run_webserver(
         *SCHEMA_VERSION,
         include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
     )?;
-    let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
+    let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats).await?;
     ActiveSchema::spawn(
         &active_schema,
         Arc::new(graph.clone()),
@@ -208,11 +208,6 @@ async fn run_webserver(
         Arc::new(config.analytics.clone()),
     )
     .with_resolver_registry(Arc::new(resolver_registry));
-
-    if config.query.default.graph_query_cache_enabled == Some(true) {
-        info!("graph query cache enabled");
-        grpc_server = grpc_server.with_cache_broker(nats);
-    }
 
     orbit_billing::register_metrics();
     orbit_billing::register_quota_metrics();

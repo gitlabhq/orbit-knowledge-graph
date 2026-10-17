@@ -18,6 +18,11 @@ fn escape_setting_str(s: &str) -> String {
     format!("'{escaped}'")
 }
 
+const QUERY_CACHE_UNCACHEABLE_HANDLING: [(&str, &str); 2] = [
+    ("query_cache_nondeterministic_function_handling", "ignore"),
+    ("query_cache_system_table_handling", "ignore"),
+];
+
 /// Query execution settings. All fields map to ClickHouse query-level
 /// settings. The closed set of fields prevents arbitrary user input from
 /// reaching the SETTINGS clause (CWE-89).
@@ -67,7 +72,8 @@ pub struct QueryConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_ast_depth: Option<u64>,
 
-    /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
+    /// ClickHouse `use_query_cache`. Queries with non-deterministic functions
+    /// or system tables still run, but uncached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_query_cache: Option<bool>,
 
@@ -81,16 +87,6 @@ pub struct QueryConfig {
     #[serde(skip)]
     #[schemars(skip)]
     pub compiler_derived: CompilerDerivedSettings,
-
-    /// NATS KV cache for graph query results (webserver).
-    /// Excluded from ClickHouse SETTINGS (app-level only).
-    #[serde(default, skip_serializing)]
-    pub graph_query_cache_enabled: Option<bool>,
-
-    /// Graph query cache TTL in seconds.
-    /// Excluded from ClickHouse SETTINGS (app-level only).
-    #[serde(default, skip_serializing)]
-    pub graph_query_cache_ttl: Option<u32>,
 }
 
 /// ClickHouse settings derived from compiler AST inspection. Not
@@ -159,30 +155,28 @@ impl QueryConfig {
             // compiler_derived is never merged from YAML overrides — it's
             // set by the compiler after merge() runs.
             compiler_derived: self.compiler_derived.clone(),
-            graph_query_cache_enabled: overrides
-                .graph_query_cache_enabled
-                .or(self.graph_query_cache_enabled),
-            graph_query_cache_ttl: overrides
-                .graph_query_cache_ttl
-                .or(self.graph_query_cache_ttl),
         }
     }
 
-    /// Returns ClickHouse SETTINGS as key-value string pairs, skipping unset fields.
-    ///
-    /// Uses serde round-trip so that the field names stay in sync with the
-    /// struct definition -- no manual string mapping needed.
-    ///
-    /// Values are formatted as SQL-safe literals: bare integers, `0`/`1`
-    /// for bools, and single-quoted escaped strings. Returns an error if
-    /// a field serializes to a type that cannot be represented as a
-    /// ClickHouse setting (e.g. arrays, objects, or non-u64 numbers).
+    /// Set fields as SETTINGS clause literals; strings are single-quoted and escaped.
     pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, String)>, String> {
+        self.render_settings(escape_setting_str)
+    }
+
+    pub fn to_http_settings(&self) -> Result<Vec<(String, String)>, String> {
+        self.render_settings(str::to_owned)
+    }
+
+    fn render_settings(
+        &self,
+        render_str: fn(&str) -> String,
+    ) -> Result<Vec<(String, String)>, String> {
         let map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
             _ => return Ok(Vec::new()),
         };
-        map.into_iter()
+        let mut settings = map
+            .into_iter()
             .filter(|(_, v)| !v.is_null())
             .map(|(k, v)| {
                 let formatted = match &v {
@@ -192,12 +186,18 @@ impl QueryConfig {
                             .ok_or_else(|| format!("setting `{k}` has non-u64 value: {v}"))?;
                         n.to_string()
                     }
-                    Value::String(s) => escape_setting_str(s),
+                    Value::String(s) => render_str(s),
                     _ => return Err(format!("setting `{k}` has unsupported type: {v}")),
                 };
                 Ok((k, formatted))
             })
-            .collect()
+            .collect::<Result<Vec<_>, String>>()?;
+        if self.use_query_cache == Some(true) {
+            settings.extend(
+                QUERY_CACHE_UNCACHEABLE_HANDLING.map(|(k, v)| (k.to_string(), render_str(v))),
+            );
+        }
+        Ok(settings)
     }
 }
 
@@ -209,7 +209,7 @@ impl QueryConfig {
 /// query:
 ///   default:
 ///     max_execution_time: 30
-///     use_query_cache: false
+///     use_query_cache: true
 ///     query_cache_ttl: 60
 ///   aggregation:
 ///     max_execution_time: 60
@@ -313,6 +313,14 @@ mod tests {
             settings,
             vec![
                 ("max_execution_time".into(), "30".into()),
+                (
+                    "query_cache_nondeterministic_function_handling".into(),
+                    "'ignore'".into()
+                ),
+                (
+                    "query_cache_system_table_handling".into(),
+                    "'ignore'".into()
+                ),
                 ("use_query_cache".into(), "1".into()),
             ]
         );
@@ -333,7 +341,16 @@ mod tests {
                 ("max_ast_elements".into(), "1000000".into()),
                 ("max_execution_time".into(), "30".into()),
                 ("max_expanded_ast_elements".into(), "10000000".into()),
+                (
+                    "query_cache_nondeterministic_function_handling".into(),
+                    "'ignore'".into()
+                ),
+                (
+                    "query_cache_system_table_handling".into(),
+                    "'ignore'".into()
+                ),
                 ("query_cache_ttl".into(), "60".into()),
+                ("use_query_cache".into(), "1".into()),
             ]
         );
         Ok(())

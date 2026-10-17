@@ -205,11 +205,6 @@ impl OrbitServiceImpl {
         self
     }
 
-    pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
-        self.pipeline = self.pipeline.with_cache_broker(broker);
-        self
-    }
-
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.pipeline = self.pipeline.with_billing(tracker);
         self
