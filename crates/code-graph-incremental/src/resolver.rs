@@ -1436,13 +1436,18 @@ fn dispatch(
     class: Option<Cursor>,
     uses: &[&Edge],
 ) -> Vec<Edge> {
+    let id = |c: Cursor| (c.fi(), c.index());
+    let mut own_class = None;
     uses.iter()
         .filter_map(|usage| {
             let call = ctx.corpus.jump(usage.from_tree, usage.site?);
             let reaching = ctx.producers.get(&(usage.from_tree, usage.site?));
             let class = match reaching {
                 Some(reaching) if reaching.len() > 1 => {
-                    site_class(ctx, usage, reaching, producer, class).or(class)
+                    let own = *own_class.get_or_insert_with(|| {
+                        class.map(id) == producer_class(ctx, producer).map(id)
+                    });
+                    site_class(ctx, usage, reaching, producer, class, own).or(class)
                 }
                 _ => class,
             };
@@ -1512,12 +1517,12 @@ fn site_class<'a>(
     reaching: &[&Edge],
     producer: Cursor<'a>,
     class: Option<Cursor<'a>>,
+    own_class: bool,
 ) -> Option<Cursor<'a>> {
     let id = |c: Cursor| (c.fi(), c.index());
-    let class_id = class.map(id);
-    let key = match class_id == producer_class(ctx, producer).map(id) {
+    let key = match own_class {
         true => (usage.site?, None, None),
-        false => (usage.site?, Some(id(producer)), class_id),
+        false => (usage.site?, Some(id(producer)), class.map(id)),
     };
     let memo = &ctx.site_classes[usage.from_tree as usize];
     if let Some(&found) = memo.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {

@@ -51,7 +51,7 @@ enum WorkItem {
         first_exit: usize,
     },
     ExitLoop(BlockId),
-    EnterLoop(u32),
+    EnterLoop(u32, usize),
     ExitLambda(BlockId),
     ExitBinding {
         binding: u32,
@@ -175,12 +175,7 @@ impl<'t> Fold<'t> {
             if self.killed.is_some() {
                 return;
             }
-            if let Err(k) = self
-                .run
-                .check()
-                .and_then(|()| self.file.check())
-                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))
-            {
+            if let Err(k) = self.check() {
                 self.killed = Some(k);
                 return;
             }
@@ -224,7 +219,9 @@ impl<'t> Fold<'t> {
                         self.killed = Some(k);
                     }
                 }
-                WorkItem::EnterLoop(node) => self.enter_loop(self.tree.cursor(node), &mut stack),
+                WorkItem::EnterLoop(node, header) => {
+                    self.enter_loop(self.tree.cursor(node), header, &mut stack)
+                }
                 WorkItem::ExitLambda(parent) => self.cur = parent,
                 WorkItem::ExitBinding {
                     binding,
@@ -311,8 +308,9 @@ impl<'t> Fold<'t> {
             Self::handle_branch(c, sink, stack);
             return;
         } else if k == C::SsaLoop {
-            stack.push(WorkItem::EnterLoop(c.index()));
-            let header: Vec<_> = c.children().take(Self::loop_var_at(c)).collect();
+            let header = Self::loop_var_at(c);
+            stack.push(WorkItem::EnterLoop(c.index(), header));
+            let header: Vec<_> = c.children().take(header).collect();
             stack.extend(header.into_iter().rev().map(|n| WorkItem::Visit(n.index())));
             return;
         } else if k == C::Lambda {
@@ -352,7 +350,7 @@ impl<'t> Fold<'t> {
             .unwrap_or(0)
     }
 
-    fn enter_loop(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
+    fn enter_loop(&mut self, c: Cursor<'t>, header_len: usize, stack: &mut Vec<WorkItem>) {
         if self.loop_ends.is_empty() {
             (self.loop_ends, self.assigned, self.loop_wildcards) =
                 loop_spans(self.tree.root(), self.wildcard);
@@ -363,7 +361,7 @@ impl<'t> Fold<'t> {
         let (header, body) = self.ssa.begin_loop(self.cur);
         self.cur = body;
         stack.push(WorkItem::ExitLoop(header));
-        let rest: Vec<_> = c.children().skip(Self::loop_var_at(c)).collect();
+        let rest: Vec<_> = c.children().skip(header_len).collect();
         stack.extend(rest.into_iter().rev().map(|n| WorkItem::Visit(n.index())));
     }
 
@@ -1228,10 +1226,7 @@ impl<'t> Fold<'t> {
 
     fn resolve_pending(&mut self) -> Result<(), Killed> {
         for (value, from, site, deferred) in std::mem::take(&mut self.pending_calls) {
-            self.run
-                .check()
-                .and_then(|()| self.file.check())
-                .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))?;
+            self.check()?;
             let first = self.edges.len();
             let mut targets = self.ssa.resolve_value(&value);
             match deferred {
@@ -1256,6 +1251,13 @@ impl<'t> Fold<'t> {
             }
         }
         Ok(())
+    }
+
+    fn check(&self) -> Result<(), Killed> {
+        self.run
+            .check()
+            .and_then(|()| self.file.check())
+            .and_then(|()| edge_limit(&self.edges, self.max_edges, &self.tree.label))
     }
 
     fn read_phi(&mut self, sym: u32) -> Option<Value> {
