@@ -22,69 +22,6 @@ pub struct RedactionNode {
     pub type_column: String,
 }
 
-impl RedactionNode {
-    pub(crate) fn expected_outputs<'a>(
-        &'a self,
-        binding: &NodeBinding,
-        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ) -> Option<Vec<(&'a str, ExpectedOutput)>> {
-        let auth_id = model
-            .entity_auth()
-            .get(&self.entity_type)
-            .map(|auth| auth.auth_id_column.as_str())
-            .unwrap_or(DEFAULT_PRIMARY_KEY);
-        let (id, pk) = match binding {
-            NodeBinding::Values {
-                identity,
-                table_alias,
-                ..
-            } => (
-                ExpectedOutput::Repeated(if auth_id == DEFAULT_PRIMARY_KEY {
-                    identity.clone()
-                } else {
-                    Expr::col(table_alias.as_deref().unwrap_or(&self.alias), auth_id)
-                }),
-                (auth_id != DEFAULT_PRIMARY_KEY)
-                    .then(|| ExpectedOutput::Repeated(identity.clone())),
-            ),
-            NodeBinding::Projected {
-                authorization_ids,
-                primary_keys,
-                ..
-            } => (
-                ExpectedOutput::Exact(authorization_ids.clone()),
-                (!primary_keys.is_empty()).then(|| ExpectedOutput::Exact(primary_keys.clone())),
-            ),
-            NodeBinding::Filtered => return None,
-        };
-        let mut outputs = vec![
-            (self.id_column.as_str(), id),
-            (
-                self.type_column.as_str(),
-                ExpectedOutput::Repeated(Expr::string(&self.entity_type)),
-            ),
-        ];
-        if auth_id != DEFAULT_PRIMARY_KEY {
-            outputs.push((self.pk_column.as_str(), pk?));
-        }
-        Some(outputs)
-    }
-}
-
-pub(crate) enum ExpectedOutput {
-    Repeated(Expr),
-    Exact(Vec<Expr>),
-}
-
-impl ExpectedOutput {
-    pub(crate) fn matches(&self, actual: &[&Expr]) -> bool {
-        match self {
-            Self::Repeated(expected) => actual.iter().all(|value| *value == expected),
-            Self::Exact(expected) => actual.iter().copied().eq(expected),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct EdgeMeta {
     pub column_prefix: String,

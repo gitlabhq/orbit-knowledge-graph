@@ -128,7 +128,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         check {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, node, lowered_metadata, result_ctx]
+            reads_state: [node]
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
@@ -408,12 +408,8 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
-    let input = require(ctx.input().as_ref(), "input")?;
     let node = require(ctx.node().clone(), "node")?;
-    let metadata = require(ctx.lowered_metadata().as_ref(), "lowered_metadata")?;
-    let result = require(ctx.result_ctx().as_ref(), "result_ctx")?;
-    check::check_ast(&node, ctx.security_ctx(), ctx.data_model())?;
-    check::check_authorization(input, &node, metadata, result, ctx.data_model())
+    check::check_ast(&node, ctx.security_ctx(), ctx.data_model())
 }
 
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>

@@ -11,9 +11,6 @@ use serde_json::Value;
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
-use crate::passes::enforce::ResultContext;
-use crate::passes::lower::LoweredMetadata;
 use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
@@ -27,97 +24,6 @@ pub fn check_ast(
         Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
         Node::Insert(_) => Ok(()),
     }
-}
-
-pub fn check_authorization(
-    input: &Input,
-    node: &Node,
-    metadata: &LoweredMetadata,
-    result: &ResultContext,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<()> {
-    let Node::Query(query) = node else {
-        return Ok(());
-    };
-    let grouped = input.aggregation_row_nodes(model);
-    let expected: std::collections::BTreeMap<_, _> = input
-        .nodes
-        .iter()
-        .filter(|node| match input.query_type {
-            QueryType::Traversal | QueryType::Neighbors => true,
-            QueryType::Aggregation => grouped.contains(node.id.as_str()),
-            QueryType::PathFinding | QueryType::Hydration => false,
-        })
-        .filter_map(|node| Some((node.id.as_str(), node.entity.as_deref()?)))
-        .collect();
-    let actual: std::collections::BTreeMap<_, _> = result
-        .nodes()
-        .map(|node| (node.alias.as_str(), node.entity_type.as_str()))
-        .collect();
-    if actual != expected {
-        return Err(authorization_error(format!(
-            "result nodes differ from query output: expected {expected:?}, got {actual:?}"
-        )));
-    }
-    for redaction in result.nodes() {
-        check_redaction_node(query, metadata, redaction, model)?;
-    }
-    match input.query_type {
-        QueryType::Neighbors => {
-            require_output(query, crate::constants::neighbor_id_column())?;
-            require_output(query, crate::constants::neighbor_type_column())?;
-        }
-        QueryType::PathFinding => {
-            require_output(query, crate::constants::path_column())?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn check_redaction_node(
-    query: &Query,
-    metadata: &LoweredMetadata,
-    redaction: &crate::passes::enforce::RedactionNode,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<()> {
-    let outputs = metadata
-        .nodes
-        .get(&redaction.alias)
-        .and_then(|binding| redaction.expected_outputs(binding, model))
-        .ok_or_else(|| {
-            authorization_error(format!(
-                "node '{}' has no lowered authorization identity",
-                redaction.alias
-            ))
-        })?;
-    for (column, expected) in outputs {
-        let actual = query.output_expressions(column).ok_or_else(|| {
-            authorization_error(format!(
-                "node '{}' is missing result column '{column}'",
-                redaction.alias
-            ))
-        })?;
-        if !expected.matches(&actual) {
-            return Err(authorization_error(format!(
-                "node '{}' result column '{column}' has the wrong identity",
-                redaction.alias,
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn require_output(query: &Query, alias: &str) -> Result<()> {
-    query
-        .output_expressions(alias)
-        .is_some()
-        .then_some(())
-        .ok_or_else(|| authorization_error(format!("result is missing dynamic column '{alias}'")))
-}
-
-fn authorization_error(message: impl Into<String>) -> QueryError {
-    QueryError::Security(format!("post-check failed: {}", message.into()))
 }
 
 fn check_query(

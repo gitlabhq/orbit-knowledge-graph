@@ -303,20 +303,6 @@ impl Query {
             .find(|s| s.alias.as_deref() == Some(alias))
             .map(|s| &s.expr)
     }
-
-    pub fn output_expressions<'a>(&'a self, alias: &str) -> Option<Vec<&'a Expr>> {
-        if self.select.iter().any(|select| select.expr == Expr::Star) {
-            let TableRef::Subquery { query, .. } = &self.from else {
-                return None;
-            };
-            return query.output_expressions(alias);
-        }
-        let mut expressions = vec![self.selected(alias)?];
-        for arm in &self.union_all {
-            expressions.extend(arm.output_expressions(alias)?);
-        }
-        Some(expressions)
-    }
 }
 
 impl Default for Query {
