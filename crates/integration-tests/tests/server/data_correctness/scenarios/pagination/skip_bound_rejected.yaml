@@ -6,3 +6,4 @@ query:
 
 expect:
   compile_error: skip must be at most 10000
+  compile_error_contains: ["ORDER BY a unique key such as id and filter past the last value"]

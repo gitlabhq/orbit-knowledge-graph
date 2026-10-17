@@ -341,7 +341,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         }
         if input.skip.is_some_and(|skip| skip > MAX_SKIP) {
             return Err(QueryError::Validation(format!(
-                "skip must be at most {MAX_SKIP}"
+                "skip must be at most {MAX_SKIP}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page"
             )));
         }
         for node in &input.nodes {

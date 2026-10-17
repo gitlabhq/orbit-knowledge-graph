@@ -117,6 +117,21 @@ Keep the rest of the query the same between pages. Stop when
 available. Write `SKIP` on every page, including the first, so all pages share
 one stable order.
 
+`SKIP` accepts up to 10000. To go deeper, page by key instead: `ORDER BY` a
+unique property such as `id`, and filter past the last value from the previous
+page. Each page costs the same however deep it is:
+
+```gql orbit-query
+MATCH (u:User {username: 'root'})-[:AUTHORED]->(mr:MergeRequest)
+WHERE mr.state = 'merged' AND mr.id > 48211
+RETURN mr.id, mr.iid, mr.title
+ORDER BY mr.id
+LIMIT 1000
+```
+
+Take the last `mr.id` on each page as the next lower bound, and stop when
+`pagination.has_more` is false.
+
 A page can return fewer rows than `LIMIT` when some rows are hidden from you.
 Keep going until `has_more` is false. `SKIP` counts hidden rows too, so pages
 never overlap. Check `pagination.truncated`: when true, the result window is

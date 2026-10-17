@@ -104,7 +104,10 @@ query type.
 | `options` | `object` | Presentation and debug options. |
 
 The JSON DSL does not paginate. To page through results, use the GQL
-`SKIP n LIMIT m` clauses.
+`SKIP n LIMIT m` clauses. `SKIP` accepts up to 10000. For deeper result sets,
+order by a unique key such as `id` and filter past the last value from the
+previous page, for example `WHERE n.id > 48211 ... ORDER BY n.id LIMIT 1000`.
+Each such page costs the same regardless of depth.
 
 Pagination reads live data at request time; there is no snapshot. Each page
 independently resolves the latest version of every row and filters out
