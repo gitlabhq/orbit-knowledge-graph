@@ -29,18 +29,12 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_value(self) -> bool {
         C::try_from_u16(self.kind()).is_some_and(C::is_value)
     }
-    /// A text label keeps the node it names. A node lifted out of that node
-    /// is walked, but it is not the value the label stands for.
     pub fn stands_for(self, child: Self) -> bool {
         !(self.labelled() && child.lifted())
     }
     pub fn value_child(self, kind: C) -> Option<Self> {
         self.children()
             .find(|node| node.is(kind) && self.stands_for(*node))
-    }
-    pub fn value(self) -> Option<Self> {
-        self.children()
-            .find(|node| node.is_value() && self.stands_for(*node))
     }
     pub fn field(self) -> u16 {
         self.node().field

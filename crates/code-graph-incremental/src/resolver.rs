@@ -458,7 +458,6 @@ impl Resolver {
             extensions: &extensions,
             declared_members: &declared_members,
             chains: trees.iter().map(|_| Default::default()).collect(),
-            producer_classes: trees.iter().map(|_| Default::default()).collect(),
             site_classes: trees.iter().map(|_| Default::default()).collect(),
             exporters: &exporters,
             imports: &imports,
@@ -727,7 +726,6 @@ struct ResolveCtx<'a> {
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     declared_members: &'a [MemberCache],
     chains: Vec<ChainMemo>,
-    producer_classes: Vec<ClassMemo>,
     site_classes: Vec<SiteMemo>,
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
@@ -792,9 +790,6 @@ impl ResolveCtx<'_> {
 
     fn clear_memos(&mut self) {
         for memo in &mut self.chains {
-            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
-        }
-        for memo in &mut self.producer_classes {
             memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
         }
         for memo in &mut self.site_classes {
@@ -1545,22 +1540,6 @@ fn site_class<'a>(
 }
 
 fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
-    let memo = &ctx.producer_classes[producer.fi() as usize];
-    if let Some(&(fi, node)) = memo
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&producer.index())
-    {
-        return Some(ctx.corpus.jump(fi, node));
-    }
-    let class = producer_class_uncached(ctx, producer)?;
-    memo.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(producer.index(), (class.fi(), class.index()));
-    Some(class)
-}
-
-fn producer_class_uncached<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
     if producer.typed().is_none()
         && let Some(rhs) = producer.bare_rhs()
     {
@@ -1616,7 +1595,6 @@ thread_local! {
 }
 
 type ChainMemo = std::sync::Mutex<FxHashMap<u32, Option<(u32, u32)>>>;
-type ClassMemo = std::sync::Mutex<FxHashMap<u32, (u32, u32)>>;
 type SiteKey = (u32, Option<(u32, u32)>, Option<(u32, u32)>);
 type SiteMemo = std::sync::Mutex<FxHashMap<SiteKey, Option<(u32, u32)>>>;
 
