@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -209,23 +210,22 @@ impl OrbitClient {
         if let Some(session_id) = &session_id {
             builder = builder.header("X-Orbit-Session-Id", session_id);
         }
-        builder
-            .send()
-            .await
-            .map_err(|e| RemoteError::new(EXIT_GENERIC, request_failure_message(&e)))
+        builder.send().await.map_err(|e| {
+            RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e))
+        })
     }
 }
 
 /// `reqwest::Error`'s Display omits its source chain, so a timeout and a
 /// refused connection would otherwise read the same.
-fn request_failure_message(error: &reqwest::Error) -> String {
+fn request_failure_message(action: &str, error: &reqwest::Error) -> String {
     if error.is_timeout() {
-        return format!("Orbit request timed out: {error}");
+        return format!("{action} timed out: {error}");
     }
-    let mut message = format!("Orbit request failed: {error}");
+    let mut message = format!("{action} failed: {error}");
     let mut source = std::error::Error::source(error);
     while let Some(cause) = source {
-        message.push_str(&format!(": {cause}"));
+        let _ = write!(message, ": {cause}");
         source = cause.source();
     }
     message
@@ -378,11 +378,12 @@ fn agent_session_id() -> Option<String> {
 }
 
 async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> {
-    response
-        .bytes()
-        .await
-        .map(|b| b.to_vec())
-        .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("failed to read response body: {e}")))
+    response.bytes().await.map(|b| b.to_vec()).map_err(|e| {
+        RemoteError::new(
+            EXIT_GENERIC,
+            request_failure_message("reading Orbit response body", &e),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -411,8 +412,51 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(error.to_string().contains("timed out"), "{error}");
+        assert!(
+            error.to_string().starts_with("Orbit request timed out"),
+            "{error}"
+        );
         drop(listener);
+    }
+
+    #[tokio::test]
+    async fn stalled_body_reports_timeout() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        let client = OrbitClient::new(ResolvedEndpoint {
+            base_url: base_url.clone(),
+            header_name: "Private-Token".into(),
+            header_value: "t".into(),
+        })
+        .unwrap();
+
+        let response = client
+            .send_authenticated(
+                client
+                    .http
+                    .get(&base_url)
+                    .timeout(Duration::from_millis(200)),
+            )
+            .await
+            .unwrap();
+        let error = read_body(response).await.unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("reading Orbit response body timed out"),
+            "{error}"
+        );
+        server.abort();
     }
 
     #[tokio::test]
@@ -434,7 +478,7 @@ mod tests {
 
         let message = error.to_string();
         assert!(!message.contains("timed out"), "{message}");
-        assert!(message.contains("onnect"), "{message}");
+        assert!(message.contains("tcp connect error"), "{message}");
     }
 
     fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
