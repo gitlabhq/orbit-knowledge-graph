@@ -769,6 +769,12 @@ impl<'t> Fold<'t> {
             declaration,
             branch: branch.is_some(),
         });
+        stack.extend(
+            c.children_rev()
+                .skip_while(|child| !child.is(C::Rhs))
+                .filter(|child| child.is(C::Call))
+                .map(|child| WorkItem::Visit(child.index())),
+        );
         if let Some(branch) = branch {
             Self::handle_branch(branch, Some(lhs), stack);
         } else if let Some(rhs) = rhs {

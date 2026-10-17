@@ -102,7 +102,7 @@ stages:
         replace: '(__call (__callee (__member @$OP|kind|map("+=:add_assign","-=:sub_assign","*=:mul_assign","/=:div_assign","%=:rem_assign","&=:bitand_assign","|=:bitor_assign","^=:bitxor_assign","<<=:shl_assign",">>=:shr_assign") (__object @$L))) $R)'
       - match: '(unary_expression $OP $E)'
         replace: '(__call (__callee (__member @$OP|kind|map("-:neg","!:not","*:deref") (__object @$E))))'
-      - match: '(index_expression $E $I)'
+      - match: '(index_expression $E:_*_named $I:_*_named)'
         replace: '(__call (__callee (__member "index" (__object @$E))) $I)'
       # `f()?` and `f().await` carry the value of the call they wrap
       - match: '(try_expression $E:__call)'
