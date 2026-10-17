@@ -87,16 +87,6 @@ pub struct QueryConfig {
     #[serde(skip)]
     #[schemars(skip)]
     pub compiler_derived: CompilerDerivedSettings,
-
-    /// NATS KV cache for graph query results (webserver).
-    /// Excluded from ClickHouse SETTINGS (app-level only).
-    #[serde(default, skip_serializing)]
-    pub graph_query_cache_enabled: Option<bool>,
-
-    /// Graph query cache TTL in seconds.
-    /// Excluded from ClickHouse SETTINGS (app-level only).
-    #[serde(default, skip_serializing)]
-    pub graph_query_cache_ttl: Option<u32>,
 }
 
 /// ClickHouse settings derived from compiler AST inspection. Not
@@ -165,12 +155,6 @@ impl QueryConfig {
             // compiler_derived is never merged from YAML overrides — it's
             // set by the compiler after merge() runs.
             compiler_derived: self.compiler_derived.clone(),
-            graph_query_cache_enabled: overrides
-                .graph_query_cache_enabled
-                .or(self.graph_query_cache_enabled),
-            graph_query_cache_ttl: overrides
-                .graph_query_cache_ttl
-                .or(self.graph_query_cache_ttl),
         }
     }
 
