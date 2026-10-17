@@ -26,7 +26,7 @@ use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
 use crate::item_counts::{ItemCountService, build_item_counts_response};
 use crate::pipeline::{
-    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request,
+    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request, result_messages,
     send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
@@ -465,7 +465,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
                 let result = pipeline
-                    .run_query(&schema, ctx, query, &tx, stream, render)
+                    .run_query(&schema, ctx, query, &tx, stream, |output| {
+                        render(output).map(|result| result_messages(result, req.chunked_result))
+                    })
                     .await;
 
                 match result {
@@ -993,6 +995,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     mod billing;
+    mod chunked_result;
     mod commands;
     mod query_errors;
     mod quota;
