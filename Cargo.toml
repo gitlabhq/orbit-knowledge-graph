@@ -116,7 +116,7 @@ walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
-duckdb = { version = "1.10505.0", features = ["vtab-arrow", "appender-arrow"] }
+duckdb = { version = "1.10506.1", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.1" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
