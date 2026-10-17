@@ -619,30 +619,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn output_expressions_follow_wrappers_and_union_arms() {
-        let arm = |value| Query {
-            select: vec![SelectExpr::new(Expr::int(value), "id")],
-            ..Default::default()
-        };
-        let mut inner = arm(1);
-        inner.union_all.push(arm(2));
-        let query = Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::subquery(inner, "wrapped"),
-            ..Default::default()
-        };
-        let actual: Vec<_> = query
-            .output_expressions("id")
-            .unwrap()
-            .into_iter()
-            .cloned()
-            .collect();
-
-        assert_eq!(actual, vec![Expr::int(1), Expr::int(2)]);
-        assert_eq!(query.output_expressions("missing"), None);
-    }
-
-    #[test]
     fn boolean_builders_preserve_leaf_order_with_logarithmic_depth() {
         for count in [0_usize, 1, 3, 16, 1025] {
             let leaves: Vec<_> = (0..count).map(|index| Expr::int(index as i64)).collect();

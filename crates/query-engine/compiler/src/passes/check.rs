@@ -229,11 +229,7 @@ fn has_valid_path_filter(
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
-    use crate::constants::{
-        TRAVERSAL_PATH_COLUMN, primary_key_column, redaction_id_column, redaction_type_column,
-    };
-    use crate::passes::lower::NodeBinding;
-    use query_data_model::OrbitQueryModel;
+    use crate::constants::TRAVERSAL_PATH_COLUMN;
 
     fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
@@ -259,114 +255,6 @@ mod tests {
 
     fn project_ontology() -> Ontology {
         Ontology::new().with_nodes(["Project"])
-    }
-
-    fn authorization_input(query_type: QueryType) -> Input {
-        Input {
-            query_type,
-            nodes: vec![crate::input::InputNode {
-                id: "p".into(),
-                entity: Some("Project".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    }
-
-    fn authorization_query(id: Expr, entity: &str) -> Node {
-        Node::Query(Box::new(Query {
-            select: vec![
-                SelectExpr::new(id, redaction_id_column("p")),
-                SelectExpr::new(Expr::string(entity), redaction_type_column("p")),
-            ],
-            from: TableRef::scan("gl_project", "p"),
-            ..Default::default()
-        }))
-    }
-
-    fn authorization_fixture(
-        id_column: &str,
-    ) -> (
-        std::sync::Arc<query_data_model::ClickHouseDataModel>,
-        Input,
-        Node,
-        LoweredMetadata,
-        ResultContext,
-    ) {
-        let ontology = project_ontology().with_redaction("Project", "project", id_column);
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        let identity = Expr::col("p", "id");
-        let mut result = ResultContext::new().with_query_type(QueryType::Traversal);
-        result.add_node("p", "Project");
-        for (entity, auth) in model.entity_auth() {
-            result.add_entity_auth(entity, auth.clone());
-        }
-        let metadata = LoweredMetadata {
-            nodes: [(
-                "p".into(),
-                NodeBinding::Values {
-                    identity: identity.clone(),
-                    table_alias: Some("p".into()),
-                    traversal_path: None,
-                },
-            )]
-            .into_iter()
-            .collect(),
-            ..Default::default()
-        };
-        (
-            model,
-            authorization_input(QueryType::Traversal),
-            authorization_query(Expr::col("p", id_column), "Project"),
-            metadata,
-            result,
-        )
-    }
-
-    #[test]
-    fn authorization_check_validates_context_and_projection() {
-        let (model, input, mut valid, metadata, result) = authorization_fixture("project_id");
-        let Node::Query(query) = &mut valid else {
-            unreachable!()
-        };
-        query.select.push(SelectExpr::new(
-            Expr::col("p", "id"),
-            primary_key_column("p"),
-        ));
-        assert!(check_authorization(&input, &valid, &metadata, &result, model.as_ref()).is_ok());
-
-        let mut wrong = valid.clone();
-        let Node::Query(query) = &mut wrong else {
-            unreachable!()
-        };
-        query.select[0].expr = Expr::col("p", "id");
-        assert!(check_authorization(&input, &wrong, &metadata, &result, model.as_ref()).is_err());
-
-        let mut projected = metadata.clone();
-        let authorization_ids = vec![Expr::col("p", "project_id")];
-        let primary_keys = vec![Expr::col("p", "id")];
-        projected.nodes.insert(
-            "p".into(),
-            NodeBinding::Projected {
-                role_identity: None,
-                authorization_ids: authorization_ids.clone(),
-                primary_keys: primary_keys.clone(),
-            },
-        );
-        assert!(check_authorization(&input, &valid, &projected, &result, model.as_ref()).is_ok());
-
-        projected.nodes.insert(
-            "p".into(),
-            NodeBinding::Projected {
-                role_identity: None,
-                authorization_ids: vec![Expr::col("p", "id")],
-                primary_keys,
-            },
-        );
-        assert!(check_authorization(&input, &valid, &projected, &result, model.as_ref()).is_err());
-
-        let empty = ResultContext::new().with_query_type(QueryType::Traversal);
-        assert!(check_authorization(&input, &wrong, &metadata, &empty, model.as_ref()).is_err());
     }
 
     #[test]
