@@ -22,6 +22,18 @@ async fn item_counts_error(path: &str) -> tonic::Code {
         .code()
 }
 
+async fn graph_status_error(path: &str, claims: Claims) -> tonic::Code {
+    let request = GetGraphStatusRequest {
+        traversal_path: path.to_string(),
+        ..Default::default()
+    };
+    test_service()
+        .get_graph_status(signed_request(request, claims))
+        .await
+        .unwrap_err()
+        .code()
+}
+
 #[tokio::test]
 async fn indexing_status_rejects_an_empty_or_oversized_path_list() {
     let paths: Vec<String> = (0..=MAX_STATUS_PATHS)
@@ -50,7 +62,26 @@ async fn status_rpcs_reject_a_malformed_path() {
             tonic::Code::InvalidArgument,
             "item counts accepted {path:?}"
         );
+        assert_eq!(
+            graph_status_error(path, test_claims()).await,
+            tonic::Code::InvalidArgument,
+            "graph status accepted {path:?}"
+        );
     }
+}
+
+#[tokio::test]
+async fn graph_status_rejects_a_malformed_path_from_an_admin() {
+    let admin = Claims {
+        admin: true,
+        organization_id: Some(1),
+        ..test_claims()
+    };
+
+    assert_eq!(
+        graph_status_error("1/22/<script>", admin).await,
+        tonic::Code::InvalidArgument
+    );
 }
 
 #[tokio::test]

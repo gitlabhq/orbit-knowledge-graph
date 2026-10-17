@@ -658,8 +658,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let claims = ctx.claims;
 
         let req = request.get_ref();
-        let traversal_path = TraversalPath::new_unchecked(req.traversal_path.clone());
-        authorize_traversal_path(&claims, &traversal_path)?;
+        let traversal_path = parse_authorized_path(&claims, &req.traversal_path)?;
 
         let security_context =
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
