@@ -196,13 +196,15 @@ mod tests {
         language: Language,
         request: &str,
     ) -> Result<String, NamedQueryError> {
-        queries.render_request_language(
-            request,
-            language,
-            &BindingValues {
-                current_user_id: 42,
-            },
-        )
+        queries
+            .render_request_language(
+                request,
+                language,
+                &BindingValues {
+                    current_user_id: 42,
+                },
+            )
+            .map(|rendered| rendered.text)
     }
 
     const VALID: &str = r#"
