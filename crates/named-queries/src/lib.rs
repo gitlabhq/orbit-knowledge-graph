@@ -8,7 +8,7 @@ use std::path::Path;
 use rust_embed::Embed;
 use serde_json::{Map, Value};
 
-pub use query::{BindingValues, NamedQuery};
+pub use query::{BindingValues, NamedQuery, RenderedQuery};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -148,7 +148,7 @@ impl NamedQueries {
         request: &str,
         language: Language,
         values: &BindingValues,
-    ) -> Result<(&NamedQuery, String), NamedQueryError> {
+    ) -> Result<RenderedQuery, NamedQueryError> {
         let envelope = parse_request(request)?;
         let Some(query) = self.queries.get(&envelope.name) else {
             return Err(NamedQueryError::Unknown {
@@ -156,8 +156,7 @@ impl NamedQueries {
                 available: self.names().map(String::from).collect(),
             });
         };
-        let text = query.render_language(language, values, &envelope.parameters)?;
-        Ok((query, text))
+        query.render_query(language, values, &envelope.parameters)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &NamedQuery> {
@@ -325,8 +324,15 @@ query:
             "name: q\nsettings:\n  max_threads: 4\n  join_algorithm: hash\n  log_queries: true",
         );
         let queries = NamedQueries::from_files("test", [("q.yaml".to_string(), yaml)]).unwrap();
+        let rendered = queries
+            .render_request_language(
+                r#"{"name":"q"}"#,
+                Language::Json,
+                &BindingValues { current_user_id: 1 },
+            )
+            .unwrap();
         assert_eq!(
-            queries.get("q").unwrap().settings,
+            rendered.settings,
             [
                 ("join_algorithm".to_string(), "hash".to_string()),
                 ("log_queries".to_string(), "true".to_string()),

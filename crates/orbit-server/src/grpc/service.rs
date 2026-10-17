@@ -69,19 +69,19 @@ fn resolve_raw_query(
     let query_type =
         QueryType::try_from(query_type).map_err(|_| format!("Unknown query_type: {query_type}"))?;
     let frontend = query_frontend(language)?;
-    let (text, settings) = match query_type {
-        QueryType::Json => (query, Vec::new()),
-        QueryType::Named => {
-            let (named, text) = named_queries
-                .render_request_language(&query, named_language(frontend), values)
-                .map_err(|e| e.to_string())?;
-            (text, named.settings.clone())
-        }
+    let rendered = match query_type {
+        QueryType::Json => named_queries::RenderedQuery {
+            text: query,
+            settings: Vec::new(),
+        },
+        QueryType::Named => named_queries
+            .render_request_language(&query, named_language(frontend), values)
+            .map_err(|e| e.to_string())?,
     };
     Ok(RawQuery {
-        text,
+        text: rendered.text,
         frontend,
-        settings,
+        settings: rendered.settings,
     })
 }
 

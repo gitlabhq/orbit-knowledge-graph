@@ -136,11 +136,17 @@ impl Lookup {
 }
 
 #[derive(Debug)]
+pub struct RenderedQuery {
+    pub text: String,
+    pub settings: Vec<(String, String)>,
+}
+
+#[derive(Debug)]
 pub struct NamedQuery {
     pub name: String,
     pub description: String,
     pub default: bool,
-    pub settings: Vec<(String, String)>,
+    settings: Vec<(String, String)>,
     bindings: Vec<String>,
     parameters: BTreeMap<String, ParameterSpec>,
     json: Value,
@@ -227,6 +233,18 @@ impl NamedQuery {
         params: &Map<String, Value>,
     ) -> Result<String, NamedQueryError> {
         self.render_language(Language::Json, values, params)
+    }
+
+    pub fn render_query(
+        &self,
+        language: Language,
+        values: &BindingValues,
+        params: &Map<String, Value>,
+    ) -> Result<RenderedQuery, NamedQueryError> {
+        Ok(RenderedQuery {
+            text: self.render_language(language, values, params)?,
+            settings: self.settings.clone(),
+        })
     }
 
     pub fn render_language(
