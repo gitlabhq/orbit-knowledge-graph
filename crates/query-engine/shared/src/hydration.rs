@@ -7,7 +7,8 @@ use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
 use compiler::constants::{
-    HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column, traversal_path_column,
+    HYDRATION_NODE_ALIAS, neighbor_traversal_path_column, primary_key_column, redaction_id_column,
+    traversal_path_column,
 };
 use compiler::{
     ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
@@ -105,6 +106,47 @@ pub fn extract_dynamic_refs(
         ids.dedup();
     }
     refs
+}
+
+pub fn collect_dynamic_ref_paths(
+    result: &QueryResult,
+    static_nodes: &[compiler::RedactionNode],
+) -> HashMap<String, Vec<TraversalPath>> {
+    let mut paths: HashMap<String, Option<Vec<TraversalPath>>> = HashMap::new();
+    let mut record = |entity_type: &str, path: Option<String>| {
+        let entry = paths
+            .entry(entity_type.to_string())
+            .or_insert_with(|| Some(Vec::new()));
+        match (entry.as_mut(), path.filter(|p| !p.is_empty())) {
+            (Some(list), Some(path)) => list.push(TraversalPath::new_unchecked(path)),
+            _ => *entry = None,
+        }
+    };
+    for row in result.authorized_rows() {
+        let neighbor_path = row.get_column_string(neighbor_traversal_path_column());
+        for node_ref in row.dynamic_nodes() {
+            record(&node_ref.entity_type, neighbor_path.clone());
+        }
+        for node in static_nodes {
+            if row.get_public_id(node).is_some()
+                && let Some(entity_type) = row.get_type(node)
+            {
+                record(
+                    entity_type,
+                    row.get_column_string(&traversal_path_column(&node.alias)),
+                );
+            }
+        }
+    }
+    paths
+        .into_iter()
+        .filter_map(|(entity_type, list)| {
+            let mut list = list?;
+            list.sort_unstable();
+            list.dedup();
+            Some((entity_type, list))
+        })
+        .collect()
 }
 
 /// Caps limit at `u32::MAX` to prevent truncation.
@@ -352,6 +394,7 @@ pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
     traversal_paths: &[TraversalPath],
+    ref_paths: &HashMap<String, Vec<TraversalPath>>,
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
@@ -378,7 +421,9 @@ pub fn hydrate_dynamic(
         total_ids += capped_ids.len();
 
         let tps = if spec.has_traversal_path {
-            traversal_paths.to_vec()
+            ref_paths
+                .get(entity_type)
+                .map_or_else(|| traversal_paths.to_vec(), Clone::clone)
         } else {
             Vec::new()
         };
