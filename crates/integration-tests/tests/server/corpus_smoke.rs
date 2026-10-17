@@ -36,6 +36,7 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
 };
+use query_engine::shared::PipelineOutput;
 use query_engine::shared::content::{ColumnResolver, ColumnResolverRegistry};
 use query_engine::shared::{
     AuthorizationOutput, CompilationStage, ExtractionOutput, ExtractionStage, OutputStage,
@@ -103,6 +104,40 @@ impl PipelineStage for AuthorizeAllStage {
             query_result: input.query_result,
             authorizations,
         })
+    }
+}
+
+const PIPELINE_STAGES: [&str; 8] = [
+    "security",
+    "compilation",
+    "execution",
+    "extraction",
+    "authorization",
+    "redaction",
+    "hydration",
+    "output",
+];
+
+struct Traced<'a, S>(&'static str, &'a S);
+
+#[derive(Default)]
+struct StageLog(Vec<&'static str>);
+
+impl<S: PipelineStage> PipelineStage for Traced<'_, S> {
+    type Input = S::Input;
+    type Output = S::Output;
+
+    async fn execute(
+        &self,
+        ctx: &mut QueryPipelineContext,
+        obs: &mut dyn PipelineObserver,
+    ) -> Result<Self::Output, PipelineError> {
+        let output = self.1.execute(ctx, obs).await?;
+        ctx.phases
+            .get_or_insert_default::<StageLog>()
+            .0
+            .push(self.0);
+        Ok(output)
     }
 }
 
@@ -398,7 +433,7 @@ async fn run_pipeline(
         &Arc<ontology::Ontology>,
     ),
     claims: &Claims,
-) -> Result<(), PipelineError> {
+) -> (Vec<&'static str>, Result<PipelineOutput, PipelineError>) {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
     server_extensions.insert(Arc::clone(data_model));
@@ -416,30 +451,45 @@ async fn run_pipeline(
         server_extensions,
         phases: TypeMap::default(),
     };
-    let mut obs = NoOpObserver;
+    let output = run_stages(&mut ctx).await;
+    let stages = ctx.phases.remove::<StageLog>().unwrap_or_default().0;
+    (stages, output)
+}
 
-    PipelineRunner::start(&mut ctx, &mut obs)
-        .then(&SecurityStage)
+async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, PipelineError> {
+    let [
+        security,
+        compilation,
+        execution,
+        extraction,
+        authorization,
+        redaction,
+        hydration,
+        output,
+    ] = PIPELINE_STAGES;
+    let executor = ClickHouseExecutor {
+        migration_version: *orbit_migrations::version::SCHEMA_VERSION,
+    };
+    let mut obs = NoOpObserver;
+    PipelineRunner::start(ctx, &mut obs)
+        .then(&Traced(security, &SecurityStage))
         .await?
-        .then(&CompilationStage)
+        .then(&Traced(compilation, &CompilationStage))
         .await?
-        .then(&ClickHouseExecutor {
-            migration_version: *orbit_migrations::version::SCHEMA_VERSION,
-        })
+        .then(&Traced(execution, &executor))
         .await?
-        .then(&ExtractionStage)
+        .then(&Traced(extraction, &ExtractionStage))
         .await?
-        .then(&AuthorizeAllStage)
+        .then(&Traced(authorization, &AuthorizeAllStage))
         .await?
-        .then(&RedactionStage)
+        .then(&Traced(redaction, &RedactionStage))
         .await?
-        .then(&HydrationStage)
+        .then(&Traced(hydration, &HydrationStage))
         .await?
-        .then(&OutputStage)
+        .then(&Traced(output, &OutputStage))
         .await?
         .finish()
-        .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
-    Ok(())
+        .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
 }
 
 #[tokio::test]
@@ -467,7 +517,7 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let outcome = run_pipeline(
+        let (stages, outcome) = run_pipeline(
             &ctx,
             &case.query,
             case.frontend,
@@ -476,13 +526,29 @@ async fn corpus_smoke() {
         )
         .await;
 
+        let ran = stages.join(" > ");
         match (case.expects_error, outcome) {
-            (false, Err(e)) => failures.push(format!("{}: {e:?}", case.key)),
-            (true, Ok(())) => failures.push(format!(
+            (false, Ok(_)) if stages != PIPELINE_STAGES => {
+                failures.push(format!("{}: ran only {ran}", case.key))
+            }
+            (false, Ok(output)) => eprintln!(
+                "corpus_smoke: {} ({:?} {}): {ran}; {} rows, {} redacted, {} ClickHouse queries",
+                case.key,
+                case.frontend,
+                output.query_type,
+                output.row_count,
+                output.redacted_count,
+                output.execution_log.len()
+            ),
+            (false, Err(e)) => failures.push(format!("{}: {e:?} after [{ran}]", case.key)),
+            (true, Ok(_)) => failures.push(format!(
                 "{}: expected a pipeline error (expect: error), but it ran",
                 case.key
             )),
-            _ => {}
+            (true, Err(e)) => eprintln!(
+                "corpus_smoke: {} rejected as expected after [{ran}]: {e}",
+                case.key
+            ),
         }
     }
 
