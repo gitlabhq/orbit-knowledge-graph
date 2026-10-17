@@ -62,7 +62,7 @@ pub(crate) enum Target {
 impl Target {
     pub(crate) fn default_scopes(&self) -> Vec<&'static str> {
         let mut scopes = PROJECT_SCOPES.to_vec();
-        if !matches!(self, Target::Origin(_) | Target::Project(_)) {
+        if !matches!(self, Target::Project(_)) {
             scopes.insert(2, "blobs");
         }
         if matches!(self, Target::Namespace(_) | Target::GroupId(_)) {
@@ -177,8 +177,14 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         Ok(host) => host,
         Err(error) => return Outcome::Failed(first_line(&error.message)),
     };
+    let home_project = match (&request.target, &origin) {
+        (Target::Origin(_), Some((_, path))) => Some(path.clone()),
+        _ => None,
+    };
     let scope = match (&request.target, origin) {
-        (Target::Origin(_), Some((host, path))) if host == api_host => ("full_path", path),
+        (Target::Origin(_), Some((host, path))) if host == api_host => {
+            ("full_path", top_level_group(&path).to_string())
+        }
         (Target::Origin(_), Some((host, _))) => {
             return Outcome::Skipped(format!("`origin` is on {host}, but Orbit uses {api_host}"));
         }
@@ -252,16 +258,25 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
     let shown = format!("{api_host}/{shown}");
     let mut found = Vec::new();
     if !responses.is_empty()
-        && let Outcome::Found(text) = render(&shown, &query, &request.keywords, &responses)
+        && let Outcome::Found(text) = render(
+            &shown,
+            &query,
+            &request.keywords,
+            &responses,
+            home_project.as_deref(),
+        )
     {
         found.push(text);
     }
     if request.scopes.contains(&BRANCHES) {
-        if !matches!(scope.0, "full_path" | "project_id") {
-            return Outcome::Skipped("branches belong to a project; name one".into());
-        }
+        let project = match &home_project {
+            Some(path) => path.clone(),
+            None if matches!(scope.0, "full_path" | "project_id") => scope.1.clone(),
+            None => return Outcome::Skipped("branches belong to a project; name one".into()),
+        };
+        let shown = format!("{api_host}/{project}");
         let wanted = request.keywords.join(" ");
-        match super::sdlc::search_text(&client, &shown, &scope.1, &wanted).await {
+        match super::sdlc::search_text(&client, &shown, &project, &wanted).await {
             Ok(Some(text)) => found.push(text),
             Ok(None) => {}
             Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
@@ -314,22 +329,46 @@ fn record_backoff(path: &Path, wait: Duration) {
     let _ = std::fs::write(path, (now() + wait).as_secs().to_string());
 }
 
-fn render(project: &str, query: &str, keywords: &[String], responses: &[Response]) -> Outcome {
+/// The group whose projects an `origin` search covers: the project's top-level group, so sibling
+/// projects' merge requests, issues, and code are found too.
+fn top_level_group(project: &str) -> &str {
+    project.split('/').next().unwrap_or(project)
+}
+
+/// Renders results; `origin` is the checkout's project, whose code the local search already covers
+/// and whose references are written short.
+fn render(
+    project: &str,
+    query: &str,
+    keywords: &[String],
+    responses: &[Response],
+    origin: Option<&str>,
+) -> Outcome {
     let terms: Vec<String> = keywords
         .iter()
         .flat_map(|keyword| keyword.split_whitespace())
         .map(str::to_lowercase)
         .collect();
-    let home = responses
-        .iter()
-        .filter_map(|response| response.target.as_ref())
-        .find(|target| target.kind.eq_ignore_ascii_case("project"))
-        .map(|target| target.full_path.as_str());
+    let home = origin.or_else(|| {
+        responses
+            .iter()
+            .filter_map(|response| response.target.as_ref())
+            .find(|target| target.kind.eq_ignore_ascii_case("project"))
+            .map(|target| target.full_path.as_str())
+    });
     let mut seen = std::collections::HashSet::new();
     let mut rows: Vec<(usize, String, Option<String>)> = Vec::new();
     let mut files: Vec<(String, std::collections::BTreeMap<u64, String>)> = Vec::new();
     for entry in responses.iter().flat_map(|response| &response.results) {
         if entry.scope == "blobs" {
+            let in_origin = entry
+                .reference
+                .get("project_path")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|path| Some(path) == origin);
+            if in_origin {
+                continue;
+            }
             let heading = blob_heading(entry);
             let index = match files.iter().position(|(name, _)| *name == heading) {
                 Some(index) => index,
@@ -522,6 +561,7 @@ mod tests {
             "grep|search",
             &keywords,
             &[first, second],
+            None,
         ) else {
             panic!("expected results");
         };
@@ -548,7 +588,37 @@ mod tests {
     #[test]
     fn no_results_is_empty() {
         let empty = response(r#"{"scopes":[{"name":"work_items","status":"ok"}],"results":[]}"#);
-        assert_eq!(render("h/p", "x", &[], &[empty]), Outcome::Empty);
+        assert_eq!(render("h/p", "x", &[], &[empty], None), Outcome::Empty);
+    }
+
+    #[test]
+    fn origin_search_covers_the_group_but_not_its_own_code() {
+        assert_eq!(top_level_group("gitlab-org/api/client-go"), "gitlab-org");
+        assert_eq!(top_level_group("solo"), "solo");
+        let found = response(
+            r#"{"target":{"type":"Group","full_path":"g"},
+               "results":[
+                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[1]","reference":{"iid":1,"project_path":"g/lib"},"state":"merged","text":"Add evaluate"},
+                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[2]","reference":{"iid":5,"project_path":"g/app"},"state":"opened","text":"Use evaluate"},
+                {"scope":"blobs","type":"File","token":null,"reference":{"project_path":"g/app","path":"main.go"},"text":"main.go","matches":[{"start_line":3,"text":"evaluate()"}]},
+                {"scope":"blobs","type":"File","token":null,"reference":{"project_path":"g/lib","path":"lib.go"},"text":"lib.go","matches":[{"start_line":7,"text":"func Evaluate() {}"}]}]}"#,
+        );
+        let Outcome::Found(text) = render(
+            "h/g",
+            "evaluate",
+            &["evaluate".into()],
+            &[found],
+            Some("g/app"),
+        ) else {
+            panic!("expected results");
+        };
+        assert!(text.contains("mr:g/lib!1 merged  Add evaluate"), "{text}");
+        assert!(text.contains("mr:5 opened  Use evaluate"), "{text}");
+        assert!(
+            text.contains("g/lib/lib.go\n7:func Evaluate() {}"),
+            "{text}"
+        );
+        assert!(!text.contains("main.go"), "{text}");
     }
 
     #[test]
@@ -577,7 +647,12 @@ mod tests {
                 .contains(&"users")
         );
         assert!(
-            !Target::Origin(".".into())
+            Target::Origin(".".into())
+                .default_scopes()
+                .contains(&"blobs")
+        );
+        assert!(
+            !Target::Project("g/p".into())
                 .default_scopes()
                 .contains(&"blobs")
         );

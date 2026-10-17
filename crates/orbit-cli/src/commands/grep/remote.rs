@@ -238,6 +238,7 @@ mod tests {
             [
                 "work_items",
                 "merge_requests",
+                "blobs",
                 "commits",
                 "notes",
                 "milestones"

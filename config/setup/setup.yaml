@@ -15,12 +15,12 @@ instructions: |
   - Reuse shown source instead of rereading unchanged files.
 
 remote:
-  remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for GitLab instead of glab: `{{orbit}} grep 'is:mr words'` (or `is:issue`, `is:branch`, `is:commit`) finds, `{{orbit}} context mr:42 branch:x pipeline:9` reads."
+  remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for GitLab instead of glab. `{{orbit}} grep` also searches GitLab (`is:mr`, `is:issue`, `is:commit`) and sibling projects' code. Read with `{{orbit}} context mr:42 branch:x job:9`, or `repo:group/project symbol:Name` for sibling code."
   remote_context: ""
   remote_context_example: " mr:42"
 
 nudge_gitlab: |
-  MANDATORY: `{{orbit}}` must be used for GitLab instead of glab. `{{orbit}} grep 'is:mr words'` finds MRs, also `is:issue`, `is:branch`, `is:commit`, `is:comment`. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI.
+  MANDATORY: `{{orbit}}` must be used for GitLab instead of glab. `{{orbit}} grep 'is:mr words'` finds MRs, also `is:issue`, `is:branch`, `is:commit`, `is:comment`. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
 nudge_search: |
   MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `is:def`/`file:x`.
 template_vars:

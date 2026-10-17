@@ -406,7 +406,7 @@ fn run_orbit_with_data(
 const GREP_RESPONSE: &str = r#"{"version":"1.0.0","target":{"type":"project","id":1,"full_path":"my-group/my-project"},"scopes":[{"name":"merge_requests","status":"ok","backend":"basic","result_count":1}],"results":[{"scope":"merge_requests","type":"MergeRequest","id":42,"token":"MergeRequest[42]","reference":{"id":42},"text":"Add runner"}],"result_count":1,"truncated":false}"#;
 
 #[test]
-fn grep_for_a_hosted_kind_searches_the_origin_project() {
+fn grep_for_a_hosted_kind_searches_the_origin_group() {
     let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
@@ -427,7 +427,7 @@ fn grep_for_a_hosted_kind_searches_the_origin_project() {
     );
     assert_eq!(
         request.request_line,
-        "GET /api/v4/orbit/grep?search=runner&full_path=my-group%2Fmy-project&limit=5&per_scope=5&scopes=merge_requests HTTP/1.1"
+        "GET /api/v4/orbit/grep?search=runner&full_path=my-group&limit=5&per_scope=5&scopes=merge_requests HTTP/1.1"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -604,7 +604,7 @@ fn grep_with_repo_resolves_credentials_for_that_checkout() {
     assert!(
         request
             .request_line
-            .starts_with("GET /api/v4/orbit/grep?search=runner&full_path=my-group%2Fmy-project"),
+            .starts_with("GET /api/v4/orbit/grep?search=runner&full_path=my-group&"),
         "{}",
         request.request_line
     );

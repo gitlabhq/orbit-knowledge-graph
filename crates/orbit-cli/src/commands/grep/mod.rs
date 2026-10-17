@@ -441,6 +441,17 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
     let kinds = kind::resolve(requested, &known)?;
     let launcher = crate::commands::setup::spec::launcher();
     let hosted = kinds.hosted.join(", ");
+    let ci = kinds.hosted.iter().any(|kind| {
+        matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "pipeline" | "job" | "stage"
+        )
+    });
+    anyhow::ensure!(
+        !ci || kinds.hosted.len() < requested.len(),
+        "{hosted} isn't searchable; read CI with `{launcher} context` (the current branch's MR and \
+         CI), `{launcher} context branch:name`, `pipeline:ID`, or `job:ID`"
+    );
     anyhow::ensure!(
         kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
         "{hosted} lives in the hosted graph; `{launcher} grep` searches GitLab for work items, \

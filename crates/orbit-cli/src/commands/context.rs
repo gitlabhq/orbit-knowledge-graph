@@ -51,21 +51,50 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let mut client = None;
     let mut origin = None;
     let mut repo: Option<String> = None;
-    let (mut targets, mut sdlc_targets) = (Vec::new(), Vec::new());
+    let (mut targets, mut sdlc_targets, mut code_targets) = (Vec::new(), Vec::new(), Vec::new());
+    let mut current_ci = false;
     for target in &args.target {
+        if is_current_ci(target) {
+            current_ci = true;
+            continue;
+        }
         match qualify(target) {
             Some(Qualified::Repo(path)) => repo = Some(path),
             Some(Qualified::Target(target)) => targets.push(target),
+            Some(Qualified::Code(code, value)) => code_targets.push((code, value)),
             Some(Qualified::Sdlc(target)) => sdlc_targets.push(target),
             None => targets.push(target.clone()),
         }
     }
-    if args.target.is_empty() {
+    let has_branch = sdlc_targets
+        .iter()
+        .any(|target| matches!(target, crate::remote::sdlc::Target::Branch(_)));
+    if args.target.is_empty() || (current_ci && !has_branch) {
         sdlc_targets.push(crate::remote::sdlc::Target::Branch(
             crate::remote::sdlc::current_branch(&dir)?,
         ));
     }
     let mut sdlc_notes = String::new();
+    let other_project = repo.as_ref().is_some_and(|repo| {
+        crate::remote::origin::project(&dir)
+            .is_none_or(|(_, origin)| origin.trim_end_matches('/') != repo.trim_end_matches('/'))
+    });
+    for (code, value) in code_targets {
+        if !other_project {
+            targets.push(value);
+            continue;
+        }
+        let what = code.to_string();
+        let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &what)?;
+        let found_client = client.as_ref().expect("gitlab_project sets the client");
+        match crate::remote::code::read(found_client, &project, &code).await {
+            Ok(text) => sdlc_notes.push_str(&text),
+            Err(error) => {
+                let message = error.message.lines().next().unwrap_or_default().to_string();
+                sdlc_notes.push_str(&format!("{what} in {project}: {message}\n"));
+            }
+        }
+    }
     for target in &sdlc_targets {
         let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &target.to_string())?;
         let found_client = client.as_ref().expect("gitlab_project sets the client");
@@ -168,6 +197,8 @@ enum Qualified {
     Repo(String),
     Target(String),
     Sdlc(crate::remote::sdlc::Target),
+    /// Code in another project when `repo:` names one; the original value otherwise.
+    Code(crate::remote::code::Code, String),
 }
 
 fn qualify(target: &str) -> Option<Qualified> {
@@ -187,11 +218,30 @@ fn qualify(target: &str) -> Option<Qualified> {
         ("pipeline", Some(id)) => Qualified::Sdlc(Target::Pipeline(id)),
         ("job", Some(id)) => Qualified::Sdlc(Target::Job(id)),
         ("commit", _) if hex => Qualified::Sdlc(Target::Commit(value.into())),
-        ("symbol" | "def" | "file" | "path", None) => Qualified::Target(value.into()),
+        (kind @ ("symbol" | "def" | "file" | "path"), _) => {
+            Qualified::Code(crate::remote::code::Code::parse(kind, value), value.into())
+        }
         ("repo" | "in", _) => Qualified::Repo(value.trim_end_matches('/').into()),
         _ => return None,
     };
     Some(qualified)
+}
+
+/// Bare `pipeline`, `ci`, or `pipeline:latest`: the current branch's MR and CI, which is what agents
+/// mean by them.
+fn is_current_ci(target: &str) -> bool {
+    matches!(
+        target.to_ascii_lowercase().as_str(),
+        "pipeline"
+            | "pipelines"
+            | "ci"
+            | "job"
+            | "jobs"
+            | "pipeline:latest"
+            | "pipeline:last"
+            | "pipeline:current"
+            | "pipeline:head"
+    )
 }
 
 fn shorten(text: &str, project: &str) -> String {
@@ -899,6 +949,15 @@ mod tests {
     }
 
     #[test]
+    fn bare_ci_words_mean_the_current_branch() {
+        for word in ["pipeline", "CI", "pipeline:latest", "jobs"] {
+            assert!(is_current_ci(word), "{word}");
+        }
+        assert!(!is_current_ci("pipeline:7"));
+        assert!(!is_current_ci("pipelines.rs"));
+    }
+
+    #[test]
     fn qualified_targets_use_what_gitlab_shows() {
         use crate::remote::sdlc::Target;
         let target = |value: &str| Some(Qualified::Target(value.to_string()));
@@ -909,8 +968,17 @@ mod tests {
             qualify("issue:gitlab-org/cli#7"),
             target("gitlab-org/cli#7")
         );
-        assert_eq!(qualify("symbol:Foo::bar"), target("Foo::bar"));
-        assert_eq!(qualify("file:src/a.rs:10-40"), target("src/a.rs:10-40"));
+        let code = |kind: &str, value: &str| {
+            Some(Qualified::Code(
+                crate::remote::code::Code::parse(kind, value),
+                value.to_string(),
+            ))
+        };
+        assert_eq!(qualify("symbol:Foo::bar"), code("symbol", "Foo::bar"));
+        assert_eq!(
+            qualify("file:src/a.rs:10-40"),
+            code("file", "src/a.rs:10-40")
+        );
         assert_eq!(
             qualify("branch:aa/fix-ci"),
             Some(Qualified::Sdlc(Target::Branch("aa/fix-ci".into())))
