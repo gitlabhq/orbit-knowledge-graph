@@ -115,11 +115,6 @@ impl Route for CodeIndexingTaskRoute {
         let mut outcome = RouteOutcome::default();
 
         for request in requests.into_values() {
-            let envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(METRIC_NAME, "publish");
-                TaskError::new(error)
-            })?;
-
             let span = info_span!(
                 "dispatch_code_indexing_task",
                 task_id = request.task_id,
@@ -127,27 +122,33 @@ impl Route for CodeIndexingTaskRoute {
                 gl_root_namespace_id = request.traversal_path.top_level_namespace_id(),
                 traversal_path = request.traversal_path.as_str(),
             );
-            let published = self
-                .nats
-                .publish(&request.publish_subscription(), &envelope)
-                .instrument(span.clone())
-                .await;
-            match published {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                    span.in_scope(|| debug!("dispatched code indexing task request"));
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    outcome.skipped += 1;
-                    span.in_scope(|| {
-                        debug!("skipped code indexing task request, already in-flight")
-                    });
-                }
-                Err(error) => {
+            let dispatch = async {
+                let envelope = Envelope::new(&request).map_err(|error| {
                     self.metrics.record_error(METRIC_NAME, "publish");
-                    return Err(TaskError::new(error));
+                    TaskError::new(error)
+                })?;
+
+                match self
+                    .nats
+                    .publish(&request.publish_subscription(), &envelope)
+                    .await
+                {
+                    Ok(()) => {
+                        outcome.dispatched += 1;
+                        debug!("dispatched code indexing task request");
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        outcome.skipped += 1;
+                        debug!("skipped code indexing task request, already in-flight");
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(METRIC_NAME, "publish");
+                        return Err(TaskError::new(error));
+                    }
                 }
-            }
+                Ok(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {

@@ -135,22 +135,21 @@ impl Handler for CodeIndexingTaskHandler {
                     "failed to deserialize code indexing task request: {e}"
                 ))
             })?;
-        let root_namespace_id = request.traversal_path.top_level_namespace_id();
         let message_span = tracing::Span::current();
-        message_span.record("gl_root_namespace_id", root_namespace_id);
+        message_span.record(
+            "gl_root_namespace_id",
+            request.traversal_path.top_level_namespace_id(),
+        );
         message_span.record("traversal_path", request.traversal_path.as_str());
 
-        let dispatch_id = request.dispatch_id.to_string();
         let span = tracing::info_span!(
             "code_indexing_project",
             gl_project_id = request.project_id,
             task_id = request.task_id,
-            gl_root_namespace_id = root_namespace_id,
-            traversal_path = request.traversal_path.as_str(),
             commit_sha = request.commit_sha.as_deref(),
-            dispatch_id = dispatch_id.as_str(),
+            dispatch_id = %request.dispatch_id,
             campaign_id = request.campaign_id.as_deref(),
-            branch = tracing::field::Empty,
+            branch = request.branch.as_deref(),
         );
         span.in_scope(|| debug!("received code indexing task"));
 
@@ -294,7 +293,7 @@ impl CodeIndexingTaskHandler {
         match self.repository_service.project_info(project_id).await {
             Ok(info) => info.repository_storage,
             Err(error) => {
-                warn!(project_id, %error, "repository storage lookup failed; using the tenant-wide archive budget");
+                warn!(%error, "repository storage lookup failed; using the tenant-wide archive budget");
                 None
             }
         }

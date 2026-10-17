@@ -64,14 +64,13 @@ pub(super) async fn load(
     let handle = tokio::runtime::Handle::current();
     let span = tracing::Span::current();
     let result = tokio::task::spawn_blocking(move || {
-        span.in_scope(|| {
-            Vfs::load(
-                Archive(SyncIoBridge::new_with_handle(reader, handle)),
-                CodePolicy,
-                limits,
-                options,
-            )
-        })
+        let _entered = span.enter();
+        Vfs::load(
+            Archive(SyncIoBridge::new_with_handle(reader, handle)),
+            CodePolicy,
+            limits,
+            options,
+        )
     })
     .await
     .map_err(|error| RepositoryCacheError::Archive(error.to_string()))?;

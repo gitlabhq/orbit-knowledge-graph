@@ -205,7 +205,6 @@ impl RepositoryResolver {
         storage: Option<&str>,
     ) -> Result<Repository, ResolveError> {
         info!(
-            project_id,
             branch,
             ref_name,
             incremental = virtual_config.is_some(),
@@ -225,7 +224,7 @@ impl RepositoryResolver {
                             Ok(resolved) => return Step::GiveUp(resolved),
                             Err(err) => err,
                         };
-                        warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
+                        warn!(ref_name, attempt = attempt + 1, error = %err, "archive download failed");
                         let e = HandlerError::Processing(format!("failed to download archive: {err}"));
                         return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
                     }
@@ -247,7 +246,7 @@ impl RepositoryResolver {
                         if !retry_empty {
                             return Step::GiveUp(empty);
                         }
-                        warn!(project_id, ref_name, attempt = attempt + 1, "archive empty for a commit that exists; retrying the download");
+                        warn!(ref_name, attempt = attempt + 1, "archive empty for a commit that exists; retrying the download");
                         ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), empty)
                     }
                     Err(RepositoryCacheError::RepositoryTooLarge) => Step::GiveUp(ResolveError::EmptyRepository {
@@ -257,7 +256,7 @@ impl RepositoryResolver {
                         ),
                     }),
                     Err(e) => {
-                        warn!(project_id, ref_name, attempt = attempt + 1, error = %e, "archive extraction failed");
+                        warn!(ref_name, attempt = attempt + 1, error = %e, "archive extraction failed");
                         let e = HandlerError::Processing(format!("failed to extract archive: {e}"));
                         ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into())
                     }
@@ -269,13 +268,13 @@ impl RepositoryResolver {
                     Step::GiveUp(ResolveError::NoArchiveSlot { waited })
                 }
                 Err(LeaseError::Cancelled(_)) => {
-                    warn!(project_id, ref_name, "archive lease wait stopped: project lock lost");
+                    warn!(ref_name, "archive lease wait stopped: project lock lost");
                     Step::GiveUp(ResolveError::NoArchiveSlot {
                         waited: Duration::ZERO,
                     })
                 }
                 Err(error @ (LeaseError::Lost(_) | LeaseError::Backend(_))) => {
-                    warn!(project_id, ref_name, attempt = attempt + 1, %error, "archive lease failed");
+                    warn!(ref_name, attempt = attempt + 1, %error, "archive lease failed");
                     let e = HandlerError::Processing(error.to_string());
                     ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into())
                 }

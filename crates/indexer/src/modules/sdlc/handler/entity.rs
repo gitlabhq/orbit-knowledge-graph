@@ -395,33 +395,30 @@ impl Handler for EntityHandler {
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let request = self.deserialize(message)?;
-        let traversal_path = request.traversal_path.as_ref().map(TraversalPath::as_str);
         let message_span = tracing::Span::current();
         message_span.record("gl_root_namespace_id", request.namespace_id);
-        message_span.record("traversal_path", traversal_path);
-
-        let dispatch_id = request.dispatch_id.to_string();
-        let span = info_span!(
-            "entity_indexing",
-            entity = self.plan.name.as_str(),
-            gl_root_namespace_id = request.namespace_id,
-            traversal_path = traversal_path,
-            dispatch_id = dispatch_id.as_str(),
-            campaign_id = request.campaign_id.as_deref(),
+        message_span.record(
+            "traversal_path",
+            request.traversal_path.as_ref().map(TraversalPath::as_str),
         );
 
         if !request.indexing_requested(&self.plan.target) {
-            span.in_scope(|| {
-                debug!(
-                    plan_target = %self.plan.target,
-                    targets = ?request.targets,
-                    "skipping request: target not selected"
-                )
-            });
+            debug!(
+                entity = %self.plan.name,
+                plan_target = %self.plan.target,
+                targets = ?request.targets,
+                "skipping request: target not selected"
+            );
             return Ok(());
         }
 
         let started_at = Utc::now();
+        let span = info_span!(
+            "entity_indexing",
+            entity = %self.plan.name,
+            dispatch_id = %request.dispatch_id,
+            campaign_id = request.campaign_id.as_deref(),
+        );
 
         async {
             let result = self.execute(context.clone(), request).await;

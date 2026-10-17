@@ -21,7 +21,7 @@ pub mod siphon;
 use async_trait::async_trait;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, info, info_span, warn};
+use tracing::{info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TriggerError {
@@ -51,15 +51,11 @@ pub async fn launch(
     for trigger in triggers {
         let token = cancel.clone();
         let name = trigger.name().to_owned();
-        let span = info_span!("trigger", trigger = name.as_str());
-        handles.spawn(
-            async move {
-                info!("trigger started");
-                let result = trigger.run(token).await;
-                (name, result)
-            }
-            .instrument(span),
-        );
+        handles.spawn(async move {
+            info!(trigger = name, "trigger started");
+            let result = trigger.run(token).await;
+            (name, result)
+        });
     }
 
     let mut first_error: Option<TriggerError> = None;
