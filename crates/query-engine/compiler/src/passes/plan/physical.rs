@@ -466,15 +466,12 @@ impl RelationUsage {
                     && filter.rhs_column.is_none()
                     && matches!(
                         filter.op,
-                        None
-                            | Some(
-                                crate::input::FilterOp::Eq | crate::input::FilterOp::In
-                            )
+                        None | Some(crate::input::FilterOp::Eq | crate::input::FilterOp::In)
                     )
             }
-            Predicate::Ids { .. }
-            | Predicate::IdRange { .. }
-            | Predicate::Membership { .. } => true,
+            Predicate::Ids { .. } | Predicate::IdRange { .. } | Predicate::Membership { .. } => {
+                true
+            }
             _ => false,
         }
     }

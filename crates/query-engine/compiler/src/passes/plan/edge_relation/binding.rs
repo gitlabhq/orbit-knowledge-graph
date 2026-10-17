@@ -59,10 +59,7 @@ pub(super) fn linearize_relations(
     Ok(())
 }
 
-fn relation_selectivity(
-    relation: &EdgeRelation,
-    nodes: &HashMap<String, NodePlan>,
-) -> u8 {
+fn relation_selectivity(relation: &EdgeRelation, nodes: &HashMap<String, NodePlan>) -> u8 {
     let endpoint = [&relation.from_node, &relation.to_node]
         .into_iter()
         .filter_map(|node| nodes.get(node))
@@ -78,7 +75,10 @@ fn relation_selectivity(
         .max()
         .unwrap_or_default();
     endpoint.max(u8::from(
-        relation.filters.iter().any(|(_, filter)| filter.is_selective()),
+        relation
+            .filters
+            .iter()
+            .any(|(_, filter)| filter.is_selective()),
     ))
 }
 

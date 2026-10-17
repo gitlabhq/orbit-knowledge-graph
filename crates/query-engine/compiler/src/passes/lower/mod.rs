@@ -175,11 +175,7 @@ fn multi_type_edge_types(node: &Node, relations: &[EdgeRelation]) -> Vec<Expr> {
 
 fn edge_type(query: &Query, relation: &EdgeRelation) -> Option<Expr> {
     query
-        .selected(&format!(
-            "{}{}",
-            relation.column_prefix(),
-            EDGE_TYPE_SUFFIX
-        ))
+        .selected(&format!("{}{}", relation.column_prefix(), EDGE_TYPE_SUFFIX))
         .cloned()
 }
 

@@ -1,13 +1,14 @@
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
+use super::conditions::denorm_hop;
 use super::{EdgeRelation, PlanningContext};
 use crate::constants::*;
 use crate::input::Direction;
 use crate::passes::plan::physical::{RelationGraph, RelationId};
 use crate::passes::plan::requirements::{
-    Column, OutputValue, Predicate, Projection, id_list, live, property_filter,
-    relationship_kinds,
+    Column, OutputValue, Predicate, Projection, id_list, live, property_filter, relationship_kinds,
+    tag_filter,
 };
 
 pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
@@ -15,10 +16,10 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
     facts: &PlanningContext<'_, M>,
     relation: &EdgeRelation,
     alias: &str,
-    source_ids: Option<(RelationId, String)>,
-    target_ids: Option<(RelationId, String)>,
+    endpoint_ids: [Option<(RelationId, String)>; 2],
     reverse_output: bool,
 ) -> RelationId {
+    let [source_ids, target_ids] = endpoint_ids;
     let edge_columns = relation
         .single_edge_table()
         .and_then(|table| facts.model.table_columns(table))
@@ -26,7 +27,9 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
     let mut required_columns = Vec::new();
     for node in [&relation.from_node, &relation.to_node] {
         for (property, _) in &facts.nodes[node].filters {
-            if edge_columns.as_ref().is_some_and(|columns| columns.contains(property))
+            if edge_columns
+                .as_ref()
+                .is_some_and(|columns| columns.contains(property))
                 && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
                 && !required_columns.contains(property)
             {
@@ -60,6 +63,21 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
         "e1",
         start_id,
     ));
+    for (_, filter) in &facts.nodes[&relation.from_node].filters {
+        if let Some((_, denormalized)) = denorm_hop(
+            filter,
+            &relation.from_node,
+            std::slice::from_ref(relation),
+            &facts.denormalized,
+        ) && let Some(predicate) = tag_filter(
+            "e1",
+            &denormalized.edge_column,
+            &denormalized.tag_key,
+            &filter.filter,
+        ) {
+            first_predicates.push(predicate);
+        }
+    }
     if let Some(columns) = &edge_columns {
         for node in [&relation.from_node, &relation.to_node] {
             first_predicates.extend(
@@ -75,25 +93,12 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
         }
     }
     let first = graph.from(first).filter(first_predicates).finish();
-    let mut previous = project_first_depth(
-        graph,
-        relation,
-        first,
-        &required_columns,
-        reverse_output,
-    );
+    let mut previous =
+        project_first_depth(graph, relation, first, &required_columns, reverse_output);
     let mut depths = Vec::new();
     if relation.min_hops <= 1 {
         depths.push(
-            complete_depth(
-                graph,
-                facts,
-                relation,
-                alias,
-                previous,
-                target_ids.as_ref(),
-            )
-            .into(),
+            complete_depth(graph, facts, relation, alias, previous, target_ids.as_ref()).into(),
         );
     }
     for depth in 2..=relation.max_hops {
@@ -146,15 +151,7 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
         );
         if depth >= relation.min_hops.max(1) {
             depths.push(
-                complete_depth(
-                    graph,
-                    facts,
-                    relation,
-                    alias,
-                    previous,
-                    target_ids.as_ref(),
-                )
-                .into(),
+                complete_depth(graph, facts, relation, alias, previous, target_ids.as_ref()).into(),
             );
         }
     }
@@ -196,11 +193,7 @@ fn complete_depth<M: OrbitQueryModel + ?Sized>(
     graph.filter(depth.alias(alias), predicates)
 }
 
-fn endpoint_predicates(
-    node: &super::NodePlan,
-    alias: &str,
-    column: &str,
-) -> Vec<Predicate> {
+fn endpoint_predicates(node: &super::NodePlan, alias: &str, column: &str) -> Vec<Predicate> {
     let mut predicates = Vec::new();
     if !node.node_ids.is_empty() {
         predicates.push(id_list(alias, column, &node.node_ids));
@@ -264,13 +257,9 @@ fn project_first_depth(
     reverse_output: bool,
 ) -> RelationId {
     let path_endpoint = match (relation.direction, reverse_output) {
-        (Direction::Outgoing | Direction::Both, false) => {
-            (TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
-        }
+        (Direction::Outgoing | Direction::Both, false) => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
         (Direction::Incoming, false) => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
-        (Direction::Outgoing | Direction::Both, true) => {
-            (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
-        }
+        (Direction::Outgoing | Direction::Both, true) => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
         (Direction::Incoming, true) => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
     };
     let mut outputs = vec![

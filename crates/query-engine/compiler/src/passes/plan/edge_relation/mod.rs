@@ -432,8 +432,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 self.facts,
                 &expansion_relation,
                 alias,
-                source_ids,
-                target_ids,
+                [source_ids, target_ids],
                 reverse_output,
             )
         } else {
@@ -849,7 +848,9 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn endpoint_is_selective(&self, alias: &str) -> bool {
         let node = &self.facts.nodes[alias];
-        !node.node_ids.is_empty() || node.id_range.is_some() || self.has_selective_node_filter(alias)
+        !node.node_ids.is_empty()
+            || node.id_range.is_some()
+            || self.has_selective_node_filter(alias)
     }
 
     fn uncovered_node(&self, alias: &str) -> NodePlan {
