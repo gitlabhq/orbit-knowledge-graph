@@ -1,5 +1,5 @@
 use super::sql::latest_row_dedup;
-use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{Cte, Expr, Function, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 
 use super::requirements::{column, predicate, projections};
@@ -100,10 +100,18 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             output.predicates.extend(predicates.iter().map(predicate));
             output
         }
-        PhysicalSource::KeyFilter { value, keys, input } => {
+        PhysicalSource::KeyFilter {
+            values,
+            keys,
+            input,
+        } => {
             let mut output = emit_source(input);
+            let expr = match values.as_slice() {
+                [value] => column(value),
+                values => Expr::func(Function::Tuple, values.iter().map(column).collect()),
+            };
             output.predicates.push(Expr::InSelect {
-                expr: Box::new(column(value)),
+                expr: Box::new(expr),
                 query: Box::new(query(keys)),
             });
             output

@@ -21,6 +21,7 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             data_type,
             in_sort_key,
             text_indexed,
+            ..
         } => sql::filter_expression(
             &value.source,
             &value.name,

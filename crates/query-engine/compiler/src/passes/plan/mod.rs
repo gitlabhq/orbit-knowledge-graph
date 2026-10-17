@@ -10,6 +10,7 @@ mod flat;
 pub(crate) mod helpers;
 mod hops;
 pub mod hydration;
+mod latest;
 pub mod neighbors;
 pub mod pathfinding;
 pub mod physical;
@@ -43,6 +44,7 @@ impl BoundFilter {
             column,
             filter: self.filter.clone(),
             data_type: self.data_type,
+            selectivity: self.selectivity,
             in_sort_key: self.in_sort_key,
             text_indexed: self.text_indexed,
         }

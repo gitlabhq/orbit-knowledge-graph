@@ -60,7 +60,7 @@ pub struct PhysicalPlan {
 #[derive(Clone)]
 pub enum PhysicalSource {
     KeyFilter {
-        value: Column,
+        values: Vec<Column>,
         keys: Box<PhysicalPlan>,
         input: Box<Self>,
     },
@@ -165,10 +165,10 @@ impl PhysicalSource {
     pub(super) fn cascade(self, hop: &Hop, alias: &str, upstream: Option<&PhysicalPlan>) -> Self {
         match upstream {
             Some(keys) => Self::KeyFilter {
-                value: Column::new(
+                values: vec![Column::new(
                     alias,
                     &hop.join_prev.as_ref().expect("cascade join").curr_col,
-                ),
+                )],
                 keys: Box::new(keys.clone()),
                 input: Box::new(self),
             },

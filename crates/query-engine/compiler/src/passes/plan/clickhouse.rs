@@ -14,7 +14,17 @@ pub fn plan(
     let context = PlanningContext::new(input, model);
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            super::edge_chain::plan(context, table_scans)
+            let mut plan = super::edge_chain::plan(context, table_scans)?;
+            match &mut plan {
+                QueryPlan::Traversal(traversal) => {
+                    super::latest::resolve(&mut traversal.operation.execution, model);
+                }
+                QueryPlan::Aggregation(aggregation) => {
+                    super::latest::resolve(&mut aggregation.operation.execution, model);
+                }
+                _ => {}
+            }
+            Ok(plan)
         }
         QueryType::Neighbors => super::neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
         QueryType::PathFinding => {

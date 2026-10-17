@@ -5,7 +5,7 @@ use crate::constants::{
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::lower::sql::{
-    deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
+    deleted_false, filter_to_expr, id_list_predicate, id_range_predicate, joined_latest_scan,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use crate::passes::plan::helpers::{FilterOwner, ordered_filters};
@@ -228,10 +228,17 @@ pub fn enforce_role_scans(
             QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
         })?;
         let role_alias = format!("_role_{}", input_node.id);
+        let role_scan = joined_latest_scan(
+            &query.from,
+            identity,
+            table,
+            &role_alias,
+            model.table_sort_key(table),
+        );
         query.from = TableRef::join(
             JoinType::Inner,
             std::mem::replace(&mut query.from, TableRef::scan("_placeholder", "_")),
-            TableRef::scan_final(table, &role_alias),
+            role_scan,
             Expr::eq(
                 identity.clone(),
                 Expr::col(&role_alias, DEFAULT_PRIMARY_KEY),
@@ -313,8 +320,15 @@ fn enforce_return_columns(
                         node.id
                     ))
                 })?;
+                let latest = joined_latest_scan(
+                    &q.from,
+                    identity,
+                    table,
+                    &node.id,
+                    model.table_sort_key(table),
+                );
                 let scan = if node.filters.is_empty() {
-                    TableRef::scan_final(table, &node.id)
+                    latest
                 } else {
                     let mut predicates: Vec<Expr> =
                         ordered_filters(&node.filters, FilterOwner::Entity(entity_id), model)
@@ -335,7 +349,7 @@ fn enforce_return_columns(
                     TableRef::subquery(
                         Query {
                             select: vec![SelectExpr::star()],
-                            from: TableRef::scan_final(table, &node.id),
+                            from: latest,
                             where_clause: Expr::conjoin(predicates),
                             ..Default::default()
                         },

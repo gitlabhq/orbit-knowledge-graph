@@ -488,9 +488,23 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             predicates.iter().flat_map(planned_predicate).collect(),
             physical_source(input),
         ),
-        PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
+        PhysicalSource::KeyFilter {
+            values,
+            keys,
+            input,
+        } => Tree::node(
             Operator::SemiJoin,
-            format!("{} IN subquery", planned_column(value)),
+            match values.as_slice() {
+                [value] => format!("{} IN subquery", planned_column(value)),
+                values => format!(
+                    "({}) IN subquery",
+                    values
+                        .iter()
+                        .map(planned_column)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            },
             vec![physical_source(input), physical_tree(keys)],
         ),
         PhysicalSource::Scope { alias, input } => {

@@ -30,6 +30,7 @@ pub enum Predicate {
         column: Column,
         filter: InputFilter,
         data_type: Option<ontology::DataType>,
+        selectivity: ontology::FieldSelectivity,
         in_sort_key: bool,
         text_indexed: bool,
     },
