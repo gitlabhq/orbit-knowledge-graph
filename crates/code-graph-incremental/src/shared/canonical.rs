@@ -107,58 +107,25 @@ pub enum Canonical {
 
     #[strum(
         serialize = "__function",
-        props(
-            def_type = "true",
-            callable = "true",
-            scoped = "true",
-            display = "Function"
-        )
+        props(def_type = "true", display = "Function")
     )]
     Function,
-    #[strum(
-        serialize = "__method",
-        props(
-            def_type = "true",
-            callable = "true",
-            scoped = "true",
-            display = "Method"
-        )
-    )]
+    #[strum(serialize = "__method", props(def_type = "true", display = "Method"))]
     Method,
-    #[strum(
-        serialize = "__class",
-        props(
-            def_type = "true",
-            callable = "true",
-            scoped = "true",
-            display = "Class"
-        )
-    )]
+    #[strum(serialize = "__class", props(def_type = "true", display = "Class"))]
     Class,
-    #[strum(
-        serialize = "__struct",
-        props(def_type = "true", scoped = "true", display = "Struct")
-    )]
+    #[strum(serialize = "__struct", props(def_type = "true", display = "Struct"))]
     Struct,
-    #[strum(
-        serialize = "__impl",
-        props(def_type = "true", scoped = "true", display = "Impl")
-    )]
+    #[strum(serialize = "__impl", props(def_type = "true", display = "Impl"))]
     ImplBlock,
-    #[strum(
-        serialize = "__trait",
-        props(def_type = "true", scoped = "true", display = "Trait")
-    )]
+    #[strum(serialize = "__trait", props(def_type = "true", display = "Trait"))]
     Trait,
     #[strum(
         serialize = "__interface",
         props(def_type = "true", display = "Interface")
     )]
     Interface,
-    #[strum(
-        serialize = "__enum",
-        props(def_type = "true", scoped = "true", display = "Enum")
-    )]
+    #[strum(serialize = "__enum", props(def_type = "true", display = "Enum"))]
     Enum,
     #[strum(
         serialize = "__variable",
@@ -185,16 +152,13 @@ pub enum Canonical {
         props(def_type = "true", display = "Property")
     )]
     Property,
-    #[strum(
-        serialize = "__lambda",
-        props(def_type = "true", callable = "true", display = "Lambda")
-    )]
+    #[strum(serialize = "__lambda", props(def_type = "true", display = "Lambda"))]
     Lambda,
     #[strum(serialize = "__field_def", props(def_type = "true", display = "Field"))]
     FieldDef,
     #[strum(
         serialize = "__enum_variant",
-        props(def_type = "true", callable = "true", display = "EnumVariant")
+        props(def_type = "true", display = "EnumVariant")
     )]
     EnumVariant,
     #[strum(serialize = "__macro", props(def_type = "true", display = "Macro"))]
@@ -234,12 +198,6 @@ impl Canonical {
     pub fn is_def_type(self) -> bool {
         self.get_str("def_type") == Some("true")
     }
-    pub fn is_callable(self) -> bool {
-        self.get_str("callable") == Some("true")
-    }
-    pub fn is_scoped(self) -> bool {
-        self.get_str("scoped") == Some("true")
-    }
     pub fn display_name(self) -> &'static str {
         self.get_str("display").unwrap_or("")
     }
@@ -252,18 +210,6 @@ pub fn def_type_of<S: crate::tree::Storage<Node = crate::tree::Node>>(
         let ck = Canonical::try_from_u16(c.kind())?;
         ck.is_def_type().then_some(ck)
     })
-}
-
-pub fn has_def_type(cursor: Cursor) -> bool {
-    def_type_of(cursor).is_some()
-}
-
-pub fn is_callable_def(cursor: Cursor) -> bool {
-    def_type_of(cursor).is_some_and(|k| k.is_callable())
-}
-
-pub fn is_scoped_def(cursor: Cursor) -> bool {
-    def_type_of(cursor).is_some_and(|k| k.is_scoped())
 }
 
 impl Canonical {

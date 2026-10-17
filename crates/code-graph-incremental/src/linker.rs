@@ -1310,13 +1310,12 @@ impl<'t> Fold<'t> {
             return value;
         };
         let target = self.tree.cursor(def);
+        let both = |d: Cursor<'t>| d.has_tag(self.tags.value) && d.has_tag(self.tags.callable);
         let role = site.role();
         let filled = match role {
             Role::Any => true,
             Role::Value => target.has_tag(self.tags.value),
-            Role::Callable => {
-                target.has_tag(self.tags.callable) && !target.has_tag(self.tags.value)
-            }
+            Role::Callable => target.has_tag(self.tags.callable) && !both(target),
         };
         if filled {
             return value;
@@ -1334,7 +1333,8 @@ impl<'t> Fold<'t> {
         };
         let member = class
             .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring))
-            .and_then(|class| self.members(class.index(), name, role).first().copied());
+            .and_then(|class| self.members(class.index(), name, role).first().copied())
+            .filter(|&member| !(both(target) && both(self.tree.cursor(member))));
         member.map_or(value, Value::LocalDef)
     }
 
