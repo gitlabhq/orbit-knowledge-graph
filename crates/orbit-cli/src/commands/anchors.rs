@@ -13,10 +13,8 @@ use crate::workspace::GitInfo;
 
 /// Definitions shown per call; GitLab text can name dozens of symbols.
 const MAX_DEFINITIONS: usize = 6;
-/// Longer definitions show the lines around their anchor instead of the whole body.
-const MAX_BODY_LINES: i64 = 120;
-const AROUND_BEFORE: i64 = 15;
-const AROUND_AFTER: i64 = 25;
+/// Lines shown on each side of a cited line.
+const AROUND: i64 = 2;
 /// A name defined in more places than this is too ambiguous to guess at.
 const MAX_SAME_NAME: i64 = 3;
 const MIN_NAME_LEN: usize = 5;
@@ -79,18 +77,6 @@ fn identifier_words(text: &str) -> Vec<String> {
             push(found.as_str());
         }
     }
-    for found in word.find_iter(text) {
-        let token = found.as_str();
-        let shaped = token.split(['.', '#', ':']).any(|part| {
-            let camel = part.chars().skip(1).any(char::is_uppercase)
-                && part.chars().any(char::is_lowercase);
-            let snake = part.contains('_') && part.chars().any(char::is_alphabetic);
-            camel || snake
-        });
-        if shaped {
-            push(token);
-        }
-    }
     names
 }
 
@@ -122,78 +108,184 @@ pub(crate) fn indexed_files(client: &GraphReader, git: &GitInfo) -> Result<BTree
         .collect())
 }
 
-/// `context` targets for the anchors: the definition enclosing each line, then definitions named in
-/// the text, at most [`MAX_DEFINITIONS`]. Long definitions become a range around their anchor.
-pub(crate) fn targets(
+struct Found {
+    id: i64,
+    path: String,
+    fqn: String,
+    kind: String,
+    start: i64,
+    end: i64,
+    /// The cited line, for anchors that came from a `file:line`.
+    line: Option<i64>,
+}
+
+fn definitions(
     client: &GraphReader,
     git: &GitInfo,
-    anchors: &Anchors,
-) -> Result<Vec<String>> {
-    let params =
-        || -> Vec<serde_json::Value> { vec![git.project_id.into(), git.commit_sha.clone().into()] };
-    let mut targets: Vec<String> = Vec::new();
-    let mut seen_ids = BTreeSet::new();
+    sql: &str,
+    extra: Vec<serde_json::Value>,
+) -> Result<Vec<Found>> {
+    let mut params: Vec<serde_json::Value> =
+        vec![git.project_id.into(), git.commit_sha.clone().into()];
+    params.extend(extra);
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT CAST(id AS BIGINT) AS id, file_path, name, fqn, definition_type,
+       CAST(start_line AS BIGINT) AS start_line, CAST(end_line AS BIGINT) AS end_line
+FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND fqn NOT LIKE '%@%' AND {sql}"
+        ),
+        &params,
+    )?;
+    let ids = duckdb_client::i64_column(&batches, "id");
+    let paths = duckdb_client::string_column(&batches, "file_path");
+    let fqns = duckdb_client::string_column(&batches, "fqn");
+    let kinds = duckdb_client::string_column(&batches, "definition_type");
+    let starts = duckdb_client::i64_column(&batches, "start_line");
+    let ends = duckdb_client::i64_column(&batches, "end_line");
+    Ok((0..ids.len())
+        .map(|i| Found {
+            id: ids[i],
+            path: paths[i].clone(),
+            fqn: fqns[i].clone(),
+            kind: kinds[i].clone(),
+            start: starts[i],
+            end: ends[i],
+            line: None,
+        })
+        .collect())
+}
+
+/// The definition enclosing each cited line, then definitions named in code spans that are unique
+/// enough to trust, at most [`MAX_DEFINITIONS`].
+fn resolve(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<Vec<Found>> {
+    let mut found: Vec<Found> = Vec::new();
     for (path, line) in &anchors.lines {
-        if targets.len() >= MAX_DEFINITIONS {
-            return Ok(targets);
+        if found.len() >= MAX_DEFINITIONS {
+            break;
         }
-        let mut values = params();
-        values.extend([path.clone().into(), (*line).into()]);
-        let batches = client.query_arrow_json(
-            "SELECT CAST(id AS BIGINT) AS id, CAST(start_line AS BIGINT) AS start_line,
-       CAST(end_line AS BIGINT) AS end_line
-FROM gl_definition
-WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3 AND start_line <= ?4 AND end_line >= ?4
-  AND fqn NOT LIKE '%@%'
-ORDER BY end_line - start_line LIMIT 1",
-            &values,
+        let enclosing = definitions(
+            client,
+            git,
+            "file_path = ?3 AND start_line <= ?4 AND end_line >= ?4 ORDER BY end_line - start_line LIMIT 1",
+            vec![path.clone().into(), (*line).into()],
         )?;
-        let (ids, starts, ends) = (
-            duckdb_client::i64_column(&batches, "id"),
-            duckdb_client::i64_column(&batches, "start_line"),
-            duckdb_client::i64_column(&batches, "end_line"),
-        );
-        match (ids.first(), starts.first(), ends.first()) {
-            (Some(id), Some(start), Some(end)) if end - start <= MAX_BODY_LINES => {
-                if seen_ids.insert(*id) {
-                    targets.push(format!("Definition:{id}"));
-                }
-            }
-            _ => targets.push(format!(
-                "{path}:{}-{}",
-                (line - AROUND_BEFORE).max(1),
-                line + AROUND_AFTER
-            )),
+        match enclosing.into_iter().next() {
+            Some(def) if found.iter().any(|known| known.id == def.id) => {}
+            Some(def) => found.push(Found {
+                line: Some(*line),
+                ..def
+            }),
+            None => found.push(Found {
+                id: -1,
+                path: path.clone(),
+                fqn: String::new(),
+                kind: String::new(),
+                start: *line,
+                end: *line,
+                line: Some(*line),
+            }),
         }
     }
     for name in &anchors.names {
-        if targets.len() >= MAX_DEFINITIONS {
+        if found.len() >= MAX_DEFINITIONS {
             break;
         }
-        let mut values = params();
-        values.push(name.clone().into());
-        let batches = client.query_arrow_json(
-            "SELECT CAST(id AS BIGINT) AS id, CAST(end_line - start_line AS BIGINT) AS span,
-       COUNT(*) OVER () AS same_name
-FROM gl_definition
-WHERE project_id = ?1 AND commit_sha = ?2 AND name = ?3 AND fqn NOT LIKE '%@%'
-ORDER BY (file_path LIKE '%test%' OR file_path LIKE '%spec%'), span LIMIT 1",
-            &values,
+        let named = definitions(
+            client,
+            git,
+            "name = ?3 ORDER BY (file_path LIKE '%test%' OR file_path LIKE '%spec%'), start_line LIMIT 4",
+            vec![name.clone().into()],
         )?;
-        let (ids, spans, counts) = (
-            duckdb_client::i64_column(&batches, "id"),
-            duckdb_client::i64_column(&batches, "span"),
-            duckdb_client::i64_column(&batches, "same_name"),
-        );
-        if let (Some(id), Some(span), Some(count)) = (ids.first(), spans.first(), counts.first())
-            && *count <= MAX_SAME_NAME
-            && *span <= MAX_BODY_LINES
-            && seen_ids.insert(*id)
+        if (named.len() as i64) <= MAX_SAME_NAME
+            && let Some(def) = named.into_iter().next()
+            && !found.iter().any(|known| known.id == def.id)
         {
-            targets.push(format!("Definition:{id}"));
+            found.push(def);
         }
     }
-    Ok(targets)
+    Ok(found)
+}
+
+fn neighbor_names(client: &GraphReader, sql: &str, id: i64) -> Result<(Vec<String>, i64)> {
+    let batches = client.query_arrow_json(sql, &[id.into()])?;
+    let names = duckdb_client::string_column(&batches, "name");
+    let total = duckdb_client::i64_column(&batches, "total")
+        .first()
+        .copied()
+        .unwrap_or(0);
+    Ok((names, total))
+}
+
+fn listed(label: &str, (names, total): (Vec<String>, i64)) -> Option<String> {
+    if names.is_empty() {
+        return None;
+    }
+    let more = total - names.len() as i64;
+    let suffix = if more > 0 {
+        format!(" (+{more})")
+    } else {
+        String::new()
+    };
+    Some(format!("  {label}: {}{suffix}", names.join(", ")))
+}
+
+/// A compact view of the code GitLab text points at: per definition its header, signature, the
+/// lines around a cited line, and its callers and callees by name. The agent reads the one it needs.
+pub(crate) fn render(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<String> {
+    let mut out = String::new();
+    for def in resolve(client, git, anchors)? {
+        let content = std::fs::read_to_string(git.repo_path.join(&def.path)).unwrap_or_default();
+        let lines: Vec<&str> = content.lines().collect();
+        let show = |out: &mut String, number: i64| {
+            if let Some(text) = usize::try_from(number - 1).ok().and_then(|i| lines.get(i)) {
+                out.push_str(&format!("  {number}| {}\n", text.trim_end()));
+            }
+        };
+        if def.id < 0 {
+            out.push_str(&format!("{}:{}\n", def.path, def.start));
+        } else {
+            out.push_str(&format!(
+                "{}:{}-{}  {}  {}\n",
+                def.path, def.start, def.end, def.kind, def.fqn
+            ));
+            show(&mut out, def.start);
+        }
+        if let Some(line) = def.line {
+            let from = (line - AROUND).max(def.start + 1).max(1);
+            if from > def.start + 1 {
+                out.push_str("  ...\n");
+            }
+            for number in from..=(line + AROUND).min(def.end.max(line + AROUND)) {
+                show(&mut out, number);
+            }
+        }
+        if def.id >= 0 {
+            let callers = neighbor_names(
+                client,
+                "SELECT DISTINCT d.name AS name, COUNT(*) OVER () AS total FROM gl_edge e
+JOIN gl_definition d ON d.id = e.source_id
+WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition' AND e.target_id = ?1
+  AND e.source_id <> e.target_id LIMIT 6",
+                def.id,
+            )?;
+            let callees = neighbor_names(
+                client,
+                "SELECT DISTINCT d.name AS name, COUNT(*) OVER () AS total FROM gl_edge e
+JOIN gl_definition d ON d.id = e.target_id
+WHERE e.relationship_kind = 'CALLS' AND e.target_kind = 'Definition' AND e.source_id = ?1
+  AND e.source_id <> e.target_id LIMIT 6",
+                def.id,
+            )?;
+            for row in [listed("called by", callers), listed("calls", callees)]
+                .into_iter()
+                .flatten()
+            {
+                out.push_str(&row);
+                out.push('\n');
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -225,7 +317,7 @@ mod tests {
         );
         assert!(anchors.names.contains(&"retry_backoff".to_string()));
         assert!(anchors.names.contains(&"PullManager".to_string()));
-        assert!(anchors.names.contains(&"TestPullRetry".to_string()));
+        assert!(!anchors.names.contains(&"TestPullRetry".to_string()));
         assert!(!anchors.names.contains(&"should".to_string()));
         assert!(!anchors.names.contains(&"executors".to_string()));
         let ruby = extract(

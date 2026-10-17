@@ -246,8 +246,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
 /// Appends the code that GitLab text points at, from the local graph, so one `context` call on an
 /// issue, MR, branch, or job also returns the definitions it names.
 fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBuf>, text: &str) {
-    let Some(workspace::IndexedRepo { git, client }) =
-        workspace::open_indexed_if_present(repo.clone(), db.clone())
+    let Some(workspace::IndexedRepo { git, client }) = workspace::open_indexed_if_present(repo, db)
     else {
         return;
     };
@@ -255,20 +254,12 @@ fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBu
         return;
     };
     let found = super::anchors::extract(text, &git.repo_path, &files);
-    let Ok(targets) = super::anchors::targets(&client, &git, &found) else {
-        return;
-    };
-    drop(client);
-    if targets.is_empty() {
-        return;
-    }
-    if let Ok(code) = run_local(repo, db, &targets)
+    if let Ok(code) = super::anchors::render(&client, &git, &found)
         && !code.trim().is_empty()
     {
+        let launcher = crate::commands::setup::spec::launcher();
         println!(
-            "
-code this refers to, from the local graph:
-{}",
+            "\ncode this refers to (read one with `{launcher} context <path>:<lines>`):\n{}",
             code.trim_end()
         );
     }
