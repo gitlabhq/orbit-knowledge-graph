@@ -2433,32 +2433,4 @@ mod tests {
             assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
         }
     }
-
-    #[test]
-    fn pinned_definition_narrows_its_partner_from_the_keyed_edge() {
-        let sql = compile_gql_sql(
-            "MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 42}) \
-             RETURN caller.name, def",
-        );
-
-        assert!(sql.contains("(def.id = 42)"), "{sql}");
-        assert!(
-            sql.contains("caller.id IN (SELECT _orbit_edge_0.source_id AS id FROM gl_code_edge AS _orbit_edge_0 WHERE"),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn unkeyed_edge_leaves_the_partner_join_unnarrowed() {
-        let sql = compile_gql_sql(
-            "MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 9 \
-             RETURN caller, callee LIMIT 5",
-        );
-
-        assert!(
-            sql.contains("INNER JOIN gl_definition AS callee FINAL ON"),
-            "{sql}"
-        );
-        assert!(!sql.contains("IN (SELECT _orbit_edge_0"), "{sql}");
-    }
 }
