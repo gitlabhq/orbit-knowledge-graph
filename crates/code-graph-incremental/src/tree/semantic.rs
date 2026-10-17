@@ -3,6 +3,7 @@ use std::ops::ControlFlow;
 use super::{Cursor, Edge, EdgeKind, Node, Storage};
 use crate::canonical::Canonical as C;
 use crate::resolver::CLASS_LIKE;
+use crate::tags::ReservedTags;
 
 impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn kind(self) -> u16 {
@@ -215,8 +216,8 @@ pub enum Role {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Slots {
     first: u32,
-    value: Option<(u32, u8)>,
-    callable: Option<(u32, u8)>,
+    value: Option<(u32, bool)>,
+    callable: Option<(u32, bool)>,
 }
 
 impl Slots {
@@ -228,17 +229,14 @@ impl Slots {
         };
         slot.map(|(def, _)| def)
     }
-    fn fill(&mut self, def: u32, kind: C, tagged: bool) {
-        let (value, callable) = (kind.fills(Role::Value), kind.fills(Role::Callable));
-        let ranks = [
-            value.then_some(callable as u8),
-            callable.then_some(value as u8).or(tagged.then_some(2)),
+    fn fill(&mut self, def: u32, value: bool, callable: bool) {
+        let slots = [
+            (&mut self.value, value, callable),
+            (&mut self.callable, callable, value),
         ];
-        for (slot, rank) in [(&mut self.value, ranks[0]), (&mut self.callable, ranks[1])] {
-            if let Some(rank) = rank
-                && slot.is_none_or(|(_, held)| rank < held)
-            {
-                *slot = Some((def, rank));
+        for (slot, fills, shared) in slots {
+            if fills && slot.is_none_or(|(_, held)| held && !shared) {
+                *slot = Some((def, shared));
             }
         }
     }
@@ -246,7 +244,10 @@ impl Slots {
 
 pub type MemberIndex = rustc_hash::FxHashMap<u32, Slots>;
 
-pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>, callable: u32) -> MemberIndex {
+pub fn member_index<S: Storage<Node = Node>>(
+    owner: Cursor<'_, S>,
+    tags: &ReservedTags,
+) -> MemberIndex {
     let nested = |node: Cursor<'_, S>| node.is_class() && !node.has(C::ImplBlock);
     let mut index = MemberIndex::default();
     for def in owner
@@ -260,10 +261,12 @@ pub fn member_index<S: Storage<Node = Node>>(owner: Cursor<'_, S>, callable: u32
             first: def.index(),
             ..Slots::default()
         });
-        if def.is_member_of(owner)
-            && let Some(kind) = crate::canonical::def_type_of(def)
-        {
-            slots.fill(def.index(), kind, def.has_tag(callable));
+        if def.is_member_of(owner) {
+            slots.fill(
+                def.index(),
+                def.has_tag(tags.value),
+                def.has_tag(tags.callable),
+            );
         }
     }
     index

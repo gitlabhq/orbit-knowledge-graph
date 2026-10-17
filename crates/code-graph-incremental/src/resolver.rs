@@ -957,7 +957,7 @@ fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<MemberIndex> {
     {
         return members.clone();
     }
-    let members = member_index(owner, ctx.tags.callable);
+    let members = member_index(owner, &ctx.tags);
     cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())

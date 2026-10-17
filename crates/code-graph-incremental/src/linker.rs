@@ -1301,7 +1301,7 @@ impl<'t> Fold<'t> {
         let mut members = self.members.borrow_mut();
         let index = members
             .entry(container)
-            .or_insert_with(|| member_index(self.tree.cursor(container), self.tags.callable));
+            .or_insert_with(|| member_index(self.tree.cursor(container), &self.tags));
         index.get(&name).copied()
     }
 
@@ -1310,23 +1310,29 @@ impl<'t> Fold<'t> {
             return value;
         };
         let target = self.tree.cursor(def);
-        let role = site.role();
-        if crate::canonical::def_type_of(target).is_some_and(|kind| kind.fills(role)) {
-            return value;
-        }
         let Some(name) = target.child_sym(C::DefName) else {
             return value;
         };
-        let class = target
-            .ancestors()
-            .filter(|node| node.is(C::Def))
-            .find(|node| node.is_class());
         let declaring = |up: Cursor<'t>| {
             up.index() == def
                 || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == Some(name)
         };
+        let inside = site.ancestors().any(declaring);
+        let role = site.role();
+        let filled = match role {
+            Role::Any => true,
+            Role::Value => target.has_tag(self.tags.value),
+            Role::Callable => target.has_tag(self.tags.callable),
+        };
+        if filled && !inside {
+            return value;
+        }
+        let class = target
+            .ancestors()
+            .filter(|node| node.is(C::Def))
+            .find(|node| node.is_class());
         let member = class
-            .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring))
+            .filter(|class| inside || target.is_member_of(*class))
             .and_then(|class| self.members(class.index(), name, role).first().copied());
         member.map_or(value, Value::LocalDef)
     }
