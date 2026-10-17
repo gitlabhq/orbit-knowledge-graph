@@ -42,6 +42,27 @@ impl EntityContext {
     pub fn new(id: i64, traversal_path: String) -> Self {
         Self { id, traversal_path }
     }
+
+    pub fn root_group(org_id: u32, group_id: i64) -> Self {
+        Self {
+            id: group_id,
+            traversal_path: format!("{}/{}/", org_id, group_id),
+        }
+    }
+
+    pub fn subgroup(parent: &EntityContext, subgroup_id: i64) -> Self {
+        Self {
+            id: subgroup_id,
+            traversal_path: format!("{}{}/", parent.traversal_path, subgroup_id),
+        }
+    }
+
+    pub fn child(parent: &EntityContext, entity_id: i64) -> Self {
+        Self {
+            id: entity_id,
+            traversal_path: parent.traversal_path.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -152,6 +173,17 @@ impl EntityRegistry {
         self.ids_only.get(node_type).map(|v| v.as_slice())
     }
 
+    pub fn get_ids(&self, node_type: &str) -> Vec<i64> {
+        if self.compacted {
+            self.ids_only.get(node_type).cloned().unwrap_or_default()
+        } else {
+            self.entities
+                .get(node_type)
+                .map(|v| v.iter().map(|e| e.id).collect())
+                .unwrap_or_default()
+        }
+    }
+
     pub fn all_entities(&self) -> &HashMap<String, Vec<EntityContext>> {
         &self.entities
     }
@@ -164,6 +196,12 @@ impl EntityRegistry {
     pub fn count(&self, node_type: &str) -> usize {
         let full = self.entities.get(node_type).map(|v| v.len()).unwrap_or(0);
         let ids = self.ids_only.get(node_type).map(|v| v.len()).unwrap_or(0);
+        full + ids
+    }
+
+    pub fn total_count(&self) -> usize {
+        let full: usize = self.entities.values().map(|v| v.len()).sum();
+        let ids: usize = self.ids_only.values().map(|v| v.len()).sum();
         full + ids
     }
 }
@@ -457,6 +495,38 @@ mod tests {
     }
 
     #[test]
+    fn test_entity_context_root_group() {
+        let ctx = EntityContext::root_group(1, 100);
+        assert_eq!(ctx.id, 100);
+        assert_eq!(ctx.traversal_path, "1/100/");
+    }
+
+    #[test]
+    fn test_entity_context_subgroup() {
+        let parent = EntityContext::root_group(1, 100);
+        let child = EntityContext::subgroup(&parent, 101);
+        assert_eq!(child.id, 101);
+        assert_eq!(child.traversal_path, "1/100/101/");
+
+        let grandchild = EntityContext::subgroup(&child, 102);
+        assert_eq!(grandchild.id, 102);
+        assert_eq!(grandchild.traversal_path, "1/100/101/102/");
+    }
+
+    #[test]
+    fn test_entity_context_child_inherits() {
+        let group = EntityContext::root_group(1, 100);
+        let project = EntityContext::child(&group, 500);
+
+        assert_eq!(project.id, 500);
+        assert_eq!(project.traversal_path, "1/100/");
+
+        let mr = EntityContext::child(&project, 1000);
+        assert_eq!(mr.id, 1000);
+        assert_eq!(mr.traversal_path, "1/100/");
+    }
+
+    #[test]
     fn test_entity_registry_namespace_counter() {
         let registry = EntityRegistry::new(1);
 
@@ -478,8 +548,8 @@ mod tests {
     fn test_entity_registry_compact() {
         let mut registry = EntityRegistry::new(1);
 
-        registry.add("Group", EntityContext::new(100, "1/100/".to_string()));
-        registry.add("Group", EntityContext::new(101, "1/101/".to_string()));
+        registry.add("Group", EntityContext::root_group(1, 100));
+        registry.add("Group", EntityContext::root_group(1, 101));
 
         registry.add_id_only("MergeRequest", 500, "1/100/");
         registry.add_id_only("MergeRequest", 501, "1/101/");
@@ -495,6 +565,10 @@ mod tests {
 
         let mr_ids = registry.get_ids_slice("MergeRequest").unwrap();
         assert_eq!(mr_ids, &[500, 501]);
+
+        assert_eq!(registry.get_ids("Group"), vec![100, 101]);
+
+        assert_eq!(registry.total_count(), 4);
     }
 
     #[test]
@@ -518,8 +592,8 @@ mod tests {
     fn test_entity_registry_compact_with_aliases() {
         let mut registry = EntityRegistry::new(1);
 
-        registry.add("Group", EntityContext::new(100, "1/100/".to_string()));
-        registry.add("Group", EntityContext::new(101, "1/101/".to_string()));
+        registry.add("Group", EntityContext::root_group(1, 100));
+        registry.add("Group", EntityContext::root_group(1, 101));
 
         registry.add("Group@1", EntityContext::new(200, "1/100/200/".to_string()));
         registry.add("Group@1", EntityContext::new(201, "1/101/201/".to_string()));
@@ -557,9 +631,12 @@ mod tests {
     fn test_entity_registry_add_and_get() {
         let mut registry = EntityRegistry::new(1);
 
-        registry.add("Group", EntityContext::new(100, "1/100/".to_string()));
-        registry.add("Group", EntityContext::new(101, "1/101/".to_string()));
-        registry.add("Project", EntityContext::new(500, "1/100/".to_string()));
+        registry.add("Group", EntityContext::root_group(1, 100));
+        registry.add("Group", EntityContext::root_group(1, 101));
+        registry.add(
+            "Project",
+            EntityContext::child(&EntityContext::root_group(1, 100), 500),
+        );
 
         assert_eq!(registry.count("Group"), 2);
         assert_eq!(registry.count("Project"), 1);
@@ -569,5 +646,8 @@ mod tests {
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].traversal_path, "1/100/");
         assert_eq!(groups[1].traversal_path, "1/101/");
+
+        let group_ids = registry.get_ids("Group");
+        assert_eq!(group_ids, vec![100, 101]);
     }
 }

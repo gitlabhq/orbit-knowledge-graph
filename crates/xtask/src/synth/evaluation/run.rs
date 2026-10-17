@@ -44,6 +44,37 @@ pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
     Ok(queries)
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct QueryParameters {
+    pub node_ids: HashMap<String, Vec<String>>,
+}
+
+pub fn extract_parameters(query_value: &serde_json::Value) -> QueryParameters {
+    let mut params = QueryParameters::default();
+
+    let all_nodes = query_value
+        .get("nodes")
+        .and_then(|n| n.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+
+    for node in all_nodes {
+        if let Some(obj) = node.as_object()
+            && obj.contains_key("node_ids")
+            && let Some(entity) = obj.get("entity").and_then(|e| e.as_str())
+            && let Some(id) = obj.get("id").and_then(|i| i.as_str())
+        {
+            params
+                .node_ids
+                .entry(entity.to_string())
+                .or_default()
+                .push(id.to_string());
+        }
+    }
+
+    params
+}
+
 pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -208,6 +239,26 @@ fn log_result(result: &ExecutionResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_parameters() {
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                {"id": "merger", "entity": "User", "node_ids": [42]}
+            ],
+            "relationships": [
+                {"type": "MERGED", "from": "merger", "to": "mr"}
+            ],
+            "limit": 30
+        }"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let params = extract_parameters(&value);
+        assert!(params.node_ids.contains_key("User"));
+        assert_eq!(params.node_ids["User"], vec!["merger".to_string()]);
+    }
 
     #[test]
     fn test_query_entry_parse() {

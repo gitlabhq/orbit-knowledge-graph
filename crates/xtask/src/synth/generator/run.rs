@@ -61,6 +61,12 @@ pub struct EdgeRecord {
 }
 
 #[derive(Debug, Default)]
+pub struct OrganizationData {
+    pub nodes: HashMap<String, Vec<RecordBatch>>,
+    pub edges: Vec<EdgeRecord>,
+}
+
+#[derive(Debug, Default)]
 pub struct OrganizationNodes {
     pub nodes: HashMap<String, Vec<RecordBatch>>,
 }
@@ -371,6 +377,65 @@ impl Generator {
         self.global_entity_counter.fetch_add(1, Ordering::SeqCst)
     }
 
+    pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
+        let mut data = OrganizationData::default();
+        let mut registry = EntityRegistry::new(org_id);
+
+        for node_type in self.dependency_graph.generation_order() {
+            let mut rng = self.stream_rng(org_id, &format!("structure:{node_type}"));
+            let real_type = self.dependency_graph.resolve_type(node_type);
+            let node = self
+                .ontology
+                .nodes()
+                .find(|n| n.name == real_type)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Node type '{}' not found in ontology", real_type)
+                })?;
+
+            if self.dependency_graph.is_root(node_type) {
+                let count = self
+                    .config
+                    .generation
+                    .roots
+                    .get(node_type)
+                    .copied()
+                    .unwrap_or(0);
+
+                if count > 0 {
+                    let (batches, edges) =
+                        self.generate_root_entities(node, org_id, count, &mut registry, &mut rng)?;
+                    data.nodes
+                        .entry(real_type.to_string())
+                        .or_default()
+                        .extend(batches);
+                    data.edges.extend(edges);
+                }
+            } else if let Some(parent_edges) = self.dependency_graph.parent_edges(node_type) {
+                let (batches, edges) = self.generate_child_entities(
+                    node,
+                    node_type,
+                    parent_edges,
+                    &mut registry,
+                    &mut rng,
+                )?;
+                if !batches.is_empty() {
+                    data.nodes
+                        .entry(real_type.to_string())
+                        .or_default()
+                        .extend(batches);
+                }
+                data.edges.extend(edges);
+            }
+        }
+
+        registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
+
+        let association_edges = self.generate_association_edges(&registry);
+        data.edges.extend(association_edges);
+
+        Ok(data)
+    }
+
     pub fn generate_organization_streaming(
         &self,
         org_id: u32,
@@ -429,6 +494,182 @@ impl Generator {
         self.generate_association_edges_streaming(&registry, edge_writer)?;
 
         Ok(data)
+    }
+
+    fn generate_root_entities(
+        &self,
+        node: &NodeEntity,
+        org_id: u32,
+        count: usize,
+        registry: &mut EntityRegistry,
+        _rng: &mut impl Rng,
+    ) -> Result<(Vec<RecordBatch>, Vec<EdgeRecord>)> {
+        let schema = Arc::new(node.to_arrow_schema());
+        let mut builder = BatchBuilder::with_seed(
+            node,
+            schema,
+            self.config.generation.batch_size,
+            self.fake_seed(org_id, &format!("fake:{}", node.name)),
+            self.pools,
+        );
+        let is_namespace_entity = node.name == self.config.generation.namespace_entity;
+
+        for _ in 0..count {
+            let (entity_id, traversal_path) = if is_namespace_entity {
+                let ns_id = registry.next_namespace_id();
+                (ns_id, format!("{}/{}/", org_id, ns_id))
+            } else {
+                (self.next_entity_id(), format!("{}/", org_id))
+            };
+
+            builder.add_row(traversal_path.clone(), entity_id);
+            registry.add(&node.name, EntityContext::new(entity_id, traversal_path));
+        }
+
+        Ok((builder.finish(), Vec::new()))
+    }
+
+    fn generate_child_entities(
+        &self,
+        node: &NodeEntity,
+        registry_key: &str,
+        parent_edges: &[ParentEdge],
+        registry: &mut EntityRegistry,
+        rng: &mut impl Rng,
+    ) -> Result<(Vec<RecordBatch>, Vec<EdgeRecord>)> {
+        let schema = Arc::new(node.to_arrow_schema());
+        let mut builder = BatchBuilder::with_seed(
+            node,
+            schema,
+            self.config.generation.batch_size,
+            self.fake_seed(registry.org_id(), &format!("fake:{registry_key}")),
+            self.pools,
+        );
+        let mut edges = Vec::new();
+        let is_namespace_entity = node.name == self.config.generation.namespace_entity;
+        let is_parent_type = self.dependency_graph.is_parent_type(registry_key);
+
+        for parent_edge in parent_edges {
+            let parents: Vec<_> = match registry.get(&parent_edge.parent_kind) {
+                Some(p) if !p.is_empty() => {
+                    p.iter().map(|e| (e.id, e.traversal_path.clone())).collect()
+                }
+                _ => continue,
+            };
+
+            let rel_kind = self.intern(&parent_edge.edge_type);
+            let parent_real_type = self.dependency_graph.resolve_type(&parent_edge.parent_kind);
+            let parent_kind_str = self.intern(parent_real_type);
+            let node_name_str = self.intern(&node.name);
+
+            for (parent_id, parent_path) in &parents {
+                let child_count = parent_edge.ratio.sample_with_variance(rng);
+
+                for _ in 0..child_count {
+                    let (entity_id, traversal_path) = if is_namespace_entity {
+                        let ns_id = registry.next_namespace_id();
+                        (ns_id, format!("{}{}/", parent_path, ns_id))
+                    } else {
+                        (self.next_entity_id(), parent_path.clone())
+                    };
+
+                    builder.add_row(traversal_path.clone(), entity_id);
+
+                    if is_parent_type {
+                        registry.add(registry_key, EntityContext::new(entity_id, traversal_path));
+                    } else {
+                        registry.add_id_only(registry_key, entity_id, &traversal_path);
+                    }
+
+                    let (source, source_kind, target, target_kind) = if parent_edge.parent_to_child
+                    {
+                        (
+                            *parent_id,
+                            parent_kind_str.clone(),
+                            entity_id,
+                            node_name_str.clone(),
+                        )
+                    } else {
+                        (
+                            entity_id,
+                            node_name_str.clone(),
+                            *parent_id,
+                            parent_kind_str.clone(),
+                        )
+                    };
+
+                    edges.push(EdgeRecord {
+                        traversal_path: self.intern(parent_path),
+                        relationship_kind: rel_kind.clone(),
+                        source,
+                        source_kind,
+                        target,
+                        target_kind,
+                    });
+                }
+            }
+        }
+
+        Ok((builder.finish(), edges))
+    }
+
+    fn generate_association_edges(&self, registry: &EntityRegistry) -> Vec<EdgeRecord> {
+        use crate::synth::config::IterationDirection;
+
+        let mut edges = Vec::new();
+
+        for (edge_type, source_kind, target_kind, ratio, direction) in
+            self.config.generation.associations.all_associations()
+        {
+            let stream = format!("assoc:{edge_type}:{source_kind}->{target_kind}");
+            let rng = &mut self.stream_rng(registry.org_id(), &stream);
+            let source_ids = match registry.get_ids_slice(&source_kind) {
+                Some(ids) if !ids.is_empty() => ids,
+                _ => continue,
+            };
+            let target_ids = match registry.get_ids_slice(&target_kind) {
+                Some(ids) if !ids.is_empty() => ids,
+                _ => continue,
+            };
+
+            let rel_kind = self.intern(&edge_type);
+            let src_kind = self.intern(&source_kind);
+            let tgt_kind = self.intern(&target_kind);
+
+            let (iterate_over, sample_from) = match direction {
+                IterationDirection::Target => (target_ids, source_ids),
+                IterationDirection::Source => (source_ids, target_ids),
+            };
+            let sample_len = sample_from.len();
+
+            for &primary_id in iterate_over {
+                let edge_count = ratio.sample(rng);
+                if edge_count == 0 {
+                    continue;
+                }
+
+                let count = edge_count.min(sample_len);
+                for _ in 0..count {
+                    let secondary_id = sample_from[rng.random_range(0..sample_len)];
+                    let (source_id, target_id) = match direction {
+                        IterationDirection::Target => (secondary_id, primary_id),
+                        IterationDirection::Source => (primary_id, secondary_id),
+                    };
+
+                    let path = most_specific_path(registry, source_id, target_id);
+                    edges.push(EdgeRecord {
+                        traversal_path: self.intern(&path),
+                        relationship_kind: rel_kind.clone(),
+                        source: source_id,
+                        source_kind: src_kind.clone(),
+                        target: target_id,
+                        target_kind: tgt_kind.clone(),
+                    });
+                }
+            }
+        }
+
+        edges
     }
 
     fn generate_root_entities_streaming(
@@ -807,10 +1048,32 @@ mod tests {
         AssociationConfig, AssociationEdgeValue, Config, EdgeRatio, GenerationConfig,
         RelationshipConfig,
     };
-    use std::collections::BTreeMap;
+    use arrow::array::Array;
+    use std::collections::{BTreeMap, HashSet};
 
     fn fake_data_path() -> String {
         crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
+    }
+
+    fn extract_ids(batches: &[RecordBatch]) -> Vec<i64> {
+        let mut ids = Vec::new();
+        for batch in batches {
+            let schema = batch.schema();
+            let id_idx = schema
+                .fields()
+                .iter()
+                .position(|f| f.name() == "id")
+                .expect("batch should have an 'id' column");
+            let id_col = batch
+                .column(id_idx)
+                .as_any()
+                .downcast_ref::<arrow::array::Int64Array>()
+                .expect("id column should be Int64");
+            for i in 0..id_col.len() {
+                ids.push(id_col.value(i));
+            }
+        }
+        ids
     }
 
     fn test_config_and_ontology() -> (Config, Ontology) {
@@ -862,6 +1125,209 @@ mod tests {
     }
 
     #[test]
+    fn test_generator_produces_nodes_and_edges() {
+        let (config, ontology) = test_config_and_ontology();
+        let generator = Generator::new(ontology, config).unwrap();
+        let data = generator.generate_organization(1).unwrap();
+
+        assert!(data.nodes.contains_key("User"));
+        assert!(data.nodes.contains_key("Group"));
+        assert!(data.nodes.contains_key("Project"));
+        assert!(data.nodes.contains_key("MergeRequest"));
+        assert!(!data.edges.is_empty());
+
+        let edge_types: HashSet<&str> = data
+            .edges
+            .iter()
+            .map(|e| e.relationship_kind.as_ref())
+            .collect();
+        assert!(edge_types.contains("CONTAINS"));
+        assert!(edge_types.contains("IN_PROJECT"));
+        assert!(edge_types.contains("AUTHORED"));
+    }
+
+    #[test]
+    fn test_generator_unique_entity_ids_per_type() {
+        let (config, ontology) = test_config_and_ontology();
+        let generator = Generator::new(ontology, config).unwrap();
+        let data = generator.generate_organization(1).unwrap();
+
+        for (node_type, batches) in &data.nodes {
+            let ids = extract_ids(batches);
+            let unique: HashSet<i64> = ids.iter().copied().collect();
+            assert_eq!(ids.len(), unique.len(), "Duplicate IDs in {}", node_type);
+        }
+    }
+
+    #[test]
+    fn test_generator_edge_references_valid_ids() {
+        let (config, ontology) = test_config_and_ontology();
+        let generator = Generator::new(ontology, config).unwrap();
+        let data = generator.generate_organization(1).unwrap();
+
+        let all_ids: HashSet<i64> = data.nodes.values().flat_map(|b| extract_ids(b)).collect();
+
+        for edge in &data.edges {
+            assert!(
+                all_ids.contains(&edge.source),
+                "Edge {:?} source {} not found",
+                edge.relationship_kind,
+                edge.source
+            );
+            assert!(
+                all_ids.contains(&edge.target),
+                "Edge {:?} target {} not found",
+                edge.relationship_kind,
+                edge.target
+            );
+        }
+    }
+
+    #[test]
+    fn test_generator_association_edges_use_source_traversal_path() {
+        let (config, ontology) = test_config_and_ontology();
+        let generator = Generator::new(ontology, config).unwrap();
+        let data = generator.generate_organization(1).unwrap();
+
+        let authored: Vec<_> = data
+            .edges
+            .iter()
+            .filter(|e| e.relationship_kind.as_ref() == "AUTHORED")
+            .collect();
+        assert!(!authored.is_empty());
+        for edge in &authored {
+            // Association edges should inherit the source node's traversal_path,
+            // not the sentinel "0/". Source nodes always have a path starting with "1/".
+            assert!(
+                edge.traversal_path.as_ref().starts_with("1/"),
+                "AUTHORED edge should have source node's traversal_path, got '{}'",
+                edge.traversal_path.as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn test_generator_namespace_entity_extends_traversal_paths() {
+        let (config, ontology) = test_config_and_ontology();
+        let generator = Generator::new(ontology, config).unwrap();
+        let data = generator.generate_organization(1).unwrap();
+
+        for batch in &data.nodes["Group"] {
+            let tp_col = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            for i in 0..tp_col.len() {
+                let depth = tp_col.value(i).split('/').filter(|s| !s.is_empty()).count();
+                assert!(
+                    depth >= 2,
+                    "Group path '{}' should have depth >= 2",
+                    tp_col.value(i)
+                );
+            }
+        }
+
+        for batch in &data.nodes["User"] {
+            let tp_col = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            for i in 0..tp_col.len() {
+                let depth = tp_col.value(i).split('/').filter(|s| !s.is_empty()).count();
+                assert_eq!(
+                    depth,
+                    1,
+                    "User path '{}' should have depth 1",
+                    tp_col.value(i)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_generator_recursive_hierarchy_edges() {
+        let (config, ontology) = test_config_and_ontology();
+        let ns_entity = config.generation.namespace_entity.clone();
+        let generator = Generator::new(ontology, config).unwrap();
+        let data = generator.generate_organization(1).unwrap();
+
+        let hierarchy_edges: Vec<_> = data
+            .edges
+            .iter()
+            .filter(|e| {
+                e.relationship_kind.as_ref() == "CONTAINS"
+                    && e.source_kind.as_ref() == ns_entity.as_str()
+                    && e.target_kind.as_ref() == ns_entity.as_str()
+            })
+            .collect();
+
+        assert!(
+            hierarchy_edges.len() >= 2 && hierarchy_edges.len() <= 4,
+            "Expected 2-4 CONTAINS {ns}->{ns} edges, got {}",
+            hierarchy_edges.len(),
+            ns = ns_entity
+        );
+
+        for edge in &hierarchy_edges {
+            assert_ne!(edge.source, edge.target);
+        }
+    }
+
+    type EdgeRow = (String, String, i64, String, i64, String);
+
+    fn snapshot(data: &OrganizationData) -> (Vec<(String, Vec<RecordBatch>)>, Vec<EdgeRow>) {
+        let mut nodes: Vec<_> = data
+            .nodes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        nodes.sort_by(|a, b| a.0.cmp(&b.0));
+        let edges = data
+            .edges
+            .iter()
+            .map(|e| {
+                let s = |v: &IStr| v.to_string();
+                (
+                    s(&e.traversal_path),
+                    s(&e.relationship_kind),
+                    e.source,
+                    s(&e.source_kind),
+                    e.target,
+                    s(&e.target_kind),
+                )
+            })
+            .collect();
+        (nodes, edges)
+    }
+
+    fn generate_with_seed(seed: u64) -> OrganizationData {
+        let (mut config, ontology) = test_config_and_ontology();
+        config.generation.seed = Some(seed);
+        Generator::new(ontology, config)
+            .unwrap()
+            .generate_organization(1)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_generator_same_seed_is_deterministic() {
+        assert_eq!(
+            snapshot(&generate_with_seed(42)),
+            snapshot(&generate_with_seed(42))
+        );
+    }
+
+    #[test]
+    fn test_generator_different_seed_differs() {
+        assert_ne!(
+            snapshot(&generate_with_seed(42)),
+            snapshot(&generate_with_seed(43))
+        );
+    }
+
+    #[test]
     fn test_derive_seed_is_stable() {
         assert_eq!(
             derive_seed(42, 1, "structure:Project"),
@@ -907,6 +1373,32 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
         assert!(!a.is_empty());
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_generator_global_entity_counter_across_orgs() {
+        let (config, ontology) = test_config_and_ontology();
+        let generator = Generator::new(ontology, config).unwrap();
+
+        let data1 = generator.generate_organization(1).unwrap();
+        let data2 = generator.generate_organization(2).unwrap();
+
+        let collect_non_ns_ids = |data: &OrganizationData| -> HashSet<i64> {
+            data.nodes
+                .iter()
+                .filter(|(k, _)| k.as_str() != "Group")
+                .flat_map(|(_, b)| extract_ids(b))
+                .collect()
+        };
+
+        let ids1 = collect_non_ns_ids(&data1);
+        let ids2 = collect_non_ns_ids(&data2);
+        let overlap: Vec<_> = ids1.intersection(&ids2).collect();
+        assert!(
+            overlap.is_empty(),
+            "Non-namespace IDs should not overlap: {:?}",
+            overlap
+        );
     }
 
     #[test]
