@@ -388,6 +388,8 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 Debug and trace lines are written only when they are expanded (see `metrics.expanded_logs`). The server adds `ra_ap=off` to the filter.
 
+A span directive such as `[orbit_request]=debug` in `metrics.log_level` also enables the lines of dependencies inside that span.
+
 ### OpenTelemetry
 
 | Config path | Default | Description |

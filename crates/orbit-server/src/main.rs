@@ -85,44 +85,47 @@ async fn main() -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
-    let result = match args.mode {
-        Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
-        Mode::DispatchIndexing => {
-            config.schema.validate()?;
-            let archive = ontology::archive::OntologyArchive::from_bytes(
-                *schema::version::SCHEMA_VERSION,
-                include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
-            )?;
+    let result: anyhow::Result<()> = async {
+        match args.mode {
+            Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
+            Mode::DispatchIndexing => {
+                config.schema.validate()?;
+                let archive = ontology::archive::OntologyArchive::from_bytes(
+                    *schema::version::SCHEMA_VERSION,
+                    include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+                )?;
 
-            let graph = config.graph.build_client("graph");
-            info!("initializing schema version table");
-            schema::version::init(&graph).await?;
+                let graph = config.graph.build_client("graph");
+                info!("initializing schema version table");
+                schema::version::init(&graph).await?;
 
-            let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
+                let dispatcher_config = DispatcherConfig::from(&config);
+                indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
+                    .await
+                    .map_err(Into::into)
+            }
+            Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
+                .await
+                .map_err(Into::into),
+            Mode::Indexer => {
+                let indexer_config = IndexerConfig::from(&config);
+                indexer::run(
+                    &indexer_config,
+                    ontology,
+                    serving,
+                    shutdown,
+                    indexer_datafusion::sql_transform(),
+                )
                 .await
                 .map_err(Into::into)
+            }
+            Mode::Webserver => {
+                config.schema.validate()?;
+                run_webserver(&config, active_schema, serving, shutdown.clone()).await
+            }
         }
-        Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
-            .await
-            .map_err(Into::into),
-        Mode::Indexer => {
-            let indexer_config = IndexerConfig::from(&config);
-            indexer::run(
-                &indexer_config,
-                ontology,
-                serving,
-                shutdown,
-                indexer_datafusion::sql_transform(),
-            )
-            .await
-            .map_err(Into::into)
-        }
-        Mode::Webserver => {
-            config.schema.validate()?;
-            run_webserver(&config, active_schema, serving, shutdown.clone()).await
-        }
-    };
+    }
+    .await;
 
     signal_task.abort();
     if let Err(error) = &result {
@@ -133,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
     }
     guard.shutdown().await;
     if result.is_err() {
+        drop(guard);
         std::process::exit(1);
     }
     Ok(())
