@@ -15,8 +15,8 @@ Accepted
 
 ## Update: cached item counts (2026-10-16)
 
-Item counts use the ClickHouse query cache with the default 60 second TTL. A count can be
-up to 60 seconds old, also after a backfill ends. `GetGraphStatus` counts the same way. The
+Item counts use the ClickHouse query cache with the default 10 second TTL. A count can be
+up to 10 seconds old, also after a backfill ends. `GetGraphStatus` counts the same way. The
 checkpoint and coverage reads still skip the cache, so a phase change is visible on the
 next call. The count queries were the largest share of ClickHouse time and bytes read.
 

@@ -1,0 +1,23 @@
+description: A lookup pinned by id skips the query cache, so it sees a row written between two runs
+
+config:
+  security: admin
+  redaction: { allow: { group: [999] } }
+
+steps:
+  - query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[999]}],"limit":10}'
+      gql: "MATCH (g:Group {id: 999}) RETURN g LIMIT 10"
+    expect:
+      skip_requirements: [node_ids]
+      node_count: 0
+
+  - seed:
+      gl_group:
+        - { id: 999, name: Late Group, full_path: late-group, visibility_level: public, traversal_path: "1/999/" }
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[999]}],"limit":10}'
+      gql: "MATCH (g:Group {id: 999}) RETURN g LIMIT 10"
+    expect:
+      node_count: 1
+      nodes: { Group: { ids: [999] } }

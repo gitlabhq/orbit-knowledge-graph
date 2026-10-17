@@ -1,0 +1,40 @@
+description: Only a query whose nodes are all pinned by id, over single hops only, runs with the query cache off
+
+config:
+  security: admin
+
+cases:
+  - name: pinned_node
+    query:
+      gql: "MATCH (w:WorkItem {id: 4000}) RETURN w"
+    expect: { compile_only: true, settings: { use_query_cache: 0 } }
+
+  - name: pinned_and_open_nodes
+    query:
+      gql: "MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(w:WorkItem) RETURN p, w LIMIT 10"
+    expect: { compile_only: true, settings: { use_query_cache: 1 } }
+
+  - name: pinned_nodes_over_single_hops
+    query:
+      gql: "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {id: 1000})<-[:IN_PROJECT]-(w:WorkItem {id: 4000}) RETURN g, p, w"
+    expect: { compile_only: true, settings: { use_query_cache: 0 } }
+
+  - name: pinned_nodes_over_a_variable_length_hop
+    query:
+      gql: "MATCH (a:WorkItem {id: 4000})-[:RELATED_TO*1..3]->(b:WorkItem {id: 4001}) RETURN a, b"
+    expect: { compile_only: true, settings: { use_query_cache: 1 } }
+
+  - name: pinned_aggregation
+    query:
+      gql: "MATCH (w:WorkItem {id: 4000}) RETURN count(w) AS c"
+    expect: { compile_only: true, settings: { use_query_cache: 0 } }
+
+  - name: id_range_traversal
+    query:
+      gql: "MATCH (w:WorkItem) WHERE w.id >= 1 AND w.id <= 100000 RETURN w LIMIT 10"
+    expect: { compile_only: true, settings: { use_query_cache: 1, query_cache_ttl: 10 } }
+
+  - name: neighbors_of_a_pinned_node
+    query:
+      gql: "MATCH (w:WorkItem {id: 4000})--(n) RETURN w, n LIMIT 10"
+    expect: { compile_only: true, settings: { use_query_cache: 1 } }
