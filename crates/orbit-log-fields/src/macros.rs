@@ -42,61 +42,51 @@ macro_rules! __event {
     };
 }
 
-/// `tracing::trace!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! trace {
     ($($args:tt)*) => { $crate::__event!(TRACE, $($args)*) };
 }
 
-/// `tracing::debug!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! debug {
     ($($args:tt)*) => { $crate::__event!(DEBUG, $($args)*) };
 }
 
-/// `tracing::info!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! info {
     ($($args:tt)*) => { $crate::__event!(INFO, $($args)*) };
 }
 
-/// `tracing::warn!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! warn {
     ($($args:tt)*) => { $crate::__event!(WARN, $($args)*) };
 }
 
-/// `tracing::error!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! error {
     ($($args:tt)*) => { $crate::__event!(ERROR, $($args)*) };
 }
 
-/// `tracing::trace_span!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! trace_span {
     ($($args:tt)*) => { $crate::__rewrite!(trace_span [] [] $($args)*) };
 }
 
-/// `tracing::debug_span!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! debug_span {
     ($($args:tt)*) => { $crate::__rewrite!(debug_span [] [] $($args)*) };
 }
 
-/// `tracing::info_span!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! info_span {
     ($($args:tt)*) => { $crate::__rewrite!(info_span [] [] $($args)*) };
 }
 
-/// `tracing::warn_span!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! warn_span {
     ($($args:tt)*) => { $crate::__rewrite!(warn_span [] [] $($args)*) };
 }
 
-/// `tracing::error_span!` with `safe(NAME)` and `expanded(NAME)` field names.
 #[macro_export]
 macro_rules! error_span {
     ($($args:tt)*) => { $crate::__rewrite!(error_span [] [] $($args)*) };
