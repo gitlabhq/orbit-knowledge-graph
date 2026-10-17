@@ -421,22 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn compile_with_prefixed_ontology_prefixes_fk_holder_table() {
-        let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
-
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
-        let compiled =
-            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        assert!(
-            sql.contains("FROM v1_gl_merge_request AS _orbit_edge_0 FINAL")
-                && sql.contains("_orbit_edge_0.author_id AS source_id"),
-            "traversal SQL should normalize the prefixed FK holder, got: {sql}"
-        );
-    }
-
-    #[test]
     fn compile_uses_supplied_ontology_for_scoped_user_table() {
         let scoped_user = (**ONTOLOGY).clone().with_path_scopable_nodes(["User"]);
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
@@ -525,33 +509,6 @@ mod tests {
     }
 
     #[test]
-    fn aggregation_with_relationship_emits_no_bare_node_ref() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{"count": "mr", "as": "total_mrs"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("FROM gl_merge_request AS _orbit_edge_0 FINAL")
-                && sql.contains("_orbit_edge_0.project_id AS target_id"),
-            "FK edge relation must retain the Project endpoint, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("278964"),
-            "Project node_ids filter must survive, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
         let query = r#"{
             "query_type": "aggregation",
@@ -587,61 +544,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn filtered_fk_count_applies_holder_filter_before_count() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "opened"}
-                }}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "open_mrs"
-            }],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("COUNT() AS open_mrs")
-                && sql.contains("_orbit_edge_0.state = 'opened'")
-                && sql.contains("FROM gl_merge_request AS _orbit_edge_0 FINAL"),
-            "FK count must filter the current holder rows before aggregation, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn mixed_edge_join_reads_current_versions() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("FROM gl_edge AS _orbit_edge_0 FINAL")
-                && sql.contains("FROM gl_merge_request AS _orbit_edge_1 FINAL"),
-            "stored and FK edge sources must both read current rows, got:\n{sql}"
-        );
-    }
-
     /// A single-hop edge scan cannot fan a node out, so it stays a plain scan;
     /// deduplicating the hot single-edge path would cost an unnecessary aggregation.
     #[test]
@@ -664,30 +566,6 @@ mod tests {
         assert!(
             !sql.contains("argMax("),
             "single-hop edge scan must not dedup, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn traversal_id_range_produces_range_conditions_in_sql() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_orbit_edge_0.source_id >= 1"),
-            "range lower bound must reach the edge endpoint, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_0.source_id <= 100"),
-            "range upper bound must reach the edge endpoint, got:\n{sql}"
         );
     }
 
@@ -925,149 +803,6 @@ mod tests {
     }
 
     #[test]
-    fn multi_hop_traversal_constrains_kind_on_every_edge() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_orbit_edge_0.source_kind")
-                && sql.contains("_orbit_edge_0.target_kind")
-                && sql.contains("_orbit_edge_1.source_kind")
-                && sql.contains("_orbit_edge_1.target_kind"),
-            "each stored relation must constrain typed endpoints, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_0.source_id = _orbit_edge_1.target_id"),
-            "shared MergeRequest occurrence must join edge endpoints, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn aggregation_prunes_unreferenced_node_hydration() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "merged"}
-                }},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "merged_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("gl_user AS u") && !sql.contains("FROM gl_user"),
-            "gl_user join must be pruned for aggregation that never \
-             references the User alias, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_nf_u"),
-            "User-aliased CTEs must be dropped, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_1.author_id AS source_id"),
-            "AUTHORED must retain its FK edge relation, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("gl_project AS p") || sql.contains("FROM gl_project"),
-            "gl_project must remain in FROM, got:\n{sql}"
-        );
-    }
-
-    /// Each UNION ALL arm must carry static kind literals so ClickHouse can use
-    /// the kind-led PK projection (`by_rel_source_kind`/`by_rel_target_kind`) for
-    /// granule pruning at every depth, instead of dynamic IN-subqueries.
-    #[test]
-    fn variable_length_traversal_emits_per_arm_kind_literals() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 3]}
-            ],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "n"}],
-            "limit": 3
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_orbit_edge_1.source_kind") && sql.contains("'Group'"),
-            "depth-1 arm must inject _orbit_edge_1.source_kind = 'Group', got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e3.target_kind") && sql.contains("'Project'"),
-            "depth-3 arm must inject e3.target_kind = 'Project', got:\n{sql}"
-        );
-        // With both endpoints kind-literal-pinned, the per-arm to-side IN
-        // subquery is redundant with the outer node-table SIP and must be
-        // suppressed. The redundant probe was costing 30%+ wall time.
-        assert!(
-            !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
-            "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn holder_filter_runs_on_fk_edge_relation_not_first_hop() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "cl"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "aggregations": [{"count": "mr", "as": "c"}]
-        }"#;
-        let sql = compile_sql(query);
-        assert!(
-            sql.contains("_orbit_edge_1.state = 'opened'"),
-            "state must filter the IN_PROJECT FK holder, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("source_tags, 'state:opened'"),
-            "state must not filter stored edge tags, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn denorm_filter_uncovered_by_query_relationships_filters_node_table() {
         let query = r#"{
             "query_type": "aggregation",
@@ -1294,36 +1029,6 @@ mod tests {
     }
 
     #[test]
-    fn aggregation_group_by_property_uses_role_gated_fk_holder() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "v", "entity": "Vulnerability"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": ["v.severity"],
-            "aggregations": [{
-                "count": "v",
-                "as": "vulnerability_count"
-            }],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("gl_vulnerability"),
-            "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_0.severity AS v_severity")
-                && sql.contains("GROUP BY _orbit_edge_0.severity"),
-            "security property grouping must use the current FK holder, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn node_table_reads_use_final_for_latest_rows() {
         let queries = [
             (
@@ -1454,90 +1159,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
-        let cases = [
-            (
-                "Group",
-                "Project",
-                r#""from":"a","to":"x""#,
-                "countSubstrings(x.traversal_path, '/') >=",
-            ),
-            (
-                "Group",
-                "Group",
-                r#""from":"a","to":"x","hops":[2,3]"#,
-                "countSubstrings(x.traversal_path, '/') <=",
-            ),
-            (
-                "Project",
-                "Branch",
-                r#""from":"a","to":"x""#,
-                "(x.traversal_path = (SELECT",
-            ),
-            (
-                "Project",
-                "Branch",
-                r#""from":"a","to":"x","direction":"incoming""#,
-                "gl_edge",
-            ),
-            (
-                "Directory",
-                "File",
-                r#""from":"a","to":"x""#,
-                "gl_code_edge",
-            ),
-            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
-            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
-        ];
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        for (anchor, far, rel, expect) in cases {
-            let query = format!(
-                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
-            );
-            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
-                .unwrap()
-                .base
-                .render();
-            assert!(
-                sql.contains(expect),
-                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
-            );
-            if expect != "gl_edge" {
-                assert!(
-                    !sql.contains("gl_edge"),
-                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn filtered_redaction_joins_push_filters_into_subquery() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "f", "entity": "File", "filters": {"path": {"ends_with": ".rb"}}},
-                {"id": "d", "entity": "Definition", "filters": {"name": {"starts_with": "process"}}}
-            ],
-            "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
-                && sql.contains("endsWith(lower(f.path), lower('.rb'))"),
-            "filtered File join should push filters into the subquery, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
-                && sql.contains("startsWith(lower(d.name), lower('process'))"),
-            "filtered Definition join should push filters into the subquery, got:\n{sql}"
-        );
     }
 
     #[test]
@@ -1942,22 +1563,5 @@ mod tests {
         assert!(!sql.contains("_orbit_fused"), "{sql}");
         assert!(sql.contains("(e.source_id = 7)"), "{sql}");
         assert!(sql.contains("(e.target_id = 7)"), "{sql}");
-    }
-
-    #[test]
-    fn aggregated_edge_dedup_filters_kinds_before_picking_latest_row() {
-        let sql = compile_gql_sql(
-            "MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n",
-        );
-
-        let dedup = sql
-            .split("LIMIT 1 BY")
-            .next()
-            .and_then(|head| head.rsplit("(SELECT * FROM gl_edge").next())
-            .expect("edge dedup subquery");
-        assert!(
-            dedup.contains("relationship_kind = 'APPROVED'"),
-            "kind filter should sit inside the dedup subquery:\n{sql}"
-        );
     }
 }

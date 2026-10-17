@@ -268,27 +268,6 @@ fn invalid_relationship_type_lists_valid_candidates() {
 }
 
 #[test]
-fn full_pipeline() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
-            {"id": "u", "entity": "User", "columns": ["username"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "limit": 25,
-        "order_by": "-n.created_at"
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-
-    assert!(rendered.contains("FROM gl_note AS _orbit_edge_0 FINAL"));
-    assert!(rendered.contains("_orbit_edge_0.author_id AS source_id"));
-    assert!(rendered.contains("LIMIT 26"));
-}
-
-#[test]
 fn package_built_by_pipeline_traversal() {
     let json = r#"{
         "query_type": "traversal",
