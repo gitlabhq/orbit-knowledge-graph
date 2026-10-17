@@ -11,11 +11,9 @@ mod server {
     pub mod cluster_health;
     pub mod corpus_smoke;
     pub mod data_correctness;
-    pub mod denormalization;
     pub mod graph_formatter;
     pub mod grpc_tls;
     pub mod http_tls;
-    pub mod hydration;
     pub mod performance;
     pub mod query_cache;
     pub mod redaction;

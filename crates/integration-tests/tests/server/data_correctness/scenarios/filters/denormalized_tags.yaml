@@ -1,0 +1,115 @@
+config:
+  extra_seed:
+    gl_pipeline:
+      - { id: 8100, iid: 1, status: failed, ref: main, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8101, iid: 2, status: success, ref: main, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8102, iid: 3, status: failed, ref: feature-1, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 8100, source_kind: Pipeline, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["status:failed"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 8101, source_kind: Pipeline, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["status:success"], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 8102, source_kind: Pipeline, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["status:failed"], target_tags: [] }
+    gl_vulnerability:
+      - { id: 8003, title: CSRF in settings, state: resolved, severity: critical, report_type: dast, resolved_on_default_branch: true, present_on_default_branch: false, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_sec_edge:
+      - { traversal_path: "1/100/1000/", source_id: 8003, source_kind: Vulnerability, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project, source_tags: ["severity:critical", "state:resolved"], target_tags: [] }
+
+cases:
+  - name: pipeline_status
+    description: A pipeline status filter through its project edge returns only the matching pipelines
+    config:
+      redaction: { allow: { project: [1000], ci_pipeline: [8100, 8101, 8102] } }
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"eq": "failed"}}, "columns": ["status"]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (pipe:Pipeline)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE pipe.status = 'failed' RETURN pipe.status, p LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        Pipeline: { ids: [8100, 8102], absent: [8101], filters: { status: failed } }
+        Project: { ids: [1000] }
+      edges:
+        IN_PROJECT: [[8100, 1000], [8102, 1000]]
+
+  - name: vulnerability_severity
+    description: A vulnerability severity filter through its project edge returns every vulnerability with that severity
+    config:
+      security: { paths: ["1/"], access_level: 25 }
+      redaction: { allow: { project: [1000], vulnerability: [8000, 8003] } }
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"eq": "critical"}}, "columns": ["severity"]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE v.severity = 'critical' RETURN v.severity, p LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        Vulnerability: { ids: [8000, 8003], filters: { severity: critical } }
+        Project: { ids: [1000] }
+      edges:
+        IN_PROJECT: [[8000, 1000], [8003, 1000]]
+
+  - name: vulnerability_state_and_severity
+    description: Two denormalized filters on the same vulnerability must both match
+    config:
+      security: { paths: ["1/"], access_level: 25 }
+      redaction: { allow: { project: [1000], vulnerability: [8000, 8003] } }
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "v", "entity": "Vulnerability", "filters": {"state": {"eq": "detected"}, "severity": {"eq": "critical"}}, "columns": ["state", "severity"]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE v.state = 'detected' AND v.severity = 'critical' RETURN v.state, v.severity, p LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        Vulnerability: { ids: [8000], absent: [8003], filters: { state: detected, severity: critical } }
+        Project: { ids: [1000] }
+      edges:
+        IN_PROJECT: [[8000, 1000]]
+
+  - name: work_item_type
+    description: Work item state and type filters through the group edge return only the matching work item
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "wi", "entity": "WorkItem", "filters": {"state": {"eq": "opened"}, "work_item_type": {"eq": "issue"}}, "columns": ["state", "work_item_type"]},
+            {"id": "g", "entity": "Group", "node_ids": [100]}
+          ],
+          "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (wi:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE wi.state = 'opened' AND wi.work_item_type = 'issue' RETURN wi.state, wi.work_item_type, g LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem: { ids: [4000], absent: [4001], filters: { state: opened, work_item_type: issue } }
+        Group: { ids: [100] }
+      edges:
+        IN_GROUP: [[4000, 100]]
