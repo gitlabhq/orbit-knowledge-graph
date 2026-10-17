@@ -705,8 +705,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if let Some(ids) = self.ids(alias) {
             return Ok(ids.clone());
         }
-        let node = self.uncovered_node(alias);
-        let source = self.node_read(&node)?;
+        let node = &self.facts.nodes[alias];
+        let source = self.node_read(node)?;
         let id = self.graph.project(
             source,
             vec![Projection::new(
