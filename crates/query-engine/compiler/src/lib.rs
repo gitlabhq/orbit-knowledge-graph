@@ -1583,4 +1583,23 @@ mod tests {
         assert!(sql.contains("(e.source_id = 7)"), "{sql}");
         assert!(sql.contains("(e.target_id = 7)"), "{sql}");
     }
+    #[test]
+    fn text_indexed_equality_also_matches_the_lowercase_index_expression() {
+        let sql = compile_gql_sql("MATCH (d:Definition) WHERE d.name = 'compile' RETURN d.name");
+
+        assert!(sql.contains("(d.name = 'compile')"), "{sql}");
+        assert!(sql.contains("(lower(d.name) = lower('compile'))"), "{sql}");
+    }
+
+    #[test]
+    fn equality_without_text_index_or_with_a_sort_key_filter_stays_plain() {
+        for query in [
+            "MATCH (d:Definition) WHERE d.definition_type = 'Function' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name",
+        ] {
+            let sql = compile_gql_sql(query);
+            assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
+        }
+    }
 }
