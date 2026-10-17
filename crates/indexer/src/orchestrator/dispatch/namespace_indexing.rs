@@ -43,35 +43,34 @@ impl NamespaceIndexingDispatch {
                 gl_root_namespace_id = namespace.namespace_id,
                 traversal_path = traversal_path.as_str(),
             );
-            if !traversal_path.is_valid() {
-                span.in_scope(|| warn!("skipping namespace with invalid traversal_path"));
-                continue;
-            }
-
-            let request = NamespaceIndexingRequest {
-                namespace: namespace.namespace_id,
-                traversal_path: traversal_path.clone(),
-                watermark,
-                dispatch_id: Uuid::new_v4(),
-                campaign_id: campaign_id.clone(),
-                targets: namespace.targets.clone(),
-            };
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(TaskError::new)?;
-
-            match self
-                .nats
-                .publish(&subscription, &envelope)
-                .instrument(span.clone())
-                .await
-            {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                    span.in_scope(|| debug!("dispatched namespace indexing request"));
+            let dispatch = async {
+                if !traversal_path.is_valid() {
+                    warn!("skipping namespace with invalid traversal_path");
+                    return Ok(());
                 }
-                Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
-                Err(error) => return Err(TaskError::new(error)),
-            }
+
+                let request = NamespaceIndexingRequest {
+                    namespace: namespace.namespace_id,
+                    traversal_path: traversal_path.clone(),
+                    watermark,
+                    dispatch_id: Uuid::new_v4(),
+                    campaign_id: campaign_id.clone(),
+                    targets: namespace.targets.clone(),
+                };
+                let subscription = request.publish_subscription();
+                let envelope = Envelope::new(&request).map_err(TaskError::new)?;
+
+                match self.nats.publish(&subscription, &envelope).await {
+                    Ok(()) => {
+                        outcome.dispatched += 1;
+                        debug!("dispatched namespace indexing request");
+                    }
+                    Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
+                    Err(error) => return Err(TaskError::new(error)),
+                }
+                Ok::<(), TaskError>(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         Ok(outcome)

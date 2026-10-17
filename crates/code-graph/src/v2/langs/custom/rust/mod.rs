@@ -384,7 +384,6 @@ fn parse_rust_files_with_workspaces(
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     let mut claimed = vec![false; files.len()];
-    let span = tracing::Span::current();
 
     for workspace_id in 0..plan.len() {
         if cancel.is_cancelled() {
@@ -433,7 +432,6 @@ fn parse_rust_files_with_workspaces(
         let workspace_results = workspace_files
             .par_iter()
             .map_with(workspace.clone(), |workspace, file| {
-                let _entered = span.enter();
                 if cancel.is_cancelled() {
                     return None;
                 }
@@ -481,7 +479,6 @@ fn parse_rust_files_with_workspaces(
     let standalone_results = standalone
         .par_iter()
         .filter_map(|file_path| {
-            let _entered = span.enter();
             if cancel.is_cancelled() {
                 return None;
             }
@@ -525,11 +522,9 @@ fn parse_rust_files_standalone(
     cancel: &CancellationToken,
     progress: &dyn ProgressObserver,
 ) -> RustParseOutput {
-    let span = tracing::Span::current();
     let results = files
         .par_iter()
         .filter_map(|file_path| {
-            let _entered = span.enter();
             if cancel.is_cancelled() {
                 return None;
             }

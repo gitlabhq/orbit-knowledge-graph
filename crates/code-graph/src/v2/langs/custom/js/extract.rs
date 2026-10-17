@@ -66,11 +66,9 @@ pub fn analyze_files(
     let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
     // an OXC invariant takes down that file's analysis, not the pipeline.
-    let span = tracing::Span::current();
     let results: Vec<_> = files
         .par_iter()
         .filter_map(|relative_path| {
-            let _entered = span.enter();
             if cancel.is_cancelled() || root_gone.load(std::sync::atomic::Ordering::Relaxed) {
                 return None;
             }

@@ -92,19 +92,13 @@ impl NamespaceDeletionScheduler {
                 gl_root_namespace_id = root.top_level_namespace_id(),
                 traversal_path = root.as_str(),
             );
-            if !root.is_valid() {
-                span.in_scope(|| {
-                    warn!("skipping reconcile for enabled namespace with invalid traversal_path")
-                });
-                continue;
-            }
+            let reconcile = async {
+                if !root.is_valid() {
+                    warn!("skipping reconcile for enabled namespace with invalid traversal_path");
+                    return;
+                }
 
-            let outcomes = self
-                .store
-                .reconcile_moved_entities(root)
-                .instrument(span.clone())
-                .await;
-            span.in_scope(|| {
+                let outcomes = self.store.reconcile_moved_entities(root).await;
                 for outcome in &outcomes {
                     if let Some(error) = &outcome.error {
                         warn!(
@@ -114,8 +108,9 @@ impl NamespaceDeletionScheduler {
                         );
                     }
                 }
-            });
-            reconciled += 1;
+                reconciled += 1;
+            };
+            reconcile.instrument(span).await;
         }
 
         info!(
@@ -197,42 +192,41 @@ impl NamespaceDeletionScheduler {
         let mut skipped = 0u64;
 
         for entry in &entries {
-            let request = NamespaceDeletionRequest {
-                namespace_id: entry.namespace_id,
-                traversal_path: entry.traversal_path.clone(),
-                dispatch_id,
-            };
-
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(self.name(), "publish");
-                TaskError::new(error)
-            })?;
-
             let span = info_span!(
                 "dispatch_namespace_deletion",
-                gl_namespace_id = entry.namespace_id,
+                gl_root_namespace_id = entry.namespace_id,
                 traversal_path = entry.traversal_path.as_str(),
             );
-            let published = self
-                .nats
-                .publish(&subscription, &envelope)
-                .instrument(span.clone())
-                .await;
-            match published {
-                Ok(()) => {
-                    dispatched += 1;
-                    span.in_scope(|| debug!("dispatched namespace deletion request"));
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    skipped += 1;
-                    span.in_scope(|| debug!("skipped, deletion request already in-flight"));
-                }
-                Err(error) => {
+            let dispatch = async {
+                let request = NamespaceDeletionRequest {
+                    namespace_id: entry.namespace_id,
+                    traversal_path: entry.traversal_path.clone(),
+                    dispatch_id,
+                };
+
+                let subscription = request.publish_subscription();
+                let envelope = Envelope::new(&request).map_err(|error| {
                     self.metrics.record_error(self.name(), "publish");
-                    return Err(TaskError::new(error));
+                    TaskError::new(error)
+                })?;
+
+                match self.nats.publish(&subscription, &envelope).await {
+                    Ok(()) => {
+                        dispatched += 1;
+                        debug!("dispatched namespace deletion request");
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        skipped += 1;
+                        debug!("skipped, deletion request already in-flight");
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(self.name(), "publish");
+                        return Err(TaskError::new(error));
+                    }
                 }
-            }
+                Ok(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         self.metrics

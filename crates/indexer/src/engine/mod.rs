@@ -218,8 +218,8 @@ impl Engine {
                         .is_some_and(|policy| policy.should_redeliver(message.envelope.attempt));
                     let span = tracing::info_span!(
                         "process_message",
-                        correlation_id = &*message.envelope.id.0,
-                        nats_subscription = topic_name.as_str(),
+                        correlation_id = %message.envelope.id.0,
+                        topic = %topic_name,
                         attempt = message.envelope.attempt,
                         gl_root_namespace_id = tracing::field::Empty,
                         traversal_path = tracing::field::Empty,

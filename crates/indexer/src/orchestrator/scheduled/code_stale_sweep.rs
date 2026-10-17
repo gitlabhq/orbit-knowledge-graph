@@ -83,13 +83,13 @@ impl CodeStaleSweep {
                 gl_root_namespace_id = path.top_level_namespace_id(),
                 traversal_path = path.as_str(),
             );
-            let result = self.sweep_namespace(path).instrument(span.clone()).await;
-            if let Err(error) = result {
-                failed += 1;
-                span.in_scope(
-                    || warn!(%error, "post-backfill stale sweep failed, retrying on a later tick"),
-                );
-            }
+            let sweep = async {
+                if let Err(error) = self.sweep_namespace(path).await {
+                    failed += 1;
+                    warn!(%error, "post-backfill stale sweep failed, retrying on a later tick");
+                }
+            };
+            sweep.instrument(span).await;
         }
         if pending.len() > self.sweeps_per_tick {
             info!(

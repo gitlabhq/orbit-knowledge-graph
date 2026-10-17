@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use tracing::{Instrument, error, info, info_span, warn};
+use tracing::{error, info, warn};
 
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;
@@ -51,26 +51,7 @@ impl Handler for NamespaceDeletionHandler {
             })?;
         let message_span = tracing::Span::current();
         message_span.record("gl_root_namespace_id", payload.namespace_id);
-        if payload.traversal_path.is_valid() {
-            message_span.record("traversal_path", payload.traversal_path.as_str());
-        }
 
-        let dispatch_id = payload.dispatch_id.to_string();
-        let span = info_span!(
-            "namespace_deletion",
-            gl_root_namespace_id = payload.namespace_id,
-            traversal_path = tracing::field::Empty,
-            dispatch_id = dispatch_id.as_str(),
-        );
-        self.delete_namespace(payload).instrument(span).await
-    }
-}
-
-impl NamespaceDeletionHandler {
-    async fn delete_namespace(
-        &self,
-        payload: NamespaceDeletionRequest,
-    ) -> Result<(), HandlerError> {
         if !payload.traversal_path.is_valid() {
             error!(
                 traversal_path = %payload.traversal_path,
@@ -81,7 +62,7 @@ impl NamespaceDeletionHandler {
                 payload.traversal_path
             )));
         }
-        tracing::Span::current().record("traversal_path", payload.traversal_path.as_str());
+        message_span.record("traversal_path", payload.traversal_path.as_str());
 
         let still_deleted = self
             .store
@@ -101,7 +82,7 @@ impl NamespaceDeletionHandler {
         }
 
         let started_at = Instant::now();
-        info!("starting namespace deletion");
+        info!(dispatch_id = %payload.dispatch_id, "starting namespace deletion");
 
         let outcomes = self
             .store

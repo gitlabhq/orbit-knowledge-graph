@@ -602,7 +602,7 @@ impl CodeIndexer {
                 let batch_bytes = match orbit_arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
-                        tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
+                        span.in_scope(|| tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes"));
                         0
                     }
                 };
