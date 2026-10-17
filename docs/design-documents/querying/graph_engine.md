@@ -189,9 +189,7 @@ policy provenance.
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
-The planner emits ClickHouse SQL similar to these patterns. The
-[planner optimization coverage](planner_optimization_coverage.md) inventory
-maps representative GQL queries to complete pseudocode shapes.
+The planner emits ClickHouse SQL similar to these patterns.
 
 - One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
 - Multi-selector traversals: stored edge relations compose through shared node bindings. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.

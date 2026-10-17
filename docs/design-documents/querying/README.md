@@ -11,8 +11,6 @@ The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agent
 ### Graph Query Engine
 
 View the [Graph Query Engine](graph_engine.md) design document for more details on the graph query engine.
-The temporary [planner optimization coverage](planner_optimization_coverage.md)
-inventory maps query classes to current and planned physical SQL shapes.
 
 ### Intermediate Query Language
 
