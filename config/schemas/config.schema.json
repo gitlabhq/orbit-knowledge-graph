@@ -1334,6 +1334,11 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "result_chunk_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
         }
       },
       "additionalProperties": false,
@@ -1347,7 +1352,8 @@
         "max_connection_age_secs",
         "max_connection_age_grace_secs",
         "stream_timeout_secs",
-        "max_header_list_size_bytes"
+        "max_header_list_size_bytes",
+        "result_chunk_bytes"
       ]
     },
     "SchemaConfig": {

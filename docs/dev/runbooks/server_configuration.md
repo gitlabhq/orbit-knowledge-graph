@@ -464,6 +464,7 @@ Enabling `tls.internal` changes what clients must send:
 | `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
+| `grpc.result_chunk_bytes` | `524288` (512 KiB) | Largest `ResultChunk` the server sends when a client sets `chunked_result`. Chunks split on UTF-8 boundaries, so a chunk can be up to 3 bytes larger. |
 
 ### Query settings
 

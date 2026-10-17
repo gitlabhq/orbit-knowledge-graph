@@ -7,7 +7,7 @@ use std::time::Duration;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
-use orbit_server_config::AnalyticsConfig;
+use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
@@ -161,6 +161,7 @@ pub struct OrbitServiceImpl {
     indexing_status: IndexingStatusService,
     item_counts: ItemCountService,
     quota: Arc<QuotaService>,
+    result_chunk_bytes: usize,
 }
 
 impl OrbitServiceImpl {
@@ -169,7 +170,7 @@ impl OrbitServiceImpl {
         active_schema: Arc<ActiveSchema>,
         client: ArrowClickHouseClient,
         cluster_health: Arc<ClusterHealthChecker>,
-        stream_timeout_secs: u64,
+        grpc: &GrpcConfig,
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         let client = Arc::new(client);
@@ -177,7 +178,7 @@ impl OrbitServiceImpl {
         let pipeline = QueryPipelineService::new(
             Arc::clone(&client),
             analytics_config,
-            Duration::from_secs(stream_timeout_secs),
+            Duration::from_secs(grpc.stream_timeout_secs),
         );
         let graph_status = GraphStatusService::new(Arc::clone(&client));
         let indexing_status = IndexingStatusService::new(Arc::clone(&client));
@@ -192,6 +193,7 @@ impl OrbitServiceImpl {
             indexing_status,
             item_counts,
             quota: Arc::new(QuotaService::disabled()),
+            result_chunk_bytes: grpc.result_chunk_bytes,
         }
     }
 
@@ -406,6 +408,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let result_chunk_bytes = self.result_chunk_bytes;
         let schema = self.active_schema.snapshot()?;
         let span = tracing::Span::current();
 
@@ -466,7 +469,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 };
                 let result = pipeline
                     .run_query(&schema, ctx, query, &tx, stream, |output| {
-                        render(output).map(|result| result_messages(result, req.chunked_result))
+                        render(output).map(|result| {
+                            result_messages(
+                                result,
+                                req.chunked_result.then_some(result_chunk_bytes),
+                            )
+                        })
                     })
                     .await;
 
@@ -995,7 +1003,6 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     mod billing;
-    mod chunked_result;
     mod commands;
     mod query_errors;
     mod quota;
@@ -1027,6 +1034,10 @@ mod tests {
         test_config().build_client("graph")
     }
 
+    fn grpc_defaults() -> GrpcConfig {
+        orbit_server_config::AppConfig::embedded_defaults().grpc
+    }
+
     fn test_service() -> OrbitServiceImpl {
         test_service_on(&test_config())
     }
@@ -1037,7 +1048,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             clickhouse.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         )
     }
@@ -1168,7 +1179,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1201,7 +1212,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1240,7 +1251,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1267,7 +1278,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1288,7 +1299,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1320,7 +1331,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1358,7 +1369,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1389,7 +1400,7 @@ mod tests {
             ActiveSchema::pinned(test_ontology()),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 
@@ -1528,7 +1539,7 @@ mod tests {
             ActiveSchema::pinned(Arc::clone(&ontology)),
             test_client(),
             ClusterHealthChecker::default().into_arc(),
-            60,
+            &grpc_defaults(),
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
 

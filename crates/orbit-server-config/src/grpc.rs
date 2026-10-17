@@ -19,6 +19,7 @@ pub struct GrpcConfig {
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
     pub max_header_list_size_bytes: u32,
+    pub result_chunk_bytes: usize,
 }
 
 #[cfg(test)]

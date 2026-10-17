@@ -14,8 +14,6 @@ use query_engine::pipeline::{ClickHouseLimit, PipelineError};
 
 use crate::pipeline::metrics::failure_reason;
 
-const RESULT_CHUNK_BYTES: usize = 512 * 1024;
-
 pub(super) async fn send_query_result(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     messages: Vec<Content>,
@@ -36,15 +34,15 @@ pub(super) async fn send_query_result(
     Ok(())
 }
 
-pub fn result_messages(mut result: ExecuteQueryResult, chunked: bool) -> Vec<Content> {
-    if !chunked {
+pub fn result_messages(mut result: ExecuteQueryResult, chunk_bytes: Option<usize>) -> Vec<Content> {
+    let Some(chunk_bytes) = chunk_bytes else {
         return vec![Content::Result(result)];
-    }
+    };
     let text = match result.content.take() {
         Some(ResultJson(text) | FormattedText(text)) => text,
         None => String::new(),
     };
-    text_chunks(&text)
+    text_chunks(&text, chunk_bytes)
         .map(|data| {
             Content::ResultChunk(ResultChunk {
                 data: data.to_owned(),
@@ -54,10 +52,10 @@ pub fn result_messages(mut result: ExecuteQueryResult, chunked: bool) -> Vec<Con
         .collect()
 }
 
-fn text_chunks(text: &str) -> impl Iterator<Item = &str> {
+fn text_chunks(text: &str, max_bytes: usize) -> impl Iterator<Item = &str> {
     let mut rest = text;
     std::iter::from_fn(move || {
-        let (chunk, tail) = rest.split_at(rest.ceil_char_boundary(RESULT_CHUNK_BYTES));
+        let (chunk, tail) = rest.split_at(rest.ceil_char_boundary(max_bytes));
         rest = tail;
         (!chunk.is_empty()).then_some(chunk)
     })
@@ -221,6 +219,8 @@ mod tests {
     use super::*;
     use crate::proto::QueryMetadata;
 
+    const CHUNK_BYTES: usize = 64;
+
     fn chunked(text: &str) -> (Vec<String>, ExecuteQueryResult) {
         let result = ExecuteQueryResult {
             content: Some(FormattedText(text.to_owned())),
@@ -229,7 +229,7 @@ mod tests {
                 ..Default::default()
             }),
         };
-        let mut messages = result_messages(result, true);
+        let mut messages = result_messages(result, Some(CHUNK_BYTES));
         let Some(Content::Result(last)) = messages.pop() else {
             panic!("expected a final result message");
         };
@@ -245,12 +245,12 @@ mod tests {
 
     #[test]
     fn result_messages_split_text_on_char_boundaries_and_keep_metadata() {
-        let text = "aé€😀".repeat(RESULT_CHUNK_BYTES / 4);
+        let text = "aé€😀".repeat(CHUNK_BYTES / 4);
         let (chunks, last) = chunked(&text);
 
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks.concat(), text);
-        assert!(chunks.iter().all(|c| c.len() <= RESULT_CHUNK_BYTES + 3));
+        assert!(chunks.iter().all(|c| c.len() <= CHUNK_BYTES + 3));
         assert_eq!(last.content, None);
         assert_eq!(last.metadata.map(|m| m.row_count), Some(7));
         assert!(chunked("").0.is_empty());
@@ -258,7 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_query_result_fails_only_when_the_client_left_before_the_first_message() {
-        let messages = || result_messages(ExecuteQueryResult::default(), false);
+        let messages = || result_messages(ExecuteQueryResult::default(), None);
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
         assert!(send_query_result(&tx, messages()).await.is_err());
