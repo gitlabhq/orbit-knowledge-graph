@@ -41,7 +41,7 @@ pub struct NamespaceFreshness {
     graph: ArrowClickHouseClient,
     datalake: ArrowClickHouseClient,
     catalog: OntologyCatalog,
-    scan: TimeDelta,
+    scan_window: TimeDelta,
     lag: Histogram<f64>,
     config: NamespaceFreshnessConfig,
 }
@@ -72,7 +72,7 @@ impl NamespaceFreshness {
             graph,
             datalake,
             catalog,
-            scan: sweep_interval + SWEEP_MARGIN,
+            scan_window: sweep_interval + SWEEP_MARGIN,
             lag: sdlc::FRESHNESS_LAG.build_histogram_f64(&orbit_observability::meter()),
             config,
         }
@@ -159,17 +159,21 @@ impl ScheduledTask for NamespaceFreshness {
             .map_err(TaskError::new)?
             .load_ontology()
             .map_err(TaskError::new)?;
-        let checkpoints: HashMap<String, Checkpoint> =
-            ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version)
-                .load_by_prefix(NAMESPACE_KEY_PREFIX)
-                .await
-                .map_err(TaskError::new)?
-                .into_iter()
-                .collect();
-        let roots = self.enabled_roots().await?;
+        let checkpoint_store =
+            ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version);
         let now = Utc::now();
-        let scanned_from = now - self.scan;
-        let changes = self.changes(&ontology, scanned_from, now).await?;
+        let scanned_from = now - self.scan_window;
+        let (checkpoints, roots, changes) = tokio::try_join!(
+            async {
+                checkpoint_store
+                    .load_by_prefix(NAMESPACE_KEY_PREFIX)
+                    .await
+                    .map_err(TaskError::new)
+            },
+            self.enabled_roots(),
+            self.changes(&ontology, scanned_from, now),
+        )?;
+        let checkpoints: HashMap<String, Checkpoint> = checkpoints.into_iter().collect();
 
         let plans = ontology
             .pipeline_descriptors()
@@ -209,10 +213,10 @@ fn lag(
     }
     changes
         .iter()
-        .find(|change| change.latest > synced)
-        .map_or(TimeDelta::zero(), |change| {
-            now - change.earliest.max(synced)
-        })
+        .filter(|change| change.latest > synced)
+        .map(|change| now - change.earliest.max(synced))
+        .max()
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
