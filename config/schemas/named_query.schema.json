@@ -50,6 +50,16 @@
       },
       "description": "Client values validated against JSON Schema. JSON uses {$param: name} for whole values and a \"$param:name\" object key for string parameters. GQL uses param(\"name\") for encoded literals, identifier(\"name\") for validated identifiers, and integer(\"name\") for decimal Int64 IDs."
     },
+    "settings": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      },
+      "description": "ClickHouse settings sent with the base query, as is. Settings in the compiled SQL take precedence."
+    },
     "query": {
       "type": "object",
       "required": ["json", "gql"],
