@@ -137,7 +137,14 @@ impl Pipeline {
         let durability = RunDurability::for_mode(window.indexing_mode());
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
-        if !cursor.is_first_page() {
+        if !cursor.is_first_page() && cursor.values().len() != plan.sort_key.len() {
+            warn!(
+                saved = cursor.values().len(),
+                expected = plan.sort_key.len(),
+                "saved cursor does not match the plan sort key, restarting from the first page"
+            );
+            cursor = Cursor::default();
+        } else if !cursor.is_first_page() {
             info!("resuming from saved cursor");
         }
 

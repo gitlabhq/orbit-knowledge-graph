@@ -162,6 +162,11 @@ The [feature flag](#feature-flag) governs new preauthorizations.
 
 ### Capacity
 
+A NATS KV lease also caps archive downloads per Gitaly storage across all pods
+(`archive_storage_budget`, see [code indexing](../indexing/code_indexing.md)).
+The figure below is the fleet bound only when the budgets are 0 (off) or larger
+than `fetch_concurrency × pods`.
+
 `fetch_concurrency × indexer pods` is the upper bound on active archive proxy
 connections, independent of repository count. Per indexer pod, archive fetches
 are bounded by

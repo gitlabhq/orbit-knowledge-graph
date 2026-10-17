@@ -1,6 +1,7 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use clickhouse_client::ClickHouseConfigurationExt;
+use integration_testkit::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -30,8 +31,6 @@ const STREAM: &str = "test_stream";
 const SUBJECT: &str = "test.events";
 const TABLE: &str = "processed_events";
 
-const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "26.2";
 const USERNAME: &str = "default";
 const PASSWORD: &str = "testpass";
 const DATABASE: &str = "test";

@@ -1,3 +1,64 @@
+## [0.146.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.145.0...v0.146.0) (2026-10-16)
+
+### Features
+
+* **indexer:** lease archive downloads per Gitaly storage across pods ([e1a4eca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1a4eca3822701c3ba3b78364274f3cc6d353b4e)) by Dmitry Gruzd
+* **lint:** block commits that add or change comments until acknowledged ([bddd554](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bddd5542f444919528eec73f57744ab08b468015)) by Dmitry Gruzd
+
+### Fixes
+
+* **cli:** orbit setup skill picker fetch and glab wrapper handling ([519fc55](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/519fc5541b0df46d59688ef8da8c95ce2ae1f092)) by Dmitry Gruzd
+* **compiler:** restrict aggregate functions to scalar properties ([c923e1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c923e1f413382f4a0042a8c67c9373bb043c5f85)) by Aaron Algutifan
+* **indexer:** match the storage lease to the new lock acquire result ([9d8ffa7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9d8ffa774d562c2ee2acaf3517cd6258f11802d3)) by Dmitry Gruzd
+
+### Performance
+
+* **query:** keep the fused neighbors scan for multi-id centers ([acd3e9c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/acd3e9c405634ce0c54e8369134117f083cb49a3)) by Jean-Gabriel Doyon
+* **query:** pin node ids written as WHERE filters ([d52e8ff](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d52e8ff47c3c3a660cca556377b3597ab9a5c114)) by Jean-Gabriel Doyon
+* **query:** use text indexes for equality and turn statistics off ([b48be6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b48be6ec99f0aed54344d4c72b21d8a6c8e0b58d)) by Michael Angelo Rivera
+
+### Other
+
+* **ci:** run ClickHouse tests on 26.6 to match production ([d4ddd69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d4ddd6933a9b3f9e692cbf4b220576dd501bfeec)) by Jean-Gabriel Doyon
+* **deps:** bump gitlab-xtasks to v1.6.1 ([86d9047](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/86d90477dbd6085812b4d2af249764d2a2fb2e97)) by Dmitry Gruzd
+* require ClickHouse 26.4 for Orbit ([e2b832f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e2b832f5e0df56afe43a489e7ce6643a3ba061cb)) by Michael Angelo Rivera
+
+## [0.145.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.144.0...v0.145.0) (2026-10-16)
+
+### Features
+
+* **dev:** declare Caproni edit-mode reloaders for Orbit ([60698dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/60698ddedb62a341bd7587952c3e4d6eb01f8a29)) by Elliot Forbes
+* **dev:** derive the native dev environment from the Caproni cluster ([befa5ad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/befa5ad45064caa43d73173fc8c174cdcea4ee84)) by Elliot Forbes
+* **indexer:** route edge variants by ontology ([2a4ec27](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a4ec27489b49e6519793a5e10b141d148e721f5)) by Michael Usachenko
+* **observability:** add query latency buckets and successful-query latency panels ([02eee65](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02eee65653b85171fc932c1868e2075d357b4e4d)) by Bohdan Parkhomchuk
+* **ontology:** add AgentSession node and CREATED_MR edge ([33f27bb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/33f27bb418b42e6c7f94f952ed75bbc636dbbdc6)) by Dmitry Gruzd
+
+### Fixes
+
+* **code-graph-incremental:** link calls in loop bodies and after C# receivers ([00db85f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00db85fbbd825c2f01987515a124907d5802e451)) by Michael Angelo Rivera
+* **code-graph-incremental:** remove the remaining quadratic blowups ([3e0b7dc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e0b7dc7e92e2a303fb65e2e82fb66766a48c757)) by Michael Angelo Rivera
+* **code-graph-incremental:** restore wrong or missing graph rows from the linking changes ([045848d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/045848deb897bff661c74c0c14825c9c885f22df)) by Michael Angelo Rivera
+* **indexer:** close the indexer gaps found by the code-graph crash work ([427cc89](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/427cc896dee68389819f677e62f4151de2f7807c)) by Michael Angelo Rivera
+* **indexer:** page SDLC cursor on DateTime64 and order AgentSession by its sort key ([ecde0b5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ecde0b5ce0f6e67de2292c76e0c72d98037d9fa7)) by Dmitry Gruzd
+* **indexer:** wait for the natural flush and defer a delivery that finds the project lock held ([7fd3c7d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7fd3c7d5d686a8be984d8b56fb83ed180210aee7)) by Michael Angelo Rivera
+
+### Performance
+
+* **code-graph-incremental:** keep deeply nested code linear and bound the file-limit dedupe ([162d0c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/162d0c539f4934394465b54aec4e2582187af974)) by Michael Angelo Rivera
+* **compiler:** filter each neighbors arm by its own relationship kinds ([7c238d6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c238d6208af4c67fa4bff176a2f6e178999507b)) by Jean-Gabriel Doyon
+* **schema:** drop auto column statistics from graph tables ([33ab2e0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/33ab2e0e5b45bc274114b79841c633cf1708326b)) by Jean-Gabriel Doyon
+
+### Other
+
+* **codeowners:** let the Orbit team approve docs lint config ([0535fb4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0535fb4b21ea9cebce2bbbe85955abdce2ad2c5a)) by michaelangeloio
+* **docs:** isolate advisory upstream Hugo build ([8e0fb81](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8e0fb81480fa63437ebff23e47352bac4bcac778)) by Michael Usachenko
+* move local development to Caproni and remove GDK ([a311502](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a31150201a669db9416ca139e7bbf5b8b52a12d8)) by Elliot Forbes
+* note chart 3.0.0 minimum for 0.143.0 ([f3c6c88](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f3c6c880574cbdc82548b5d7a848a835d03d3441)) by Bohdan Parkhomchuk
+* **query:** cover all production edge routes ([0ee7667](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0ee766713a4215a38b6610d0ed017955027c8d84)) by Michael Usachenko
+* **query:** harden production route fixtures ([a17aef2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a17aef236569304b17698c6b363808eace54bcb9)) by michaelusa
+* **query:** harden YAML scenarios and remove legacy Rust duplicates ([013ffdc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/013ffdcea0e5eacfb0084158c31d89a6c52e39f7)) by Michael Usachenko
+* run every code-graph-incremental integration test target in the unit-test job ([65e9001](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/65e9001b91c235045b9ee17030df021dd44b6587)) by Michael Angelo Rivera
+
 ## [0.144.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.143.0...v0.144.0) (2026-10-15)
 
 ### Features

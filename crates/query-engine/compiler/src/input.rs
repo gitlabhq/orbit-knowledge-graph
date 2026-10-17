@@ -98,6 +98,20 @@ pub struct Input {
 }
 
 impl Input {
+    pub(crate) fn aggregation_row_nodes(
+        &self,
+        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    ) -> std::collections::HashSet<&str> {
+        let groups = &self.aggregation.group_by;
+        let text_groups = property_groups(groups)
+            .filter(|(node, property)| {
+                self.entity_of(node)
+                    .is_some_and(|entity| model.property_is_free_text(entity, property))
+            })
+            .map(|(node, _)| node);
+        node_group_ids(groups).chain(text_groups).collect()
+    }
+
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {

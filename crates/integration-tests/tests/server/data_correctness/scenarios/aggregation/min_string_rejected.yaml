@@ -1,4 +1,4 @@
-description: Lexicographic min on string column (username)
+description: MIN on a string column rejects
 
 config:
   security:
@@ -21,9 +21,4 @@ query:
     MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, min(u.username) AS first_username LIMIT 10
 
 expect:
-  groups:
-    g:
-      rows:
-        - { entity: Group, id: 100, values: { first_username: "alice" } }
-        - { entity: Group, id: 101, values: { first_username: "charlie" } }
-        - { entity: Group, id: 102, values: { first_username: "alice" } }
+  compile_error: aggregates are restricted to scalars

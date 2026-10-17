@@ -1249,37 +1249,6 @@ async fn aggregation_min_max(ctx: &TestContext) {
     assert_eq!(priv_group["max_id"].as_i64().unwrap(), 2);
 }
 
-async fn aggregation_min_string(ctx: &TestContext) {
-    let value = run_pipeline(
-        ctx,
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [
-                {"min": "u.username", "as": "min_username"}
-            ],
-            "limit": 10
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    let nodes = aggregation_nodes(&value, "g");
-    assert!(nodes.iter().all(|n| n["min_username"].is_string()));
-
-    let public_group = find_node(&nodes, "Group", 100);
-    assert_eq!(public_group["min_username"].as_str().unwrap(), "alice");
-    let private_group = find_node(&nodes, "Group", 101);
-    assert_eq!(private_group["min_username"].as_str().unwrap(), "alice");
-    let internal_group = find_node(&nodes, "Group", 102);
-    assert_eq!(internal_group["min_username"].as_str().unwrap(), "charlie");
-}
-
 async fn aggregation_multiple_functions(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
@@ -2559,7 +2528,6 @@ async fn graph_formatter_e2e() {
         aggregation_sum,
         aggregation_avg,
         aggregation_min_max,
-        aggregation_min_string,
         aggregation_multiple_functions,
         aggregation_redaction,
         ungrouped_count_emits_aggregates,

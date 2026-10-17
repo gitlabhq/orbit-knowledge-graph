@@ -99,7 +99,7 @@ pub struct QueryConfig {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompilerDerivedSettings {
     /// ClickHouse `enable_materialized_cte`. Required when any CTE uses
-    /// the `MATERIALIZED` keyword (ClickHouse 26.2+).
+    /// the `MATERIALIZED` keyword (ClickHouse 26.4+).
     pub enable_materialized_cte: bool,
     /// ClickHouse `query_plan_optimize_join_order_algorithm`. When set,
     /// enables dynamic-programming join reordering for queries with 3+

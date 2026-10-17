@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::Utc;
 use code_graph::v2::CancellationToken;
-use gitlab_client::GitlabClientError;
+use gitlab_client::{GitlabClientError, ProjectInfo};
 use tracing::{debug, info, warn};
 
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
@@ -155,21 +155,26 @@ impl Handler for CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    /// Returns `Ok(Some(branch))` when the branch is known, `Ok(None)` when
-    /// the project is gone from Rails (terminal: the dispatcher has a stale
-    /// view; acking avoids DLQ churn), and `Err` for transient failures.
+    /// Returns `Ok(Some((branch, project_info)))` when the branch is known,
+    /// `Ok(None)` when the project is gone from Rails (terminal: the dispatcher
+    /// has a stale view; acking avoids DLQ churn), and `Err` for transient
+    /// failures. `project_info` is `Some` when the lookup ran, so the caller
+    /// reuses it instead of asking again.
     async fn resolve_branch(
         &self,
         request: &CodeIndexingTaskRequest,
-    ) -> Result<Option<String>, HandlerError> {
+    ) -> Result<Option<(String, Option<ProjectInfo>)>, HandlerError> {
         match &request.branch {
-            Some(branch) => Ok(Some(branch.clone())),
+            Some(branch) => Ok(Some((branch.clone(), None))),
             None => match self
                 .repository_service
                 .project_info(request.project_id)
                 .await
             {
-                Ok(project_info) => Ok(Some(project_info.default_branch)),
+                Ok(project_info) => Ok(Some((
+                    project_info.default_branch.clone(),
+                    Some(project_info),
+                ))),
                 Err(RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(_))) => Ok(None),
                 Err(e) => Err(HandlerError::Processing(format!(
                     "failed to fetch project info: {e}"
@@ -186,7 +191,7 @@ impl CodeIndexingTaskHandler {
     ) -> Result<(), HandlerError> {
         let started_at = Utc::now();
 
-        let Some(branch) = self.resolve_branch(request).await? else {
+        let Some((branch, project_info)) = self.resolve_branch(request).await? else {
             warn!(
                 project_id = request.project_id,
                 task_id = request.task_id,
@@ -264,6 +269,7 @@ impl CodeIndexingTaskHandler {
                 request,
                 &branch,
                 checkpoint,
+                project_info,
                 attempt,
                 &mut observer,
             )
@@ -289,6 +295,16 @@ impl CodeIndexingTaskHandler {
         }
 
         result.map(|_| ())
+    }
+
+    async fn repository_storage(&self, project_id: i64) -> Option<String> {
+        match self.repository_service.project_info(project_id).await {
+            Ok(info) => info.repository_storage,
+            Err(error) => {
+                warn!(project_id, %error, "repository storage lookup failed; using the tenant-wide archive budget");
+                None
+            }
+        }
     }
 
     async fn refund_attempt(&self, checkpoint: &mut CodeCheckpoint) {
@@ -344,6 +360,7 @@ impl CodeIndexingTaskHandler {
         request: &CodeIndexingTaskRequest,
         branch: &str,
         mut checkpoint: CodeCheckpoint,
+        project_info: Option<ProjectInfo>,
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<&'static str, HandlerError> {
@@ -367,6 +384,10 @@ impl CodeIndexingTaskHandler {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to save start: {e}")))?;
 
+        let repository_storage = match project_info {
+            Some(info) => info.repository_storage,
+            None => self.repository_storage(project_id).await,
+        };
         let indexing_request = IndexingRequest {
             project_id,
             branch: branch.to_string(),
@@ -374,6 +395,7 @@ impl CodeIndexingTaskHandler {
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
             checkpoint: checkpoint.clone(),
+            repository_storage,
         };
         let cancel = CancellationToken::new();
         let indexing = self.pipeline.index_project(
@@ -411,7 +433,7 @@ impl CodeIndexingTaskHandler {
                 ))
             }
             Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
-                "no indexing lane within {}s",
+                "no indexing capacity within {}s",
                 waited.as_secs()
             ))),
             Err(IndexError::Overloaded(cause)) => {
@@ -471,7 +493,7 @@ mod tests {
     use crate::modules::code::repository::RepositoryResolver;
     use crate::modules::code::repository::cache::LocalRepositoryCache;
     use crate::modules::code::repository::service::test_utils::{
-        MockRepositoryService, build_tar_gz,
+        CountingRepositoryService, MockRepositoryService, build_tar_gz,
     };
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
@@ -491,6 +513,7 @@ mod tests {
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
         mock_repo: Arc<MockRepositoryService>,
+        counting_repo: Arc<CountingRepositoryService>,
         _cache_dir: tempfile::TempDir,
     }
 
@@ -504,7 +527,8 @@ mod tests {
             let metrics = test_metrics();
 
             let checkpoint_store: Arc<dyn CodeCheckpointStore> = mock_checkpoints.clone();
-            let repo_service: Arc<dyn RepositoryService> = mock_repo.clone();
+            let counting_repo = CountingRepositoryService::wrapping(mock_repo.clone());
+            let repo_service: Arc<dyn RepositoryService> = counting_repo.clone();
 
             let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let table_names = Arc::new(
@@ -551,6 +575,7 @@ mod tests {
                 mock_locks,
                 mock_checkpoints,
                 mock_repo,
+                counting_repo,
                 _cache_dir: temp_dir,
             }
         }
@@ -654,6 +679,98 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
         assert!(result.is_ok());
         assert!(!ctx.lock_exists(123, "main"));
+    }
+
+    #[tokio::test]
+    async fn a_backfill_task_looks_the_project_up_once() {
+        let ctx = TestContext::new();
+        let envelope = Envelope::new(&CodeIndexingTaskRequest {
+            task_id: 1,
+            project_id: 123,
+            branch: None,
+            commit_sha: None,
+            traversal_path: TraversalPath::new_unchecked("1/123/"),
+            dispatch_id: uuid::Uuid::new_v4(),
+            campaign_id: None,
+        })
+        .unwrap();
+
+        let _ = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_push_task_looks_the_project_up_once() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+
+        let envelope = TestContext::make_request(1, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_storage_from_project_info_picks_the_archive_slots() {
+        let config = crate::testkit::builders::test_pipeline_configuration();
+        for branch in [None, Some("main")] {
+            let ctx = TestContext::new();
+            ctx.mock_repo.set_repository_storage(123, "gitaly-1");
+            ctx.mock_repo.set_archive(
+                123,
+                build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+            );
+            for slot in 0..config.archive_storage_budget {
+                ctx.mock_locks
+                    .set_lock(&crate::modules::code::repository::slot_key(
+                        Some("gitaly-1"),
+                        slot,
+                    ));
+            }
+            let envelope = Envelope::new(&CodeIndexingTaskRequest {
+                task_id: 1,
+                project_id: 123,
+                branch: branch.map(str::to_string),
+                commit_sha: Some("abc123".to_string()),
+                traversal_path: TraversalPath::new_unchecked("1/123/"),
+                dispatch_id: uuid::Uuid::new_v4(),
+                campaign_id: None,
+            })
+            .unwrap();
+
+            let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+            assert!(
+                matches!(result, Err(HandlerError::Backpressure(_))),
+                "branch {branch:?}: got {result:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_storage_lookup_on_a_push_task_still_indexes() {
+        use crate::modules::code::repository::RepositoryServiceError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_project_info_error(
+            123,
+            RepositoryServiceError::Archive("info unavailable".to_string()),
+        );
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("abc123/src/main.rs", b"fn main() {}")]),
+        );
+
+        let envelope = TestContext::make_request(1, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 1);
     }
 
     #[tokio::test]
@@ -839,6 +956,85 @@ mod tests {
             checkpoint.attempts, 1,
             "a run that lost its lock must not write a refund over a new holder"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn losing_the_lock_while_queued_for_an_archive_slot_stops_the_wait() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
+        for slot in 0..config.archive_tenant_budget {
+            ctx.mock_locks
+                .set_lock(&crate::modules::code::repository::slot_key(None, slot));
+        }
+        ctx.mock_locks.steal_leases();
+
+        let started = tokio::time::Instant::now();
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(config.archive_lease_max_wait_secs)
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("the started attempt is saved");
+        assert_eq!(
+            checkpoint.attempts, 1,
+            "a run that lost its lock must not write a refund over a new holder"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_saturated_archive_budget_backs_off_quickly_without_counting_an_attempt() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
+        for slot in 0..config.archive_tenant_budget {
+            ctx.mock_locks
+                .set_lock(&crate::modules::code::repository::slot_key(None, slot));
+        }
+
+        let started = tokio::time::Instant::now();
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        assert!(
+            started.elapsed() <= Duration::from_secs(config.archive_lease_max_wait_secs + 1),
+            "the wait is bounded by the lease wait, not the project lock"
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("the refunded attempt is saved");
+        assert_eq!(checkpoint.attempts, 0);
     }
 
     #[tokio::test(start_paused = true)]

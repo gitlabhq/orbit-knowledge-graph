@@ -4715,6 +4715,126 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
+          "description": "Archive download and extraction time while holding a lease, per storage.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 230
+          },
+          "id": 93,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p50 {{storage}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p95 {{storage}}",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p99 {{storage}}",
+              "refId": "C"
+            }
+          ],
+          "title": "gkg_indexer_code_archive_duration_seconds — p50/p95/p99",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Archive download and extraction time while holding a lease, per storage.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 230
+          },
+          "id": 94,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (storage) (rate(gkg_indexer_code_archive_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{storage}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_code_archive_duration_seconds — observation rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
           "description": "Files the stream recorded as a graph node but did not load or parse (and, for the tar source, did not write to disk). Reasons: `excluded_extension` (basename matches the `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, minified bundles), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid UTF-8), `minified` / `line_too_long` (high average line length or a >64 KiB line), `non_regular_file` (a symlink — a node, never parsed), `lfs_pointer` (a Git LFS pointer: the archive is fetched with `include_lfs_blobs=false`, so the pointer text stands in for content Orbit never indexes).",
           "fieldConfig": {
             "defaults": {
@@ -4730,10 +4850,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 230
+            "x": 0,
+            "y": 238
           },
-          "id": 93,
+          "id": 95,
           "options": {
             "legend": {
               "calcs": [
@@ -4766,6 +4886,228 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
+          "description": "Archive downloads cancelled because the lease could not be renewed.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 238
+          },
+          "id": 96,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (storage) (rate(gkg_indexer_code_archive_lease_lost_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{storage}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_code_archive_lease_lost_total — rate/s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Archive lease slots held by this pod. Sum across pods for the storage's load against its budget.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 238
+          },
+          "id": 97,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (storage) (gkg_indexer_code_archive_lease_slots_in_use{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"})",
+              "legendFormat": "{{storage}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_code_archive_lease_slots_in_use",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 246
+          },
+          "id": 98,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p50 {{storage}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p95 {{storage}}",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p99 {{storage}}",
+              "refId": "C"
+            }
+          ],
+          "title": "gkg_indexer_code_archive_lease_wait_seconds — p50/p95/p99",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 246
+          },
+          "id": 99,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{storage}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_code_archive_lease_wait_seconds — observation rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
           "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
           "fieldConfig": {
             "defaults": {
@@ -4782,9 +5124,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 230
+            "y": 246
           },
-          "id": 94,
+          "id": 100,
           "options": {
             "legend": {
               "calcs": [
@@ -4833,9 +5175,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 238
+            "y": 254
           },
-          "id": 95,
+          "id": 101,
           "options": {
             "legend": {
               "calcs": [
@@ -4884,9 +5226,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 238
+            "y": 254
           },
-          "id": 96,
+          "id": 102,
           "options": {
             "legend": {
               "calcs": [
@@ -4953,9 +5295,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 238
+            "y": 254
           },
-          "id": 97,
+          "id": 103,
           "options": {
             "legend": {
               "calcs": [
@@ -5004,9 +5346,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 246
+            "y": 262
           },
-          "id": 98,
+          "id": 104,
           "options": {
             "legend": {
               "calcs": [
@@ -5055,9 +5397,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 246
+            "y": 262
           },
-          "id": 99,
+          "id": 105,
           "options": {
             "legend": {
               "calcs": [
@@ -5106,9 +5448,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 246
+            "y": 262
           },
-          "id": 100,
+          "id": 106,
           "options": {
             "legend": {
               "calcs": [
@@ -5157,9 +5499,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 254
+            "y": 270
           },
-          "id": 101,
+          "id": 107,
           "options": {
             "legend": {
               "calcs": [
@@ -5226,9 +5568,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 254
+            "y": 270
           },
-          "id": 102,
+          "id": 108,
           "options": {
             "legend": {
               "calcs": [
@@ -5277,9 +5619,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 254
+            "y": 270
           },
-          "id": 103,
+          "id": 109,
           "options": {
             "legend": {
               "calcs": [
@@ -5346,9 +5688,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 262
+            "y": 278
           },
-          "id": 104,
+          "id": 110,
           "options": {
             "legend": {
               "calcs": [
@@ -5397,9 +5739,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 262
+            "y": 278
           },
-          "id": 105,
+          "id": 111,
           "options": {
             "legend": {
               "calcs": [
@@ -5448,9 +5790,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 262
+            "y": 278
           },
-          "id": 106,
+          "id": 112,
           "options": {
             "legend": {
               "calcs": [
@@ -5499,9 +5841,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 270
+            "y": 286
           },
-          "id": 107,
+          "id": 113,
           "options": {
             "legend": {
               "calcs": [
@@ -5568,9 +5910,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 270
+            "y": 286
           },
-          "id": 108,
+          "id": 114,
           "options": {
             "legend": {
               "calcs": [
@@ -5619,9 +5961,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 270
+            "y": 286
           },
-          "id": 109,
+          "id": 115,
           "options": {
             "legend": {
               "calcs": [
@@ -5670,9 +6012,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 278
+            "y": 294
           },
-          "id": 110,
+          "id": 116,
           "options": {
             "legend": {
               "calcs": [
@@ -5739,9 +6081,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 278
+            "y": 294
           },
-          "id": 111,
+          "id": 117,
           "options": {
             "legend": {
               "calcs": [
@@ -5790,9 +6132,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 278
+            "y": 294
           },
-          "id": 112,
+          "id": 118,
           "options": {
             "legend": {
               "calcs": [
@@ -5841,9 +6183,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 286
+            "y": 302
           },
-          "id": 113,
+          "id": 119,
           "options": {
             "legend": {
               "calcs": [
@@ -5892,9 +6234,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 286
+            "y": 302
           },
-          "id": 114,
+          "id": 120,
           "options": {
             "legend": {
               "calcs": [
@@ -5961,9 +6303,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 286
+            "y": 302
           },
-          "id": 115,
+          "id": 121,
           "options": {
             "legend": {
               "calcs": [
@@ -6012,9 +6354,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 294
+            "y": 310
           },
-          "id": 116,
+          "id": 122,
           "options": {
             "legend": {
               "calcs": [
@@ -6063,9 +6405,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 294
+            "y": 310
           },
-          "id": 117,
+          "id": 123,
           "options": {
             "legend": {
               "calcs": [
@@ -6114,9 +6456,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 294
+            "y": 310
           },
-          "id": 118,
+          "id": 124,
           "options": {
             "legend": {
               "calcs": [
@@ -6183,9 +6525,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 302
+            "y": 318
           },
-          "id": 119,
+          "id": 125,
           "options": {
             "legend": {
               "calcs": [
@@ -6223,9 +6565,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 310
+        "y": 326
       },
-      "id": 120,
+      "id": 126,
       "panels": [
         {
           "datasource": {
@@ -6248,9 +6590,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 311
+            "y": 327
           },
-          "id": 121,
+          "id": 127,
           "options": {
             "legend": {
               "calcs": [
@@ -6299,9 +6641,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 311
+            "y": 327
           },
-          "id": 122,
+          "id": 128,
           "options": {
             "legend": {
               "calcs": [
@@ -6368,9 +6710,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 311
+            "y": 327
           },
-          "id": 123,
+          "id": 129,
           "options": {
             "legend": {
               "calcs": [
@@ -6419,9 +6761,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 319
+            "y": 335
           },
-          "id": 124,
+          "id": 130,
           "options": {
             "legend": {
               "calcs": [
@@ -6488,9 +6830,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 319
+            "y": 335
           },
-          "id": 125,
+          "id": 131,
           "options": {
             "legend": {
               "calcs": [
@@ -6539,9 +6881,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 319
+            "y": 335
           },
-          "id": 126,
+          "id": 132,
           "options": {
             "legend": {
               "calcs": [
@@ -6608,9 +6950,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 327
+            "y": 343
           },
-          "id": 127,
+          "id": 133,
           "options": {
             "legend": {
               "calcs": [
@@ -6659,9 +7001,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 327
+            "y": 343
           },
-          "id": 128,
+          "id": 134,
           "options": {
             "legend": {
               "calcs": [
@@ -6710,9 +7052,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 327
+            "y": 343
           },
-          "id": 129,
+          "id": 135,
           "options": {
             "legend": {
               "calcs": [
@@ -6761,9 +7103,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 335
+            "y": 351
           },
-          "id": 130,
+          "id": 136,
           "options": {
             "legend": {
               "calcs": [
@@ -6830,9 +7172,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 335
+            "y": 351
           },
-          "id": 131,
+          "id": 137,
           "options": {
             "legend": {
               "calcs": [
@@ -6881,9 +7223,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 335
+            "y": 351
           },
-          "id": 132,
+          "id": 138,
           "options": {
             "legend": {
               "calcs": [
@@ -6921,9 +7263,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 343
+        "y": 359
       },
-      "id": 133,
+      "id": 139,
       "panels": [
         {
           "datasource": {
@@ -6946,9 +7288,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 344
+            "y": 360
           },
-          "id": 134,
+          "id": 140,
           "options": {
             "legend": {
               "calcs": [
@@ -7021,9 +7363,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 344
+            "y": 360
           },
-          "id": 135,
+          "id": 141,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7080,9 +7422,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 352
+            "y": 368
           },
-          "id": 136,
+          "id": 142,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7133,9 +7475,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 352
+            "y": 368
           },
-          "id": 137,
+          "id": 143,
           "options": {
             "legend": {
               "calcs": [
@@ -7208,9 +7550,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 360
+            "y": 376
           },
-          "id": 138,
+          "id": 144,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7267,9 +7609,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 360
+            "y": 376
           },
-          "id": 139,
+          "id": 145,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7320,9 +7662,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 368
+            "y": 384
           },
-          "id": 140,
+          "id": 146,
           "options": {
             "legend": {
               "calcs": [
@@ -7389,9 +7731,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 368
+            "y": 384
           },
-          "id": 141,
+          "id": 147,
           "options": {
             "legend": {
               "calcs": [
@@ -7440,9 +7782,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 368
+            "y": 384
           },
-          "id": 142,
+          "id": 148,
           "options": {
             "legend": {
               "calcs": [
@@ -7480,9 +7822,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 376
+        "y": 392
       },
-      "id": 143,
+      "id": 149,
       "panels": [
         {
           "datasource": {
@@ -7505,9 +7847,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 377
+            "y": 393
           },
-          "id": 144,
+          "id": 150,
           "options": {
             "legend": {
               "calcs": [
@@ -7574,9 +7916,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 377
+            "y": 393
           },
-          "id": 145,
+          "id": 151,
           "options": {
             "legend": {
               "calcs": [
@@ -7625,9 +7967,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 377
+            "y": 393
           },
-          "id": 146,
+          "id": 152,
           "options": {
             "legend": {
               "calcs": [
@@ -7676,9 +8018,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 385
+            "y": 401
           },
-          "id": 147,
+          "id": 153,
           "options": {
             "legend": {
               "calcs": [
@@ -7745,9 +8087,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 385
+            "y": 401
           },
-          "id": 148,
+          "id": 154,
           "options": {
             "legend": {
               "calcs": [
@@ -7796,9 +8138,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 385
+            "y": 401
           },
-          "id": 149,
+          "id": 155,
           "options": {
             "legend": {
               "calcs": [
@@ -7847,9 +8189,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 393
+            "y": 409
           },
-          "id": 150,
+          "id": 156,
           "options": {
             "legend": {
               "calcs": [
@@ -7898,9 +8240,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 393
+            "y": 409
           },
-          "id": 151,
+          "id": 157,
           "options": {
             "legend": {
               "calcs": [

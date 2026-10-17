@@ -265,6 +265,13 @@ mod tests {
             .render()
     }
 
+    fn compile_gql_sql(query: &str) -> String {
+        compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx())
+            .expect("should compile")
+            .base
+            .render()
+    }
+
     #[test]
     fn relationship_filter_keeps_edge_column_type() {
         let query = r#"{
@@ -2344,5 +2351,86 @@ mod tests {
             (1000..3000).contains(&wide_page),
             "wide page got {wide_page} chars"
         );
+    }
+
+    #[test]
+    fn gql_where_id_equality_compiles_like_pattern_id() {
+        assert_eq!(
+            compile_gql_sql(
+                "MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note) WHERE w.id = 7 RETURN n.note"
+            ),
+            compile_gql_sql("MATCH (w:WorkItem {id: 7})-[:HAS_NOTE]->(n:Note) RETURN n.note"),
+        );
+    }
+
+    #[test]
+    fn json_id_filter_compiles_like_node_ids() {
+        let neighbors = |center: &str| {
+            compile_sql(&format!(
+                r#"{{"query_type": "neighbors", "nodes": [{{"id": "w", "entity": "WorkItem", {center}}}],
+                    "neighbors": {{"direction": "both"}}, "limit": 30}}"#
+            ))
+        };
+        assert_eq!(
+            neighbors(r#""filters": {"id": 7}"#),
+            neighbors(r#""node_ids": [7]"#)
+        );
+    }
+
+    #[test]
+    fn multi_id_neighbors_center_keeps_one_fused_scan() {
+        let sql = compile_gql_sql(
+            "MATCH (g:Group)-[r:MEMBER_OF|CONTAINS]-(m) WHERE g.id IN [1, 2] RETURN g, r, m LIMIT 30",
+        );
+
+        assert!(sql.contains("_orbit_fused"), "{sql}");
+    }
+
+    #[test]
+    fn pinned_neighbors_center_scans_each_arm_by_its_own_id() {
+        let sql = compile_gql_sql(
+            "MATCH (w:WorkItem)-[r:RELATED_TO|HAS_LABEL]-(m) WHERE w.id = 7 RETURN w, r, m LIMIT 30",
+        );
+
+        assert!(!sql.contains("_orbit_fused"), "{sql}");
+        assert!(sql.contains("(e.source_id = 7)"), "{sql}");
+        assert!(sql.contains("(e.target_id = 7)"), "{sql}");
+    }
+
+    #[test]
+    fn aggregated_edge_dedup_filters_kinds_before_picking_latest_row() {
+        let sql = compile_gql_sql(
+            "MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n",
+        );
+
+        let dedup = sql
+            .split("LIMIT 1 BY")
+            .next()
+            .and_then(|head| head.rsplit("(SELECT * FROM gl_edge").next())
+            .expect("edge dedup subquery");
+        assert!(
+            dedup.contains("relationship_kind = 'APPROVED'"),
+            "kind filter should sit inside the dedup subquery:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn text_indexed_equality_also_matches_the_lowercase_index_expression() {
+        let sql = compile_gql_sql("MATCH (d:Definition) WHERE d.name = 'compile' RETURN d.name");
+
+        assert!(sql.contains("(d.name = 'compile')"), "{sql}");
+        assert!(sql.contains("(lower(d.name) = lower('compile'))"), "{sql}");
+    }
+
+    #[test]
+    fn equality_without_text_index_or_with_a_sort_key_filter_stays_plain() {
+        for query in [
+            "MATCH (d:Definition) WHERE d.definition_type = 'Function' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name",
+        ] {
+            let sql = compile_gql_sql(query);
+            assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
+        }
     }
 }
