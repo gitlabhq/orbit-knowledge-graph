@@ -1,5 +1,4 @@
-# The argument list of a tracing macro, and the legacy `{ field = value }`
-# block that tracing accepts after `target:` or `parent:`.
+# Also the legacy `{ field = value }` block that tracing accepts after `target:`.
 id: log-args
 language: rust
 rule:

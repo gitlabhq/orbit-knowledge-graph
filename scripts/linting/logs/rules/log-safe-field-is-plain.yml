@@ -20,7 +20,6 @@ utils:
         regex: '^\{\s*safe::'
   formatted-value:
     any:
-      # `safe(X) = %value`, `= ?value`
       - kind: identifier
         regex: '^safe$'
         precedes:
@@ -36,7 +35,6 @@ utils:
           regex: '^=$'
           precedes:
             regex: '^[%?]$'
-      # `safe(X) = debug(v)`, `= v.to_string()`, `= format!(..)`
       - kind: identifier
         regex: '^(display|debug|format|format_args|to_string|to_owned)$'
         precedes:

@@ -8,18 +8,15 @@ note: |
   crates/orbit-log-fields.
 rule:
   any:
-    # `name = value`, `a.b = value`, `"name" = value`
     - any:
         - kind: identifier
         - kind: string_literal
       precedes:
         regex: '^=$'
-    # `{ NAME } = value`
     - kind: token_tree
       regex: '^\{'
       precedes:
         regex: '^=$'
-    # shorthand `%name`, `?name.field`
     - any:
         - kind: identifier
         - kind: self
@@ -29,7 +26,6 @@ rule:
           any:
             - regex: '^\($'
             - regex: '^,$'
-    # shorthand `name`
     - kind: identifier
       follows:
         any:
