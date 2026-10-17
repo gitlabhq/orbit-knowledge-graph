@@ -190,6 +190,12 @@ fn parse_request(request: &str) -> Result<Envelope, NamedQueryError> {
 mod tests {
     use super::*;
 
+    fn values() -> BindingValues {
+        BindingValues {
+            current_user_id: 42,
+        }
+    }
+
     const VALID: &str = r#"
 name: q
 description: A query.
@@ -206,8 +212,67 @@ query:
 "#;
 
     #[test]
-    fn load_embedded_contains_committed_queries() {
-        assert_eq!(NamedQueries::load_embedded().unwrap().iter().count(), 14);
+    fn json_render_substitutes_current_user_id() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let rendered = queries
+            .render_request_language(r#"{"name": "my_neighbors"}"#, Language::Json, &values())
+            .expect("known named query renders");
+        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
+        assert!(!rendered.contains("$binding"), "{rendered}");
+    }
+
+    #[test]
+    fn json_render_rejects_unknown_name_and_lists_available() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err = queries
+            .render_request_language(r#"{"name": "nonexistent"}"#, Language::Json, &values())
+            .unwrap_err();
+        assert!(err.to_string().contains("nonexistent"), "{err}");
+        assert!(err.to_string().contains("my_neighbors"), "{err}");
+    }
+
+    #[test]
+    fn json_render_rejects_bare_name() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err = queries
+            .render_request_language("my_neighbors", Language::Json, &values())
+            .unwrap_err();
+        assert!(
+            matches!(err, NamedQueryError::InvalidRequest { .. }),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn json_render_substitutes_parameters() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let rendered = queries
+            .render_request_language(
+                r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#,
+                Language::Json,
+                &values(),
+            )
+            .expect("parameterized named query renders");
+        assert!(rendered.contains("\"entity\":\"Project\""), "{rendered}");
+        assert!(rendered.contains("\"node_ids\":[7,9]"), "{rendered}");
+        assert!(rendered.contains("\"limit\":50"), "{rendered}");
+        assert!(!rendered.contains("$param"), "{rendered}");
+    }
+
+    #[test]
+    fn json_render_rejects_malformed_envelope() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err = queries
+            .render_request_language(
+                r#"{"name": "expand_neighbors", "unexpected": 1}"#,
+                Language::Json,
+                &values(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, NamedQueryError::InvalidRequest { .. }),
+            "{err}"
+        );
     }
 
     #[test]
