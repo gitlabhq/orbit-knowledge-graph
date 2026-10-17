@@ -1310,29 +1310,30 @@ impl<'t> Fold<'t> {
             return value;
         };
         let target = self.tree.cursor(def);
-        let Some(name) = target.child_sym(C::DefName) else {
-            return value;
-        };
-        let declaring = |up: Cursor<'t>| {
-            up.index() == def
-                || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == Some(name)
-        };
-        let inside = site.ancestors().any(declaring);
         let role = site.role();
         let filled = match role {
             Role::Any => true,
             Role::Value => target.has_tag(self.tags.value),
-            Role::Callable => target.has_tag(self.tags.callable),
+            Role::Callable => {
+                target.has_tag(self.tags.callable) && !target.has_tag(self.tags.value)
+            }
         };
-        if filled && !inside {
+        if filled {
             return value;
         }
+        let Some(name) = target.child_sym(C::DefName) else {
+            return value;
+        };
         let class = target
             .ancestors()
             .filter(|node| node.is(C::Def))
             .find(|node| node.is_class());
+        let declaring = |up: Cursor<'t>| {
+            up.index() == def
+                || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == Some(name)
+        };
         let member = class
-            .filter(|class| inside || target.is_member_of(*class))
+            .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring))
             .and_then(|class| self.members(class.index(), name, role).first().copied());
         member.map_or(value, Value::LocalDef)
     }
