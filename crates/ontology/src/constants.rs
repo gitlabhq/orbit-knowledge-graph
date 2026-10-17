@@ -111,15 +111,4 @@ mod tests {
         let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
         validate_ontology_constants(&ontology);
     }
-
-    #[test]
-    fn siphon_columns_derived_from_yaml() {
-        let ontology = crate::Ontology::load_embedded().expect("embedded ontology must be valid");
-        assert_eq!(siphon_version_column(), ontology.default_version_column());
-        assert_eq!(
-            siphon_watermark_column(),
-            ontology.default_watermark_column()
-        );
-        assert_eq!(siphon_deleted_column(), ontology.default_deleted_column());
-    }
 }

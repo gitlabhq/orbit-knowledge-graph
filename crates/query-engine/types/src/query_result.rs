@@ -76,10 +76,6 @@ impl QueryResultRow {
         self.columns.get(&node.id_column)?.as_int64().copied()
     }
 
-    pub fn get_pk(&self, node: &RedactionNode) -> Option<i64> {
-        self.columns.get(&node.pk_column)?.as_int64().copied()
-    }
-
     pub fn get_public_id(&self, node: &RedactionNode) -> Option<i64> {
         self.columns
             .get(&node.pk_column)
@@ -239,10 +235,6 @@ impl QueryResult {
         &self.rows
     }
 
-    pub fn rows_mut(&mut self) -> &mut [QueryResultRow] {
-        &mut self.rows
-    }
-
     /// Remove authorized rows that do not satisfy `predicate`.
     /// Used for post-hydration filtering (e.g. virtual column filters).
     pub fn retain_rows(&mut self, mut predicate: impl FnMut(&QueryResultRow) -> bool) {
@@ -251,10 +243,6 @@ impl QueryResult {
 
     pub fn ctx(&self) -> &ResultContext {
         &self.ctx
-    }
-
-    pub fn node_aliases(&self) -> Vec<String> {
-        self.ctx.nodes().map(|n| n.alias.clone()).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -579,7 +567,6 @@ mod tests {
             let row = &result.rows()[0];
             let u = result.ctx().get("u").unwrap();
 
-            assert_eq!(row.get_pk(u), None);
             assert_eq!(row.get_public_id(u), Some(1));
         }
 
@@ -602,7 +589,6 @@ mod tests {
             let d = result.ctx().get("d").unwrap();
 
             assert_eq!(row.get_id(d), Some(1000));
-            assert_eq!(row.get_pk(d), Some(5000));
             assert_eq!(row.get_public_id(d), Some(5000));
 
             let node_ref = row.node_ref(d).unwrap();
@@ -669,7 +655,7 @@ mod tests {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             assert!(result.rows()[0].is_authorized());
 
-            result.rows_mut()[0].set_unauthorized();
+            result.rows[0].set_unauthorized();
             assert!(!result.rows()[0].is_authorized());
         }
 
@@ -713,17 +699,6 @@ mod tests {
             let result = QueryResult::from_batches(&[], &ResultContext::new());
             assert!(result.is_empty());
             assert_eq!(result.len(), 0);
-            assert!(result.node_aliases().is_empty());
-        }
-
-        #[test]
-        fn from_batches_uses_context_aliases() {
-            let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            let aliases: HashSet<String> = result.node_aliases().into_iter().collect();
-
-            assert_eq!(aliases.len(), 2);
-            assert!(aliases.contains("u"));
-            assert!(aliases.contains("p"));
         }
 
         #[test]
@@ -772,7 +747,7 @@ mod tests {
         #[test]
         fn authorized_rows_filters_correctly() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            result.rows_mut()[1].set_unauthorized();
+            result.rows[1].set_unauthorized();
 
             let u = result.ctx().get("u").unwrap();
             let authorized: Vec<_> = result.authorized_rows().collect();
@@ -787,11 +762,11 @@ mod tests {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             assert_eq!(result.authorized_count(), 3);
 
-            result.rows_mut()[0].set_unauthorized();
+            result.rows[0].set_unauthorized();
             assert_eq!(result.authorized_count(), 2);
 
-            result.rows_mut()[1].set_unauthorized();
-            result.rows_mut()[2].set_unauthorized();
+            result.rows[1].set_unauthorized();
+            result.rows[2].set_unauthorized();
             assert_eq!(result.authorized_count(), 0);
         }
     }
@@ -920,7 +895,7 @@ mod tests {
         #[test]
         fn already_unauthorized_rows_not_double_counted() {
             let mut result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
-            result.rows_mut()[0].set_unauthorized();
+            result.rows[0].set_unauthorized();
             let redacted = result.apply_authorizations(&full_auth());
             assert_eq!(redacted, 0);
             assert_eq!(result.authorized_count(), 2);
@@ -957,7 +932,7 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx);
-            result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
+            result.rows[0].dynamic_nodes = vec![NodeRef::new(1000, "Definition")];
 
             let authorizations = vec![
                 ResourceAuthorization {
@@ -1013,7 +988,7 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx);
-            result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+            result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),
@@ -1060,7 +1035,7 @@ mod tests {
             );
 
             let mut result = QueryResult::from_batches(&[batch], &ctx);
-            result.rows_mut()[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
+            result.rows[0].dynamic_nodes = vec![NodeRef::new(5000, "Definition")];
 
             let authorizations = vec![ResourceAuthorization {
                 resource_type: "project".to_string(),

@@ -379,10 +379,6 @@ impl<'r> SgNode<'r> for Node<'r> {
 }
 
 pub trait LanguageExt: Language {
-    fn ast_grep<S: AsRef<str>>(&self, source: S) -> crate::Root<StrDoc<Self>> {
-        crate::Root::new(source, self.clone())
-    }
-
     fn get_ts_language(&self) -> TSLanguage;
 
     /// Grammar node-kind names indexed by `kind_id`. Implementations should
@@ -397,11 +393,6 @@ pub trait LanguageExt: Language {
 }
 
 impl<L: LanguageExt> crate::Root<StrDoc<L>> {
-    /// Infallible parse with default limits; panics on failure. For tests/fuzz; production uses [`Self::try_new`].
-    pub fn new<S: AsRef<str>>(src: S, lang: L) -> Self {
-        Self::try_new(src, lang, &ParseGuard::default()).expect("should parse")
-    }
-
     pub fn try_new<S: AsRef<str>>(src: S, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let doc = StrDoc::try_new(src.as_ref(), lang, guard)?;
         Ok(Root { doc })
