@@ -45,7 +45,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             .table
             .as_ref()
             .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        let read = graph.read(table, &node.alias, true, None);
+        let read = graph.read(table, &node.alias, true);
         let owned = graph.owned(
             read,
             super::physical::ReadOwner::Node(node.alias.clone()),

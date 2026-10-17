@@ -31,6 +31,7 @@ pub enum Predicate {
         column: Column,
         filter: InputFilter,
         data_type: Option<ontology::DataType>,
+        selectivity: ontology::FieldSelectivity,
         in_sort_key: bool,
         text_indexed: bool,
     },
@@ -82,6 +83,11 @@ pub enum OutputValue {
     Depth(u32),
     Path(Vec<(Column, Column)>),
     PathAppend {
+        path: Column,
+        id: Column,
+        kind: Column,
+    },
+    PathPrepend {
         path: Column,
         id: Column,
         kind: Column,

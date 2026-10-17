@@ -21,9 +21,9 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Project 2 AS depth, ... (_)))
+        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS depth, ... (_)))))
         - (Join ON (_depth_1.target_id = e2.source_id) AND (_depth_1.target_kind = e2.source_kind) (_) (_))
-        - (Filter e2.relationship_kind = 'CALLS' (_))
+        - (Filter e2.relationship_kind = 'CALLS', e2._deleted = false, e2.source_id IN ?.target_id (_))
       reject:
         - (Project 3 AS depth, ... (_))
       occurrences:
@@ -32,6 +32,6 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Project 2 AS depth, ... (_)))
+        - (Union ALL AS _orbit_edge_0 (Filter _orbit_edge_0.target_kind = 'Definition' (Bind _orbit_edge_0 (Project 2 AS depth, ... (_)))))
       reject:
         - (Project 3 AS depth, ... (_))

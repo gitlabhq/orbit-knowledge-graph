@@ -56,8 +56,7 @@ cases:
           expect:
             - (Scan Table(gl_security_scan) AS scan)
             - (Scan Table(gl_code_edge) AS _orbit_edge_1)
-          occurrences:
-            - { pattern: "(Scan Table(gl_code_edge) AS _orbit_edge_1)", count: 2 }
+            - (Scan Table(gl_code_edge) AS _orbit_edge_2)
 
   - name: Untyped merge request alternatives union default CI and diff tables
     query:

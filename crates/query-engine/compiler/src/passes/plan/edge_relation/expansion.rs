@@ -6,7 +6,8 @@ use crate::constants::*;
 use crate::input::Direction;
 use crate::passes::plan::physical::{RelationGraph, RelationId};
 use crate::passes::plan::requirements::{
-    Column, OutputValue, Predicate, Projection, live, relationship_kinds,
+    Column, OutputValue, Predicate, Projection, id_list, live, property_filter,
+    relationship_kinds,
 };
 
 pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
@@ -14,14 +15,18 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
     facts: &PlanningContext<'_, M>,
     relation: &EdgeRelation,
     alias: &str,
+    source_ids: Option<(RelationId, String)>,
+    target_ids: Option<(RelationId, String)>,
+    reverse_output: bool,
 ) -> RelationId {
     let edge_columns = relation
         .single_edge_table()
-        .and_then(|table| facts.model.table_columns(table));
+        .and_then(|table| facts.model.table_columns(table))
+        .cloned();
     let mut required_columns = Vec::new();
     for node in [&relation.from_node, &relation.to_node] {
         for (property, _) in &facts.nodes[node].filters {
-            if edge_columns.is_some_and(|columns| columns.contains(property))
+            if edge_columns.as_ref().is_some_and(|columns| columns.contains(property))
                 && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
                 && !required_columns.contains(property)
             {
@@ -31,10 +36,65 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
     }
 
     let first = edge_read(graph, relation, "e1");
-    let mut previous = project_first_depth(graph, relation, first, &required_columns);
+    let start_id = relation.direction.edge_columns().0;
+    let start_kind = match relation.direction {
+        Direction::Outgoing | Direction::Both => SOURCE_KIND_COLUMN,
+        Direction::Incoming => TARGET_KIND_COLUMN,
+    };
+    let mut first_predicates = vec![live("e1")];
+    if let Some(entity) = facts.nodes[&relation.from_node].entity.as_ref() {
+        first_predicates.push(Predicate::EntityKind {
+            column: Column::new("e1", start_kind),
+            entity: entity.clone(),
+        });
+    }
+    if let Some((ids, key)) = source_ids {
+        first_predicates.push(Predicate::Membership {
+            column: Column::new("e1", start_id),
+            relation: ids,
+            key,
+        });
+    }
+    first_predicates.extend(endpoint_predicates(
+        &facts.nodes[&relation.from_node],
+        "e1",
+        start_id,
+    ));
+    if let Some(columns) = &edge_columns {
+        for node in [&relation.from_node, &relation.to_node] {
+            first_predicates.extend(
+                facts.nodes[node]
+                    .filters
+                    .iter()
+                    .filter(|(property, _)| {
+                        columns.contains(property)
+                            && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
+                    })
+                    .map(|(property, filter)| property_filter("e1", property, filter)),
+            );
+        }
+    }
+    let first = graph.from(first).filter(first_predicates).finish();
+    let mut previous = project_first_depth(
+        graph,
+        relation,
+        first,
+        &required_columns,
+        reverse_output,
+    );
     let mut depths = Vec::new();
     if relation.min_hops <= 1 {
-        depths.push(previous.into());
+        depths.push(
+            complete_depth(
+                graph,
+                facts,
+                relation,
+                alias,
+                previous,
+                target_ids.as_ref(),
+            )
+            .into(),
+        );
     }
     for depth in 2..=relation.max_hops {
         let previous_alias = format!("_depth_{}", depth - 1);
@@ -54,6 +114,15 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
                 TARGET_KIND_COLUMN,
             ),
         };
+        let current = graph
+            .from(current)
+            .filter(vec![live(&current_alias)])
+            .semi_join(
+                Column::new(&current_alias, current_id),
+                previous,
+                previous_id,
+            )
+            .finish();
         let joined = graph.join(
             previous.alias(&previous_alias),
             current.alias(&current_alias),
@@ -71,38 +140,84 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
             relation,
             joined,
             depth,
-            &previous_alias,
-            &current_alias,
+            (&previous_alias, &current_alias),
             &required_columns,
+            reverse_output,
         );
         if depth >= relation.min_hops.max(1) {
-            depths.push(previous.into());
+            depths.push(
+                complete_depth(
+                    graph,
+                    facts,
+                    relation,
+                    alias,
+                    previous,
+                    target_ids.as_ref(),
+                )
+                .into(),
+            );
         }
     }
-    let union = graph.union_all(depths, alias);
-    let (from_kind, to_kind) = match relation.direction {
-        Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
-        Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+    graph.union_all(depths, alias)
+}
+
+fn complete_depth<M: OrbitQueryModel + ?Sized>(
+    graph: &mut RelationGraph,
+    facts: &PlanningContext<'_, M>,
+    relation: &EdgeRelation,
+    alias: &str,
+    depth: RelationId,
+    target_ids: Option<&(RelationId, String)>,
+) -> RelationId {
+    let end_id = relation.direction.edge_columns().1;
+    let end_kind = match relation.direction {
+        Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
+        Direction::Incoming => SOURCE_KIND_COLUMN,
     };
     let mut predicates = Vec::new();
-    for (node, column) in [
-        (&relation.from_node, from_kind),
-        (&relation.to_node, to_kind),
-    ] {
-        if let Some(entity) = facts.nodes[node].entity.as_ref() {
-            predicates.push(Predicate::EntityKind {
-                column: Column::new(alias, column),
-                entity: entity.clone(),
-            });
-        }
+    if let Some(entity) = facts.nodes[&relation.to_node].entity.as_ref() {
+        predicates.push(Predicate::EntityKind {
+            column: Column::new(alias, end_kind),
+            entity: entity.clone(),
+        });
     }
-    predicates.push(live(alias));
-    graph.from(union).filter(predicates).finish()
+    if let Some((ids, key)) = target_ids {
+        predicates.push(Predicate::Membership {
+            column: Column::new(alias, end_id),
+            relation: *ids,
+            key: key.clone(),
+        });
+    }
+    predicates.extend(endpoint_predicates(
+        &facts.nodes[&relation.to_node],
+        alias,
+        end_id,
+    ));
+    graph.filter(depth.alias(alias), predicates)
+}
+
+fn endpoint_predicates(
+    node: &super::NodePlan,
+    alias: &str,
+    column: &str,
+) -> Vec<Predicate> {
+    let mut predicates = Vec::new();
+    if !node.node_ids.is_empty() {
+        predicates.push(id_list(alias, column, &node.node_ids));
+    }
+    if let Some(range) = &node.id_range {
+        predicates.push(Predicate::IdRange {
+            column: Column::new(alias, column),
+            start: range.start,
+            end: range.end,
+        });
+    }
+    predicates
 }
 
 fn edge_read(graph: &mut RelationGraph, relation: &EdgeRelation, alias: &str) -> RelationId {
     let edge = if let Some(table) = relation.single_edge_table() {
-        let read = graph.shared_read(table, alias, true);
+        let read = graph.read(table, alias, true);
         graph.owned(
             read,
             crate::passes::plan::physical::ReadOwner::Relationship(relation.input_index),
@@ -113,7 +228,7 @@ fn edge_read(graph: &mut RelationGraph, relation: &EdgeRelation, alias: &str) ->
             .edge_tables
             .iter()
             .map(|table| {
-                let read = graph.shared_read(table, alias, true);
+                let read = graph.read(table, alias, true);
                 let owned = graph.owned(
                     read,
                     crate::passes::plan::physical::ReadOwner::Relationship(relation.input_index),
@@ -129,9 +244,15 @@ fn edge_read(graph: &mut RelationGraph, relation: &EdgeRelation, alias: &str) ->
             .collect();
         graph.union_all(routes, alias)
     };
-    let predicates = relationship_kinds(alias, &relation.rel_types)
+    let mut predicates: Vec<_> = relationship_kinds(alias, &relation.rel_types)
         .into_iter()
         .collect();
+    predicates.extend(
+        relation
+            .filters
+            .iter()
+            .map(|(property, filter)| property_filter(alias, property, filter)),
+    );
     graph.from(edge).filter(predicates).finish()
 }
 
@@ -140,10 +261,17 @@ fn project_first_depth(
     relation: &EdgeRelation,
     input: RelationId,
     required_columns: &[String],
+    reverse_output: bool,
 ) -> RelationId {
-    let path_endpoint = match relation.direction {
-        Direction::Outgoing | Direction::Both => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
-        Direction::Incoming => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
+    let path_endpoint = match (relation.direction, reverse_output) {
+        (Direction::Outgoing | Direction::Both, false) => {
+            (TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
+        }
+        (Direction::Incoming, false) => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
+        (Direction::Outgoing | Direction::Both, true) => {
+            (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
+        }
+        (Direction::Incoming, true) => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
     };
     let mut outputs = vec![
         Projection::col("e1", RELATIONSHIP_KIND_COLUMN),
@@ -177,15 +305,33 @@ fn project_next_depth(
     relation: &EdgeRelation,
     input: RelationId,
     depth: u32,
-    previous: &str,
-    current: &str,
+    aliases: (&str, &str),
     required_columns: &[String],
+    reverse_output: bool,
 ) -> RelationId {
+    let (previous, current) = aliases;
     let (source, target, path_endpoint) = match relation.direction {
         Direction::Outgoing | Direction::Both => {
             (previous, current, (TARGET_ID_COLUMN, TARGET_KIND_COLUMN))
         }
         Direction::Incoming => (current, previous, (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)),
+    };
+    let path = if reverse_output {
+        let path_endpoint = match relation.direction {
+            Direction::Outgoing | Direction::Both => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
+            Direction::Incoming => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
+        };
+        OutputValue::PathPrepend {
+            path: Column::new(previous, PATH_NODES_COLUMN),
+            id: Column::new(current, path_endpoint.0),
+            kind: Column::new(current, path_endpoint.1),
+        }
+    } else {
+        OutputValue::PathAppend {
+            path: Column::new(previous, PATH_NODES_COLUMN),
+            id: Column::new(current, path_endpoint.0),
+            kind: Column::new(current, path_endpoint.1),
+        }
     };
     let mut outputs = vec![
         Projection::col(previous, RELATIONSHIP_KIND_COLUMN),
@@ -195,14 +341,7 @@ fn project_next_depth(
         Projection::col(target, TARGET_ID_COLUMN),
         Projection::col(target, TARGET_KIND_COLUMN),
         Projection::col(target, TARGET_TAGS_COLUMN),
-        Projection::new(
-            OutputValue::PathAppend {
-                path: Column::new(previous, PATH_NODES_COLUMN),
-                id: Column::new(current, path_endpoint.0),
-                kind: Column::new(current, path_endpoint.1),
-            },
-            PATH_NODES_COLUMN,
-        ),
+        Projection::new(path, PATH_NODES_COLUMN),
         Projection::new(OutputValue::Depth(depth), DEPTH_COLUMN),
         Projection::col(previous, DELETED_COLUMN),
         Projection::col(previous, TRAVERSAL_PATH_COLUMN),

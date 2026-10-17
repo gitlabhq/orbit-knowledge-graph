@@ -122,6 +122,17 @@ pub struct NodeRelationSource {
 }
 
 impl EdgeRelation {
+    fn reversed(&self) -> Self {
+        let mut relation = self.clone();
+        std::mem::swap(&mut relation.from_node, &mut relation.to_node);
+        relation.direction = match relation.direction {
+            Direction::Outgoing => Direction::Incoming,
+            Direction::Incoming => Direction::Outgoing,
+            Direction::Both => Direction::Both,
+        };
+        relation
+    }
+
     pub fn single_edge_table(&self) -> Option<&str> {
         let [table] = self.edge_tables.as_slice() else {
             return None;
@@ -129,11 +140,11 @@ impl EdgeRelation {
         Some(table)
     }
 
-    pub fn column_prefix(&self, index: usize) -> String {
+    pub fn column_prefix(&self) -> String {
         if self.max_hops > 1 {
-            format!("hop_e{index}_")
+            format!("hop_e{}_", self.input_index)
         } else {
-            format!("e{index}_")
+            format!("e{}_", self.input_index)
         }
     }
 
@@ -180,7 +191,7 @@ where
         &placement.joined_nodes,
         &mut nodes,
     );
-    linearize_relations(&mut relations)?;
+    linearize_relations(&mut relations, &nodes)?;
     if input.query_type == QueryType::Aggregation {
         let groups: HashSet<&str> = node_group_ids(&input.aggregation.group_by).collect();
         for node in nodes.values_mut() {
@@ -329,10 +340,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn add_edge(&mut self, index: usize, relation: &EdgeRelation) -> Result<()> {
         if relation.node_source.is_some() {
-            return self.add_node_relation(index, relation);
+            return self.add_node_relation(relation);
         }
         let alias = &relation.alias;
         let mut physical_relation = relation.clone();
+        for node in [&relation.from_node, &relation.to_node] {
+            if self.ids(node).is_none() && self.has_selective_node_filter(node) {
+                self.node_ids(node)?;
+            }
+        }
         let endpoint_ids: Vec<_> = [&relation.from_node, &relation.to_node]
             .into_iter()
             .filter_map(|node| self.ids(node).cloned().map(|ids| (node.clone(), ids)))
@@ -393,8 +409,33 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
 
         let mut source = if relation.max_hops > 1 {
-            let expansion = multi_hop(&mut self.graph, self.facts, &physical_relation, alias);
-            self.graph.from(expansion).filter(predicates).finish()
+            let mut expansion_relation = physical_relation.clone();
+            let mut source_ids = self.ids(&relation.from_node).cloned();
+            let mut target_ids = self.ids(&relation.to_node).cloned();
+            let mut reverse_output = false;
+            if relation.direction != Direction::Both
+                && !self.endpoint_is_selective(&relation.from_node)
+                && self.endpoint_is_selective(&relation.to_node)
+            {
+                expansion_relation = expansion_relation.reversed();
+                std::mem::swap(&mut source_ids, &mut target_ids);
+                reverse_output = true;
+            }
+            let endpoint = expansion_relation.direction.edge_columns().0;
+            select_edge_layouts(
+                self.facts.model,
+                &mut expansion_relation.edge_tables,
+                &[endpoint],
+            );
+            multi_hop(
+                &mut self.graph,
+                self.facts,
+                &expansion_relation,
+                alias,
+                source_ids,
+                target_ids,
+                reverse_output,
+            )
         } else {
             let current_rows = !(self.facts.aggregate() && self.facts.relations.len() == 1);
             if self.facts.aggregate() && self.facts.relations.len() == 1 {
@@ -468,11 +509,11 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 self.set_binding(node, alias, column, None, None);
             }
         }
-        self.push_edge_outputs(index, relation, alias);
+        self.push_edge_outputs(relation, alias);
         Ok(())
     }
 
-    fn add_node_relation(&mut self, index: usize, relation: &EdgeRelation) -> Result<()> {
+    fn add_node_relation(&mut self, relation: &EdgeRelation) -> Result<()> {
         let node_source = relation.node_source.as_ref().expect("node relation source");
         let joined_through_endpoint = self.ensure_relation_node(relation, node_source)?;
 
@@ -539,7 +580,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if let Some(root) = self.root.take() {
             self.root = Some(self.graph.from(root).filter(predicates).finish());
         }
-        self.push_node_relation_outputs(index, relation, node_source, alias);
+        self.push_node_relation_outputs(relation, node_source, alias);
         Ok(())
     }
 
@@ -613,7 +654,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn push_node_relation_outputs(
         &mut self,
-        index: usize,
         relation: &EdgeRelation,
         node_source: &NodeRelationSource,
         alias: &str,
@@ -636,7 +676,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         } else {
             DEFAULT_PRIMARY_KEY
         };
-        let prefix = relation.column_prefix(index);
+        let prefix = relation.column_prefix();
         self.outputs.extend([
             Projection::new(
                 OutputValue::Text(relation.rel_types.first().cloned().unwrap_or_default()),
@@ -665,11 +705,10 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if let Some(ids) = self.ids(alias) {
             return Ok(ids.clone());
         }
-        let node = &self.facts.nodes[alias];
-        let source = self.node_read(node)?;
-        let filtered = self.graph.filter(source, node_predicates(node));
+        let node = self.uncovered_node(alias);
+        let source = self.node_read(&node)?;
         let id = self.graph.project(
-            filtered,
+            source,
             vec![Projection::new(
                 OutputValue::Column(Column::new(&node.alias, DEFAULT_PRIMARY_KEY)),
                 DEFAULT_PRIMARY_KEY,
@@ -714,17 +753,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         {
             return Ok(());
         }
-        let mut node = self.facts.nodes[alias].clone();
-        node.filters.retain(|(property, filter)| {
-            !filter_covered_by_edge(
-                &node.alias,
-                property,
-                filter,
-                &self.facts.relations,
-                &self.facts.denormalized,
-                self.facts.model,
-            )
-        });
+        let node = self.uncovered_node(alias);
         let outputs = node_outputs(&node);
         let scan = self.node_read(&node)?;
         self.root = Some(match (self.root.take(), self.binding(alias).cloned()) {
@@ -756,11 +785,11 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         Ok(())
     }
 
-    fn push_edge_outputs(&mut self, index: usize, relation: &EdgeRelation, alias: &str) {
+    fn push_edge_outputs(&mut self, relation: &EdgeRelation, alias: &str) {
         if self.facts.aggregate() {
             return;
         }
-        let prefix = relation.column_prefix(index);
+        let prefix = relation.column_prefix();
         self.outputs.extend(
             [
                 (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
@@ -790,7 +819,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             .table
             .as_ref()
             .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        let read = self.graph.read(table, &node.alias, true, None);
+        let read = self.graph.read(table, &node.alias, true);
         let owned = self.graph.owned(
             read,
             super::physical::ReadOwner::Node(node.alias.clone()),
@@ -803,6 +832,41 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             .finish())
     }
 
+    fn has_selective_node_filter(&self, alias: &str) -> bool {
+        let node = &self.facts.nodes[alias];
+        node.filters.iter().any(|(property, filter)| {
+            filter.is_selective()
+                && !filter_covered_by_edge(
+                    alias,
+                    property,
+                    filter,
+                    &self.facts.relations,
+                    &self.facts.denormalized,
+                    self.facts.model,
+                )
+        })
+    }
+
+    fn endpoint_is_selective(&self, alias: &str) -> bool {
+        let node = &self.facts.nodes[alias];
+        !node.node_ids.is_empty() || node.id_range.is_some() || self.has_selective_node_filter(alias)
+    }
+
+    fn uncovered_node(&self, alias: &str) -> NodePlan {
+        let mut node = self.facts.nodes[alias].clone();
+        node.filters.retain(|(property, filter)| {
+            !filter_covered_by_edge(
+                alias,
+                property,
+                filter,
+                &self.facts.relations,
+                &self.facts.denormalized,
+                self.facts.model,
+            )
+        });
+        node
+    }
+
     fn edge_read(
         &mut self,
         relation: &EdgeRelation,
@@ -810,7 +874,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         final_: bool,
     ) -> Result<RelationId> {
         if let Some(table) = relation.single_edge_table() {
-            let read = self.graph.shared_read(table, alias, final_);
+            let read = self.graph.read(table, alias, final_);
             return Ok(self.graph.owned(
                 read,
                 super::physical::ReadOwner::Relationship(relation.input_index),
@@ -820,7 +884,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         let mut routes = Vec::new();
         for table in &relation.edge_tables {
             let route_alias = format!("_{alias}");
-            let read = self.graph.shared_read(table, &route_alias, final_);
+            let read = self.graph.read(table, &route_alias, final_);
             let owned = self.graph.owned(
                 read,
                 super::physical::ReadOwner::Relationship(relation.input_index),

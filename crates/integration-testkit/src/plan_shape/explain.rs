@@ -717,6 +717,12 @@ fn planned_projections(values: &[Projection]) -> String {
                     planned_column(id),
                     planned_column(kind)
                 ),
+                OutputValue::PathPrepend { path, id, kind } => format!(
+                    "prepend(({}, {}), {})",
+                    planned_column(id),
+                    planned_column(kind),
+                    planned_column(path)
+                ),
             };
             format!("{value} AS {}", projection.name)
         })

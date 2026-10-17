@@ -81,6 +81,7 @@ pub fn bind_filter(
         data_type,
         selectivity: property_id
             .map(|property| model.property_selectivity(property))
+            .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),

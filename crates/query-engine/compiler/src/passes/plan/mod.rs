@@ -30,11 +30,18 @@ pub struct BoundFilter {
 }
 
 impl BoundFilter {
+    pub fn is_selective(&self) -> bool {
+        self.selectivity == ontology::FieldSelectivity::High
+            && self.filter.rhs_column.is_none()
+            && matches!(self.filter.op, None | Some(FilterOp::Eq | FilterOp::In))
+    }
+
     pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
         requirements::Predicate::Property {
             column,
             filter: self.filter.clone(),
             data_type: self.data_type,
+            selectivity: self.selectivity,
             in_sort_key: self.in_sort_key,
             text_indexed: self.text_indexed,
         }

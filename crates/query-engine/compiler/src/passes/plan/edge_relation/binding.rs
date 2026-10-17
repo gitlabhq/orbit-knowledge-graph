@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
@@ -10,16 +11,43 @@ use crate::input::*;
 use crate::passes::plan::helpers::{FilterOwner, ordered_filters};
 use crate::passes::plan::{DenormalizedKey, DenormalizedProperty};
 
-pub(super) fn linearize_relations(relations: &mut [EdgeRelation]) -> Result<()> {
-    let Some(first) = relations.first() else {
+pub(super) fn linearize_relations(
+    relations: &mut [EdgeRelation],
+    nodes: &HashMap<String, NodePlan>,
+) -> Result<()> {
+    if relations.is_empty() {
         return Ok(());
-    };
+    }
+    let first = relations
+        .iter()
+        .enumerate()
+        .min_by_key(|(index, relation)| (Reverse(relation_selectivity(relation, nodes)), *index))
+        .map(|(index, _)| index)
+        .unwrap_or_default();
+    relations.swap(0, first);
+    let first = &relations[0];
     let mut reached = HashSet::from([first.from_node.clone(), first.to_node.clone()]);
     for index in 1..relations.len() {
+        let last = &relations[index - 1];
+        let connected_to_last = |candidate: usize| {
+            [
+                &relations[candidate].from_node,
+                &relations[candidate].to_node,
+            ]
+            .into_iter()
+            .any(|node| node == &last.from_node || node == &last.to_node)
+        };
         let next = (index..relations.len())
-            .find(|candidate| {
+            .filter(|candidate| {
                 reached.contains(&relations[*candidate].from_node)
                     || reached.contains(&relations[*candidate].to_node)
+            })
+            .min_by_key(|candidate| {
+                (
+                    Reverse(relation_selectivity(&relations[*candidate], nodes)),
+                    Reverse(connected_to_last(*candidate)),
+                    *candidate,
+                )
             })
             .ok_or_else(|| {
                 QueryError::Validation("relationships must form a connected tree".into())
@@ -29,6 +57,29 @@ pub(super) fn linearize_relations(relations: &mut [EdgeRelation]) -> Result<()> 
         reached.insert(relations[index].to_node.clone());
     }
     Ok(())
+}
+
+fn relation_selectivity(
+    relation: &EdgeRelation,
+    nodes: &HashMap<String, NodePlan>,
+) -> u8 {
+    let endpoint = [&relation.from_node, &relation.to_node]
+        .into_iter()
+        .filter_map(|node| nodes.get(node))
+        .map(|node| {
+            if !node.node_ids.is_empty() || node.id_range.is_some() {
+                2
+            } else if node.filters.iter().any(|(_, filter)| filter.is_selective()) {
+                1
+            } else {
+                0
+            }
+        })
+        .max()
+        .unwrap_or_default();
+    endpoint.max(u8::from(
+        relation.filters.iter().any(|(_, filter)| filter.is_selective()),
+    ))
 }
 
 pub(super) fn build_nodes<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>

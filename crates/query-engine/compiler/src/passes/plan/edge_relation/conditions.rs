@@ -95,7 +95,8 @@ pub(super) fn filter_covered_by_edge(
             || relation.node_source.is_none()
                 && (denorm_hop(filter, alias, std::slice::from_ref(relation), denormalized)
                     .is_some()
-                    || relation.endpoint_column(alias).is_some()
+                    || relation.max_hops == 1
+                        && relation.endpoint_column(alias).is_some()
                         && relation
                             .single_edge_table()
                             .and_then(|table| model.table_columns(table))

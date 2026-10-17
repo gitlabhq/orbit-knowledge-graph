@@ -148,14 +148,6 @@ impl Relation<'_> {
 #[derive(Default)]
 pub struct RelationGraph {
     nodes: Vec<RelationNode>,
-    reads: HashMap<ReadKey, RelationId>,
-}
-
-#[derive(Hash, PartialEq, Eq)]
-struct ReadKey {
-    table: String,
-    occurrence: Option<String>,
-    final_: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -220,44 +212,12 @@ impl RelationGraph {
         table: impl Into<String>,
         alias: impl Into<String>,
         final_: bool,
-        _relationship: Option<usize>,
     ) -> RelationId {
-        self.read_with_occurrence(table, alias, final_, true)
-    }
-
-    pub(crate) fn shared_read(
-        &mut self,
-        table: impl Into<String>,
-        alias: impl Into<String>,
-        final_: bool,
-    ) -> RelationId {
-        self.read_with_occurrence(table, alias, final_, false)
-    }
-
-    fn read_with_occurrence(
-        &mut self,
-        table: impl Into<String>,
-        alias: impl Into<String>,
-        final_: bool,
-        occurrence_is_identity: bool,
-    ) -> RelationId {
-        let table = table.into();
-        let alias = alias.into();
-        let key = ReadKey {
-            table: table.clone(),
-            occurrence: occurrence_is_identity.then(|| alias.clone()),
+        self.add(RelationNode::Read {
+            table: table.into(),
+            alias: alias.into(),
             final_,
-        };
-        if let Some(id) = self.reads.get(&key) {
-            return *id;
-        }
-        let id = self.add(RelationNode::Read {
-            table,
-            alias,
-            final_,
-        });
-        self.reads.insert(key, id);
-        id
+        })
     }
 
     pub(crate) fn owned(
@@ -416,7 +376,9 @@ impl RelationUsage {
     fn visit(&mut self, id: RelationId, graph: &RelationGraph) {
         *self.references.entry(id).or_default() += 1;
         if self.references[&id] > 1 {
-            self.materialize(id);
+            if Self::reusable(id, graph) {
+                self.materialize(id);
+            }
             return;
         }
         match graph.get(id) {
@@ -469,6 +431,51 @@ impl RelationUsage {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn reusable(id: RelationId, graph: &RelationGraph) -> bool {
+        match graph.get(id) {
+            RelationNode::Read { .. } | RelationNode::Owned { .. } => false,
+            RelationNode::Filter { predicates, .. } => {
+                predicates.iter().any(Self::selective_predicate)
+            }
+            RelationNode::Project { input, .. } | RelationNode::Bind { input, .. } => {
+                Self::reusable(input.id, graph)
+            }
+            RelationNode::Distinct { .. }
+            | RelationNode::UnionAll { .. }
+            | RelationNode::Join { .. }
+            | RelationNode::Latest { .. }
+            | RelationNode::Sort { .. }
+            | RelationNode::Limit { .. } => true,
+        }
+    }
+
+    fn selective_predicate(predicate: &Predicate) -> bool {
+        match predicate {
+            Predicate::Boolean(expression) => expression
+                .leaves()
+                .any(|predicate| Self::selective_predicate(predicate)),
+            Predicate::Property {
+                filter,
+                selectivity,
+                ..
+            } => {
+                *selectivity == ontology::FieldSelectivity::High
+                    && filter.rhs_column.is_none()
+                    && matches!(
+                        filter.op,
+                        None
+                            | Some(
+                                crate::input::FilterOp::Eq | crate::input::FilterOp::In
+                            )
+                    )
+            }
+            Predicate::Ids { .. }
+            | Predicate::IdRange { .. }
+            | Predicate::Membership { .. } => true,
+            _ => false,
         }
     }
 

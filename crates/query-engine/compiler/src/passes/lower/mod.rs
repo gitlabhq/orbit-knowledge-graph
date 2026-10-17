@@ -164,21 +164,20 @@ fn multi_type_edge_types(node: &Node, relations: &[EdgeRelation]) -> Vec<Expr> {
     };
     relations
         .iter()
-        .enumerate()
-        .filter(|(_, hop)| {
+        .filter(|hop| {
             hop.max_hops == 1
                 && (hop.rel_types.len() > 1
                     || crate::passes::normalize::is_wildcard(&hop.rel_types))
         })
-        .filter_map(|(index, hop)| edge_type(query, hop, index))
+        .filter_map(|hop| edge_type(query, hop))
         .collect()
 }
 
-fn edge_type(query: &Query, relation: &EdgeRelation, index: usize) -> Option<Expr> {
+fn edge_type(query: &Query, relation: &EdgeRelation) -> Option<Expr> {
     query
         .selected(&format!(
             "{}{}",
-            relation.column_prefix(index),
+            relation.column_prefix(),
             EDGE_TYPE_SUFFIX
         ))
         .cloned()
@@ -199,9 +198,8 @@ fn emit_traversal(
         (None, Some(sort)) => {
             let edge_type = relations
                 .iter()
-                .enumerate()
-                .find(|(_, hop)| hop.input_index == sort.relationship)
-                .and_then(|(index, hop)| edge_type(&query, hop, index))
+                .find(|hop| hop.input_index == sort.relationship)
+                .and_then(|hop| edge_type(&query, hop))
                 .ok_or_else(|| {
                     QueryError::Lowering("sorted relationship has no edge type column".into())
                 })?;
@@ -246,9 +244,8 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     let edges = plan
         .relations()
         .iter()
-        .enumerate()
-        .map(|(index, hop)| {
-            let prefix = hop.column_prefix(index);
+        .map(|hop| {
+            let prefix = hop.column_prefix();
             LoweredEdge {
                 path_column: (hop.max_hops > 1).then(|| format!("{prefix}path_nodes")),
                 column_prefix: prefix,

@@ -68,7 +68,7 @@ cases:
           expect:
             - (Join ON _orbit_edge_2.target_id = _orbit_edge_1.source_id (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (_) (_)) (_))
 
-  - name: Convergent stored relations reuse one physical read
+  - name: Convergent stored relations keep selective reads inline
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[2]},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}]}
@@ -80,11 +80,12 @@ cases:
     physical:
       clickhouse:
         planned:
-          bind:
-            - (CTE $read (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))
           expect:
             - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.target_id (_) (_))
-            - (Scan Relation(?) AS _orbit_relation)
+            - (Filter _orbit_edge_0.source_id = 1, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))
+            - (Filter _orbit_edge_1.source_id = 2, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_1)))
+          reject:
+            - (CTE ? (Deduplicate Final (Scan Table(gl_code_edge) ...)))
           occurrences:
-            - pattern: (CTE $read (_))
-              count: 1
+            - pattern: (Scan Table(gl_code_edge) ...)
+              count: 2

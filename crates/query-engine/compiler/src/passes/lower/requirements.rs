@@ -21,6 +21,7 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             data_type,
             in_sort_key,
             text_indexed,
+            ..
         } => sql::filter_expression(
             &value.source,
             &value.name,
@@ -100,6 +101,16 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                             Function::Array,
                             vec![Expr::func(Function::Tuple, vec![column(id), column(kind)])],
                         ),
+                    ],
+                ),
+                OutputValue::PathPrepend { path, id, kind } => Expr::func(
+                    Function::ArrayConcat,
+                    vec![
+                        Expr::func(
+                            Function::Array,
+                            vec![Expr::func(Function::Tuple, vec![column(id), column(kind)])],
+                        ),
+                        column(path),
                     ],
                 ),
             };
