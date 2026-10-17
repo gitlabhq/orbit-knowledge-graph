@@ -294,12 +294,9 @@ pub struct RedactionConfig {
     /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
     /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
     pub resource_type: String,
-    /// Column containing the ID for redaction (defaults to "id").
-    #[serde(default = "RedactionConfig::default_id_column")]
+    /// Column containing the ID for redaction.
     pub id_column: String,
     /// The ability to check for this resource (e.g., "read_project", "read_group").
-    /// Defaults to "read".
-    #[serde(default = "RedactionConfig::default_ability")]
     pub ability: String,
     /// Minimum GitLab role required on a traversal path for rows of this
     /// entity to survive the compiler security pass. Defaults to `Reporter`
@@ -311,14 +308,6 @@ pub struct RedactionConfig {
 }
 
 impl RedactionConfig {
-    fn default_id_column() -> String {
-        "id".to_string()
-    }
-
-    fn default_ability() -> String {
-        "read".to_string()
-    }
-
     fn default_required_role() -> RequiredRole {
         RequiredRole::Reporter
     }
