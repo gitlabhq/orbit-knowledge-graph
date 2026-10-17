@@ -407,7 +407,7 @@ only IDs and the relationship type.
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
 | `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
 | `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
-| `settings` | {name: value} | ClickHouse SETTINGS pairs the compiled query carries, for example `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent. The production settings are loaded only by the `query_settings_scenarios` test |
+| `settings` | {name: value} | ClickHouse SETTINGS pairs the compiled query carries, for example `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent. The pairs come from the process-wide query settings; the `query_settings_scenarios` test loads the production defaults |
 
 **Pagination:**
 

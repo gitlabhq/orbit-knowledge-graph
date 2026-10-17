@@ -17,7 +17,7 @@ pub struct QueryScenario {
     #[serde(default)]
     pub query: BTreeMap<String, String>,
     #[serde(default)]
-    pub expect: QueryExpect,
+    pub expect: Option<QueryExpect>,
     #[serde(default)]
     pub steps: Vec<QueryStep>,
 }
@@ -30,7 +30,6 @@ pub struct QueryStep {
     #[serde(default)]
     pub seed: Seed,
     pub query: BTreeMap<String, String>,
-    #[serde(default)]
     pub expect: QueryExpect,
 }
 
@@ -40,7 +39,7 @@ impl QueryScenario {
             (false, true) => vec![QueryStep {
                 seed: Seed::default(),
                 query: self.query,
-                expect: self.expect,
+                expect: self.expect.expect("scenario declares query without expect"),
             }],
             (true, false) => self.steps,
             (false, false) => panic!("scenario declares both query/expect and steps:"),

@@ -1,4 +1,4 @@
-description: Only a single-hop query whose every node is pinned by id runs with the query cache off
+description: Only a query whose nodes are all pinned by id, over single hops only, runs with the query cache off
 
 config:
   security: admin
