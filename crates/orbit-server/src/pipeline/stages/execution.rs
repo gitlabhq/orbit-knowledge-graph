@@ -12,6 +12,7 @@ use query_engine::shared::{
 };
 
 use crate::pipeline::correlation;
+use crate::pipeline::service::QuerySettings;
 
 struct PreparedQuery {
     sql: String,
@@ -57,14 +58,18 @@ impl PipelineStage for ClickHouseExecutor {
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
             let query_id = correlation::query_id("base");
+            let mut http_settings = vec![
+                ("query_id".to_string(), query_id.clone()),
+                ("log_comment".to_string(), log_comment),
+            ];
+            if let Some(QuerySettings(settings)) = ctx.phases.get::<QuerySettings>() {
+                http_settings.extend(settings.iter().cloned());
+            }
             let prepared = PreparedQuery {
                 sql: compiled.base.sql.clone(),
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
-                http_settings: vec![
-                    ("query_id".to_string(), query_id.clone()),
-                    ("log_comment".to_string(), log_comment),
-                ],
+                http_settings,
                 query_id,
             };
             (prepared, compiled.base.result_context.clone())

@@ -65,6 +65,8 @@ struct NamedQueryYaml {
     bindings: Vec<String>,
     #[serde(default)]
     parameters: BTreeMap<String, ParameterSpecYaml>,
+    #[serde(default)]
+    settings: BTreeMap<String, Value>,
     query: QueryTexts,
 }
 
@@ -134,10 +136,17 @@ impl Lookup {
 }
 
 #[derive(Debug)]
+pub struct RenderedQuery {
+    pub text: String,
+    pub settings: Vec<(String, String)>,
+}
+
+#[derive(Debug)]
 pub struct NamedQuery {
     pub name: String,
     pub description: String,
     pub default: bool,
+    settings: Vec<(String, String)>,
     bindings: Vec<String>,
     parameters: BTreeMap<String, ParameterSpec>,
     json: Value,
@@ -181,10 +190,24 @@ impl NamedQuery {
             parameters.insert(name, spec);
         }
 
+        let settings = yaml
+            .settings
+            .into_iter()
+            .map(|(name, value)| match value {
+                Value::String(text) => Ok((name, text)),
+                Value::Number(_) | Value::Bool(_) => Ok((name, value.to_string())),
+                _ => Err(invalid(
+                    &yaml.name,
+                    format!("setting `{name}` must be a string, number, or boolean"),
+                )),
+            })
+            .collect::<Result<_, _>>()?;
+
         let query = Self {
             name: yaml.name,
             description: yaml.description,
             default: yaml.default,
+            settings,
             bindings: yaml.bindings,
             parameters,
             json: yaml.query.json,
@@ -210,6 +233,18 @@ impl NamedQuery {
         params: &Map<String, Value>,
     ) -> Result<String, NamedQueryError> {
         self.render_language(Language::Json, values, params)
+    }
+
+    pub fn render_query(
+        &self,
+        language: Language,
+        values: &BindingValues,
+        params: &Map<String, Value>,
+    ) -> Result<RenderedQuery, NamedQueryError> {
+        Ok(RenderedQuery {
+            text: self.render_language(language, values, params)?,
+            settings: self.settings.clone(),
+        })
     }
 
     pub fn render_language(

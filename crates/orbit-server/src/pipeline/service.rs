@@ -29,7 +29,10 @@ use super::stages::{
 pub struct RawQuery {
     pub text: String,
     pub frontend: Frontend,
+    pub settings: Vec<(String, String)>,
 }
+
+pub(crate) struct QuerySettings(pub Vec<(String, String)>);
 
 pub enum QueryServiceOutput {
     Graph(Box<PipelineOutput>),
@@ -124,6 +127,7 @@ impl QueryPipelineService {
             server_extensions,
             phases: TypeMap::default(),
         };
+        ctx.phases.insert(QuerySettings(query.settings));
 
         // The timeout lives inside run_query so the observer is still alive
         // when it fires. Dropping the future from outside (the prior shape)
