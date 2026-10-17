@@ -207,7 +207,7 @@ query:
 
     #[test]
     fn load_embedded_contains_committed_queries() {
-        assert_eq!(NamedQueries::load_embedded().unwrap().iter().count(), 12);
+        assert_eq!(NamedQueries::load_embedded().unwrap().iter().count(), 14);
     }
 
     #[test]
