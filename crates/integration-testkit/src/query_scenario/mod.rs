@@ -41,8 +41,8 @@ use crate::{
 
 pub use duckdb::run_duckdb_dir;
 pub use format::{
-    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
-    SecurityOverride,
+    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
+    ScenarioConfig, SecurityOverride,
 };
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
@@ -172,12 +172,21 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
 }
 
 async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
-    let database = (!scenario.config.extra_seed.is_empty()
-        || scenario.config.ontology_overlay.is_some())
+    let (config, steps) = scenario.into_steps();
+    let database = (!config.extra_seed.is_empty()
+        || config.ontology_overlay.is_some()
+        || steps.iter().any(|step| !step.seed.is_empty()))
     .then(|| scenario::database_name(name));
-    let outcome = AssertUnwindSafe(run_case(ctx, scenario, name, presets, database.as_deref()))
-        .catch_unwind()
-        .await;
+    let outcome = AssertUnwindSafe(run_case(
+        ctx,
+        &config,
+        &steps,
+        name,
+        presets,
+        database.as_deref(),
+    ))
+    .catch_unwind()
+    .await;
     let cleanup = if let Some(database) = database {
         AssertUnwindSafe(ctx.execute(&format!("DROP DATABASE IF EXISTS `{database}` SYNC")))
             .catch_unwind()
@@ -192,13 +201,12 @@ async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, pr
 
 async fn run_case(
     ctx: &TestContext,
-    scenario: QueryScenario,
+    cfg: &ScenarioConfig,
+    steps: &[QueryStep],
     name: &str,
     presets: &Path,
     database: Option<&str>,
 ) {
-    let cfg = &scenario.config;
-
     let ctx = if let Some(database) = database {
         let forked = ctx.fork(database).await;
         if let Some(overlay) = &cfg.ontology_overlay {
@@ -271,20 +279,43 @@ async fn run_case(
         });
     let data_model = derive_clickhouse_data_model(&ontology);
 
-    for (frontend_key, query_str) in &scenario.query {
-        let frontend = frontend_key
-            .parse::<Frontend>()
-            .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
-        run_frontend(
-            (&ctx, &data_model, &ontology),
-            (frontend, frontend_key),
-            query_str,
-            &security,
-            &redaction,
-            &scenario.expect,
-            name,
-        )
-        .await;
+    for (index, step) in steps.iter().enumerate() {
+        if !step.seed.is_empty() {
+            let columns = crate::scenario::seed::fetch_table_columns(&ctx).await;
+            crate::scenario::seed::apply_seed(
+                &ctx,
+                &step.seed,
+                &Default::default(),
+                &columns,
+                name,
+            )
+            .await;
+            ctx.optimize_all().await;
+        }
+        let name = &step_label(name, index, steps.len());
+        for (frontend_key, query_str) in &step.query {
+            let frontend = frontend_key
+                .parse::<Frontend>()
+                .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
+            run_frontend(
+                (&ctx, &data_model, &ontology),
+                (frontend, frontend_key),
+                query_str,
+                &security,
+                &redaction,
+                &step.expect,
+                name,
+            )
+            .await;
+        }
+    }
+}
+
+pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
+    if steps > 1 {
+        format!("{name} step {}", index + 1)
+    } else {
+        name.to_string()
     }
 }
 

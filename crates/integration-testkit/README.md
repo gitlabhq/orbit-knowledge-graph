@@ -323,8 +323,9 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 |---|---|---|---|
 | `description` | string | no | Human-readable summary |
 | `config` | `ScenarioConfig` | no | Security, redaction, and seed overrides |
-| `query` | map | **yes** | Query strings keyed by frontend (`json`, `gql`) |
-| `expect` | `QueryExpect` | **yes** | Assertions on the result |
+| `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
+| `expect` | `QueryExpect` | with `query` | Assertions on the result |
+| `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
 
 #### `config` — `ScenarioConfig`
 
@@ -406,6 +407,7 @@ only IDs and the relationship type.
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
 | `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
 | `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
+| `settings` | {name: value} | ClickHouse SETTINGS pairs the compiled query carries, for example `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent. The production settings are loaded only by the `query_settings_scenarios` test |
 
 **Pagination:**
 

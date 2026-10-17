@@ -160,7 +160,9 @@ impl QueryConfig {
 
     /// Set fields as SETTINGS clause literals; strings are single-quoted and escaped.
     pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, String)>, String> {
-        self.render_settings(escape_setting_str)
+        let mut settings = self.render_settings(escape_setting_str)?;
+        settings.extend(self.compiler_derived.to_clickhouse_settings());
+        Ok(settings)
     }
 
     pub fn to_http_settings(&self) -> Result<Vec<(String, String)>, String> {
