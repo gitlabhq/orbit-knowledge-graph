@@ -1,3 +1,34 @@
+## [0.147.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.146.0...v0.147.0) (2026-10-17)
+
+### Features
+
+* **grpc:** send query results in chunks when the client asks ([0b40f46](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0b40f4643c96004aaf136d2bdd4a58143b231d4b)) by Michael Angelo Rivera
+* **query:** let named queries set ClickHouse settings ([c8757e3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c8757e3558fd5b480762c2e5d6015d083b201275)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **deps:** update duckdb to v1.10506.1 ([6fb34b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6fb34b7556fa837f4976b521eeb6d17bf1aa38d8)) by Aaron Algutifan
+* **ontology:** require node redaction configuration ([a61e06c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a61e06c0c3790ee987ed3286923715dce7d0eddb)) by Michael Usachenko
+* **query:** lower the cache TTL to 10 s and skip the cache for id-pinned lookups ([9fe810a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9fe810a7510817c809b49320ab4ce9f19d4582f0)) by Michael Angelo Rivera
+* **query:** validate redaction result metadata ([72fe76f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/72fe76f3585ab2997d00ea0d18a9d25d10a45b6a)) by Michael Usachenko
+
+### Performance
+
+* **clickhouse-client:** skip the text index dictionary scan for affix filters ([5716ce8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5716ce80f18a101068e204af1b0a8effb6cc1577)) by michaelangeloio
+* **query:** cache repeated graph and status queries for 60 s ([ddba03c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ddba03c93a58a2ad66c4d2d61fbe9368061cc6c7)) by Michael Angelo Rivera
+* **query:** let string equality use lowercase text indexes ([a4e7e58](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a4e7e58eadd5a006c61e1ef049a687c701c1d787)) by Jean-Gabriel Doyon
+* **query:** narrow the authorization join from a keyed edge ([22a7600](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/22a7600bb8960b4ecfb498e844a4ec85caafb850)) by Jean-Gabriel Doyon
+* **query:** prune empty neighbor arms and hydrate neighbors by edge path ([3d42cee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d42cee0daad38102340f97fc9e729aad5c14946)) by Jean-Gabriel Doyon
+
+### Other
+
+* dead code elimination ([9f9ee01](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f9ee0154f3580ff9bf7b6b82ca78068efa563d7)) by Michael Usachenko
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([543b703](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/543b703c27323d71d31d8ee90cc85e566ad6394e)) by Orbit Automation Bot
+* **indexer:** insert each code job's rows directly and checkpoint after they land ([e1a5482](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1a54820568982e9acfa3cb852ecbfb783b2d3b0)) by Michael Angelo Rivera
+* **named-queries:** preserve request behavior coverage ([40e734f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/40e734fecac22bb44b2dd6284e169da8734d4618)) by Michael Usachenko
+* **query:** move hydration and denormalization tests to YAML scenarios ([bdb588e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bdb588e376c4adcacad29d72ac3659aa73a523c6)) by Aaron Algutifan
+* **query:** run the query corpus as GQL ([62ba657](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/62ba6574ae925b00c95647cf2fc7a794c423e4e6)) by Michael Angelo Rivera
+
 ## [0.146.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.145.0...v0.146.0) (2026-10-16)
 
 ### Features
