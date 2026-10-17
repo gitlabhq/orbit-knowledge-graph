@@ -11,10 +11,11 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::sql::{
-    dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
+    dedup_query, dedup_subquery, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
+    id_range_predicate, rel_kind_filter,
 };
-use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
+use crate::passes::plan::{EdgeTableConfig, NeighborArm, Neighbors, Plan};
+use crate::scope::{PathScopeId, lookup_expr};
 
 pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
     let Neighbors {
@@ -23,10 +24,8 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         edge,
         has_non_denorm,
         fused_table,
-        outgoing_kinds,
-        incoming_kinds,
-        incoming_scope_preserving,
-        incoming_cross_scope,
+        outgoing,
+        incoming,
     } = &plan.operation;
     let direction = *direction;
     let has_non_denorm = *has_non_denorm;
@@ -42,59 +41,48 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
     let center_id_range = cnp.id_range.clone();
     let edge_alias = "e";
 
-    let center_lookup = |edge: &str, center: &str| Expr::InSelect {
-        expr: Box::new(Expr::col(edge, TARGET_ID_COLUMN)),
-        query: Box::new(Query {
-            select: vec![SelectExpr::col(center, DEFAULT_PRIMARY_KEY)],
-            from: TableRef::scan_final(&center_table, center),
-            where_clause: Expr::conjoin(vec![
-                id_list_predicate(center, DEFAULT_PRIMARY_KEY, &center_node_ids),
-                deleted_false(center),
-            ]),
-            ..Default::default()
-        }),
+    let anchor_where = |alias: &str| -> Vec<Expr> {
+        let mut parts: Vec<Expr> = center_filters
+            .iter()
+            .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
+            .collect();
+        if !center_node_ids.is_empty() {
+            parts.push(id_list_predicate(
+                alias,
+                DEFAULT_PRIMARY_KEY,
+                &center_node_ids,
+            ));
+        }
+        if let Some(range) = &center_id_range {
+            parts.push(id_range_predicate(alias, range));
+        }
+        parts
     };
 
-    let path_lookup = |edge: &str| Expr::InSelect {
-        expr: Box::new(Expr::col(edge, TRAVERSAL_PATH_COLUMN)),
-        query: Box::new(Query {
-            select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-            from: TableRef::scan_final(&center_table, "_tpd"),
-            where_clause: Expr::conjoin(vec![
-                id_list_predicate("_tpd", DEFAULT_PRIMARY_KEY, &center_node_ids),
-                deleted_false("_tpd"),
-            ]),
-            ..Default::default()
-        }),
+    let center_lookup = |edge: &str, column: &str, select: &str, alias: &str| {
+        let mut scan_where = anchor_where(alias);
+        scan_where.push(deleted_false(alias));
+        Expr::InSelect {
+            expr: Box::new(Expr::col(edge, column)),
+            query: Box::new(dedup_query(
+                alias,
+                &center_table,
+                vec![SelectExpr::col(alias, select)],
+                scan_where,
+            )),
+        }
     };
-
-    fn build_center_dedup(
-        alias: &str,
-        table: &str,
-        filters: &[(String, crate::passes::plan::BoundFilter)],
-        node_ids: &[i64],
-        id_range: Option<&InputIdRange>,
-        extra_select: &[&str],
-    ) -> (TableRef, Expr) {
-        let mut scan_where = Vec::new();
-        for (prop, filter) in filters {
-            scan_where.push(filter_to_expr(alias, prop, filter));
-        }
-        if !node_ids.is_empty() {
-            scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, node_ids));
-        }
-        if let Some(range) = id_range {
-            scan_where.push(id_range_predicate(alias, range));
-        }
-        let mut select = vec![
-            SelectExpr::col(alias, DEFAULT_PRIMARY_KEY),
-            SelectExpr::col(alias, DELETED_COLUMN),
-        ];
-        for col in extra_select {
-            select.push(SelectExpr::col(alias, *col));
-        }
-        dedup_subquery(alias, table, select, scan_where)
-    }
+    let center_path_lookup = |edge: &str| match center_node_ids.as_slice() {
+        [id] if center_filters.is_empty() && center_id_range.is_none() => Expr::eq(
+            Expr::col(edge, TRAVERSAL_PATH_COLUMN),
+            lookup_expr(
+                &center_table,
+                DEFAULT_PRIMARY_KEY,
+                &PathScopeId::Numeric(*id),
+            ),
+        ),
+        _ => center_lookup(edge, TRAVERSAL_PATH_COLUMN, TRAVERSAL_PATH_COLUMN, "_tpd"),
+    };
 
     let order_by = match &input.order_by {
         Some(ob) => vec![if ob.direction == OrderDirection::Desc {
@@ -106,7 +94,7 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
     };
 
     let build_arm = |dir: Direction| -> Query {
-        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arm_kinds) =
+        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arms) =
             match dir {
                 Direction::Outgoing => (
                     SOURCE_ID_COLUMN,
@@ -114,7 +102,7 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
                     TARGET_ID_COLUMN,
                     TARGET_KIND_COLUMN,
                     1i64,
-                    outgoing_kinds,
+                    outgoing,
                 ),
                 Direction::Incoming => (
                     TARGET_ID_COLUMN,
@@ -122,7 +110,7 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
                     SOURCE_ID_COLUMN,
                     SOURCE_KIND_COLUMN,
                     0i64,
-                    incoming_kinds,
+                    incoming,
                 ),
                 Direction::Both => unreachable!(),
             };
@@ -133,35 +121,25 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             query_data_model::DenormalizedDirection::Target
         };
 
-        let arm_where = |a: &str| -> Vec<Expr> {
+        let center_id_lookup =
+            |a: &str| center_lookup(a, center_edge_col, DEFAULT_PRIMARY_KEY, "_ctr");
+        let arm_where = |a: &str, arm: &NeighborArm| -> Vec<Expr> {
             let mut wp = vec![Expr::eq(
                 Expr::col(a, center_kind_col),
                 Expr::string(&center_entity),
             )];
             if !center_node_ids.is_empty() {
                 wp.push(id_list_predicate(a, center_edge_col, &center_node_ids));
+            } else if has_non_denorm {
+                wp.push(center_id_lookup(a));
             }
-            if let Some(f) = rel_kind_filter(a, arm_kinds) {
+            if let Some(f) = rel_kind_filter(a, &arm.kinds) {
                 wp.push(f);
             }
-            if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
-                if incoming_cross_scope.is_empty() {
-                    wp.push(path_lookup(a));
-                } else if incoming_scope_preserving.is_empty() {
-                    wp.push(center_lookup(a, "_ctr"));
-                } else {
-                    let narrowed_filter = rel_kind_filter(a, incoming_scope_preserving)
-                        .expect("nonempty scoped kinds");
-                    let broad_filter = rel_kind_filter(a, incoming_cross_scope)
-                        .expect("nonempty cross-scope kinds");
-                    wp.push(
-                        Expr::or_all([
-                            Some(Expr::and(narrowed_filter, path_lookup(a))),
-                            Some(Expr::and(broad_filter, center_lookup(a, "_ctr"))),
-                        ])
-                        .expect("incoming route groups are nonempty"),
-                    );
-                }
+            if arm.anchored {
+                wp.push(center_path_lookup(a));
+            } else if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
+                wp.push(center_id_lookup(a));
             }
             wp.push(deleted_false(a));
             wp
@@ -199,29 +177,23 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
-        let arm_tables = if dir == Direction::Outgoing {
-            &edge.outgoing_tables
-        } else {
-            &edge.incoming_tables
-        };
-        let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
+        let (mut from, outer_pushed) = arm_scans(arms, edge_alias, arm_where);
         where_parts.extend(outer_pushed);
         let needs_center_table = !center_uses_default_pk;
 
         if has_non_denorm {
-            let redaction_col = center_redaction_col.as_str();
-            let extra: Vec<&str> = if needs_center_table {
-                vec![redaction_col]
-            } else {
-                Vec::new()
-            };
-            let (center_subq, deleted_filter) = build_center_dedup(
+            let mut center_select = vec![
+                SelectExpr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                SelectExpr::col(&center_id, DELETED_COLUMN),
+            ];
+            if needs_center_table {
+                center_select.push(SelectExpr::col(&center_id, &center_redaction_col));
+            }
+            let (center_subq, deleted_filter) = dedup_subquery(
                 &center_id,
                 &center_table,
-                &center_filters,
-                &center_node_ids,
-                center_id_range.as_ref(),
-                &extra,
+                center_select,
+                anchor_where(&center_id),
             );
             from = TableRef::join(
                 JoinType::Inner,
@@ -324,6 +296,32 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         Node::Query(Box::new(query)),
         NodeBinding::Projected { role_identity },
     ))
+}
+
+fn arm_scans(
+    arms: &[NeighborArm],
+    alias: &str,
+    arm_where: impl Fn(&str, &NeighborArm) -> Vec<Expr>,
+) -> (TableRef, Vec<Expr>) {
+    if let [arm] = arms {
+        return (TableRef::scan(&arm.table, alias), arm_where(alias, arm));
+    }
+    let inner_alias = format!("_{alias}");
+    let mut common_cols: Vec<SelectExpr> = EDGE_RESERVED_COLUMNS
+        .iter()
+        .map(|col| SelectExpr::col(&inner_alias, *col))
+        .collect();
+    common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
+    let scans: Vec<Query> = arms
+        .iter()
+        .map(|arm| Query {
+            select: common_cols.clone(),
+            from: TableRef::scan(&arm.table, &inner_alias),
+            where_clause: Expr::conjoin(arm_where(&inner_alias, arm)),
+            ..Default::default()
+        })
+        .collect();
+    (TableRef::union_all(scans, alias), Vec::new())
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).

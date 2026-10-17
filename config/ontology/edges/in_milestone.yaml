@@ -6,9 +6,11 @@ variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Milestone, id: id }
     fk_column: milestone_id
+    scope: prune_to_source
     description: "Work item assigned to milestone."
 
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Milestone, id: id }
     fk_column: milestone_id
+    scope: prune_to_source
     description: "Merge request assigned to milestone."

@@ -293,7 +293,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::Neighbors,
                 format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
+                    "center={} direction={} {access} center_filter={} relationships=[{}] arms=[{}]",
                     operation.center,
                     match operation.direction {
                         compiler::input::Direction::Both => "both",
@@ -307,8 +307,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         .as_deref()
                         .unwrap_or_default()
                         .join(", "),
-                    operation.incoming_scope_preserving.join(", "),
-                    operation.incoming_cross_scope.join(", ")
+                    neighbor_arms(operation)
                 ),
                 vec![planned_node(&plan.nodes[&operation.center])],
             )
@@ -415,6 +414,20 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
         Node::Insert(_) => leaf(Operator::Insert, ""),
     };
     (planned, emitted)
+}
+
+fn neighbor_arms(operation: &compiler::passes::plan::Neighbors) -> String {
+    let arm = |side: &str, arm: &compiler::passes::plan::NeighborArm| {
+        let anchored = if arm.anchored { " path" } else { "" };
+        format!("{side} {} {}{anchored}", arm.table, arm.kinds.join("|"))
+    };
+    operation
+        .outgoing
+        .iter()
+        .map(|a| arm("out", a))
+        .chain(operation.incoming.iter().map(|a| arm("in", a)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {

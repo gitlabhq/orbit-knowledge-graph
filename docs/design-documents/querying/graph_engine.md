@@ -190,7 +190,7 @@ Ungrouped aggregations can still elide targets used only as filters.
 
 The planner emits ClickHouse SQL similar to these patterns:
 
-- One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
+- One‑hop neighbors: one scan per routed edge table and direction. Each scan carries the center id: `source_id = ?`, or `source_id IN (SELECT id FROM <center> ...)` for a filter-pinned center. Kinds whose `scope` names the center's side also take the center's own `traversal_path`, so the primary key seeks one prefix. One pinned id uses a cached scalar lookup; other centers use `IN (SELECT traversal_path FROM <center> ...)`. Cross-namespace kinds such as `MENTIONS` scan a separate arm under the authorization prefixes alone.
 - Multi-selector traversals: chained JOINs/CTEs with DISTINCT frontiers between selectors to avoid blow-ups. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
 - Path finding: bounded expansion over the routed edge tables, with `path.max_depth` capped independently at 3.
 - Reverse hops: filter the edge table on `target_id`, supported by its target ID bloom filter.
@@ -288,7 +288,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
-- Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, or omitted for cross-namespace.
+- Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, `prune_to_source`, `prune_to_target`, or omitted for cross-namespace.
 - Group containment propagates a parent's prefix to its descendants, never a descendant's prefix to its parent. This follows the stored edge direction, including incoming query selectors. A project's path cannot constrain its ancestor group or that group's membership edges.
 - Other scope-preserving variants propagate prefixes in both directions. A two-pass taint walk resolves the exact variant and refuses aliases reachable through a cross-namespace edge.
 - Cross-namespace relationships such as `CLOSES` do not propagate, so multi-edge traversals stay correct. This is what lets a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (#601941).

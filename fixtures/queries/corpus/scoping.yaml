@@ -1061,7 +1061,7 @@ mr_ids_changed_paths_agg:
     }
 
 pipeline_filter_changed_paths_agg:
-  desc: "Most-changed file paths under a project's failed merge_request_event pipelines: Pipeline (project_id/status/source filters) <-TRIGGERED- MergeRequest -HAS_LATEST_DIFF-> MergeRequestDiff -HAS_FILE-> MergeRequestDiffFile, grouped by old_path. A filter-anchored FK-backed chain lowers to node FK joins (pl.merge_request_id, mr.latest_merge_request_diff_id, f.merge_request_diff_id) rather than edge scans, which is both faster and avoids stale HAS_LATEST_DIFF edge over-counting."
+  desc: "Most-changed file paths under a project's failed merge_request_event pipelines: Pipeline (project_id/status/source filters) <-TRIGGERED- MergeRequest -HAS_LATEST_DIFF-> MergeRequestDiff -HAS_FILE-> MergeRequestDiffFile, grouped by old_path. TRIGGERED is pruned to the pipeline's namespace (a fork MR's pipeline lives in the fork), so the chain reads the TRIGGERED edge rows; the HAS_LATEST_DIFF and HAS_FILE hops stay FK-backed."
   category: aggregation
   suite: scoping
   query: |

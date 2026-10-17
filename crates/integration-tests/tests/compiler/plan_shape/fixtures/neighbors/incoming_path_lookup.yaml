@@ -1,10 +1,10 @@
-name: Incoming neighbors keep broad edge scope and verify the center
+name: Incoming cross-namespace neighbors keep broad edge scope and verify the center
 
 query:
   json: |
-    {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[100]}],"neighbors":{"direction":"incoming","rel_types":["MENTIONS"]}}
   gql: |
-    MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor) RETURN g, neighbor
+    MATCH (mr:MergeRequest {id: 100})<-[:MENTIONS]-(neighbor) RETURN mr, neighbor
 
 logical:
   expect: ["(Input neighbors (...))"]
@@ -12,9 +12,9 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Neighbors center=g direction=incoming directional ... (_))"]
+      expect: ["(Neighbors center=mr direction=incoming directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[MENTIONS] arms=[in gl_edge MENTIONS] (_))"]
     emitted:
       expect:
-        - (SemiJoin e.target_id IN subquery (Filter e.target_kind = 'Group', e.target_id = 100, e.relationship_kind = 'MEMBER_OF' (Scan Table(gl_edge) AS e)) (Project _ctr.id AS id (Filter _ctr.id = 100, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_group) AS _ctr)))))
+        - (SemiJoin e.target_id IN subquery (Filter e.target_kind = 'MergeRequest', e.target_id = 100, e.relationship_kind = 'MENTIONS' (Scan Table(gl_edge) AS e)) (Project _ctr.id AS id (Filter _ctr.id = 100, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr)))))
       reject:
         - (SemiJoin e.traversal_path IN subquery (_))

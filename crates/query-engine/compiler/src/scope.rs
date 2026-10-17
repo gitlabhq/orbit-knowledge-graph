@@ -217,7 +217,7 @@ fn propagate_scope_proofs(
     result
 }
 
-fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
+pub(crate) fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
     let (key, from) = match value {
         PathScopeId::Numeric(id) => (
             Expr::param(SqlType::Int64, *id),

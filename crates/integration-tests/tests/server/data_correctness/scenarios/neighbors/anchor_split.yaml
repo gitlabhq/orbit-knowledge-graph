@@ -1,0 +1,174 @@
+description: >
+  Pinned neighbors push the center id into every edge arm and read same-path
+  kinds under the center's own traversal_path; cross-namespace kinds keep the
+  authorization prefixes, so a MENTIONS edge stored under another project is
+  still returned when the caller can see that project.
+
+config:
+  redaction:
+    allow:
+      user: [2]
+      project: [1000]
+      merge_request: [98000, 98001]
+      work_item: [98100, 98101]
+      label: [7000, 7001, 7002]
+      note: [98200]
+  extra_seed:
+    gl_merge_request:
+      - { id: 98000, iid: 900, title: anchor_old, state: opened, project_id: 1002, author_id: 2, traversal_path: "1/100/1002/", _version: "2024-01-01 00:00:00" }
+      - { id: 98000, iid: 900, title: anchor_mr, state: opened, project_id: 1000, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+      - { id: 98001, iid: 901, title: deleted_mr, state: opened, project_id: 1000, author_id: 2, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
+    gl_work_item:
+      - { id: 98100, iid: 1, title: mentioned_wi, state: opened, project_id: 1001, traversal_path: "1/101/1001/" }
+      - { id: 98101, iid: 2, title: closed_wi, state: opened, project_id: 1001, traversal_path: "1/101/1001/" }
+    gl_note:
+      - { id: 98200, note: same project note, noteable_type: MergeRequest, noteable_id: 98000, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/101/1001/", source_id: 98000, source_kind: MergeRequest, relationship_kind: MENTIONS, target_id: 98100, target_kind: WorkItem }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 98101, target_kind: WorkItem }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7000, target_kind: Label }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7001, target_kind: Label, _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7001, target_kind: Label, _version: "2024-06-01 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 98200, target_kind: Note }
+      - { traversal_path: "1/100/1000/", source_id: 98000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+      - { traversal_path: "1/100/1000/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 98000, target_kind: MergeRequest }
+      - { traversal_path: "1/100/1002/", source_id: 98000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7002, target_kind: Label }
+      - { traversal_path: "1/100/1000/", source_id: 98001, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7000, target_kind: Label }
+      - { traversal_path: "1/101/1001/", source_id: 98001, source_kind: MergeRequest, relationship_kind: MENTIONS, target_id: 98100, target_kind: WorkItem }
+
+cases:
+  - name: pinned_by_id_keeps_cross_namespace_neighbors
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98000]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 98000})--(n) RETURN mr, n
+    expect:
+      node_count: 7
+      nodes:
+        MergeRequest: { ids: [98000], rows: [{ id: 98000, title: anchor_mr }] }
+        WorkItem: { ids: [98100, 98101] }
+        Label: { ids: [7000], absent: [7001, 7002] }
+        Note: { ids: [98200] }
+        Project: { ids: [1000] }
+        User: { ids: [2] }
+      edges:
+        MENTIONS: [[98000, 98100]]
+        CLOSES: [[98000, 98101]]
+        HAS_LABEL: [[98000, 7000]]
+        HAS_NOTE: [[98000, 98200]]
+        IN_PROJECT: [[98000, 1000]]
+        AUTHORED: [[2, 98000]]
+
+  - name: pinned_by_filter_matches_pinned_by_id
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":900},"project_id":{"eq":1000}}}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (mr:MergeRequest {iid: 900, project_id: 1000})--(n) RETURN mr, n
+    expect:
+      skip_requirements: ["filter:project_id"]
+      node_count: 7
+      nodes:
+        MergeRequest: { ids: [98000], filters: { iid: { eq: 900 } } }
+        WorkItem: { ids: [98100, 98101] }
+        Label: { ids: [7000], absent: [7001] }
+        Note: { ids: [98200] }
+        Project: { ids: [1000] }
+        User: { ids: [2] }
+      edges:
+        MENTIONS: [[98000, 98100]]
+        CLOSES: [[98000, 98101]]
+        HAS_LABEL: [[98000, 7000]]
+        HAS_NOTE: [[98000, 98200]]
+        IN_PROJECT: [[98000, 1000]]
+        AUTHORED: [[2, 98000]]
+
+  - name: split_arms_within_one_table
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98000]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_LABEL","MENTIONS"]}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 98000})-[:HAS_LABEL|MENTIONS]->(n) RETURN mr, n
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest: { ids: [98000] }
+        WorkItem: { ids: [98100] }
+        Label: { ids: [7000], absent: [7001] }
+      edges:
+        MENTIONS: [[98000, 98100]]
+        HAS_LABEL: [[98000, 7000]]
+
+  - name: caller_without_the_other_namespace_loses_only_that_edge
+    config:
+      security:
+        paths: ["1/100/"]
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98000]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 98000})--(n) RETURN mr, n
+    expect:
+      node_count: 6
+      nodes:
+        MergeRequest: { ids: [98000] }
+        WorkItem: { ids: [98101], absent: [98100] }
+        Label: { ids: [7000] }
+        Note: { ids: [98200] }
+        Project: { ids: [1000] }
+        User: { ids: [2] }
+      edges:
+        CLOSES: [[98000, 98101]]
+        HAS_LABEL: [[98000, 7000]]
+        HAS_NOTE: [[98000, 98200]]
+        IN_PROJECT: [[98000, 1000]]
+        AUTHORED: [[2, 98000]]
+      edge_absent:
+        MENTIONS: [[98000, 98100]]
+
+  - name: deleted_center_drops_anchored_edges_only
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98001]}],"neighbors":{"direction":"outgoing"}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 98001})-->(n) RETURN mr, n
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [98001] }
+        WorkItem: { ids: [98100] }
+        Label: { absent: [7000] }
+      edges:
+        MENTIONS: [[98001, 98100]]
+
+  - name: caller_outside_the_center_namespace_sees_only_edges_in_its_own
+    config:
+      security:
+        paths: ["1/101/"]
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[98000]}],"neighbors":{"direction":"both"}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 98000})--(n) RETURN mr, n
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [98000] }
+        WorkItem: { ids: [98100], absent: [98101] }
+      edges:
+        MENTIONS: [[98000, 98100]]
+
+  - name: incoming_mention_lands_under_the_mentioned_item
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[98100]}],"neighbors":{"direction":"incoming","rel_types":["MENTIONS"]}}
+      gql: |
+        MATCH (w:WorkItem {id: 98100})<-[:MENTIONS]-(n) RETURN w, n
+    expect:
+      node_count: 3
+      nodes:
+        WorkItem: { ids: [98100] }
+        MergeRequest: { ids: [98000, 98001] }
+      edges:
+        MENTIONS: [[98000, 98100], [98001, 98100]]

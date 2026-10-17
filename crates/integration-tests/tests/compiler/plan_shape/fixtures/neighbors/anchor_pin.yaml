@@ -1,0 +1,22 @@
+name: Filter-pinned neighbors push the center id into every edge arm
+
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"iid":{"eq":7},"project_id":{"eq":1000}}}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE"]}}
+  gql: |
+    MATCH (mr:MergeRequest {iid: 7, project_id: 1000})-[:IN_PROJECT|HAS_HEAD_PIPELINE]->(neighbor) RETURN mr, neighbor
+
+logical:
+  expect: ["(Input neighbors (...))"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Neighbors center=mr direction=outgoing directional outgoing=[gl_ci_edge, gl_edge] incoming=[gl_ci_edge, gl_code_edge, gl_diff_edge, gl_edge, gl_sec_edge] center_filter=true relationships=[IN_PROJECT, HAS_HEAD_PIPELINE] arms=[out gl_ci_edge HAS_HEAD_PIPELINE path, out gl_edge IN_PROJECT path] (_))"]
+    emitted:
+      expect:
+        - (Union ALL AS e (_) (_))
+        - (SemiJoin _e.source_id IN subquery (Filter _e.source_kind = 'MergeRequest' (Scan Table(gl_ci_edge) AS _e)) (Project _ctr.id AS id (Filter _ctr.iid = 7, _ctr.project_id = 1000, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr)))))
+        - (SemiJoin _e.source_id IN subquery (Filter _e.source_kind = 'MergeRequest' (Scan Table(gl_edge) AS _e)) (_))
+        - (SemiJoin _e.traversal_path IN subquery (Filter _e.relationship_kind = 'HAS_HEAD_PIPELINE' (_)) (Project _tpd.traversal_path AS traversal_path (Filter _tpd.iid = 7, _tpd.project_id = 1000, _tpd._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _tpd)))))
+        - (SemiJoin _e.traversal_path IN subquery (Filter _e.relationship_kind = 'IN_PROJECT' (_)) (_))

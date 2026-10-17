@@ -6,4 +6,5 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Project, id: id }
     fk_column: source_project_id
+    scope: prune_to_source
     description: "Merge request originates from source project."

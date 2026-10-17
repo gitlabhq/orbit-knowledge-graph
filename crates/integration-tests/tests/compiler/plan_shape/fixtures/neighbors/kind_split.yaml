@@ -1,0 +1,26 @@
+name: Pinned neighbors split each table into a center-path arm and a cross-namespace arm
+
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["HAS_LABEL","MENTIONS","AUTHORED","CLOSES"]}}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1})-[:HAS_LABEL|MENTIONS|AUTHORED|CLOSES]-(neighbor) RETURN mr, neighbor
+
+logical:
+  expect: ["(Input neighbors (...))"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Neighbors center=mr direction=both directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[HAS_LABEL, MENTIONS, AUTHORED, CLOSES] arms=[out gl_edge MENTIONS|CLOSES, out gl_edge HAS_LABEL path, in gl_edge MENTIONS, in gl_edge AUTHORED path] (_))"]
+    emitted:
+      expect:
+        - (Union ALL (_) (_))
+        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['MENTIONS', 'CLOSES'], _e._deleted = false (Scan Table(gl_edge) AS _e))
+        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind = 'HAS_LABEL', _e.traversal_path = scalar(subquery), _e._deleted = false (Scan Table(gl_edge) AS _e))
+        - (SemiJoin _e.target_id IN subquery (Filter _e.target_kind = 'MergeRequest', _e.target_id = 1, _e.relationship_kind = 'MENTIONS' (Scan Table(gl_edge) AS _e)) (Project _ctr.id AS id (Filter _ctr.id = 1, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr)))))
+        - (Filter _e.target_kind = 'MergeRequest', _e.target_id = 1, _e.relationship_kind = 'AUTHORED', _e.traversal_path = scalar(subquery), _e._deleted = false (Scan Table(gl_edge) AS _e))
+      reject:
+        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['MENTIONS', 'CLOSES'], _e.traversal_path = scalar(subquery), _e._deleted = false (_))
+        - (Filter _e.target_kind = 'MergeRequest', _e.target_id = 1, _e.relationship_kind = 'MENTIONS', _e.traversal_path = scalar(subquery) (_))
+        - (SemiJoin _e.traversal_path IN subquery (_) (_))

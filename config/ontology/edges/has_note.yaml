@@ -5,12 +5,15 @@ description: Entity has a note/comment attached
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Note, id: id }
+    scope: prune_to_target
     description: "Merge request has note."
 
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Note, id: id }
+    scope: prune_to_target
     description: "Work item has note."
 
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: Note, id: id }
+    scope: prune_to_target
     description: "Vulnerability has note."

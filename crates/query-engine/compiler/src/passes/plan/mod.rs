@@ -130,10 +130,15 @@ pub struct Neighbors {
     pub edge: EdgeTableConfig,
     pub has_non_denorm: bool,
     pub fused_table: Option<String>,
-    pub outgoing_kinds: Vec<String>,
-    pub incoming_kinds: Vec<String>,
-    pub incoming_scope_preserving: Vec<String>,
-    pub incoming_cross_scope: Vec<String>,
+    pub outgoing: Vec<NeighborArm>,
+    pub incoming: Vec<NeighborArm>,
+}
+
+/// `anchored` arms hold only kinds whose edge rows carry the center's own traversal_path.
+pub struct NeighborArm {
+    pub table: String,
+    pub kinds: Vec<String>,
+    pub anchored: bool,
 }
 
 pub struct Hydration {

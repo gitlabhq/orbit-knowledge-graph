@@ -1,10 +1,12 @@
-use ontology::constants::*;
+use std::collections::BTreeMap;
+
+use ontology::{EdgeVariantScope, constants::*};
 
 use crate::error::Result;
 use crate::input::*;
 
 use super::context::PlanningContext;
-use super::{EdgeTableConfig, Neighbors, Plan};
+use super::{EdgeTableConfig, NeighborArm, Neighbors, Plan};
 use query_data_model::OrbitQueryModel;
 
 pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<Neighbors>>
@@ -62,58 +64,8 @@ where
             .filter_map(|relationship| model.graph().relationship_id(relationship))
             .collect::<Vec<_>>()
     };
-    let arm_kinds = |source: bool| {
-        let kinds: Vec<String> = config
-            .rel_types
-            .iter()
-            .filter(|kind| touches(kind, source))
-            .cloned()
-            .collect();
-        match kinds.is_empty() {
-            true => config.rel_types.clone(),
-            false => kinds,
-        }
-    };
     let outgoing_relationships = relationship_ids(true);
     let incoming_relationships = relationship_ids(false);
-    let incoming_kinds: Vec<_> = relationships
-        .iter()
-        .filter(|relationship| touches(relationship, false))
-        .copied()
-        .collect();
-    let incoming_scope_preserving: Vec<_> = incoming_kinds
-        .iter()
-        .filter(|relationship| {
-            let mut found = false;
-            let mut scope_preserving = true;
-            for route in model.relationship_routes(relationship) {
-                for variant in route
-                    .variants()
-                    .filter(|variant| variant.target == center_entity_id)
-                {
-                    found = true;
-                    scope_preserving &= model
-                        .variant_scope(
-                            relationship,
-                            &model.graph().entity(variant.source).name,
-                            &model.graph().entity(variant.target).name,
-                        )
-                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving);
-                }
-            }
-            found && scope_preserving
-        })
-        .map(|relationship| relationship.to_string())
-        .collect();
-    let incoming_cross_scope = incoming_kinds
-        .into_iter()
-        .filter(|relationship| {
-            !incoming_scope_preserving
-                .iter()
-                .any(|kind| kind == relationship)
-        })
-        .map(str::to_string)
-        .collect();
     let covered = |filter: &super::BoundFilter,
                    direction: query_data_model::DenormalizedDirection,
                    relationships: &[query_data_model::RelationshipId]| {
@@ -151,31 +103,88 @@ where
                         &incoming_relationships,
                     ))
         });
+    let pinned = (!center_np.node_ids.is_empty() || has_non_denorm) && center_np.has_traversal_path;
+
+    let anchors_center =
+        |relationship: &str, variant: &query_data_model::RelationshipVariant, source: bool| {
+            let scope = model.variant_scope(
+                relationship,
+                &model.graph().entity(variant.source).name,
+                &model.graph().entity(variant.target).name,
+            );
+            scope.is_some_and(|scope| match source {
+                true => {
+                    scope == EdgeVariantScope::PruneToSource
+                        || scope.propagates_to_source(relationship, center_entity)
+                }
+                false => scope == EdgeVariantScope::PruneToTarget || scope.is_scope_preserving(),
+            })
+        };
+    let arms = |source: bool| -> Vec<NeighborArm> {
+        let mut groups: BTreeMap<(String, bool), Vec<String>> = BTreeMap::new();
+        for relationship in &relationships {
+            for route in model.relationship_routes(relationship) {
+                let mut variants = route
+                    .variants()
+                    .filter(|variant| match source {
+                        true => variant.source == center_entity_id,
+                        false => variant.target == center_entity_id,
+                    })
+                    .peekable();
+                if variants.peek().is_none() {
+                    continue;
+                }
+                let anchored =
+                    pinned && variants.all(|variant| anchors_center(relationship, variant, source));
+                groups
+                    .entry((route.table.to_string(), anchored))
+                    .or_default()
+                    .push(relationship.to_string());
+            }
+        }
+        groups
+            .into_iter()
+            .map(|((table, anchored), kinds)| NeighborArm {
+                table,
+                kinds,
+                anchored,
+            })
+            .collect()
+    };
+    let tables_of = |arms: &[NeighborArm]| -> Vec<String> {
+        let mut tables: Vec<String> = arms.iter().map(|arm| arm.table.clone()).collect();
+        tables.dedup();
+        tables
+    };
+    let fallback = |tables: &[String]| -> Vec<NeighborArm> {
+        tables
+            .iter()
+            .map(|table| NeighborArm {
+                table: table.clone(),
+                kinds: config.rel_types.clone(),
+                anchored: false,
+            })
+            .collect()
+    };
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
-    {
-        let tables_for = |source: bool| -> Vec<String> {
-            let mut tables: Vec<String> = relationships
-                .iter()
-                .flat_map(|relationship| model.relationship_routes(relationship))
-                .filter(|route| match source {
-                    true => route.has_source(center_entity_id),
-                    false => route.has_target(center_entity_id),
-                })
-                .map(|route| route.table.to_string())
-                .collect();
-            tables.sort();
-            tables.dedup();
-            tables
-        };
-        let outgoing = tables_for(true);
-        let incoming = tables_for(false);
-        if !outgoing.is_empty() {
-            edge.outgoing_tables = outgoing;
-        }
-        if !incoming.is_empty() {
-            edge.incoming_tables = incoming;
-        }
+    let mut outgoing = arms(true);
+    let mut incoming = arms(false);
+    if outgoing.is_empty() {
+        outgoing = fallback(&edge.outgoing_tables);
+    } else {
+        edge.outgoing_tables = tables_of(&outgoing);
+    }
+    if incoming.is_empty() {
+        incoming = fallback(&edge.incoming_tables);
+    } else {
+        edge.incoming_tables = tables_of(&incoming);
+    }
+    if config.direction == Direction::Outgoing {
+        incoming.clear();
+    }
+    if config.direction == Direction::Incoming {
+        outgoing.clear();
     }
 
     context.node_edge_mappings.insert(
@@ -199,9 +208,7 @@ where
         edge,
         has_non_denorm,
         fused_table,
-        outgoing_kinds: arm_kinds(true),
-        incoming_kinds: arm_kinds(false),
-        incoming_scope_preserving,
-        incoming_cross_scope,
+        outgoing,
+        incoming,
     }))
 }

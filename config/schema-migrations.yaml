@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 109
+  scope: none
+  note: >-
+    Edge scope annotations only (has_note, in_milestone, source_project,
+    created_for_mr); scope is read by the query compiler and changes no DDL or indexed row.
 - version: 108
   scope: none
   note: >-

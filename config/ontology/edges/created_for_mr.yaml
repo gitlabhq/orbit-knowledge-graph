@@ -7,4 +7,5 @@ variants:
   - from_node: { type: Environment, id: id }
     to_node: { type: MergeRequest, id: id }
     fk_column: merge_request_id
+    scope: prune_to_source
     description: "Environment was first created by a merge request pipeline."

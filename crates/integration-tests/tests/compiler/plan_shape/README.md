@@ -75,8 +75,8 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 |---|---|---|
 | `lower/neighbors` | Fuse eligible both-direction reads into one scan | `neighbors/fused.yaml`, `neighbors/denormalized_fused.yaml` |
 | Neighbor eligibility | Use separate arms for center filters, indirect identity, or multiple routes | `neighbors/filtered_directional.yaml`, `neighbors/indirect_identity.yaml`, `neighbors/multiple_routes.yaml` |
-| Neighbor routing | Push predicates into each table arm | `neighbors/multiple_routes.yaml` |
-| Incoming neighbors | Pin the leading traversal-path key through a center lookup | `neighbors/incoming_path_lookup.yaml` |
+| Neighbor routing | Push the center id and each table's own kinds into every arm | `neighbors/multiple_routes.yaml`, `neighbors/anchor_pin.yaml`, `neighbors/pin_forms.yaml` |
+| Neighbor scope | Split each table into a center-path arm for scoped kinds and a broad arm for cross-namespace kinds | `neighbors/kind_split.yaml`, `neighbors/incoming_path_lookup.yaml` |
 | `plan/pathfinding` | Split forward/backward depths and omit the backward side at depth one | `path_finding/scoped_frontiers.yaml`, `path_finding/odd_depth.yaml`, `path_finding/direct_pinned.yaml` |
 | `build_anchor` | Inline unscoped pinned IDs; bound filtered current-row anchors | `path_finding/direct_pinned.yaml`, `path_finding/filtered_anchor.yaml` |
 | `build_scope_cte`, `build_frontier_arm` | Union endpoint paths; prune expansions and intersection by scope | `path_finding/scoped_frontiers.yaml`, `path_finding/odd_depth.yaml` |
