@@ -553,7 +553,9 @@ SKIP 0 LIMIT 50
 ```
 
 Repeat with `SKIP 50 LIMIT 50`, `SKIP 100 LIMIT 50`, and so on, until
-`pagination.has_more` is false. Every response carries `pagination.truncated`;
+`pagination.has_more` is false. `SKIP` accepts up to 10000. Past that, keep
+`ORDER BY p.id`, drop `SKIP`, and add `p.id > <last id from the previous page>`
+to the `WHERE` clause. Every response carries `pagination.truncated`;
 when true, the result window is incomplete and any aggregate computed over it
 is too.
 
