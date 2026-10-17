@@ -335,7 +335,7 @@ mod tests {
         ));
         assert!(check_authorization(&input, &valid, &metadata, &result, model.as_ref()).is_ok());
 
-        let mut wrong = valid;
+        let mut wrong = valid.clone();
         let Node::Query(query) = &mut wrong else {
             unreachable!()
         };
@@ -343,15 +343,27 @@ mod tests {
         assert!(check_authorization(&input, &wrong, &metadata, &result, model.as_ref()).is_err());
 
         let mut projected = metadata.clone();
+        let authorization_ids = vec![Expr::col("p", "project_id")];
+        let primary_keys = vec![Expr::col("p", "id")];
         projected.nodes.insert(
             "p".into(),
             NodeBinding::Projected {
                 role_identity: None,
-                authorization_ids: vec![Expr::col("p", "project_id")],
-                primary_keys: vec![],
+                authorization_ids: authorization_ids.clone(),
+                primary_keys: primary_keys.clone(),
             },
         );
-        assert!(check_authorization(&input, &wrong, &projected, &result, model.as_ref()).is_err());
+        assert!(check_authorization(&input, &valid, &projected, &result, model.as_ref()).is_ok());
+
+        projected.nodes.insert(
+            "p".into(),
+            NodeBinding::Projected {
+                role_identity: None,
+                authorization_ids: vec![Expr::col("p", "id")],
+                primary_keys,
+            },
+        );
+        assert!(check_authorization(&input, &valid, &projected, &result, model.as_ref()).is_err());
 
         let empty = ResultContext::new().with_query_type(QueryType::Traversal);
         assert!(check_authorization(&input, &wrong, &metadata, &empty, model.as_ref()).is_err());
