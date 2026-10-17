@@ -1301,7 +1301,7 @@ impl<'t> Fold<'t> {
         let mut members = self.members.borrow_mut();
         let index = members
             .entry(container)
-            .or_insert_with(|| member_index(self.tree.cursor(container)));
+            .or_insert_with(|| member_index(self.tree.cursor(container), self.tags.callable));
         index.get(&name).copied()
     }
 
@@ -1314,22 +1314,20 @@ impl<'t> Fold<'t> {
         if crate::canonical::def_type_of(target).is_some_and(|kind| kind.fills(role)) {
             return value;
         }
-        let name = target.child_sym(C::DefName);
+        let Some(name) = target.child_sym(C::DefName) else {
+            return value;
+        };
         let class = target
             .ancestors()
             .filter(|node| node.is(C::Def))
             .find(|node| node.is_class());
         let declaring = |up: Cursor<'t>| {
-            up.index() == def || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == name
+            up.index() == def
+                || up.is(C::Binding) && up.has(C::Declaration) && up.sym_opt() == Some(name)
         };
         let member = class
             .filter(|class| target.is_member_of(*class) || site.ancestors().any(declaring))
-            .and_then(|class| {
-                let name = name?;
-                self.parts(class.index())
-                    .into_iter()
-                    .find_map(|part| self.slots(part, name)?.get(role))
-            });
+            .and_then(|class| self.members(class.index(), name, role).first().copied());
         member.map_or(value, Value::LocalDef)
     }
 
@@ -1456,18 +1454,21 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn find_method_in(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
+    fn members(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
         let supers = |dn: u32| {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(|dn| self.parts(dn)).collect::<Vec<_>>()
         };
-        let pick = |dn| Some(self.slots(dn, name)?.pick(role));
-        let mut members = members_by_level(self.parts(container), supers, pick);
-        let fills = |&def: &u32| self.tree.cursor(def).fills(role, self.tags.callable);
-        if members.iter().any(fills) {
-            members.retain(fills);
+        members_by_level(self.parts(container), supers, |dn| {
+            self.slots(dn, name)?.get(role)
+        })
+    }
+
+    fn find_method_in(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
+        match self.members(container, name, role) {
+            found if found.is_empty() => self.members(container, name, Role::Any),
+            found => found,
         }
-        members
     }
 }
 
@@ -1600,7 +1601,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<(Vec<Edge>, Option
     }
     let mut seen = FxHashSet::default();
     f.edges
-        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution as u8)));
+        .retain(|e| seen.insert((e.from(), e.to(), e.kind, e.site, e.call_resolution)));
     Ok((f.edges, f.limited))
 }
 

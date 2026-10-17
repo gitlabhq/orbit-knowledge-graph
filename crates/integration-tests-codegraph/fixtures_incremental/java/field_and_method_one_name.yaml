@@ -204,8 +204,6 @@ tests:
       - { column_values: { field: kind, values: ["Method"] } }
 
   - name: a bare call of a field name whose method is inherited targets the inherited method
-    # Known gap: the bound field has no callable sibling in its class, so the call stops before the supertype fallback, on main too.
-    skip: true
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Sub.goCall'

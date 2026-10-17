@@ -957,7 +957,7 @@ fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<MemberIndex> {
     {
         return members.clone();
     }
-    let members = member_index(owner);
+    let members = member_index(owner, ctx.tags.callable);
     cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -1805,11 +1805,17 @@ fn method_up<'a>(
     role: Role,
 ) -> Vec<Cursor<'a>> {
     let jump = |(sf, n): (u32, u32)| ctx.corpus.jump(sf, n);
-    let inherited = members_by_level(
-        vec![(cls.fi(), cls.index())],
-        |id| supertypes(ctx, jump(id)),
-        |id| declared_member(ctx, jump(id), name, role).map(|m| (m.fi(), m.index())),
-    );
+    let find = |role| {
+        members_by_level(
+            vec![(cls.fi(), cls.index())],
+            |id| supertypes(ctx, jump(id)),
+            |id| declared_member(ctx, jump(id), name, role).map(|m| (m.fi(), m.index())),
+        )
+    };
+    let inherited = match find(role) {
+        found if found.is_empty() => find(Role::Any),
+        found => found,
+    };
     if !inherited.is_empty() {
         return inherited.into_iter().map(jump).collect();
     }
@@ -1895,16 +1901,10 @@ fn declared_member<'a>(
 ) -> Option<Cursor<'a>> {
     let parts = partial_key(cls, ctx.packages).and_then(|k| ctx.partials.get(&k));
     let parts = parts.into_iter().flatten().map(|l| cls.jump(l.fi, l.node));
-    let owners: Vec<_> = std::iter::once(cls)
+    std::iter::once(cls)
         .chain(impl_blocks_of(ctx, cls))
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
-        .collect();
-    let find = |role| {
-        owners
-            .iter()
-            .find_map(|&owner| member_in(ctx, owner, name, role))
-    };
-    find(role).or_else(|| find(Role::Any))
+        .find_map(|owner| member_in(ctx, owner, name, role))
 }
 
 /// Cross-file edges for one file that the import pass cannot produce:

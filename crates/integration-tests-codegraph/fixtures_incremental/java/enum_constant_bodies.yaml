@@ -71,13 +71,14 @@ tests:
     assert:
       - { column_values: { field: callee, values: ["Op.apply"] } }
 
-  - name: a method that exists only in the constant bodies keeps the override of the first body
+  - name: a method that exists only in the constant bodies targets the method that the enum inherits from its interface
+    description: "JLS 15.12: the compile-time declaration of fig.area() is the member Fig inherits from Shape; the constant-body overrides are runtime dispatch targets"
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'size' AND t.name = 'area'
       RETURN t.fqn AS callee
     assert:
-      - { column_values: { field: callee, values: ["Fig.SQUARE.area"] } }
+      - { column_values: { field: callee, values: ["Shape.area"] } }
 
   - name: a call of a method that shares its name with a constant targets the method
     query: |
