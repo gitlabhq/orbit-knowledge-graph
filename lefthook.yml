@@ -42,20 +42,8 @@ pre-commit:
       glob: "**/*.{rs,yaml,yml,toml,sh,py,js,mjs,ts,rb,css}"
     # Advisory until every log call uses the orbit_log_fields macros.
     - name: log-safety
-      run: mise exec -- ast-grep scan {staged_files} || true
+      run: mise run lint:logs || true
       glob: "crates/**/*.rs"
-      exclude:
-        - "**/tests/**"
-        - "**/tests.rs"
-        - "**/test_helpers.rs"
-        - "**/testing.rs"
-        - "**/testkit.rs"
-        - "**/testkit/**"
-        - "**/benches/**"
-        - "**/examples/**"
-        - "**/build.rs"
-        - "crates/integration-*/**"
-        - "crates/fuzz/**"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:

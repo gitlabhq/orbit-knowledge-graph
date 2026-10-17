@@ -11,6 +11,7 @@ valid:
     #[tokio::test]
     #[serial]
     async fn t() { dbg!(x); }
+  - 'writeln!(buffer, "x");'
 invalid:
   - 'println!("{path}");'
   - 'eprintln!("failed");'
@@ -22,3 +23,5 @@ invalid:
     #[cfg(test)]
     fn helper() {}
     fn prod() { println!("x"); }
+  - 'writeln!(std::io::stderr(), "x");'
+  - 'write!(io::stdout(), "x");'

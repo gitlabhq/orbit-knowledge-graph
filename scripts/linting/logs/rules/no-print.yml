@@ -1,7 +1,7 @@
 id: no-print
 language: rust
 severity: error
-message: Server code must not print. Log through `tracing` with orbit_log_fields constants.
+message: Server code must not print. Log through the orbit_log_fields macros.
 note: |
   Output that bypasses `tracing` bypasses the expanded logs policy. Local
   tools (orbit-cli, xtask, profilers, tests) may print.
@@ -15,25 +15,24 @@ rule:
       has:
         field: function
         regex: '^(::)?(std::)?(io::)?(stdout|stderr)$'
+    - kind: identifier
+      regex: '^(stdout|stderr)$'
+      precedes:
+        kind: token_tree
+        regex: '^\(\s*\)$'
+      inside:
+        kind: token_tree
+        inside:
+          kind: macro_invocation
+          has:
+            field: macro
+            regex: '^(::)?(std::)?(write|writeln)$'
   not:
     matches: test-code
 ignores:
   - crates/orbit-cli/**
   - crates/xtask/**
-  - crates/duckdb-client/**
-  - crates/object-storage/**
-  - crates/orbit-search/**
   - crates/query-engine/profiler/**
   - crates/code-graph/treesitter-visit/src/bin/**
   # Debug tracer that only integration tests turn on.
   - crates/code-graph/src/v2/trace.rs
----
-id: no-log-crate
-language: rust
-severity: error
-message: Use `tracing`, not the `log` crate. `log` records have no span, so the expanded logs policy cannot see them.
-rule:
-  kind: macro_invocation
-  has:
-    field: macro
-    regex: '^(::)?log::(trace|debug|info|warn|error|log)$'

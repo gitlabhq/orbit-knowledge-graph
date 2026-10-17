@@ -11,8 +11,17 @@ valid:
         use tracing::info;
         fn t() { tracing::info!("test"); }
     }
+  - 'use tracing::Instrument as _;'
+  - 'use orbit_log_fields::{info, warn};'
 invalid:
   - 'tracing::info!("done");'
   - 'tracing::info_span!("work");'
   - 'use tracing::{Instrument, info, warn};'
   - 'use tracing::debug;'
+  - 'use orbit_log_fields::info as oinfo;'
+  - 'use tracing::info as t;'
+  - 'use tracing as t;'
+  - 'use tracing::{warn as w};'
+  - 'use orbit_log_fields::{info as i};'
+  - 'use tracing::*;'
+  - 'extern crate tracing as tr;'

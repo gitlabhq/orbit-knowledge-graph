@@ -8,6 +8,7 @@ rule:
           - kind: mod_item
           - kind: impl_item
           - kind: function_item
+          - kind: use_declaration
         follows:
           stopBy:
             not:
@@ -16,7 +17,7 @@ rule:
                 - kind: line_comment
                 - kind: block_comment
           kind: attribute_item
-          regex: '^#\[cfg\((test|any\([^()]*\btest\b[^()]*\))\)\]'
+          regex: '^#\[cfg\((test|(any|all)\([^()]*\btest\b[^()]*\))\)\]'
       - kind: function_item
         follows:
           stopBy:
