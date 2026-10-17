@@ -31,35 +31,52 @@ pub(super) fn multi_hop<M: OrbitQueryModel + ?Sized>(
     }
 
     let first = edge_read(graph, relation, "e1");
-    let mut previous = first;
+    let mut previous = project_first_depth(graph, relation, first, &required_columns);
     let mut depths = Vec::new();
-    for depth in 1..=relation.max_hops {
-        if depth > 1 {
-            let current_alias = format!("e{depth}");
-            let current = edge_read(graph, relation, &current_alias);
-            let previous_alias = format!("e{}", depth - 1);
-            let (start, end) = relation.direction.edge_columns();
-            let (end_kind, start_kind) = match relation.direction {
-                Direction::Outgoing | Direction::Both => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
-                Direction::Incoming => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
-            };
-            previous = graph
-                .from(previous)
-                .join(
-                    current.alias(current_alias.clone()),
-                    (
-                        Column::new(&previous_alias, end),
-                        Column::new(&current_alias, start),
-                    ),
-                    vec![Predicate::ColumnEq {
-                        left: Column::new(&previous_alias, end_kind),
-                        right: Column::new(&current_alias, start_kind),
-                    }],
-                )
-                .finish();
-        }
+    if relation.min_hops <= 1 {
+        depths.push(previous.into());
+    }
+    for depth in 2..=relation.max_hops {
+        let previous_alias = format!("_depth_{}", depth - 1);
+        let current_alias = format!("e{depth}");
+        let current = edge_read(graph, relation, &current_alias);
+        let (previous_id, previous_kind, current_id, current_kind) = match relation.direction {
+            Direction::Outgoing | Direction::Both => (
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+            ),
+            Direction::Incoming => (
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+            ),
+        };
+        let joined = graph.join(
+            previous.alias(&previous_alias),
+            current.alias(&current_alias),
+            (
+                Column::new(&previous_alias, previous_id),
+                Column::new(&current_alias, current_id),
+            ),
+            vec![Predicate::ColumnEq {
+                left: Column::new(&previous_alias, previous_kind),
+                right: Column::new(&current_alias, current_kind),
+            }],
+        );
+        previous = project_next_depth(
+            graph,
+            relation,
+            joined,
+            depth,
+            &previous_alias,
+            &current_alias,
+            &required_columns,
+        );
         if depth >= relation.min_hops.max(1) {
-            depths.push(project_depth(graph, relation, previous, depth, &required_columns).into());
+            depths.push(previous.into());
         }
     }
     let union = graph.union_all(depths, alias);
@@ -116,43 +133,32 @@ fn edge_read(graph: &mut RelationGraph, relation: &EdgeRelation, alias: &str) ->
     graph.from(edge).filter(predicates).finish()
 }
 
-fn project_depth(
+fn project_first_depth(
     graph: &mut RelationGraph,
     relation: &EdgeRelation,
     input: RelationId,
-    depth: u32,
     required_columns: &[String],
 ) -> RelationId {
-    let (start, end) = relation.direction.edge_columns();
-    let end_kind = match relation.direction {
-        Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
-        Direction::Incoming => SOURCE_KIND_COLUMN,
+    let path_endpoint = match relation.direction {
+        Direction::Outgoing | Direction::Both => (TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
+        Direction::Incoming => (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
     };
-    let last = format!("e{depth}");
-    let (source_alias, target_alias, kind_alias) = match relation.direction {
-        Direction::Outgoing | Direction::Both => ("e1", last.as_str(), "e1"),
-        Direction::Incoming => (last.as_str(), "e1", last.as_str()),
-    };
-    let path = OutputValue::Path(
-        (1..=depth)
-            .map(|index| {
-                let alias = format!("e{index}");
-                (Column::new(&alias, end), Column::new(&alias, end_kind))
-            })
-            .collect(),
-    );
     let mut outputs = vec![
-        Projection::col("e1", start),
-        Projection::col(&last, end),
-        Projection::col(kind_alias, RELATIONSHIP_KIND_COLUMN),
-        Projection::col(source_alias, SOURCE_ID_COLUMN),
-        Projection::col(source_alias, SOURCE_KIND_COLUMN),
-        Projection::col(source_alias, SOURCE_TAGS_COLUMN),
-        Projection::col(target_alias, TARGET_ID_COLUMN),
-        Projection::col(target_alias, TARGET_KIND_COLUMN),
-        Projection::col(target_alias, TARGET_TAGS_COLUMN),
-        Projection::new(path, PATH_NODES_COLUMN),
-        Projection::new(OutputValue::Depth(depth), DEPTH_COLUMN),
+        Projection::col("e1", RELATIONSHIP_KIND_COLUMN),
+        Projection::col("e1", SOURCE_ID_COLUMN),
+        Projection::col("e1", SOURCE_KIND_COLUMN),
+        Projection::col("e1", SOURCE_TAGS_COLUMN),
+        Projection::col("e1", TARGET_ID_COLUMN),
+        Projection::col("e1", TARGET_KIND_COLUMN),
+        Projection::col("e1", TARGET_TAGS_COLUMN),
+        Projection::new(
+            OutputValue::Path(vec![(
+                Column::new("e1", path_endpoint.0),
+                Column::new("e1", path_endpoint.1),
+            )]),
+            PATH_NODES_COLUMN,
+        ),
+        Projection::new(OutputValue::Depth(1), DEPTH_COLUMN),
         Projection::col("e1", DELETED_COLUMN),
         Projection::col("e1", TRAVERSAL_PATH_COLUMN),
     ];
@@ -160,6 +166,49 @@ fn project_depth(
         required_columns
             .iter()
             .map(|column| Projection::col("e1", column)),
+    );
+    graph.from(input).project(outputs).finish()
+}
+
+fn project_next_depth(
+    graph: &mut RelationGraph,
+    relation: &EdgeRelation,
+    input: RelationId,
+    depth: u32,
+    previous: &str,
+    current: &str,
+    required_columns: &[String],
+) -> RelationId {
+    let (source, target, path_endpoint) = match relation.direction {
+        Direction::Outgoing | Direction::Both => {
+            (previous, current, (TARGET_ID_COLUMN, TARGET_KIND_COLUMN))
+        }
+        Direction::Incoming => (current, previous, (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)),
+    };
+    let mut outputs = vec![
+        Projection::col(previous, RELATIONSHIP_KIND_COLUMN),
+        Projection::col(source, SOURCE_ID_COLUMN),
+        Projection::col(source, SOURCE_KIND_COLUMN),
+        Projection::col(source, SOURCE_TAGS_COLUMN),
+        Projection::col(target, TARGET_ID_COLUMN),
+        Projection::col(target, TARGET_KIND_COLUMN),
+        Projection::col(target, TARGET_TAGS_COLUMN),
+        Projection::new(
+            OutputValue::PathAppend {
+                path: Column::new(previous, PATH_NODES_COLUMN),
+                id: Column::new(current, path_endpoint.0),
+                kind: Column::new(current, path_endpoint.1),
+            },
+            PATH_NODES_COLUMN,
+        ),
+        Projection::new(OutputValue::Depth(depth), DEPTH_COLUMN),
+        Projection::col(previous, DELETED_COLUMN),
+        Projection::col(previous, TRAVERSAL_PATH_COLUMN),
+    ];
+    outputs.extend(
+        required_columns
+            .iter()
+            .map(|column| Projection::col(previous, column)),
     );
     graph.from(input).project(outputs).finish()
 }

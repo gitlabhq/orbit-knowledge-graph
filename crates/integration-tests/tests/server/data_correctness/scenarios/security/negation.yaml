@@ -1,337 +1,360 @@
 cases:
-- name: double_negated_traversal_path_rejected
-  description: A double NOT cannot hide a traversal_path condition
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    gql: |
-      MATCH (p:Project {id: 1000}) WHERE NOT NOT p.traversal_path STARTS WITH '2/' RETURN p.id
-  expect:
-    compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-    compile_error_not_contains: [1/100/, 2/]
-- name: negated_relationship_traversal_path_rejected
-  description: NOT cannot wrap a relationship traversal_path condition
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})-[c:CONTAINS]->(p:Project) WHERE NOT c.traversal_path = '1/100/1000/' RETURN p.id
-  expect:
-    compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-    compile_error_not_contains: [1/100/, 2/]
-- name: negated_traversal_path_grouped_rejected
-  description: A NOT group cannot contain a traversal_path condition
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    gql: |
-      MATCH (p:Project {id: 1000}) WHERE NOT (p.traversal_path STARTS WITH '1/100/' AND p.name = 'x') RETURN p.id
-  expect:
-    compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-    compile_error_not_contains: [1/100/, 2/]
-- name: negated_traversal_path_in_scope_rejected
-  description: "NOT cannot wrap a traversal_path condition even when the literal is inside the caller's scope"
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    gql: |
-      MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '1/100/1000/' RETURN p.id
-  expect:
-    compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-    compile_error_not_contains: [1/100/]
-- name: negated_traversal_path_rejected
-  description: NOT cannot wrap a traversal_path condition
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"starts_with":"2/"}}}],"limit":30}
-    gql: |
-      MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '2/' RETURN p.id
-  expect:
-    compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-    compile_error_not_contains: [1/100/, 2/]
-- name: negation_admin_bypass_cross_node
-  description: A NOT group cannot compare against an administrator-only field on another node
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
-      WHERE NOT (mr.title = u.first_name AND mr.state = 'opened')
-      RETURN mr.title LIMIT 10
-  expect: {compile_error: administrator}
-- name: negation_admin_bypass_grouped
-  description: A NOT group cannot filter on an administrator-only field
-  query:
-    gql: |
-      MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.is_admin = true) RETURN u.id
-  expect:
-    compile_error: administrator
-    compile_error_not_contains: [alice]
-- name: negation_admin_bypass_pushdown
-  description: A complemented NOT cannot filter on an administrator-only field
-  query:
-    gql: |
-      MATCH (u:User {id: 1}) WHERE NOT u.is_admin = true RETURN u.id
-  expect: {compile_error: administrator}
-- name: negation_admin_bypass_rhs
-  description: A NOT group cannot compare against an administrator-only field on the same node
-  query:
-    gql: |
-      MATCH (u:User {id: 1}) WHERE NOT (u.username = u.first_name AND u.state = 'active') RETURN u.id
-  expect: {compile_error: administrator}
-- name: negation_admin_context_allowed
-  description: An administrator can use administrator-only fields under NOT
-  config:
-    security: {admin: true}
-  query:
-    gql: |
-      MATCH (u:User)
-      WHERE u.id IN [1, 2] AND NOT (u.is_admin = true AND u.username = 'alice')
-      RETURN u.username LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      User:
-        ids: [1, 2]
-- name: negation_admin_leaf
-  description: A NOT leaf that keeps its NOT (a list) cannot inspect an administrator-only field
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"is_admin":{"in":[true]}}}],"limit":30}
-    gql: |
-      MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
-  expect: {compile_error: administrator}
-- name: negation_admin_rhs_pushdown
-  description: A complemented NOT comparison cannot reference an administrator-only field on the same node
-  query:
-    gql: |
-      MATCH (u:User {id: 1}) WHERE NOT u.private_profile = u.is_admin RETURN u.id
-  expect: {compile_error: administrator}
-- name: negation_cross_org_excludes
-  description: |
-    NOT conditions cannot reach another organization. User 1 authored opened merge requests in org 1 and org 2; the pushed-down NOT and the NOT group both match org-2 MR 9100, and the org-1 scope still removes it.
-  config:
-    security:
-      org_id: 1
-      paths: [1/]
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
-      WHERE NOT mr.state = 'merged' AND NOT (mr.state = 'closed' AND mr.title CONTAINS 'Org')
-      RETURN u, mr.title, mr.state LIMIT 50
-  expect:
-    node_count: 3
-    nodes:
-      User:
-        ids: [1]
-      MergeRequest:
-        ids: [2000, 2001]
-        absent: [9100]
-        filters: {state: opened}
-    edges:
-      AUTHORED:
-      - [1, 2000]
-      - [1, 2001]
-- name: negation_far_node_scan_keeps_scope
-  description: |
-    A NOT on the far node of a traversal reads the current node row. The table scan carries the caller's traversal_path filter.
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
-    gql: |
-      MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
-      WHERE NOT g.name CONTAINS 'secret'
-      RETURN g.name
-  expect:
-    compile_only: true
-    sql_contains:
-    - "startsWith(g.traversal_path, '1/')"
-    - "NOT multiSearchAny(lower(g.name), [lower('secret')])"
-- name: negation_no_existence_oracle_hidden
-  description: |
-    A NOT query over a project the caller cannot see returns the same empty result as a NOT query over a project that does not exist.
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1001],"not":{"name":"x"},"columns":["name"]}],"limit":30}
-    gql: |
-      MATCH (p:Project) WHERE p.id IN [1001] AND NOT p.name = 'x' RETURN p.name
-  expect:
-    skip_requirements: [node_ids, 'filter:name']
-    node_count: 0
-- name: negation_no_existence_oracle_missing
-  description: |
-    A NOT query over a project that does not exist returns the same empty result as a NOT query over a project the caller cannot see.
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1999],"not":{"name":"x"},"columns":["name"]}],"limit":30}
-    gql: |
-      MATCH (p:Project) WHERE p.id IN [1999] AND NOT p.name = 'x' RETURN p.name
-  expect:
-    skip_requirements: [node_ids, 'filter:name']
-    node_count: 0
-- name: negation_pagination_redacted
-  description: NOT pages skip a redaction-denied row without repeating or losing a visible row
-  config:
-    redaction:
-      allow:
-        work_item: [4000, 4001, 4003, 4010]
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010
-        AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
-      RETURN wi.state ORDER BY wi.id PAGE 2
-  expect:
-    all_pages:
-      node_ids:
-        WorkItem: [4000, 4001, 4003, 4010]
-      page_count: 3
-      no_duplicate_ids: true
-    pages:
-    - node_count: 2
+  - name: double_negated_traversal_path_rejected
+    description: A double NOT cannot hide a traversal_path condition
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT NOT p.traversal_path STARTS WITH '2/' RETURN p.id
+    expect:
+      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
+      compile_error_not_contains: [1/100/, 2/]
+
+  - name: negated_relationship_traversal_path_rejected
+    description: NOT cannot wrap a relationship traversal_path condition
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[c:CONTAINS]->(p:Project) WHERE NOT c.traversal_path = '1/100/1000/' RETURN p.id
+    expect:
+      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
+      compile_error_not_contains: [1/100/, 2/]
+
+  - name: negated_traversal_path_grouped_rejected
+    description: A NOT group cannot contain a traversal_path condition
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT (p.traversal_path STARTS WITH '1/100/' AND p.name = 'x') RETURN p.id
+    expect:
+      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
+      compile_error_not_contains: [1/100/, 2/]
+
+  - name: negated_traversal_path_in_scope_rejected
+    description: "NOT cannot wrap a traversal_path condition even when the literal is inside the caller's scope"
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '1/100/1000/' RETURN p.id
+    expect:
+      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
+      compile_error_not_contains: [1/100/]
+
+  - name: negated_traversal_path_rejected
+    description: NOT cannot wrap a traversal_path condition
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"starts_with":"2/"}}}],"limit":30}
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '2/' RETURN p.id
+    expect:
+      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
+      compile_error_not_contains: [1/100/, 2/]
+
+  - name: negation_admin_bypass_cross_node
+    description: A NOT group cannot compare against an administrator-only field on another node
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+        WHERE NOT (mr.title = u.first_name AND mr.state = 'opened')
+        RETURN mr.title LIMIT 10
+    expect: { compile_error: administrator }
+
+  - name: negation_admin_bypass_grouped
+    description: A NOT group cannot filter on an administrator-only field
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.is_admin = true) RETURN u.id
+    expect:
+      compile_error: administrator
+      compile_error_not_contains: [alice]
+
+  - name: negation_admin_bypass_pushdown
+    description: A complemented NOT cannot filter on an administrator-only field
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.is_admin = true RETURN u.id
+    expect: { compile_error: administrator }
+
+  - name: negation_admin_bypass_rhs
+    description: A NOT group cannot compare against an administrator-only field on the same node
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT (u.username = u.first_name AND u.state = 'active') RETURN u.id
+    expect: { compile_error: administrator }
+
+  - name: negation_admin_context_allowed
+    description: An administrator can use administrator-only fields under NOT
+    config:
+      security: { admin: true }
+    query:
+      gql: |
+        MATCH (u:User)
+        WHERE u.id IN [1, 2] AND NOT (u.is_admin = true AND u.username = 'alice')
+        RETURN u.username LIMIT 10
+    expect:
+      node_count: 2
       nodes:
-        WorkItem:
-          order: [4000, 4001]
-      has_more: true
-    - node_count: 1
+        User:
+          ids: [1, 2]
+
+  - name: negation_admin_leaf
+    description: A NOT leaf that keeps its NOT (a list) cannot inspect an administrator-only field
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"is_admin":{"in":[true]}}}],"limit":30}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
+    expect: { compile_error: administrator }
+
+  - name: negation_admin_rhs_pushdown
+    description: A complemented NOT comparison cannot reference an administrator-only field on the same node
+    query:
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.private_profile = u.is_admin RETURN u.id
+    expect: { compile_error: administrator }
+
+  - name: negation_cross_org_excludes
+    description: |
+      NOT conditions cannot reach another organization. User 1 authored opened merge requests in org 1 and org 2; the pushed-down NOT and the NOT group both match org-2 MR 9100, and the org-1 scope still removes it.
+    config:
+      security:
+        org_id: 1
+        paths: [1/]
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+        WHERE NOT mr.state = 'merged' AND NOT (mr.state = 'closed' AND mr.title CONTAINS 'Org')
+        RETURN u, mr.title, mr.state LIMIT 50
+    expect:
+      node_count: 3
       nodes:
-        WorkItem:
-          order: [4003]
-          absent: [4002]
-      has_more: true
-    - node_count: 1
+        User:
+          ids: [1]
+        MergeRequest:
+          ids: [2000, 2001]
+          absent: [9100]
+          filters: { state: opened }
+      edges:
+        AUTHORED:
+          - [1, 2000]
+          - [1, 2001]
+
+  - name: negation_far_node_scan_keeps_scope
+    description: |
+      A NOT on the far node of a traversal reads the current node row. The table scan carries the caller's traversal_path filter.
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
+        WHERE NOT g.name CONTAINS 'secret'
+        RETURN g.name
+    expect:
+      compile_only: true
+      sql_contains:
+        - "startsWith(g.traversal_path, '1/')"
+        - "NOT multiSearchAny(lower(g.name), [lower('secret')])"
+
+  - name: negation_no_existence_oracle_hidden
+    description: |
+      A NOT query over a project the caller cannot see returns the same empty result as a NOT query over a project that does not exist.
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1001],"not":{"name":"x"},"columns":["name"]}],"limit":30}
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1001] AND NOT p.name = 'x' RETURN p.name
+    expect:
+      skip_requirements: [node_ids, "filter:name"]
+      node_count: 0
+
+  - name: negation_no_existence_oracle_missing
+    description: |
+      A NOT query over a project that does not exist returns the same empty result as a NOT query over a project the caller cannot see.
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1999],"not":{"name":"x"},"columns":["name"]}],"limit":30}
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1999] AND NOT p.name = 'x' RETURN p.name
+    expect:
+      skip_requirements: [node_ids, "filter:name"]
+      node_count: 0
+
+  - name: negation_pagination_redacted
+    description: NOT pages skip a redaction-denied row without repeating or losing a visible row
+    config:
+      redaction:
+        allow:
+          work_item: [4000, 4001, 4003, 4010]
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010
+          AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
+        RETURN wi.state ORDER BY wi.id PAGE 2
+    expect:
+      all_pages:
+        node_ids:
+          WorkItem: [4000, 4001, 4003, 4010]
+        page_count: 3
+        no_duplicate_ids: true
+      pages:
+        - node_count: 2
+          nodes:
+            WorkItem:
+              order: [4000, 4001]
+          has_more: true
+        - node_count: 1
+          nodes:
+            WorkItem:
+              order: [4003]
+              absent: [4002]
+          has_more: true
+        - node_count: 1
+          nodes:
+            WorkItem:
+              order: [4010]
+          has_more: false
+
+  - name: negation_redaction_hides
+    description: |
+      A NOT group whose matches include a redaction-denied work item returns neither that work item nor its edge.
+    config:
+      redaction:
+        allow:
+          user: [1, 2, 3]
+          work_item: [4000, 4002, 4003, 4010]
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+        WHERE u.id IN [1, 2, 3] AND NOT (wi.state = 'opened' AND wi.weight = 3)
+        RETURN u.username, wi.title LIMIT 20
+    expect:
+      node_count: 2
       nodes:
+        User:
+          ids: [3]
         WorkItem:
-          order: [4010]
-      has_more: false
-- name: negation_redaction_hides
-  description: |
-    A NOT group whose matches include a redaction-denied work item returns neither that work item nor its edge.
-  config:
-    redaction:
-      allow:
-        user: [1, 2, 3]
-        work_item: [4000, 4002, 4003, 4010]
-  query:
-    gql: |
-      MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
-      WHERE u.id IN [1, 2, 3] AND NOT (wi.state = 'opened' AND wi.weight = 3)
-      RETURN u.username, wi.title LIMIT 20
-  expect:
-    node_count: 2
-    nodes:
-      User:
-        ids: [3]
-      WorkItem:
-        ids: [4003]
-        absent: [4001]
-    edges:
-      AUTHORED:
-      - [3, 4003]
-    edge_absent:
-      AUTHORED:
-      - [2, 4001]
-- name: negation_relationship_rhs_rejected
-  description: A NOT group cannot compare a relationship column against a node field
-  query:
-    gql: |
-      MATCH (u:User {id: 1})-[m:MEMBER_OF]->(g:Group)
-      WHERE NOT (m.source_id = u.first_name AND g.id = 100)
-      RETURN g.name LIMIT 10
-  expect: {compile_error: property comparisons involving relationships are unsupported}
-- name: negation_scoped_neighbors_excludes
-  description: "A complemented NOT on a neighbors center keeps the caller's scope"
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    json: |
-      {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"state":"blocked"},"columns":["state"]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}
-    gql: |
-      MATCH (u:User {id: 1})-[:MEMBER_OF]->(n)
-      WHERE NOT u.state = 'blocked'
-      RETURN u.state, n
-  expect:
-    node_count: 2
-    nodes:
-      User:
-        ids: [1]
-        filters: {state: active}
-    edges:
-      MEMBER_OF:
-      - [1, 100]
-- name: negation_scoped_path_finding_excludes
-  description: |
-    A complemented NOT on a path endpoint keeps the caller's scope. Group 102 is internal and outside 1/100/, so only the path to group 100 remains.
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    json: |
-      {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["*"]}}
-    gql: |
-      MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
-      WHERE g.id IN [100, 101, 102] AND NOT g.visibility_level = 'private'
-      RETURN p
-  expect:
-    path_destinations:
-      Group: [100]
-    nodes:
-      Group:
-        filters: {visibility_level: public}
-- name: not_traversal_path_eq_rejected
-  description: |
-    A JSON not entry on traversal_path is rejected even when its operator has an exact complement, and the error does not echo the path.
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":"1/100/1000/"}}],"limit":30}
-  expect:
-    compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-    compile_error_not_contains: [1/100/]
-- name: not_traversal_path_is_null_rejected
-  description: A JSON not entry with is_null on traversal_path is rejected before it becomes is_not_null
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"is_null":true}}}],"limit":30}
-  expect: {compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths}
-- name: scoped_negation
-  description: Grouped negation cannot expose projects outside the authorized namespace and organization
-  config:
-    security:
-      org_id: 1
-      paths: [1/100/]
-  query:
-    gql: |
-      MATCH (p:Project)
-      WHERE p.id >= 1000 AND p.id <= 9000
-        AND NOT (NOT p.id IN [1000, 1001, 9000] AND p.visibility_level = 'private')
-      RETURN p.name ORDER BY p.id LIMIT 10
-  expect:
-    node_count: 3
-    nodes:
-      Project:
-        order: [1000, 1002, 1010]
+          ids: [4003]
+          absent: [4001]
+      edges:
+        AUTHORED:
+          - [3, 4003]
+      edge_absent:
+        AUTHORED:
+          - [2, 4001]
+
+  - name: negation_relationship_rhs_rejected
+    description: A NOT group cannot compare a relationship column against a node field
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[m:MEMBER_OF]->(g:Group)
+        WHERE NOT (m.source_id = u.first_name AND g.id = 100)
+        RETURN g.name LIMIT 10
+    expect: { compile_error: property comparisons involving relationships are unsupported }
+
+  - name: negation_scoped_neighbors_excludes
+    description: "A complemented NOT on a neighbors center keeps the caller's scope"
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1],"not":{"state":"blocked"},"columns":["state"]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(n)
+        WHERE NOT u.state = 'blocked'
+        RETURN u.state, n
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [1]
+          filters: { state: active }
+      edges:
+        MEMBER_OF:
+          - [1, 100]
+
+  - name: negation_scoped_path_finding_excludes
+    description: |
+      A complemented NOT on a path endpoint keeps the caller's scope. Group 102 is internal and outside 1/100/, so only the path to group 100 remains.
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      json: |
+        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["*"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+        WHERE g.id IN [100, 101, 102] AND NOT g.visibility_level = 'private'
+        RETURN p
+    expect:
+      path_destinations:
+        Group: [100]
+      nodes:
+        Group:
+          filters: { visibility_level: public }
+
+  - name: not_traversal_path_eq_rejected
+    description: |
+      A JSON not entry on traversal_path is rejected even when its operator has an exact complement, and the error does not echo the path.
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":"1/100/1000/"}}],"limit":30}
+    expect:
+      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
+      compile_error_not_contains: [1/100/]
+
+  - name: not_traversal_path_is_null_rejected
+    description: A JSON not entry with is_null on traversal_path is rejected before it becomes is_not_null
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"is_null":true}}}],"limit":30}
+    expect: { compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths }
+
+  - name: scoped_negation
+    description: Grouped negation cannot expose projects outside the authorized namespace and organization
+    config:
+      security:
+        org_id: 1
+        paths: [1/100/]
+    query:
+      gql: |
+        MATCH (p:Project)
+        WHERE p.id >= 1000 AND p.id <= 9000
+          AND NOT (NOT p.id IN [1000, 1001, 9000] AND p.visibility_level = 'private')
+        RETURN p.name ORDER BY p.id LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        Project:
+          order: [1000, 1002, 1010]

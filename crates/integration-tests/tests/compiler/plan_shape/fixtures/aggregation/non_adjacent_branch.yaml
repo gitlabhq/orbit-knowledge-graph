@@ -1,4 +1,5 @@
 name: Branch aggregation counts matches joined through the original shared node
+
 query:
   json: |
     {
@@ -20,9 +21,11 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
           (a)-[:CALLS]->(d:Definition)
     RETURN count(d) AS matches
+
 logical:
   expect:
     - (Aggregate COUNT(d) AS matches (_))
+
 physical:
   clickhouse:
     planned:

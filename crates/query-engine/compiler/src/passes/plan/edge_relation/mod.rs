@@ -400,13 +400,16 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             if self.facts.aggregate() && self.facts.relations.len() == 1 {
                 if let Some(table) = physical_relation.single_edge_table() {
                     let edge = self.edge_read(&physical_relation, alias, false)?;
+                    let sort_key = self.facts.latest_row_key(table)?;
+                    let identity = predicates
+                        .iter()
+                        .filter(|predicate| filters_sort_key(predicate, sort_key))
+                        .cloned()
+                        .collect();
                     self.graph
                         .from(edge)
-                        .latest(
-                            alias,
-                            self.facts.latest_row_key(table)?.to_vec(),
-                            predicates,
-                        )
+                        .filter(identity)
+                        .latest(alias, sort_key.to_vec(), predicates)
                         .finish()
                 } else {
                     self.read_relation(&physical_relation, alias, current_rows, predicates)?
@@ -844,6 +847,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         let read = self.edge_read(relation, alias, final_)?;
         Ok(self.graph.from(read).filter(predicates).finish())
     }
+}
+
+fn filters_sort_key(predicate: &Predicate, sort_key: &[String]) -> bool {
+    let column = match predicate {
+        Predicate::RelationshipKinds { .. } => RELATIONSHIP_KIND_COLUMN,
+        Predicate::EntityKind { column, .. } => &column.name,
+        _ => return false,
+    };
+    sort_key.iter().any(|key| key == column)
 }
 
 fn edge_predicates<M: OrbitQueryModel + ?Sized>(

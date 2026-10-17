@@ -21,16 +21,19 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Union ALL AS _orbit_edge_0 (Project 1 AS depth, ... (_)) (Project 2 AS depth, ... (_)) (Project 3 AS depth, ... (_)))
-        - (Project e1.source_tags AS source_tags, e3.target_tags AS target_tags, ... (_))
-        - (Project path[(e1.target_id, e1.target_kind), (e2.target_id, e2.target_kind), (e3.target_id, e3.target_kind)] AS path_nodes, ... (_))
+        - (Union ALL AS _orbit_edge_0 (_) (_) (_))
+        - (Project 1 AS depth, ... (_))
+        - (Project 2 AS depth, ... (_))
+        - (Project 3 AS depth, ... (_))
+        - (Project _depth_2.source_tags AS source_tags, e3.target_tags AS target_tags, ... (_))
+        - (Project append(_depth_2.path_nodes, (e3.target_id, e3.target_kind)) AS path_nodes, ... (_))
     emitted:
       expect:
         - (Union ALL AS _orbit_edge_0 (_) (_) (_))
         - (Project 3 AS depth, ... (_))
         - (Project _orbit_edge_0.relationship_kind AS hop_e0_type, ... (_))
         - (Project _orbit_edge_0.path_nodes AS hop_e0_path_nodes, ... (_))
-        - (Project Array(Tuple(e1.target_id, e1.target_kind), Tuple(e2.target_id, e2.target_kind), Tuple(e3.target_id, e3.target_kind)) AS path_nodes, ... (_))
+        - (Project ArrayConcat(_depth_2.path_nodes, Array(Tuple(e3.target_id, e3.target_kind))) AS path_nodes, ... (_))
   duckdb:
     planned:
       expect:

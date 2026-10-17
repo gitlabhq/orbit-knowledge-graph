@@ -81,6 +81,11 @@ pub enum OutputValue {
     EmptyTextArray,
     Depth(u32),
     Path(Vec<(Column, Column)>),
+    PathAppend {
+        path: Column,
+        id: Column,
+        kind: Column,
+    },
 }
 
 #[derive(Clone)]

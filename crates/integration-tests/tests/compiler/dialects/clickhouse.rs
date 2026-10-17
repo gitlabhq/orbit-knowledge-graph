@@ -814,8 +814,9 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    let before_related = sql.split("RELATED_TO").next().unwrap();
-    assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
+    let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
+    let related_scope = related_scan.split(" ON ").next().unwrap();
+    assert!(!related_scope.contains(SCOPED_LOOKUP), "{sql}");
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");

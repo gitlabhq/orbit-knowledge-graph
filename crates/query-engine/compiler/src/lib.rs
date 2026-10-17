@@ -1122,30 +1122,49 @@ mod tests {
                 "p".into(),
                 ScopeProof::literal("1/2/"),
             )]));
-        for (query, lookup) in [
+        for (query, lookup, alias, literal_proof) in [
             (
                 "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
                 false,
+                "p",
+                true,
             ),
-            ("MATCH (p:Project {id: 100}) RETURN p LIMIT 20", true),
+            (
+                "MATCH (p:Project {id: 100}) RETURN p LIMIT 20",
+                true,
+                "p",
+                true,
+            ),
             (
                 "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
+                true,
+                "p",
                 true,
             ),
             (
                 "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
                 true,
+                "p",
+                true,
             ),
             (
                 "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
                 true,
+                "_orbit_edge_0",
+                false,
             ),
         ] {
             let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
             let sql = compiled.base.render();
-            for path in ["1/2/", "1/2/3/", "1/2/4/"] {
+            for path in ["1/2/3/", "1/2/4/"] {
                 assert!(
-                    sql.contains(&format!("startsWith(p.traversal_path, '{path}')")),
+                    sql.contains(&format!("startsWith({alias}.traversal_path, '{path}')")),
+                    "{query}: {sql}"
+                );
+            }
+            if literal_proof {
+                assert!(
+                    sql.contains(&format!("startsWith({alias}.traversal_path, '1/2/')")),
                     "{query}: {sql}"
                 );
             }

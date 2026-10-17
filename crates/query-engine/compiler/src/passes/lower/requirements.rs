@@ -92,6 +92,16 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                         })
                         .collect(),
                 ),
+                OutputValue::PathAppend { path, id, kind } => Expr::func(
+                    Function::ArrayConcat,
+                    vec![
+                        column(path),
+                        Expr::func(
+                            Function::Array,
+                            vec![Expr::func(Function::Tuple, vec![column(id), column(kind)])],
+                        ),
+                    ],
+                ),
             };
             SelectExpr::new(expression, &value.name)
         })

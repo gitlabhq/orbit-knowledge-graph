@@ -1,477 +1,500 @@
 cases:
-- name: aggregation_edge_negation
-  description: An aggregation counts only the memberships outside a negated relationship list
-  query:
-    gql: |
-      MATCH (u:User)-[m:MEMBER_OF]->(g:Group)
-      WHERE g.id IN [100, 101] AND NOT m.source_id IN [2, 3]
-      RETURN g{.name}, count(u) AS members LIMIT 10
-  expect:
-    groups:
-      g:
-        entity: Group
-        ids: [100, 101]
-        rows:
-        - entity: Group
-          id: 100
-          values: {members: 2}
-        - entity: Group
-          id: 101
-          values: {members: 3}
-- name: aggregation_node_edge_negation
-  description: An aggregation with a NOT group across a node and its relationship drops only the matching row
-  query:
-    gql: |
-      MATCH (u:User)-[a:AUTHORED]->(wi:WorkItem)
-      WHERE u.id IN [1, 2, 3, 7] AND NOT (u.username IN ['alice'] AND a.target_id = 4000)
-      RETURN count(wi) AS items
-  expect:
-    skip_requirements: [node_ids]
-    row_count: 1
-    row_values:
-    - {items: 4}
-- name: anchor_rewrite_keeps_relationship
-  description: |
-    The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group is false and all four merge requests count. Reading the AUTHORED edge instead would drop the opened merge requests.
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
-      WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
-      RETURN p{.name}, count(mr) AS mrs LIMIT 10
-  expect:
-    sql_contains:
-    - "(_orbit_edge_0.relationship_kind = 'IN_PROJECT')"
-    - "NOT ((_orbit_edge_0.source_kind = 'User') AND ((_orbit_edge_1.state = 'opened') AND has(_orbit_edge_0.source_tags, 'state:opened')))"
-    groups:
-      p:
-        entity: Project
-        ids: [1000]
-        rows:
-        - entity: Project
-          id: 1000
-          values: {mrs: 4}
-- name: anchor_rewrite_last_relationship
-  description: |
-    When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and counts every merge request in the project.
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
-      WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
-      RETURN p{.name}, count(mr) AS mrs LIMIT 10
-  expect:
-    sql_contains:
-    - "NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))"
-    groups:
-      p:
-        entity: Project
-        ids: [1000]
-        rows:
-        - entity: Project
-          id: 1000
-          values: {mrs: 4}
-- name: and_not_callee_name_in
-  description: AND NOT callee.name IN keeps a call whose callee is outside the exclusion list
-  query:
-    gql: |
-      MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
-      WHERE caller.name = 'compile' AND NOT callee.name IN ['run_query']
-      RETURN caller.name, callee.name LIMIT 20
-  expect:
-    node_count: 2
-    nodes:
-      Definition:
-        ids: [12000, 12001]
-        filters:
-          name:
-            in: [compile, helper]
-        rows:
-        - {id: 12000, name: compile}
-        - {id: 12001, name: helper}
-    edges:
-      CALLS:
-      - [12000, 12001]
-    referential_integrity: true
-- name: and_not_callee_name_in_excluded
-  description: AND NOT callee.name IN removes a call whose callee is in the exclusion list
-  query:
-    gql: |
-      MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
-      WHERE caller.name = 'compile' AND NOT callee.name IN ['helper']
-      RETURN caller.name, callee.name LIMIT 20
-  expect:
-    node_count: 0
-    skip_requirements: ['filter:name']
-    edges:
-      CALLS: []
-- name: cross_node_edge_negation
-  description: Nested negation combines user and group properties with a membership property
-  query:
-    gql: |
-      MATCH (u:User)-[membership:MEMBER_OF]->(g:Group)
-      WHERE u.id >= 1 AND u.id <= 7
-        AND NOT (NOT u.username = 'alice' AND NOT (g.visibility_level = 'private' AND membership.source_id = 3))
-      RETURN u.username, g.visibility_level LIMIT 20
-  expect:
-    node_count: 5
-    nodes:
-      User:
-        ids: [1, 3]
-        rows:
-        - {id: 1, username: alice}
-        - {id: 3, username: charlie}
-      Group:
-        ids: [100, 101, 102]
-    edges:
-      MEMBER_OF:
-      - [1, 100]
-      - [1, 102]
-      - [3, 101]
-    referential_integrity: true
-- name: cross_node_negation_aggregation
-  description: Cross-node negation counts each matching merge request once
-  query:
-    gql: |
-      MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
-      WHERE u.id >= 1 AND u.id <= 7
-        AND NOT (NOT u.username = 'alice' AND NOT mr.id IN [2000, 2002])
-      RETURN u{.username}, count(mr) AS mr_count LIMIT 10
-  expect:
-    groups:
-      u:
-        entity: User
-        ids: [1, 2]
-        rows:
-        - entity: User
-          id: 1
-          values: {mr_count: 2}
-          properties: {username: alice}
-        - entity: User
-          id: 2
-          values: {mr_count: 1}
-          properties: {username: bob}
-- name: fk_elidable_negation
-  description: |
-    NOT on a pinned foreign-key target keeps the hop so the target columns stay readable; the opened merge requests in the public project are removed.
-  query:
-    gql: |
-      MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000})
-      WHERE NOT (p.name CONTAINS 'Public' AND mr.state = 'opened')
-      RETURN mr.title LIMIT 20
-  expect:
-    node_count: 3
-    nodes:
-      Project:
-        ids: [1000]
-      MergeRequest:
-        ids: [2004, 2005]
-        absent: [2000, 2001]
-    edges:
-      IN_PROJECT:
-      - [2004, 1000]
-      - [2005, 1000]
-- name: latest_rows
-  description: Boolean filters use the latest values and exclude tombstones before background merges
-  config:
-    unmerged_seed: true
-    redaction:
-      allow:
-        work_item: [9400, 9401, 9402, 9403]
-    extra_seed:
-      gl_work_item:
-      - {id: 9400, title: old match, state: opened, weight: 3, traversal_path: 1/100/, _version: '2024-01-01 00:00:00'}
-      - {id: 9400, title: now closed, state: closed, weight: 3, traversal_path: 1/100/, _version: '2024-06-01 00:00:00'}
-      - {id: 9401, title: old closed, state: closed, weight: 3, traversal_path: 1/100/, _version: '2024-01-01 00:00:00'}
-      - {id: 9401, title: now opened, state: opened, weight: 8, traversal_path: 1/100/, _version: '2024-06-01 00:00:00'}
-      - {id: 9402, title: deleted match, state: opened, weight: 13, traversal_path: 1/100/, _version: '2024-01-01 00:00:00'}
-      - {id: 9402, title: deleted match, state: opened, weight: 13, traversal_path: 1/100/, _version: '2024-06-01 00:00:00', _deleted: true}
-      - {id: 9403, title: closed exception, state: closed, weight: 13, traversal_path: 1/100/, _version: '2024-06-01 00:00:00'}
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id IN [9400, 9401, 9402, 9403] AND NOT (wi.state = 'closed' AND NOT wi.weight = 13)
-      RETURN wi.title, wi.state, wi.weight LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        ids: [9401, 9403]
-        rows:
-        - {id: 9401, title: now opened, state: opened, weight: 8}
-        - {id: 9403, title: closed exception, state: closed, weight: 13}
-- name: latest_rows_aggregation
-  description: Aggregation with NOT on a mutable property counts the latest row only
-  config:
-    unmerged_seed: true
-    extra_seed:
-      gl_work_item:
-      - {id: 9410, title: was closed, state: closed, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: '2024-01-01 00:00:00'}
-      - {id: 9410, title: now opened, state: opened, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: '2024-06-01 00:00:00'}
-      - {id: 9411, title: was opened, state: opened, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: '2024-01-01 00:00:00'}
-      - {id: 9411, title: now closed, state: closed, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: '2024-06-01 00:00:00'}
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id IN [9410, 9411] AND NOT wi.state IN ['closed']
-      RETURN count(wi) AS open_items
-  expect:
-    skip_requirements: [node_ids]
-    row_count: 1
-    row_values:
-    - {open_items: 1}
-- name: negation_pagination
-  description: Cursor bounds apply to grouped negation without repeats or missing matches
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010
-        AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
-      RETURN wi.state ORDER BY wi.id PAGE 2
-  expect:
-    all_pages:
-      node_ids:
-        WorkItem: [4000, 4001, 4002, 4003, 4010]
-      page_count: 3
-      no_duplicate_ids: true
-    pages:
-    - node_count: 2
+  - name: aggregation_edge_negation
+    description: An aggregation counts only the memberships outside a negated relationship list
+    query:
+      gql: |
+        MATCH (u:User)-[m:MEMBER_OF]->(g:Group)
+        WHERE g.id IN [100, 101] AND NOT m.source_id IN [2, 3]
+        RETURN g{.name}, count(u) AS members LIMIT 10
+    expect:
+      groups:
+        g:
+          entity: Group
+          ids: [100, 101]
+          rows:
+            - entity: Group
+              id: 100
+              values: { members: 2 }
+            - entity: Group
+              id: 101
+              values: { members: 3 }
+
+  - name: aggregation_node_edge_negation
+    description: An aggregation with a NOT group across a node and its relationship drops only the matching row
+    query:
+      gql: |
+        MATCH (u:User)-[a:AUTHORED]->(wi:WorkItem)
+        WHERE u.id IN [1, 2, 3, 7] AND NOT (u.username IN ['alice'] AND a.target_id = 4000)
+        RETURN count(wi) AS items
+    expect:
+      skip_requirements: [node_ids]
+      row_count: 1
+      row_values:
+        - { items: 4 }
+
+  - name: anchor_rewrite_keeps_relationship
+    description: |
+      The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group is false and all four merge requests count. Reading the AUTHORED edge instead would drop the opened merge requests.
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
+        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+        RETURN p{.name}, count(mr) AS mrs LIMIT 10
+    expect:
+      sql_contains:
+        - "(_orbit_edge_0.relationship_kind = 'IN_PROJECT')"
+        - "NOT ((_orbit_edge_0.source_kind = 'User') AND ((_orbit_edge_1.state = 'opened') AND has(_orbit_edge_0.source_tags, 'state:opened')))"
+      groups:
+        p:
+          entity: Project
+          ids: [1000]
+          rows:
+            - entity: Project
+              id: 1000
+              values: { mrs: 4 }
+
+  - name: anchor_rewrite_last_relationship
+    description: |
+      When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and counts every merge request in the project.
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+        RETURN p{.name}, count(mr) AS mrs LIMIT 10
+    expect:
+      sql_contains:
+        - "NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))"
+      groups:
+        p:
+          entity: Project
+          ids: [1000]
+          rows:
+            - entity: Project
+              id: 1000
+              values: { mrs: 4 }
+
+  - name: and_not_callee_name_in
+    description: AND NOT callee.name IN keeps a call whose callee is outside the exclusion list
+    query:
+      gql: |
+        MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
+        WHERE caller.name = 'compile' AND NOT callee.name IN ['run_query']
+        RETURN caller.name, callee.name LIMIT 20
+    expect:
+      node_count: 2
       nodes:
-        WorkItem:
-          order: [4000, 4001]
-      has_more: true
-    - node_count: 2
-      nodes:
-        WorkItem:
-          order: [4002, 4003]
-      has_more: true
-    - node_count: 1
-      nodes:
-        WorkItem:
-          order: [4010]
-      has_more: false
-- name: not_denormalized_state
-  description: NOT = on a denormalized property matches the same rows as the JSON ne filter
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","filters":{"state":{"ne":"closed"}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
-    gql: |
-      MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
-      WHERE u.id IN [1, 2] AND NOT wi.state = 'closed'
-      RETURN u, wi.state LIMIT 20
-  expect:
-    node_count: 3
-    nodes:
-      User:
-        ids: [1]
-      WorkItem:
-        ids: [4000, 4002]
-        absent: [4001]
-        filters: {state: opened}
-    edges:
-      AUTHORED:
-      - [1, 4000]
-      - [1, 4002]
-- name: not_fk_relationship_filter
-  description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes every row
-  query:
-    gql: |
-      MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
-      WHERE NOT r.source_kind = 'MergeRequest'
-      RETURN p.name, mr.title LIMIT 20
-  expect:
-    skip_requirements: [node_ids]
-    sql_contains: ["source_kind != 'MergeRequest'"]
-    node_count: 0
-    edges:
-      IN_PROJECT: []
-- name: not_id_list_stays_filter
-  description: NOT over an ID list stays a filter and does not become an ID selector
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"id":{"lt":4003}},"not":{"id":{"in":[4000,4001]}},"columns":["state"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.id < 4003 AND NOT wi.id IN [4000, 4001]
-      RETURN wi.state LIMIT 10
-  expect:
-    skip_requirements: ['filter:id']
-    node_count: 1
-    nodes:
-      WorkItem:
-        ids: [4002]
-- name: not_in_denormalized_state
-  description: NOT IN on a non-nullable denormalized property reads the edge tags and removes the closed work item
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed","locked"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
-    gql: |
-      MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
-      WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed', 'locked']
-      RETURN u, wi.state LIMIT 20
-  expect:
-    node_count: 3
-    nodes:
-      User:
-        ids: [1]
-      WorkItem:
-        ids: [4000, 4002]
-        absent: [4001]
-    edges:
-      AUTHORED:
-      - [1, 4000]
-      - [1, 4002]
-- name: not_plus_filters_same_property
-  description: A filter and a not entry on the same property both apply
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"gte":3}},"not":{"weight":{"in":[8,13]}},"columns":["weight"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight >= 3 AND NOT wi.weight IN [8, 13]
-      RETURN wi.weight LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        ids: [4000, 4010]
-        absent: [4001, 4002, 4003]
-        filters:
-          weight:
-            in: [3, 5]
-- name: not_token_match
-  description: NOT token_match removes the work item whose title has the token
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"title":{"token_match":"login"}},"columns":["title"]}],"limit":10}
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT token_match(wi.title, 'login')
-      RETURN wi.title LIMIT 10
-  expect:
-    node_count: 4
-    nodes:
-      WorkItem:
-        ids: [4001, 4002, 4003, 4010]
-        absent: [4000]
-- name: parenthesized_conjunction_flattens
-  description: A parenthesized AND with a complemented NOT matches like the same conditions without parentheses
-  query:
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'opened' AND NOT wi.weight = 3)
-      RETURN wi.state, wi.weight LIMIT 10
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        ids: [4003, 4010]
-        absent: [4000, 4001, 4002]
-        filters:
-          state: opened
-          weight:
-            in: [13, 5]
-- name: pushdown_neighbors_center
-  description: A complemented NOT on a neighbors center is an ordinary filter and keeps the open work item
-  query:
-    json: |
-      {"query_type":"neighbors","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"state":"closed"},"columns":["state"]}],"neighbors":{"direction":"outgoing","rel_types":["IN_GROUP"]}}
-    gql: |
-      MATCH (wi:WorkItem {id: 4000})-[:IN_GROUP]->(n)
-      WHERE NOT wi.state = 'closed'
-      RETURN wi.state, n
-  expect:
-    node_count: 2
-    nodes:
-      WorkItem:
-        ids: [4000]
-        filters: {state: opened}
-    edges:
-      IN_GROUP:
-      - [4000, 100]
-- name: pushdown_neighbors_center_excluded
-  description: A complemented NOT on a neighbors center removes the closed work item and its neighbors
-  query:
-    gql: |
-      MATCH (wi:WorkItem {id: 4001})-[:IN_GROUP]->(n)
-      WHERE NOT wi.state = 'closed'
-      RETURN n
-  expect:
-    skip_requirements: [node_ids, 'filter:state']
-    node_count: 0
-    edges:
-      IN_GROUP: []
-- name: pushdown_path_endpoint
-  description: A complemented NOT on a path endpoint is an ordinary filter and removes the internal group
-  query:
-    gql: |
-      MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
-      WHERE g.id IN [100, 102] AND NOT g.visibility_level = 'internal'
-      RETURN p
-  expect:
-    path_destinations:
-      Group: [100]
-    nodes:
-      Group:
-        filters: {visibility_level: public}
-- name: traversal_negation_pagination
-  description: Traversal pages over a negated list return each remaining membership once and in order
-  query:
-    json: |
-      {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"username":{"in":["charlie"]}},"columns":["username"]},{"id":"g","entity":"Group","node_ids":[101]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"order_by":"u.id","cursor":{"page_size":2}}
-    gql: |
-      MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 101})
-      WHERE NOT u.username IN ['charlie']
-      RETURN u.username ORDER BY u.id PAGE 2
-  expect:
-    all_pages:
-      node_ids:
-        User: [4, 5, 6]
-        Group: [101]
-      edge_count: 3
-      page_count: 2
-    pages:
-    - node_count: 3
+        Definition:
+          ids: [12000, 12001]
+          filters:
+            name:
+              in: [compile, helper]
+          rows:
+            - { id: 12000, name: compile }
+            - { id: 12001, name: helper }
+      edges:
+        CALLS:
+          - [12000, 12001]
+      referential_integrity: true
+
+  - name: and_not_callee_name_in_excluded
+    description: AND NOT callee.name IN removes a call whose callee is in the exclusion list
+    query:
+      gql: |
+        MATCH (caller:Definition)-[:CALLS {project_id: 1000}]->(callee:Definition)
+        WHERE caller.name = 'compile' AND NOT callee.name IN ['helper']
+        RETURN caller.name, callee.name LIMIT 20
+    expect:
+      node_count: 0
+      skip_requirements: ["filter:name"]
+      edges:
+        CALLS: []
+
+  - name: cross_node_edge_negation
+    description: Nested negation combines user and group properties with a membership property
+    query:
+      gql: |
+        MATCH (u:User)-[membership:MEMBER_OF]->(g:Group)
+        WHERE u.id >= 1 AND u.id <= 7
+          AND NOT (NOT u.username = 'alice' AND NOT (g.visibility_level = 'private' AND membership.source_id = 3))
+        RETURN u.username, g.visibility_level LIMIT 20
+    expect:
+      node_count: 5
       nodes:
         User:
-          order: [4, 5]
+          ids: [1, 3]
+          rows:
+            - { id: 1, username: alice }
+            - { id: 3, username: charlie }
         Group:
-          ids: [101]
+          ids: [100, 101, 102]
       edges:
         MEMBER_OF:
-        - [4, 101]
-        - [5, 101]
-      has_more: true
-    - node_count: 2
+          - [1, 100]
+          - [1, 102]
+          - [3, 101]
+      referential_integrity: true
+
+  - name: cross_node_negation_aggregation
+    description: Cross-node negation counts each matching merge request once
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+        WHERE u.id >= 1 AND u.id <= 7
+          AND NOT (NOT u.username = 'alice' AND NOT mr.id IN [2000, 2002])
+        RETURN u{.username}, count(mr) AS mr_count LIMIT 10
+    expect:
+      groups:
+        u:
+          entity: User
+          ids: [1, 2]
+          rows:
+            - entity: User
+              id: 1
+              values: { mr_count: 2 }
+              properties: { username: alice }
+            - entity: User
+              id: 2
+              values: { mr_count: 1 }
+              properties: { username: bob }
+
+  - name: fk_elidable_negation
+    description: |
+      NOT on a pinned foreign-key target keeps the hop so the target columns stay readable; the opened merge requests in the public project are removed.
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000})
+        WHERE NOT (p.name CONTAINS 'Public' AND mr.state = 'opened')
+        RETURN mr.title LIMIT 20
+    expect:
+      node_count: 3
+      nodes:
+        Project:
+          ids: [1000]
+        MergeRequest:
+          ids: [2004, 2005]
+          absent: [2000, 2001]
+      edges:
+        IN_PROJECT:
+          - [2004, 1000]
+          - [2005, 1000]
+
+  - name: latest_rows
+    description: Boolean filters use the latest values and exclude tombstones before background merges
+    config:
+      unmerged_seed: true
+      redaction:
+        allow:
+          work_item: [9400, 9401, 9402, 9403]
+      extra_seed:
+        gl_work_item:
+          - { id: 9400, title: old match, state: opened, weight: 3, traversal_path: 1/100/, _version: "2024-01-01 00:00:00" }
+          - { id: 9400, title: now closed, state: closed, weight: 3, traversal_path: 1/100/, _version: "2024-06-01 00:00:00" }
+          - { id: 9401, title: old closed, state: closed, weight: 3, traversal_path: 1/100/, _version: "2024-01-01 00:00:00" }
+          - { id: 9401, title: now opened, state: opened, weight: 8, traversal_path: 1/100/, _version: "2024-06-01 00:00:00" }
+          - { id: 9402, title: deleted match, state: opened, weight: 13, traversal_path: 1/100/, _version: "2024-01-01 00:00:00" }
+          - { id: 9402, title: deleted match, state: opened, weight: 13, traversal_path: 1/100/, _version: "2024-06-01 00:00:00", _deleted: true }
+          - { id: 9403, title: closed exception, state: closed, weight: 13, traversal_path: 1/100/, _version: "2024-06-01 00:00:00" }
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id IN [9400, 9401, 9402, 9403] AND NOT (wi.state = 'closed' AND NOT wi.weight = 13)
+        RETURN wi.title, wi.state, wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [9401, 9403]
+          rows:
+            - { id: 9401, title: now opened, state: opened, weight: 8 }
+            - { id: 9403, title: closed exception, state: closed, weight: 13 }
+
+  - name: latest_rows_aggregation
+    description: Aggregation with NOT on a mutable property counts the latest row only
+    config:
+      unmerged_seed: true
+      extra_seed:
+        gl_work_item:
+          - { id: 9410, title: was closed, state: closed, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: "2024-01-01 00:00:00" }
+          - { id: 9410, title: now opened, state: opened, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: "2024-06-01 00:00:00" }
+          - { id: 9411, title: was opened, state: opened, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: "2024-01-01 00:00:00" }
+          - { id: 9411, title: now closed, state: closed, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: 1/100/, _version: "2024-06-01 00:00:00" }
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id IN [9410, 9411] AND NOT wi.state IN ['closed']
+        RETURN count(wi) AS open_items
+    expect:
+      skip_requirements: [node_ids]
+      row_count: 1
+      row_values:
+        - { open_items: 1 }
+
+  - name: negation_pagination
+    description: Cursor bounds apply to grouped negation without repeats or missing matches
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010
+          AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
+        RETURN wi.state ORDER BY wi.id PAGE 2
+    expect:
+      all_pages:
+        node_ids:
+          WorkItem: [4000, 4001, 4002, 4003, 4010]
+        page_count: 3
+        no_duplicate_ids: true
+      pages:
+        - node_count: 2
+          nodes:
+            WorkItem:
+              order: [4000, 4001]
+          has_more: true
+        - node_count: 2
+          nodes:
+            WorkItem:
+              order: [4002, 4003]
+          has_more: true
+        - node_count: 1
+          nodes:
+            WorkItem:
+              order: [4010]
+          has_more: false
+
+  - name: not_denormalized_state
+    description: NOT = on a denormalized property matches the same rows as the JSON ne filter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","filters":{"state":{"ne":"closed"}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+        WHERE u.id IN [1, 2] AND NOT wi.state = 'closed'
+        RETURN u, wi.state LIMIT 20
+    expect:
+      node_count: 3
       nodes:
         User:
-          order: [6]
+          ids: [1]
+        WorkItem:
+          ids: [4000, 4002]
+          absent: [4001]
+          filters: { state: opened }
+      edges:
+        AUTHORED:
+          - [1, 4000]
+          - [1, 4002]
+
+  - name: not_fk_relationship_filter
+    description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes every row
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE NOT r.source_kind = 'MergeRequest'
+        RETURN p.name, mr.title LIMIT 20
+    expect:
+      skip_requirements: [node_ids]
+      sql_contains: ["source_kind != 'MergeRequest'"]
+      node_count: 0
+      edges:
+        IN_PROJECT: []
+
+  - name: not_id_list_stays_filter
+    description: NOT over an ID list stays a filter and does not become an ID selector
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"id":{"lt":4003}},"not":{"id":{"in":[4000,4001]}},"columns":["state"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.id < 4003 AND NOT wi.id IN [4000, 4001]
+        RETURN wi.state LIMIT 10
+    expect:
+      skip_requirements: ["filter:id"]
+      node_count: 1
+      nodes:
+        WorkItem:
+          ids: [4002]
+
+  - name: not_in_denormalized_state
+    description: NOT IN on a non-nullable denormalized property reads the edge tags and removes the closed work item
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed","locked"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+        WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed', 'locked']
+        RETURN u, wi.state LIMIT 20
+    expect:
+      node_count: 3
+      nodes:
+        User:
+          ids: [1]
+        WorkItem:
+          ids: [4000, 4002]
+          absent: [4001]
+      edges:
+        AUTHORED:
+          - [1, 4000]
+          - [1, 4002]
+
+  - name: not_plus_filters_same_property
+    description: A filter and a not entry on the same property both apply
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"gte":3}},"not":{"weight":{"in":[8,13]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight >= 3 AND NOT wi.weight IN [8, 13]
+        RETURN wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000, 4010]
+          absent: [4001, 4002, 4003]
+          filters:
+            weight:
+              in: [3, 5]
+
+  - name: not_token_match
+    description: NOT token_match removes the work item whose title has the token
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"title":{"token_match":"login"}},"columns":["title"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT token_match(wi.title, 'login')
+        RETURN wi.title LIMIT 10
+    expect:
+      node_count: 4
+      nodes:
+        WorkItem:
+          ids: [4001, 4002, 4003, 4010]
+          absent: [4000]
+
+  - name: parenthesized_conjunction_flattens
+    description: A parenthesized AND with a complemented NOT matches like the same conditions without parentheses
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND (wi.state = 'opened' AND NOT wi.weight = 3)
+        RETURN wi.state, wi.weight LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4003, 4010]
+          absent: [4000, 4001, 4002]
+          filters:
+            state: opened
+            weight:
+              in: [13, 5]
+
+  - name: pushdown_neighbors_center
+    description: A complemented NOT on a neighbors center is an ordinary filter and keeps the open work item
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"state":"closed"},"columns":["state"]}],"neighbors":{"direction":"outgoing","rel_types":["IN_GROUP"]}}
+      gql: |
+        MATCH (wi:WorkItem {id: 4000})-[:IN_GROUP]->(n)
+        WHERE NOT wi.state = 'closed'
+        RETURN wi.state, n
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000]
+          filters: { state: opened }
+      edges:
+        IN_GROUP:
+          - [4000, 100]
+
+  - name: pushdown_neighbors_center_excluded
+    description: A complemented NOT on a neighbors center removes the closed work item and its neighbors
+    query:
+      gql: |
+        MATCH (wi:WorkItem {id: 4001})-[:IN_GROUP]->(n)
+        WHERE NOT wi.state = 'closed'
+        RETURN n
+    expect:
+      skip_requirements: [node_ids, "filter:state"]
+      node_count: 0
+      edges:
+        IN_GROUP: []
+
+  - name: pushdown_path_endpoint
+    description: A complemented NOT on a path endpoint is an ordinary filter and removes the internal group
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+        WHERE g.id IN [100, 102] AND NOT g.visibility_level = 'internal'
+        RETURN p
+    expect:
+      path_destinations:
+        Group: [100]
+      nodes:
         Group:
-          ids: [101]
+          filters: { visibility_level: public }
+
+  - name: traversal_negation_pagination
+    description: Traversal pages over a negated list return each remaining membership once and in order
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"username":{"in":["charlie"]}},"columns":["username"]},{"id":"g","entity":"Group","node_ids":[101]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"order_by":"u.id","cursor":{"page_size":2}}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 101})
+        WHERE NOT u.username IN ['charlie']
+        RETURN u.username ORDER BY u.id PAGE 2
+    expect:
+      all_pages:
+        node_ids:
+          User: [4, 5, 6]
+          Group: [101]
+        edge_count: 3
+        page_count: 2
+      pages:
+        - node_count: 3
+          nodes:
+            User:
+              order: [4, 5]
+            Group:
+              ids: [101]
+          edges:
+            MEMBER_OF:
+              - [4, 101]
+              - [5, 101]
+          has_more: true
+        - node_count: 2
+          nodes:
+            User:
+              order: [6]
+            Group:
+              ids: [101]
+          edges:
+            MEMBER_OF:
+              - [6, 101]
+          has_more: false
+
+  - name: two_hop_edge_negation_reversed
+    description: |
+      A NOT group over a relationship column and a node column keeps its edge alias when the planner starts from the pinned project at the far end.
+    query:
+      gql: |
+        MATCH (u:User)-[m:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1000})
+        WHERE NOT (m.source_id = 2 AND g.visibility_level = 'public')
+        RETURN u.username, g.name, p.name LIMIT 20
+    expect:
+      node_count: 4
+      nodes:
+        User:
+          ids: [1, 6]
+          absent: [2]
+        Project:
+          ids: [1000]
       edges:
         MEMBER_OF:
-        - [6, 101]
-      has_more: false
-- name: two_hop_edge_negation_reversed
-  description: |
-    A NOT group over a relationship column and a node column keeps its edge alias when the planner starts from the pinned project at the far end.
-  query:
-    gql: |
-      MATCH (u:User)-[m:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1000})
-      WHERE NOT (m.source_id = 2 AND g.visibility_level = 'public')
-      RETURN u.username, g.name, p.name LIMIT 20
-  expect:
-    node_count: 4
-    nodes:
-      User:
-        ids: [1, 6]
-        absent: [2]
-      Project:
-        ids: [1000]
-    edges:
-      MEMBER_OF:
-      - [1, 100]
-      - [6, 100]
-      CONTAINS:
-      - [100, 1000]
-    sql_contains:
-    - "(_orbit_edge_0.relationship_kind = 'MEMBER_OF')"
-    - "(NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))"
+          - [1, 100]
+          - [6, 100]
+        CONTAINS:
+          - [100, 1000]
+      sql_contains:
+        - "(_orbit_edge_0.relationship_kind = 'MEMBER_OF')"
+        - "(NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))"

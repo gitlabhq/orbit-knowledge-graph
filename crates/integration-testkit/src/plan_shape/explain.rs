@@ -711,6 +711,12 @@ fn planned_projections(values: &[Projection]) -> String {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
+                OutputValue::PathAppend { path, id, kind } => format!(
+                    "append({}, ({}, {}))",
+                    planned_column(path),
+                    planned_column(id),
+                    planned_column(kind)
+                ),
             };
             format!("{value} AS {}", projection.name)
         })
