@@ -19,8 +19,8 @@ fn escape_setting_str(s: &str) -> String {
 }
 
 const QUERY_CACHE_UNCACHEABLE_HANDLING: [(&str, &str); 2] = [
-    ("query_cache_nondeterministic_function_handling", "'ignore'"),
-    ("query_cache_system_table_handling", "'ignore'"),
+    ("query_cache_nondeterministic_function_handling", "ignore"),
+    ("query_cache_system_table_handling", "ignore"),
 ];
 
 /// Query execution settings. All fields map to ClickHouse query-level
@@ -158,16 +158,19 @@ impl QueryConfig {
         }
     }
 
-    /// Returns ClickHouse SETTINGS as key-value string pairs, skipping unset fields.
-    ///
-    /// Uses serde round-trip so that the field names stay in sync with the
-    /// struct definition -- no manual string mapping needed.
-    ///
-    /// Values are formatted as SQL-safe literals: bare integers, `0`/`1`
-    /// for bools, and single-quoted escaped strings. Returns an error if
-    /// a field serializes to a type that cannot be represented as a
-    /// ClickHouse setting (e.g. arrays, objects, or non-u64 numbers).
+    /// Set fields as SETTINGS clause literals; strings are single-quoted and escaped.
     pub fn to_clickhouse_settings(&self) -> Result<Vec<(String, String)>, String> {
+        self.render_settings(escape_setting_str)
+    }
+
+    pub fn to_http_settings(&self) -> Result<Vec<(String, String)>, String> {
+        self.render_settings(str::to_owned)
+    }
+
+    fn render_settings(
+        &self,
+        render_str: fn(&str) -> String,
+    ) -> Result<Vec<(String, String)>, String> {
         let map = match serde_json::to_value(self) {
             Ok(Value::Object(m)) => m,
             _ => return Ok(Vec::new()),
@@ -183,7 +186,7 @@ impl QueryConfig {
                             .ok_or_else(|| format!("setting `{k}` has non-u64 value: {v}"))?;
                         n.to_string()
                     }
-                    Value::String(s) => escape_setting_str(s),
+                    Value::String(s) => render_str(s),
                     _ => return Err(format!("setting `{k}` has unsupported type: {v}")),
                 };
                 Ok((k, formatted))
@@ -191,7 +194,7 @@ impl QueryConfig {
             .collect::<Result<Vec<_>, String>>()?;
         if self.use_query_cache == Some(true) {
             settings.extend(
-                QUERY_CACHE_UNCACHEABLE_HANDLING.map(|(k, v)| (k.to_string(), v.to_string())),
+                QUERY_CACHE_UNCACHEABLE_HANDLING.map(|(k, v)| (k.to_string(), render_str(v))),
             );
         }
         Ok(settings)

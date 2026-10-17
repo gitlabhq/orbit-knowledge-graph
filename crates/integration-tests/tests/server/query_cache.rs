@@ -44,19 +44,21 @@ async fn repeated_graph_query_reads_the_cache(ctx: &TestContext) {
 }
 
 async fn uncacheable_queries_run_uncached(ctx: &TestContext) {
-    let clause = orbit_server_config::query::default_config()
-        .to_clickhouse_settings()
-        .expect("default settings render")
-        .iter()
-        .map(|(key, value)| format!("{key} = {value}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let settings = orbit_server_config::query::default_config()
+        .to_http_settings()
+        .expect("default settings render");
 
     for sql in [
         "SELECT toInt64(now() > toDateTime(0))",
         "SELECT toInt64(count()) FROM system.one",
     ] {
-        let batches = ctx.query(&format!("{sql} SETTINGS {clause}")).await;
+        let batches = ctx
+            .create_client()
+            .query(sql)
+            .with_settings(settings.clone())
+            .fetch_arrow()
+            .await
+            .expect("query with the default settings");
         assert_eq!(i64::extract_column(&batches, 0).expect("one column"), [1]);
     }
     assert_eq!(query_cache_usage(ctx).await, ["None", "None"]);
