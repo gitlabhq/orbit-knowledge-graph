@@ -29,3 +29,8 @@ invalid:
   - 'warn!(safe(REASON) = e.to_string().as_str(), "to_string then as_str");'
   - 'info!(safe(KIND) = format_args!("{x}"), "format_args");'
   - 'span.record(safe::REASON, error.to_string().as_str());'
+  - |
+    span.record(
+        safe::REASON,
+        tracing::field::display(path),
+    );
