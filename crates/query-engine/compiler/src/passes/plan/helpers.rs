@@ -16,7 +16,7 @@ pub fn ordered_filters(
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);
-    properties
+    let mut bound: Vec<_> = properties
         .into_iter()
         .flat_map(|(property, filters)| {
             filters.iter().map(|filter| {
@@ -26,7 +26,20 @@ pub fn ordered_filters(
                 )
             })
         })
-        .collect()
+        .collect();
+    let key_narrowed = bound.iter().any(|(_, filter)| {
+        filter.in_sort_key
+            && matches!(
+                filter.filter.op.unwrap_or(FilterOp::Eq),
+                FilterOp::Eq | FilterOp::In
+            )
+    });
+    if key_narrowed {
+        for (_, filter) in &mut bound {
+            filter.text_indexed = false;
+        }
+    }
+    bound
 }
 
 pub fn bind_filter(

@@ -10,7 +10,9 @@ use tonic::Status;
 
 use super::phase::Phase;
 use crate::active_schema::SchemaSnapshot;
-use crate::status_query::{fetch_status_query_batches, map_column_extraction_error};
+use crate::status_query::{
+    fetch_status_query_batches, map_column_extraction_error, uncached_query_config,
+};
 
 const MAX_SDLC_ATTEMPTS: i64 = 5;
 // The hourly sweep retries a dead run, so wait for two sweeps.
@@ -81,14 +83,20 @@ pub async fn read_plan_checkpoints(
     }
 
     let table = prefixed_table_name(CHECKPOINT_TABLE, schema.migration_version);
-    let batches =
-        fetch_status_query_batches(client, PLAN_CHECKPOINTS_SQL, "plan checkpoints", |query| {
+    let config = uncached_query_config();
+    let batches = fetch_status_query_batches(
+        client,
+        PLAN_CHECKPOINTS_SQL,
+        "plan checkpoints",
+        &config,
+        |query| {
             query
                 .param("table", &table)
                 .param("namespace_prefix", NAMESPACE_KEY_PREFIX)
                 .param("roots", roots)
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     let mut checkpoints: HashMap<i64, PlanCheckpoints> = roots
         .iter()

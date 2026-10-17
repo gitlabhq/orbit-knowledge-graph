@@ -474,7 +474,7 @@ query:
   default:
     max_execution_time: 30
     max_memory_usage: 1073741824
-    use_query_cache: false
+    use_query_cache: true
     query_cache_ttl: 60
   aggregation:
     max_execution_time: 60
@@ -487,8 +487,8 @@ query:
 | `query.default.max_bytes_to_read` | unset | ClickHouse `max_bytes_to_read` in bytes |
 | `query.default.max_rows_to_read` | unset | ClickHouse `max_rows_to_read` |
 | `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
-| `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
-| `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
+| `query.default.use_query_cache` | `true` | ClickHouse query cache for graph queries and item counts. Indexing progress reads and the indexer always skip it. Queries with non-deterministic functions or system tables run uncached |
+| `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds. A cached result can be this old |
 
 ## Schema management
 

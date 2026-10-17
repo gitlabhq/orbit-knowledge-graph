@@ -19,7 +19,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 | NatsBroker | `nats/broker.rs` | JetStream connection |
 | WorkerPool | `engine/worker_pool.rs` | Concurrency control |
 | Retry harness | `engine/retry.rs` | Shared retry vocabulary: `RetryPolicy` (mode + `Backoff` + cap), `Step`/`Loop`, and the `drive`/`drive_with`/`drive_until`/`drive_forever` executors. Global (NATS-redelivery) mode is executed by `run_handlers`, which reads the same policy |
-| ClickHouse writer | `clickhouse/` | `ClickHouseWriter` (one Arrow-IPC `write`) + `BufferedWriter` (per-table coalescing across all producers + local write retry). A table flushes at `write_slice_rows`, on the soft `write_buffer_age_secs` tick once it holds `write_min_flush_rows`, or when its oldest row exceeds the hard `write_max_flush_age_secs` cap — so a trickle of small repos pools into one part instead of one tiny part per tick |
+| ClickHouse writer | `clickhouse/` | `ClickHouseWriter`: one Arrow-IPC `write` per call, plus `write_durable` (the same insert with `async_insert` and `wait_for_async_insert`, retried 2 s then 4 s). Each code job inserts its own row slices (`write_slice_rows`, at most `write_max_concurrent` in flight) and waits for them before it checkpoints. ClickHouse pools the small inserts from all jobs into one part per table per flush |
 
 ### Domain modules
 

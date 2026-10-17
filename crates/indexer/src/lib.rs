@@ -165,7 +165,6 @@ pub async fn run(
             writer.clone(),
             analytics.clone(),
             &resources,
-            shutdown.clone(),
         )
         .await?;
     } else {

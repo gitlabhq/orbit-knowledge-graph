@@ -1761,12 +1761,9 @@ mod tests {
 
     #[test]
     fn scope_proofs_preserve_deeper_authorization_filters() {
-        let context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()])
-            .unwrap()
-            .with_scope_proofs(std::collections::HashMap::from([(
-                "p".into(),
-                ScopeProof::literal("1/2/"),
-            )]));
+        let mut context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()]).unwrap();
+        context.scope_proofs =
+            std::collections::HashMap::from([("p".into(), ScopeProof::literal("1/2/"))]);
         for (query, lookup) in [
             (
                 "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
@@ -2415,5 +2412,25 @@ mod tests {
             dedup.contains("relationship_kind = 'APPROVED'"),
             "kind filter should sit inside the dedup subquery:\n{sql}"
         );
+    }
+
+    #[test]
+    fn text_indexed_equality_also_matches_the_lowercase_index_expression() {
+        let sql = compile_gql_sql("MATCH (d:Definition) WHERE d.name = 'compile' RETURN d.name");
+
+        assert!(sql.contains("(d.name = 'compile')"), "{sql}");
+        assert!(sql.contains("(lower(d.name) = lower('compile'))"), "{sql}");
+    }
+
+    #[test]
+    fn equality_without_text_index_or_with_a_sort_key_filter_stays_plain() {
+        for query in [
+            "MATCH (d:Definition) WHERE d.definition_type = 'Function' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name",
+        ] {
+            let sql = compile_gql_sql(query);
+            assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
+        }
     }
 }

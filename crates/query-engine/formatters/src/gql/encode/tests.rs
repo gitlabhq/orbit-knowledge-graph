@@ -75,7 +75,7 @@ fn column(name: &str, array: ArrayRef) -> (String, ArrayRef) {
 }
 
 fn hydrate(output: &mut PipelineOutput, key: &str, value: &str) {
-    for row in output.query_result.rows_mut() {
+    for row in output.query_result.authorized_rows_mut() {
         for node in row.dynamic_nodes_mut() {
             if node.entity_type == "User" {
                 node.properties
