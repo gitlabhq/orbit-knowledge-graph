@@ -169,7 +169,7 @@ mise test:integration
 | `mise test:integration:corpus` | The query corpus and the executable docs |
 | `mise test:integration:overlay <name>` | Data correctness with an ontology overlay |
 
-CI builds the container-test binaries once, then runs the same nextest archive in three parallel lanes. One lane runs most tests, one runs the data-driven tests, and one runs the query corpus. The `integration-test-lane-coverage-check` job fails if a test is in no lane or in two lanes.
+CI splits the container tests into lanes that run in parallel. One lane runs most tests, one runs the data-driven tests, and one runs the query corpus. The `integration-test-lane-coverage-check` job fails if a test is in no lane or in two lanes.
 
 ### Query scenarios
 

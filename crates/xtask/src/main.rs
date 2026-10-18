@@ -83,9 +83,6 @@ enum Command {
         /// Check the filters in .gitlab-ci.yml.
         #[arg(long)]
         check: bool,
-        /// Read tests from this nextest archive.
-        #[arg(long)]
-        archive_file: Option<String>,
     },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
@@ -370,10 +367,7 @@ async fn main() -> Result<()> {
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
-        Command::IntegrationLanes {
-            check,
-            archive_file,
-        } => integration_lanes::run(check, archive_file.as_deref()),
+        Command::IntegrationLanes { check } => integration_lanes::run(check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
         Command::Loadtest {
             endpoint,
