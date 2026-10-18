@@ -69,7 +69,7 @@ stages:
   - name: imports
     rules:
       - match: '(preproc_include path: $S:string_literal)'
-        replace: '(__import (__source @$S) (__source_path @$S|regex_replace("^.", "")|regex_replace(".$", "")|prepend("./")) (__name "*"))'
+        replace: '(__import (__source @$S $S) (__source_path @$S|regex_replace("^.", "")|regex_replace(".$", "")|prepend("./")) (__name "*"))'
       - match: '(preproc_include path: $S:system_lib_string)'
         replace: '(__import (__source @$S|strip=<|strip_suffix(">")) (__source_path @$S|strip=<|strip_suffix(">")) (__name "*"))'
 
@@ -107,9 +107,9 @@ stages:
       - match: '(field_expression argument: $O:__member field: $F:field_identifier)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression argument: $O field: (template_method name: $F:field_identifier))'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
       - match: '(field_expression argument: $O field: $F:field_identifier)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
   - name: retag-calls
     rules:
@@ -140,13 +140,13 @@ stages:
       - match: '(function_definition type:? $RT:type_identifier declarator: (attributed_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (pointer_declarator declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P)) body: $B)'
-        replace: '(__def (__defname @$Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+        replace: '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $Q:qualified_identifier parameters: $P) body: $B)'
-        replace: '(__def (__defname @$Q) (__function) (__ssa_return_type? @$RT) $P $B)'
+        replace: '(__def (__defname @$Q $Q) (__function) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition declarator: $Q:qualified_identifier body: $B)'
-        replace: '(__def (__defname @$Q|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "")) (__function) $B)'
+        replace: '(__def (__defname @$Q|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "") $Q) (__function) $B)'
       - match: '(function_definition declarator: $C:operator_cast body: $B)'
-        replace: '(__def (__defname @$C|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "")) (__function) $B)'
+        replace: '(__def (__defname @$C|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "") $C) (__function) $B)'
       - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
         replace: '(__defname @$N)'
         tag: { exports: '@$N' }
@@ -159,9 +159,9 @@ stages:
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P) body: $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: $N:operator_name parameters: $P) body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B)'
+        replace: '(__def (__defname @$N $N) (__method) (__ssa_return_type? @$RT) $P $B)'
       - match: '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:operator_name parameters: $P))'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
+        replace: '(__def (__defname @$N $N) (__method) (__ssa_return_type? @$RT) $P)'
       - match: '(function_definition type:? $RT:type_identifier declarator: (function_declarator declarator: (qualified_identifier scope: $S:namespace_identifier name: $N:operator_name) parameters: $P) body: $B)'
         replace: '(__def (__defname @$S) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B))'
       # Out-of-class method definitions: Class::method
@@ -191,13 +191,13 @@ stages:
       - match: '(declaration type: $T:qualified_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")) $A)'
       - match: '(declaration type: $T:qualified_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::") $T) (__rhs $V))'
       - match: '(declaration type: $T:qualified_identifier declarator: $N:identifier)'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::") $T))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V))'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(declaration type: $T:type_identifier declarator: $N:identifier)'
@@ -209,13 +209,13 @@ stages:
       - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
       - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
       - match: '(assignment_expression left: $N:identifier right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
       - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(switch_statement condition: $C body: $B)'
@@ -250,7 +250,7 @@ stages:
       - match: '(concept_definition name: $N:identifier)'
         replace: '(__def (__defname @$N) (__interface))'
       - match: '(namespace_definition name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__class) $B)'
+        replace: '(__def (__defname @$N $N) (__class) $B)'
 
   - name: ssa-cleanup
     rules:

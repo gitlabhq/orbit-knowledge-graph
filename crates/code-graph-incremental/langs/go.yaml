@@ -119,12 +119,12 @@ stages:
       - match: '(selector_expression operand: $O:__call field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O field: $F)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: imports
     rules:
@@ -146,13 +146,13 @@ stages:
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__declaration) (__rhs @$R))'
+        replace: '(__binding @$N (__declaration) (__rhs @$R $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
 
       # var/const: a __def for the graph plus a __binding for SSA
       - match: '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))'
@@ -164,7 +164,7 @@ stages:
       - match: '(var_spec name: $N:identifier value: (expression_list $V:__call))'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $V)))'
       - match: '(var_spec name: $N:identifier value: (expression_list $V))'
-        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V)))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V $V)))'
       - match: '(var_spec name: $N:identifier)'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
       - match: '(const_spec name: $N:identifier)'

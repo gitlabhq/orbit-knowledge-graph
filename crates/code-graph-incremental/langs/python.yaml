@@ -92,7 +92,7 @@ stages:
 
       # Aliased import: capture real name as sym, alias as child
       - match: '(aliased_import name: $N alias: $A)'
-        replace: '(aliased_import @$N (__alias @$A))'
+        replace: '(aliased_import @$N $N (__alias @$A))'
       - match: '(aliased_import name: $N)'
         replace: '(aliased_import @$N)'
 
@@ -106,7 +106,7 @@ stages:
         replace: '(__member @$M (__object $O))'
       # a.b → __member "b" (__object "a")
       - match: '(attribute object: $O attribute: $M)'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
 
   - name: retag-calls
     rules:
@@ -120,21 +120,21 @@ stages:
       - match: '(parenthesized_expression $V:__call)'
         replace: '$V'
       - match: '(call function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: imports
     rules:
       # from X import * (must precede named-import rule due to first-match-wins)
       - match: '(import_from_statement module_name: $M $W:wildcard_import)'
-        replace: '(__import (__source @$M) (__source_path @$M) (__name @$W))'
+        replace: '(__import (__source @$M $M) (__source_path @$M) (__name @$W $W))'
 
       # from X import a, b  /  from X import a as b  /  mixed
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
-        replace: '(__import (__source @$M) (__source_path @$M) $$$NAMES->__name)'
+        replace: '(__import (__source @$M $M) (__source_path @$M) $$$NAMES->__name)'
 
       # import X / import X.Y.Z
       - match: '(import_statement name: $N:dotted_name)'
-        replace: '(__import (__source @$N) (__source_path @$N) (__name @$N (__ssa_hint @$N|split_first("."))))'
+        replace: '(__import (__source @$N $N) (__source_path @$N) (__name @$N (__ssa_hint @$N|split_first("."))))'
 
       # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'
@@ -152,21 +152,21 @@ stages:
         replace: '(nonlocal_names $$$N=>nonlocal_name)'
       # Defs
       - match: '(assignment left: $N right: $R:__lambda)'
-        replace: '(__def (__defname @$N) (__lambda) $R)'
+        replace: '(__def (__defname @$N $N) (__lambda) $R)'
       - match: '(assignment left: $N type: $T:type)'
-        replace: '(__def (__defname @$N) (__field_def))'
+        replace: '(__def (__defname @$N $N) (__field_def))'
       - match: '(typed_default_parameter name: $N type: (type $T) value: $V)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__ssa_typed @$T $T) (__rhs @$V $V))'
       - match: '(typed_default_parameter name: $N type: (type $T))'
         replace: '(__binding @$N (__ssa_typed @$T))'
       - match: '(typed_default_parameter name: $N)'
         replace: '(__binding @$N)'
       - match: '(typed_parameter $C:identifier type: (type $T))'
-        replace: '(__binding @$C (__ssa_typed @$T))'
+        replace: '(__binding @$C (__ssa_typed @$T $T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
       - match: '(default_parameter name: $N:identifier value: $V)'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__rhs @$V $V))'
       - match: '(lambda_parameters $$$P:identifier|__binding)'
         replace: '(lambda_parameters $$$P->__binding)'
 
@@ -174,25 +174,25 @@ stages:
       - match: '(assignment left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment left: $N:__ivar right: $R)'
-        replace: '(__binding $N (__rhs @$R))'
+        replace: '(__binding $N (__rhs @$R $R))'
       - match: '(assignment left: $N right: $R:__call)'
-        replace: '(__binding @$N (__declaration "function") (__rhs $R))'
+        replace: '(__binding @$N $N (__declaration "function") (__rhs $R))'
       - match: '(assignment left: $N right: $R:__ssa_loop)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment left: $N right: $R)'
-        replace: '(__binding @$N (__declaration "function") (__rhs @$R))'
+        replace: '(__binding @$N $N (__declaration "function") (__rhs @$R $R))'
       - match: '(assignment left: $N:__ivar)'
         replace: '(__binding $N)'
       - match: '(assignment left: $N)'
         replace: '(__binding @$N)'
       - match: '(augmented_assignment left: $N right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(augmented_assignment left: $N right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(named_expression name: $N value: $V:__call)'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(named_expression name: $N value: $V)'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__rhs @$V $V))'
 
       # Branches
       - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
@@ -228,12 +228,12 @@ stages:
 
       # Methods — has self parameter (before generic function rule)
       - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
         tag: { flavor: self_method }
 
       # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R $R) $$$ANN $$$P $B)'
 
       # Classes — variadic before body captures __supertype/__decorator
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'

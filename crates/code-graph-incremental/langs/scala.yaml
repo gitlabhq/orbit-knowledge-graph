@@ -47,7 +47,7 @@ stages:
       - match: '(compilation_unit $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_clause name: $N:package_identifier)'
-        replace: '(sc_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        replace: '(sc_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
         tag: { import_type: Import }
         tag_on: __import
       - match: '(return_expression $$$V)'
@@ -76,7 +76,7 @@ stages:
       - match: '(field_expression value: $O:call_expression field: $F:identifier)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F:identifier)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
   - name: retag-calls
     rules:
@@ -125,7 +125,7 @@ stages:
       - match: '(while_expression body: $B)'
         replace: '(__ssa_loop $B)'
       - match: '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type:? $RT:type_identifier body: $B)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
+        replace: '(__def (__defname @$N $N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
       - match: '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters return_type:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $B)'
       - match: '(function_declaration $M?:modifiers name: $N:identifier parameters:? $P return_type:? $RT:type_identifier)'

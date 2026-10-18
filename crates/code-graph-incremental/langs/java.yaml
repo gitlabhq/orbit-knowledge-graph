@@ -47,19 +47,19 @@ stages:
     rules:
       # import static a.b.C.*;
       - match: '(import_declaration (static) $S:scoped_identifier (asterisk))'
-        replace: '(__import (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$S $S) (__source_path @$S|replace(".", "/")) (__name "*"))'
         tag: { import_type: StaticImport, callable: "true" }
       # import static a.b.C.m;
       - match: '(import_declaration (static) $S:scoped_identifier)'
-        replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
+        replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "") $S) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
         tag: { import_type: StaticImport, callable: "true" }
       # import a.b.*;
       - match: '(import_declaration $S:scoped_identifier (asterisk))'
-        replace: '(__import (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$S $S) (__source_path @$S|replace(".", "/")) (__name "*"))'
         tag: { import_type: WildcardImport }
       # import a.b.C;
       - match: '(import_declaration $S:scoped_identifier)'
-        replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|replace(".", "/")) (__name @$S|split_last(".")))'
+        replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "") $S) (__source_path @$S|replace(".", "/")) (__name @$S|split_last(".")))'
 
   - name: normalize
     rules:
@@ -73,7 +73,7 @@ stages:
         tag: { import_type: WildcardImport }
         tag_on: __import
       - match: '(package_declaration $S:scoped_identifier)'
-        replace: '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        replace: '(java_pkg (__package @$S $S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
         tag: { import_type: WildcardImport }
         tag_on: __import
       - match: '(package_declaration $S:identifier)'

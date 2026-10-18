@@ -41,11 +41,11 @@ stages:
   - name: imports
     rules:
       - match: '(import_header $I:identifier (import_alias $A:type_identifier))'
-        replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "")) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".") (__alias @$A)))'
+        replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "") $I) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".") (__alias @$A)))'
       - match: '(import_header $I:identifier (wildcard_import))'
-        replace: '(__import (__source @$I) (__source_path @$I|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$I $I) (__source_path @$I|replace(".", "/")) (__name "*"))'
       - match: '(import_header $I:identifier)'
-        replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "")) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
+        replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "") $I) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
 
   - name: attach-getters
     rules:
@@ -61,7 +61,7 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_header $I:identifier)'
-        replace: '(kt_pkg (__package @$I) (__module_export (__import (__source @$I) (__source_path @$I|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        replace: '(kt_pkg (__package @$I $I) (__module_export (__import (__source @$I) (__source_path @$I|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(jump_expression (throw) $$$V)'
         replace: '(__ssa_branch $$$V)'
       - match: '(null_literal)'
@@ -89,7 +89,7 @@ stages:
 
       # this.x → __ivar
       - match: '(navigation_expression (this_expression) (navigation_suffix $N:simple_identifier))'
-        replace: '(__ivar @$N)'
+        replace: '(__ivar @$N $N)'
 
       # : Base(), : Iface → __supertype
       - match: '(delegation_specifier (constructor_invocation $T:__member $A:value_arguments))'
@@ -105,7 +105,7 @@ stages:
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)'
         replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+        replace: '(kt_prop (__def (__defname @$N $N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier)'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(class_parameter $N:simple_identifier $T:__member)'
@@ -117,7 +117,7 @@ stages:
       - match: '(parameter $N:simple_identifier $T:__member)'
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
       - match: '(parameter $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
       - match: '(parameter $N:simple_identifier)'
         replace: '(__binding @$N)'
       - match: '(catch_block $N:simple_identifier $T:type_identifier $$$B)'
@@ -140,7 +140,7 @@ stages:
       - match: '(navigation_expression (super_expression) (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object (__ivar "super")))'
       - match: '(navigation_expression $O (navigation_suffix $M:simple_identifier))'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
 
       - match: '(call_expression $F:__ivar (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
@@ -249,7 +249,7 @@ stages:
       - match: '(statements $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:simple_identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

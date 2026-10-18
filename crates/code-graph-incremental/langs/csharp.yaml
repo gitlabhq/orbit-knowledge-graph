@@ -29,7 +29,7 @@ stages:
     rules:
       # Namespaces first, before qualified names collapse
       - match: '(namespace_declaration name: $N body: (declaration_list $$$B))'
-        replace: '(namespace_declaration (cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
+        replace: '(namespace_declaration (cs_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
         tag: { import_type: WildcardImport }
         tag_on: __import
       - match: '(file_scoped_namespace_declaration name: $N)'
@@ -37,21 +37,21 @@ stages:
         tag: { import_type: WildcardImport }
         tag_on: __import
       - match: '(using_directive (static) $Q:qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
         tag: { import_type: StaticImport, callable: "true" }
       - match: '(using_directive (static) $Q:identifier)'
         replace: '(__import (__source @$Q) (__source_path @$Q) (__name "*"))'
         tag: { import_type: StaticImport, callable: "true" }
       - match: '(using_directive name: $A:identifier $Q:qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:alias_qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:generic_name)'
         replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:identifier)'
         replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive $Q:qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
         tag: { import_type: WildcardImport }
       - match: '(using_directive $Q:identifier)'
         replace: '(__import (__source @$Q) (__source_path @$Q) (__name "*"))'

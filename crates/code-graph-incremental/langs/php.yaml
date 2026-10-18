@@ -44,9 +44,9 @@ stages:
     rules:
       # use A\B\C as D;  /  use function A\B\f;  /  use const A\B\K;
       - match: '(namespace_use_clause $Q:(qualified_name $N:name) alias: $A:name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")) (__name @$N (__alias @$A)))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")) (__name @$N (__alias @$A)))'
       - match: '(namespace_use_clause $Q:(qualified_name $N:name))'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")) (__name @$N))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")) (__name @$N))'
 
       # Grouped clause entries: keep the name, carry the alias
       - match: '(namespace_use_clause $N:name alias: $A:name)'
@@ -56,13 +56,13 @@ stages:
 
       # use A\B\{C, D as E};
       - match: '(namespace_use_declaration $P:namespace_name body: (namespace_use_group $$$CLAUSES:namespace_use_clause))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("\", "/")) $$$CLAUSES->__name)'
+        replace: '(__import (__source @$P $P) (__source_path @$P|replace("\", "/")) $$$CLAUSES->__name)'
 
       # \Vendor\X\Y::f() and new \Vendor\X\Y() — a fully qualified reference imports Y
       - match: '(scoped_call_expression scope: $Q:(qualified_name $N:name) name: $M arguments: $A)'
-        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (scoped_call_expression scope: (name @$N) name: (name @$M) $A))'
+        replace: '(php_fqn_ref (__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (scoped_call_expression scope: (name @$N) name: (name @$M) $A))'
       - match: '(object_creation_expression $Q:(qualified_name $N:name) $A:arguments)'
-        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (object_creation_expression (name @$N) $A))'
+        replace: '(php_fqn_ref (__import (__source @$Q $Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (object_creation_expression (name @$N) $A))'
 
   - name: normalize
     rules:
@@ -73,7 +73,7 @@ stages:
       - match: '(namespace_definition name: $N:namespace_name body: (compound_statement $$$B))'
         replace: '(namespace_definition (php_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
       - match: '(namespace_definition name: $N:namespace_name)'
-        replace: '(php_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        replace: '(php_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
 
@@ -113,15 +113,15 @@ stages:
       - match: '(property_promotion_parameter name: (variable_name $N:name))'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(simple_parameter type: $T:named_type name: $N:variable_name)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
       - match: '(simple_parameter name: $N:variable_name)'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N $N)'
       - match: '(variadic_parameter name: $N:variable_name)'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N $N)'
 
       # catch (T $e)
       - match: '(catch_clause type: (type_list $T:named_type) name: $N:variable_name body: $B)'
-        replace: '(catch_clause (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) $B)'
+        replace: '(catch_clause (__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) $B)'
 
       # $x instanceof T references T
       - match: '(binary_expression left: $L (instanceof) right: $T:name)'
@@ -136,7 +136,7 @@ stages:
       - match: '(member_access_expression object: $O:__call name: $M:name)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression object: $O name: $M:name)'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
       - match: '(nullsafe_member_access_expression object: $O:__ivar name: $M:name)'
         replace: '(__member @$M (__object $O))'
       - match: '(nullsafe_member_access_expression object: $O name: $M:name)'
@@ -170,13 +170,13 @@ stages:
       - match: '(member_call_expression object: $O:__member name: $M:name arguments: $A)'
         replace: '(__call (__callee (__member @$M (__object $O))) $A)'
       - match: '(member_call_expression object: $O name: $M:name arguments: $A)'
-        replace: '(__call (__callee (__member @$M (__object @$O))) $A)'
+        replace: '(__call (__callee (__member @$M (__object @$O $O))) $A)'
       - match: '(nullsafe_member_call_expression object: $O:__ivar name: $M:name arguments: $A)'
         replace: '(__call (__callee (__member @$M (__object $O))) $A)'
       - match: '(nullsafe_member_call_expression object: $O:__member name: $M:name arguments: $A)'
         replace: '(__call (__callee (__member @$M (__object $O))) $A)'
       - match: '(nullsafe_member_call_expression object: $O name: $M:name arguments: $A)'
-        replace: '(__call (__callee (__member @$M (__object @$O))) $A)'
+        replace: '(__call (__callee (__member @$M (__object @$O $O))) $A)'
 
       # Foo::m()
       - match: '(scoped_call_expression scope: $S:name name: $M:name arguments: $A)'
@@ -196,19 +196,19 @@ stages:
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
-        replace: '(__binding $N (__rhs @$R))'
+        replace: '(__binding $N (__rhs @$R $R))'
       - match: '(assignment_expression left: $N:variable_name right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N:variable_name right: $R:php_fqn_ref)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N:variable_name right: $R:__ssa_branch)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:variable_name right: $R:anonymous_function)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N:variable_name right: $R:arrow_function)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N:variable_name right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(static_variable_declaration name: $N:variable_name value: $V:__call)'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(static_variable_declaration name: $N:variable_name value: $V)'
@@ -277,7 +277,7 @@ stages:
       - match: '$R:(__ssa_return_type "self")'
         replace: '(__ssa_return_type @$R|ancestor_sym("__class"))'
       - match: '(__ssa_return $V:variable_name)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

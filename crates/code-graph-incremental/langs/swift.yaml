@@ -24,7 +24,7 @@ stages:
   - name: imports
     rules:
       - match: '(import_declaration $I:identifier)'
-        replace: '(__import (__source @$I) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
+        replace: '(__import (__source @$I $I) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
 
   - name: normalize
     rules:

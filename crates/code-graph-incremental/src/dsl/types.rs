@@ -230,21 +230,6 @@ pub struct Rewrite {
     pub guards: Vec<(u16, u16, bool)>,
     pub slots: HashMap<Box<str>, u16>,
     pub unique: Option<(Pat, u16, usize)>,
-    pub placed: Vec<bool>,
-}
-
-impl Pat {
-    fn mark_placed(&self, placed: &mut [bool]) {
-        match self {
-            Pat::Cap { slot, .. } | Pat::Var { slot, .. } => placed[*slot as usize] = true,
-            Pat::Spread { slot, inject } => {
-                placed[*slot as usize] = true;
-                inject.iter().for_each(|kid| kid.mark_placed(placed));
-            }
-            Pat::Node { kids, .. } => kids.iter().for_each(|kid| kid.mark_placed(placed)),
-            Pat::Not(_) | Pat::Desc(_) => {}
-        }
-    }
 }
 
 pub struct Ctx<'l> {
@@ -318,12 +303,6 @@ impl Rewrite {
         let pat = parse(&mut ctx, src)?;
         let out = out(ctx.as_template())?;
         let nslots = ctx.slots.len();
-        let mut placed = vec![false; nslots];
-        match &out {
-            Out::Replace(pat, ..) => pat.mark_placed(&mut placed),
-            Out::Append(pats) => pats.iter().for_each(|pat| pat.mark_placed(&mut placed)),
-            Out::Tag(..) => {}
-        }
         Ok(Rewrite {
             pat,
             out,
@@ -332,7 +311,6 @@ impl Rewrite {
             filters: ctx.filters,
             guards: vec![],
             unique: None,
-            placed,
         })
     }
 

@@ -58,7 +58,7 @@ stages:
   - name: imports
     rules:
       - match: '(preproc_include path: $S:string_literal)'
-        replace: '(__import (__source @$S) (__source_path @$S|regex_replace("^.", "")|regex_replace(".$", "")|prepend("./")) (__name "*"))'
+        replace: '(__import (__source @$S $S) (__source_path @$S|regex_replace("^.", "")|regex_replace(".$", "")|prepend("./")) (__name "*"))'
       - match: '(preproc_include path: $S:system_lib_string)'
         replace: '(__import (__source @$S) (__source_path @$S|strip=<|strip_suffix(">")) (__name "*"))'
 
@@ -90,7 +90,7 @@ stages:
   - name: retag-calls
     rules:
       - match: '(call_expression function: (field_expression argument: $O field: $F:field_identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$F (__object @$O))) $A)'
+        replace: '(__call (__callee (__member @$F (__object @$O $O))) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
 
@@ -120,13 +120,13 @@ stages:
       - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
       - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
       - match: '(assignment_expression left: $N:identifier right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
       - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(switch_statement condition: $C body: $B)'
