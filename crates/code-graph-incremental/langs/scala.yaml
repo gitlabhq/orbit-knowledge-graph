@@ -145,6 +145,7 @@ stages:
     rules:
       - match: '(block $$$B)'
         replace: '(__scope $$$B)'
+        tag: { hoisted: "true" }
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 
