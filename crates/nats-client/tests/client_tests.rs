@@ -5,7 +5,7 @@ use nats_client::kv_types::{KvBucketConfig, KvPutOptions, KvPutResult};
 use nats_client::{NatsClient, SubjectDedup};
 use orbit_server_config::NatsConfiguration;
 use testcontainers::ImageExt;
-use testcontainers::core::{ContainerPort, WaitFor};
+use testcontainers::core::ContainerPort;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
@@ -18,14 +18,26 @@ async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
         .with_cmd(&cmd)
         .with_tag(NATS_TAG)
         .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(3)])
         .start()
         .await
         .expect("failed to start NATS container");
 
     let host = container.get_host().await.expect("host");
     let port = container.get_host_port_ipv4(4222).await.expect("port");
-    (container, format!("{host}:{port}"))
+    let url = format!("{host}:{port}");
+    wait_for_nats_port(&url).await;
+
+    (container, url)
+}
+
+async fn wait_for_nats_port(url: &str) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while tokio::net::TcpStream::connect(url).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("NATS port did not become ready");
 }
 
 fn config(url: &str) -> NatsConfiguration {

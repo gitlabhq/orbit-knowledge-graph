@@ -22,10 +22,6 @@ use integration_testkit::scenario::{
 use orbit_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use siphon_proto::replication_event::{Column, Operation};
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
-use testcontainers::ImageExt;
-use testcontainers::core::{ContainerPort, WaitFor};
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 /// Dispatchers publish to a fixed versioned stream, so the shared NATS container
 /// can't host concurrent scenarios: `serial` runs them one at a time and each run
@@ -67,22 +63,6 @@ impl ScenarioHandlers for DispatchScenarioHandlers {
 
 pub fn serving_flag() -> Arc<std::sync::atomic::AtomicBool> {
     Arc::new(std::sync::atomic::AtomicBool::new(false))
-}
-
-pub async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
-    let container = Nats::default()
-        .with_cmd(&NatsServerCmd::default().with_jetstream())
-        .with_tag("2.11-alpine")
-        .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(3)])
-        .start()
-        .await
-        .unwrap();
-
-    let host = container.get_host().await.unwrap();
-    let port = container.get_host_port_ipv4(4222).await.unwrap();
-
-    (container, format!("{host}:{port}"))
 }
 
 async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<DispatchedMessage> {

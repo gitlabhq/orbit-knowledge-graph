@@ -164,7 +164,7 @@ async fn start_nats_tls_container(
         )
         .with_cmd(vec!["--config", "/etc/nats/nats.conf"])
         .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(5)])
+        .with_ready_conditions(vec![WaitFor::message_on_stderr("Server is ready")])
         .start()
         .await
         .expect("failed to start NATS TLS container");
@@ -178,7 +178,10 @@ async fn start_nats_tls_container(
         .await
         .expect("failed to get NATS port");
 
-    (container, format!("{host}:{port}"))
+    let url = format!("{host}:{port}");
+    super::common::wait_for_nats_port(&url).await;
+
+    (container, url)
 }
 
 #[tokio::test]

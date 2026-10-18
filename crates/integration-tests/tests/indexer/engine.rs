@@ -23,9 +23,9 @@ use orbit_arrow::ArrowUtils;
 use orbit_server_config::{ClickHouseConfiguration, NatsConfiguration, SubscriptionConfig};
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
-use testcontainers::core::{ContainerPort, ImageExt, WaitFor};
+use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use testcontainers_modules::nats::Nats;
 
 const STREAM: &str = "test_stream";
 const SUBJECT: &str = "test.events";
@@ -107,7 +107,7 @@ struct TestContext {
 
 impl TestContext {
     async fn new() -> Self {
-        let (nats_container, nats_url) = Self::start_nats().await;
+        let (nats_container, nats_url) = super::common::start_nats().await;
         let (clickhouse_container, clickhouse_endpoint, database) =
             match std::env::var("GKG_TEST_CLICKHOUSE_URL") {
                 Ok(_) => {
@@ -130,25 +130,6 @@ impl TestContext {
             clickhouse_endpoint,
             database,
         }
-    }
-
-    async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
-        let container = Nats::default()
-            .with_cmd(&NatsServerCmd::default().with_jetstream())
-            .with_tag("2.11-alpine")
-            .with_mapped_port(0, ContainerPort::Tcp(4222))
-            .with_ready_conditions(vec![WaitFor::seconds(3)])
-            .start()
-            .await
-            .expect("failed to start NATS container");
-
-        let host = container.get_host().await.expect("failed to get host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("failed to get port");
-
-        (container, format!("{host}:{port}"))
     }
 
     async fn start_clickhouse() -> (testcontainers::ContainerAsync<GenericImage>, String) {

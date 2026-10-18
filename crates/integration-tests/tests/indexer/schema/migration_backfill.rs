@@ -32,10 +32,7 @@ use orbit_migrations::catalog::{ONTOLOGY_ARCHIVES_BUCKET, OntologyCatalog};
 use orbit_migrations::execute;
 use orbit_server_config::NatsConfiguration;
 use serde::Deserialize;
-use testcontainers::ImageExt;
-use testcontainers::core::{ContainerPort, WaitFor};
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use testcontainers_modules::nats::Nats;
 use tokio_util::sync::CancellationToken;
 
 use super::super::common;
@@ -64,7 +61,7 @@ impl TestContext {
     async fn new() -> Self {
         let clickhouse =
             ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, *common::GRAPH_SCHEMA_SQL]).await;
-        let (nats, nats_url) = Self::start_nats().await;
+        let (nats, nats_url) = common::start_nats().await;
         Self::create_streams(&nats_url).await;
         let scheduler_services = indexer::orchestrator::scheduled::connect(&NatsConfiguration {
             url: nats_url.clone(),
@@ -248,22 +245,6 @@ impl TestContext {
                 ))
                 .await;
         }
-    }
-
-    async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
-        let container = Nats::default()
-            .with_cmd(&NatsServerCmd::default().with_jetstream())
-            .with_tag("2.11-alpine")
-            .with_mapped_port(0, ContainerPort::Tcp(4222))
-            .with_ready_conditions(vec![WaitFor::seconds(3)])
-            .start()
-            .await
-            .unwrap();
-
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(4222).await.unwrap();
-
-        (container, format!("{host}:{port}"))
     }
 
     async fn create_streams(url: &str) {
