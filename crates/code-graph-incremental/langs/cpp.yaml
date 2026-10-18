@@ -86,11 +86,11 @@ stages:
       - match: '(template_type name: $T:type_identifier)'
         replace: '(type_identifier @$T)'
       - match: '(parameter_declaration type: $T:type_identifier declarator: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter_declaration type: $T:type_identifier declarator: (reference_declarator $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter_declaration type: $T:type_identifier declarator: (pointer_declarator declarator: $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter_declaration declarator: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(parameter_declaration declarator: (pointer_declarator declarator: $N:identifier))'
@@ -119,17 +119,17 @@ stages:
         replace: '(__call (__callee $F) $A)'
       # a::b::f() and a::b::c::f(): the scope nests to the right, so each depth is its own rule
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: (qualified_identifier scope: $U:namespace_identifier name: $N:identifier))) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object (__member @$U (__object (__member @$T (__object @$S))))))) $A)'
+        replace: '(__call (__callee (__member @$N (__object (__member @$U (__object (__member @$T (__object @$S $S))))))) $A)'
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: (qualified_identifier scope: $T:namespace_identifier name: $N:identifier)) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object (__member @$T (__object @$S))))) $A)'
+        replace: '(__call (__callee (__member @$N (__object (__member @$T (__object @$S $S))))) $A)'
       - match: '(call_expression function: (qualified_identifier scope: $S:namespace_identifier name: $N:identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$S))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$S $S))) $A)'
       - match: '(call_expression function: (template_function name: $N:identifier) arguments: $A)'
-        replace: '(__call (__callee @$N) $A)'
+        replace: '(__call (__callee @$N $N) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
       - match: '(new_expression type: $T:type_identifier arguments:? $A)'
-        replace: '(__call (__callee @$T) $A)'
+        replace: '(__call (__callee @$T $T) $A)'
 
   - name: classify
     rules:
@@ -180,7 +180,7 @@ stages:
       - match: '(field_declaration type: $T:class_specifier declarator: $N:field_identifier)'
         replace: '(field_declaration $T (__def (__defname @$N) (__field_def)))'
       - match: '(field_declaration type: $T:type_identifier declarator: $N:field_identifier)'
-        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))))'
       - match: '(field_declaration declarator: $N:field_identifier)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(field_declaration declarator: (pointer_declarator declarator: $N:field_identifier))'
@@ -257,7 +257,7 @@ stages:
       - match: '(compound_statement $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

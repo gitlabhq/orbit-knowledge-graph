@@ -112,7 +112,7 @@ stages:
 
       # Constructor parameter property (only when accessibility_modifier present)
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))))'
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N)'
         replace: '(__def (__defname @$N) (__property))'
 
@@ -176,11 +176,11 @@ stages:
       - match: '(jsx_self_closing_element name: $N:__member $$$A)'
         replace: '(__call (__callee $N) $$$A)'
       - match: '(jsx_self_closing_element name: $N:identifier $$$A)'
-        replace: '(__call (__callee @$N) $$$A)'
+        replace: '(__call (__callee @$N $N) $$$A)'
       - match: '(jsx_element open_tag: (jsx_opening_element name: $N:__member $$$A) $$$C)'
         replace: '(__call (__callee $N) $$$A $$$C)'
       - match: '(jsx_element open_tag: (jsx_opening_element name: $N:identifier $$$A) $$$C)'
-        replace: '(__call (__callee @$N) $$$A $$$C)'
+        replace: '(__call (__callee @$N $N) $$$A $$$C)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
@@ -282,7 +282,7 @@ stages:
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
         replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $V)'
       - match: '(variable_declarator name: $N value: $V:identifier)'
-        replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs @$V))'
+        replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs @$V $V))'
       - match: '(variable_declarator name: $N value: $V)'
         replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs $V))'
       - match: '(variable_declarator name: $N)'
@@ -292,7 +292,7 @@ stages:
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(public_field_definition name: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))))'
       - match: '(public_field_definition name: $N value: $V)'
         replace: '(__def (__defname @$N $N) (__property) $V)'
       - match: '(public_field_definition name: $N)'
@@ -391,7 +391,7 @@ stages:
   - name: ssa-cleanup
     rules:
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

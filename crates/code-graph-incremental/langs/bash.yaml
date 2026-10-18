@@ -33,7 +33,7 @@ stages:
   - name: retag-calls
     rules:
       - match: '(command name: (command_name $W:word) $$$A)'
-        replace: '(__call (__callee @$W) $$$A)'
+        replace: '(__call (__callee @$W $W) $$$A)'
 
   - name: classify
     rules:

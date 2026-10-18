@@ -41,7 +41,7 @@ stages:
       - match: '(navigation_expression target: (self_expression) suffix: (navigation_suffix suffix: $N:simple_identifier))'
         replace: '(__ivar @$N)'
       - match: '(parameter name: $N:simple_identifier $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter name: $N:simple_identifier)'
         replace: '(__binding @$N)'
 
@@ -56,7 +56,7 @@ stages:
       - match: '(navigation_expression target: (super_expression) suffix: (navigation_suffix suffix: $M:simple_identifier))'
         replace: '(__member @$M (__object (__ivar "super")))'
       - match: '(navigation_expression target: $O suffix: (navigation_suffix suffix: $M:simple_identifier))'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
 
   - name: retag-calls
     rules:
@@ -65,30 +65,30 @@ stages:
       - match: '(call_expression $F:__member (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
-        replace: '(__call (__callee @$F) $$$A)'
+        replace: '(__call (__callee @$F $F) $$$A)'
       - match: '(call_expression $F (call_suffix $$$A))'
-        replace: '(__call (__callee @$F) $$$A)'
+        replace: '(__call (__callee @$F $F) $$$A)'
 
   - name: classify
     rules:
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier) value: $V:__call)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier))'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T $T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V:__call)'
         replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V)))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V $V)))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) $$$R)'
         replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration)) $$$R)'
       - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R:__call)'
         replace: '(__binding $T (__rhs $R))'
       - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R)'
-        replace: '(__binding $T (__rhs @$R))'
+        replace: '(__binding $T (__rhs @$R $R))'
       - match: '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R:__call)'
         replace: '(__binding @$T (__rhs $R))'
       - match: '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R)'
-        replace: '(__binding @$T (__rhs @$R))'
+        replace: '(__binding @$T (__rhs @$R $R))'
       - match: '(control_transfer_statement (throw_keyword) $$$V)'
         replace: '(__ssa_branch $$$V)'
       - match: '(if_statement $$$X)'
@@ -131,7 +131,7 @@ stages:
       - match: '(statements $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:simple_identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

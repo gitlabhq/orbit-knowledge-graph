@@ -145,6 +145,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
             text,
             kids,
             optional,
+            labelled,
         } => {
             if *optional {
                 let text_empty =
@@ -173,12 +174,6 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     tf.apply_sym(t, lang, src, edge_ctx)
                 }
             };
-            let labelled = match text {
-                Text::From(slot, _) => kids
-                    .iter()
-                    .any(|kid| std::matches!(kid, Pat::Cap { slot: kid, .. } if kid == slot)),
-                _ => false,
-            };
             let src = *t.node(pl.target);
             let at = t.append(
                 parent,
@@ -195,7 +190,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     end_row: src.end_row,
                     end_col: src.end_col,
                     lifted: false,
-                    labelled,
+                    labelled: *labelled,
                 },
             );
             for k in kids {

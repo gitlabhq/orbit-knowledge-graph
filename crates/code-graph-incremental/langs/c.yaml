@@ -92,7 +92,7 @@ stages:
       - match: '(call_expression function: (field_expression argument: $O field: $F:field_identifier) arguments: $A)'
         replace: '(__call (__callee (__member @$F (__object @$O $O))) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: classify
     rules:
@@ -160,7 +160,7 @@ stages:
       - match: '(compound_statement $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

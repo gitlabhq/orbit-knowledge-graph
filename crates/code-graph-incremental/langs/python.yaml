@@ -248,7 +248,7 @@ stages:
       - match: '(nonlocal_name)'
         replace: '(__binding @$ROOT (__declaration "function") (__alias "function"))'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

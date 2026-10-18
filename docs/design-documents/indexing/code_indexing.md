@@ -334,16 +334,16 @@ for `var`. Python assignment rules use function labels. Rust declarations take
 effect in source order. Scope labels are YAML symbols; the engine does not branch
 on language names.
 
-A text label such as `(__rhs @$V)` holds only the text of the node it names.
-A rule writes `(__rhs @$V $V)` to place the node under its label as well. A call,
-lambda or array inside that expression then survives canonicalization and is
-walked for edges. The rewriter records that the text and the child come from the
-same capture. Canonicalization marks a node it hoists out of a placed node as
-lifted. A lifted node under such a label is walked, but it is never the value of
-the label. So `x = f()` types `x` by the call, and `x = a + f()` leaves `x`
-opaque. A language
-rule that replaces a transparent wrapper by its call, as Rust does for `f()?`,
-`f().await`, `&f()` and `(f())`, makes the call the value.
+A text label such as `(__rhs @$V)` holds only the text of the node it names, and
+the subtree of V is dropped. A rule writes `(__rhs @$V $V)` to place the node
+under its label as well. A call, lambda or array inside that expression then
+survives canonicalization and is walked for edges. The rewriter records that the
+text and the child come from the same capture. Canonicalization marks a node it
+hoists out of a node it drops as lifted. A lifted node under such a label is
+walked, but it is never the value of the label. So `x = f()` types `x` by the
+call, and `x = a + f()` leaves `x` opaque. A language rule that replaces a
+transparent wrapper by its call, as Rust does for `f()?`, `f().await`, `&f()`
+and `(f())`, makes the call the value.
 
 A `__qualifier` marker on the object of a member names a module or type, as in
 `ptr::write`. The linker resolves that object through declared items and imports

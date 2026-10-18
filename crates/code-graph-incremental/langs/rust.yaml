@@ -122,10 +122,10 @@ stages:
 
       # self::f() is the local scope
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
-        replace: '(__call (__callee @$N) $A)'
+        replace: '(__call (__callee @$N $N) $A)'
       # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
-        replace: '(__call (__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
+        replace: '(__call (__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N $N) $A)'
       - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q $Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
@@ -343,7 +343,7 @@ stages:
 
       # Containers (after functions)
       - match: '(struct_item name: $N !(field_declaration_list) !(ordered_field_declaration_list))'
-        replace: '(__def (__defname @$N) (__struct) (__binding (__rhs (__call (__callee @$N)))))'
+        replace: '(__def (__defname @$N) (__struct) (__binding (__rhs (__call (__callee @$N $N)))))'
       - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(union_item name: $N body: $B)'
@@ -425,13 +425,13 @@ stages:
       - match: '(tuple_value)'
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$ROOT $ROOT)))'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
       - match: '(__ssa_arm $V:identifier)'
-        replace: '(__ssa_arm (__rhs @$V))'
+        replace: '(__ssa_arm (__rhs @$V $V))'
       - match: '(__ssa_arm (block $V:identifier))'
-        replace: '(__ssa_arm (__rhs @$V))'
+        replace: '(__ssa_arm (__rhs @$V $V))'
       - match: '(__ssa_arm (else_clause (block $V:identifier)))'
-        replace: '(__ssa_arm (__rhs @$V))'
+        replace: '(__ssa_arm (__rhs @$V $V))'
       - match: '(__ssa_arm (else_clause $V:block))'
         replace: '(__ssa_arm $V)'
 

@@ -218,7 +218,7 @@ stages:
       - match: '(__ssa_return (expression_list $V:__struct_lit))'
         replace: '(__ssa_return (__call (__callee @$V) $V))'
       - match: '(__ssa_return (expression_list $V:identifier))'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

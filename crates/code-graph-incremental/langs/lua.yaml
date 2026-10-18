@@ -59,11 +59,11 @@ stages:
   - name: retag-calls
     rules:
       - match: '(function_call name: (dot_index_expression table: $T:identifier field: $F:identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$F (__object @$T))) $A)'
+        replace: '(__call (__callee (__member @$F (__object @$T $T))) $A)'
       - match: '(function_call name: (method_index_expression table: $T:identifier method: $F:identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$F (__object @$T))) $A)'
+        replace: '(__call (__callee (__member @$F (__object @$T $T))) $A)'
       - match: '(function_call name: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: classify
     rules:
@@ -101,7 +101,7 @@ stages:
       - match: '(block $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return (expression_list $V:identifier))'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:
