@@ -8,10 +8,6 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
-use testcontainers::bollard::Docker;
-use testcontainers::bollard::query_parameters::{
-    ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
-};
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
@@ -31,17 +27,6 @@ const DATABASE_PREFIX: &str = "GKG_TEST_DATABASE_PREFIX";
 const TEMPLATE_READY_TABLE: &str = "_gkg_template_ready";
 const TEMPLATE_ATTEMPTS: u32 = 1200;
 
-const CONTAINER_LABEL_KEY: &str = "gkg-integration-test";
-const SESSION_LABEL_KEY: &str = "gkg-session-id";
-
-fn session_id() -> &'static str {
-    use std::sync::OnceLock;
-    static ID: OnceLock<String> = OnceLock::new();
-    ID.get_or_init(|| {
-        std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
-    })
-}
-
 const MAX_CONNECTION_ATTEMPTS: u32 = 200;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
@@ -50,7 +35,6 @@ pub struct TestContext {
     _container: Option<Arc<ContainerAsync<GenericImage>>>,
     pub config: ClickHouseConfiguration,
     client: ArrowClickHouseClient,
-    url: String,
     schema_sqls: Arc<Vec<String>>,
 }
 
@@ -58,36 +42,13 @@ impl TestContext {
     pub async fn new(schema_sqls: &[&str]) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let t = std::time::Instant::now();
-        let (container, url) = match std::env::var(SHARED_CLICKHOUSE_URL) {
-            Ok(url) => (None, url),
-            Err(_) => {
-                let container = Arc::new(Self::start_container().await);
-                let url = Self::extract_url(&container).await;
-                (Some(container), url)
-            }
-        };
-        Self::wait_for_ready(&url).await;
-        let database = if container.is_none() {
-            unique_database(TEST_DATABASE)
-        } else {
-            TEST_DATABASE.to_string()
-        };
-        if container.is_none() {
-            Self::create_database(&url, &database).await;
-        }
+        let url = std::env::var(SHARED_CLICKHOUSE_URL)
+            .unwrap_or_else(|_| panic!("run integration tests through mise"));
+        let database = unique_database(TEST_DATABASE);
+        Self::create_database(&url, &database).await;
         Self::run_schema_in(&url, &database, schema_sqls).await;
         eprintln!("[context] new(): {:.2?}", t.elapsed());
-
-        let config = test_configuration(&url, &database);
-        let client = config.build_client("graph");
-
-        Self {
-            _container: container,
-            config,
-            client,
-            url,
-            schema_sqls: Arc::new(schema_sqls.iter().map(|s| s.to_string()).collect()),
-        }
+        Self::from_database(None, url, database, schema_sqls)
     }
 
     pub async fn dedicated(schema_sqls: &[&str]) -> Self {
@@ -96,14 +57,7 @@ impl TestContext {
         let url = Self::extract_url(&container).await;
         Self::wait_for_ready(&url).await;
         Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
-        let config = test_configuration(&url, TEST_DATABASE);
-        Self {
-            _container: Some(container),
-            client: config.build_client("graph"),
-            config,
-            url,
-            schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
-        }
+        Self::from_database(Some(container), url, TEST_DATABASE.to_string(), schema_sqls)
     }
 
     pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {
@@ -225,32 +179,22 @@ impl TestContext {
         self.client.clone()
     }
 
-    pub async fn isolated(schema_sqls: &[&str]) -> Self {
-        let context = Self::new(&[]).await;
-        let database = unique_database("isolated");
-        Self::create_database(&context.url, &database).await;
-        Self::run_schema_in(&context.url, &database, schema_sqls).await;
-        Self {
-            _container: context._container,
-            config: test_configuration(&context.url, &database),
-            client: test_client(&context.url, &database),
-            url: context.url,
-            schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
-        }
-    }
-
     pub async fn fork(&self, name: &str) -> Self {
         let database = self.fork_database_name(name);
         let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-        Self::clone_database(&self.url, &self.config.database, &database, &schema_refs).await;
-
-        Self {
-            _container: self._container.clone(),
-            config: test_configuration(&self.url, &database),
-            client: test_client(&self.url, &database),
-            url: self.url.clone(),
-            schema_sqls: Arc::clone(&self.schema_sqls),
-        }
+        Self::clone_database(
+            &self.config.url,
+            &self.config.database,
+            &database,
+            &schema_refs,
+        )
+        .await;
+        Self::from_database(
+            self._container.clone(),
+            self.config.url.clone(),
+            database,
+            &schema_refs,
+        )
     }
 
     pub async fn cached_fork<F, Fut>(&self, key: &str, initialize: F) -> Self
@@ -258,17 +202,11 @@ impl TestContext {
         F: FnOnce(TestContext) -> Fut,
         Fut: Future<Output = ()>,
     {
-        if self._container.is_some() {
-            let context = self.clone();
-            initialize(context.clone()).await;
-            return context;
-        }
-
         let input = format!("{}\0{key}", self.schema_sqls.join("\0"));
         let hash = ontology::migrations::sha256_hex(&input);
         let template = format!("gkg_seed_{}", &hash[..16]);
-        let admin = test_client(&self.url, "default");
-        let client = test_client(&self.url, &template);
+        let admin = test_client(&self.config.url, "default");
+        let client = test_client(&self.config.url, &template);
 
         match admin
             .execute(&format!("CREATE DATABASE `{template}`"))
@@ -276,14 +214,19 @@ impl TestContext {
         {
             Ok(()) => {
                 let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-                Self::clone_tables(&self.url, &self.config.database, &template, &schema_refs).await;
-                let context = Self {
-                    _container: None,
-                    config: test_configuration(&self.url, &template),
-                    client: test_client(&self.url, &template),
-                    url: self.url.clone(),
-                    schema_sqls: Arc::clone(&self.schema_sqls),
-                };
+                Self::clone_tables(
+                    &self.config.url,
+                    &self.config.database,
+                    &template,
+                    &schema_refs,
+                )
+                .await;
+                let context = Self::from_database(
+                    None,
+                    self.config.url.clone(),
+                    template.clone(),
+                    &schema_refs,
+                );
                 initialize(context).await;
                 client
                     .execute(&format!(
@@ -303,14 +246,8 @@ impl TestContext {
 
         let database = unique_database(key);
         let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-        Self::clone_database(&self.url, &template, &database, &schema_refs).await;
-        Self {
-            _container: None,
-            config: test_configuration(&self.url, &database),
-            client: test_client(&self.url, &database),
-            url: self.url.clone(),
-            schema_sqls: Arc::clone(&self.schema_sqls),
-        }
+        Self::clone_database(&self.config.url, &template, &database, &schema_refs).await;
+        Self::from_database(None, self.config.url.clone(), database, &schema_refs)
     }
 
     pub fn fork_database_name(&self, name: &str) -> String {
@@ -331,8 +268,6 @@ impl TestContext {
 
     async fn start_container() -> ContainerAsync<GenericImage> {
         let t = std::time::Instant::now();
-        Self::cleanup_stale_containers().await;
-
         let port = ContainerPort::Tcp(CLICKHOUSE_HTTP_PORT);
 
         let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
@@ -341,62 +276,11 @@ impl TestContext {
             .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
             .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
             .with_env_var("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "1")
-            .with_label(CONTAINER_LABEL_KEY, "true")
-            .with_label(SESSION_LABEL_KEY, session_id())
             .start()
             .await
             .expect("failed to start ClickHouse container");
         eprintln!("[context] start_container: {:.2?}", t.elapsed());
         container
-    }
-
-    /// Remove containers from previous test runs that weren't cleaned up
-    /// (e.g. because the process was killed without running Drop handlers).
-    /// Only targets containers with the `gkg-integration-test` label whose
-    /// `gkg-session-id` differs from the current run, so concurrent tests
-    /// within the same nextest invocation never kill each other.
-    async fn cleanup_stale_containers() {
-        let docker = match Docker::connect_with_defaults() {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-
-        let current_session = session_id();
-
-        let filters = HashMap::from([(
-            "label".to_string(),
-            vec![format!("{CONTAINER_LABEL_KEY}=true")],
-        )]);
-
-        let options = ListContainersOptionsBuilder::default()
-            .all(true)
-            .filters(&filters)
-            .build();
-
-        let containers = docker
-            .list_containers(Some(options))
-            .await
-            .unwrap_or_default();
-
-        let remove_opts = RemoveContainerOptionsBuilder::default().force(true).build();
-
-        for container in containers {
-            let is_current_session = container
-                .labels
-                .as_ref()
-                .and_then(|labels| labels.get(SESSION_LABEL_KEY))
-                .is_some_and(|id| id == current_session);
-
-            if is_current_session {
-                continue;
-            }
-
-            if let Some(id) = container.id {
-                let _ = docker
-                    .remove_container(&id, Some(remove_opts.clone()))
-                    .await;
-            }
-        }
     }
 
     async fn extract_url(container: &ContainerAsync<GenericImage>) -> String {
@@ -450,6 +334,21 @@ impl TestContext {
         let client = test_client(url, database);
         Self::execute_statements(&client, schema_statements(database, schema_sqls)).await;
         eprintln!("[context] run_schema: {:.2?}", t.elapsed());
+    }
+
+    fn from_database(
+        container: Option<Arc<ContainerAsync<GenericImage>>>,
+        url: String,
+        database: String,
+        schema_sqls: &[&str],
+    ) -> Self {
+        let config = test_configuration(&url, &database);
+        Self {
+            _container: container,
+            client: config.build_client("graph"),
+            config,
+            schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
+        }
     }
 
     async fn wait_for_template(client: &ArrowClickHouseClient, database: &str) {
@@ -509,7 +408,7 @@ impl TestContext {
                     || kind.starts_with("CREATE DICTIONARY")
             })
             .collect();
-        Self::execute_schema_objects(&client, objects).await;
+        Self::execute_statements(&client, objects).await;
     }
 
     async fn create_database(url: &str, database: &str) {
@@ -526,10 +425,6 @@ impl TestContext {
                 .await
                 .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
         }
-    }
-
-    async fn execute_schema_objects(client: &ArrowClickHouseClient, statements: Vec<String>) {
-        Self::execute_statements(client, statements).await;
     }
 }
 

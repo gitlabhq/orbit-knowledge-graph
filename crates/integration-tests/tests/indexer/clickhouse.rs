@@ -20,7 +20,7 @@ struct TestContext {
 
 impl TestContext {
     async fn new() -> Self {
-        let clickhouse = integration_testkit::TestContext::isolated(&[]).await;
+        let clickhouse = integration_testkit::TestContext::new(&[]).await;
         clickhouse
             .execute(&format!(
                 "CREATE TABLE {TEST_TABLE} (id Int32, name String) \

@@ -111,7 +111,7 @@ impl TestContext {
         let (clickhouse_container, clickhouse_endpoint, database) =
             match std::env::var("GKG_TEST_CLICKHOUSE_URL") {
                 Ok(_) => {
-                    let context = integration_testkit::TestContext::isolated(&[]).await;
+                    let context = integration_testkit::TestContext::new(&[]).await;
                     (None, context.config.url, context.config.database)
                 }
                 Err(_) => {

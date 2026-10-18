@@ -151,8 +151,8 @@ Query-only suites create only the graph schema. Indexer suites also create the S
 schema. Mocks replace Rails authorization and Gitaly because Orbit does not own those systems.
 
 The mise tasks use the Docker socket of the Colima `gkg` profile. On macOS, start that profile.
-Then pick a task. On Linux with native Docker, use the same mise task. A direct `cargo nextest`
-command keeps the per-test-container fallback. Local mise tasks reuse `gkg-clickhouse-local`.
+Then pick a task. On Linux with native Docker, use the same mise task. Local mise tasks reuse
+`gkg-clickhouse-local`. Container tests require the mise runner because it configures the service.
 
 ```shell
 colima start gkg --memory 12
