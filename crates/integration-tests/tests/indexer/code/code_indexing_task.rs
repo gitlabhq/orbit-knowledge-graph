@@ -1276,7 +1276,7 @@ async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
         *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
-    let (_nats, nats_url) = super::super::common::dispatch::start_nats().await;
+    let (_nats, nats_url) = super::super::common::start_nats().await;
     let broker = Arc::new(
         indexer::nats::NatsBroker::connect(&orbit_server_config::NatsConfiguration {
             url: nats_url,

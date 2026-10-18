@@ -18,11 +18,9 @@ use indexer::types::{Envelope, Event, Subscription};
 use nats_client::{KvBucketConfig, KvPutOptions};
 use orbit_server_config::NatsConfiguration;
 use serde::{Deserialize, Serialize};
-use testcontainers::ImageExt;
-use testcontainers::core::{ContainerPort, WaitFor};
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use tokio_util::sync::CancellationToken;
+
+use super::common::start_nats as start_nats_container;
 
 const TEST_STREAM: &str = "test_stream";
 const TEST_SUBJECT: &str = "test.events";
@@ -40,31 +38,6 @@ impl Event for TestEvent {
     fn subscription() -> Subscription {
         Subscription::new(TEST_STREAM, TEST_SUBJECT)
     }
-}
-
-async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String) {
-    let nats_cmd = NatsServerCmd::default().with_jetstream();
-    let container = Nats::default()
-        .with_cmd(&nats_cmd)
-        .with_tag("2.11-alpine")
-        .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(3)])
-        .start()
-        .await
-        .expect("failed to start NATS container");
-
-    let host = container
-        .get_host()
-        .await
-        .expect("failed to get container host");
-
-    let port = container
-        .get_host_port_ipv4(4222)
-        .await
-        .expect("failed to get NATS port");
-
-    let url = format!("{host}:{port}");
-    (container, url)
 }
 
 fn default_config(url: &str) -> NatsConfiguration {
