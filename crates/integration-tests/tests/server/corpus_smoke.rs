@@ -496,7 +496,7 @@ async fn corpus_smoke() {
     orbit_server_config::query::init(orbit_server_config::AppConfig::embedded_defaults().query);
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
-    ctx.optimize_all().await;
+    ctx.optimize_if_needed().await;
 
     let ontology = load_ontology();
     let data_model = derive_clickhouse_data_model(&ontology);

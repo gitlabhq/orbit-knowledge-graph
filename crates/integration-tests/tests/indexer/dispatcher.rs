@@ -32,7 +32,7 @@ async fn dispatch_scenarios_with_a_mismatch_between_downstream_schema_and_orbit(
             _siphon_deleted Bool DEFAULT FALSE
         ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted) ORDER BY id;
     ";
-    let ctx = common::TestContext::new(&[
+    let ctx = common::TestContext::dedicated(&[
         common::SIPHON_SCHEMA_SQL,
         *common::GRAPH_SCHEMA_SQL,
         sbom_without_traversal_path,

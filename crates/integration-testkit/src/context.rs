@@ -90,6 +90,22 @@ impl TestContext {
         }
     }
 
+    pub async fn dedicated(schema_sqls: &[&str]) -> Self {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let container = Arc::new(Self::start_container().await);
+        let url = Self::extract_url(&container).await;
+        Self::wait_for_ready(&url).await;
+        Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
+        let config = test_configuration(&url, TEST_DATABASE);
+        Self {
+            _container: Some(container),
+            client: config.build_client("graph"),
+            config,
+            url,
+            schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
+        }
+    }
+
     pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {
         let batches = self
             .create_client()
@@ -147,12 +163,25 @@ impl TestContext {
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
     /// every inserted row.
     pub async fn optimize_all(&self) {
+        self.optimize(false).await;
+    }
+
+    pub async fn optimize_if_needed(&self) {
+        self.optimize(true).await;
+    }
+
+    async fn optimize(&self, multiple_parts_only: bool) {
         let t = std::time::Instant::now();
+        let having = if multiple_parts_only {
+            " HAVING count() > 1"
+        } else {
+            ""
+        };
         let batches = self
             .query(&format!(
                 "SELECT table FROM system.parts WHERE database = '{}' AND active \
-                 GROUP BY table HAVING count() > 1",
-                self.config.database
+                 GROUP BY table{having}",
+                self.config.database,
             ))
             .await;
 
@@ -419,9 +448,7 @@ impl TestContext {
     async fn run_schema_in(url: &str, database: &str, schema_sqls: &[&str]) {
         let t = std::time::Instant::now();
         let client = test_client(url, database);
-        let (tables, objects) = schema_statements(database, schema_sqls);
-        Self::execute_statements(&client, tables).await;
-        Self::execute_schema_objects(&client, objects).await;
+        Self::execute_statements(&client, schema_statements(database, schema_sqls)).await;
         eprintln!("[context] run_schema: {:.2?}", t.elapsed());
     }
 
@@ -474,7 +501,14 @@ impl TestContext {
                     .unwrap_or_else(|e| panic!("failed to clone {source}.{table}: {e}"));
             }
         }
-        let (_, objects) = schema_statements(target, schema_sqls);
+        let objects = schema_statements(target, schema_sqls)
+            .into_iter()
+            .filter(|statement| {
+                let kind = statement_kind(statement);
+                kind.starts_with("CREATE MATERIALIZED VIEW")
+                    || kind.starts_with("CREATE DICTIONARY")
+            })
+            .collect();
         Self::execute_schema_objects(&client, objects).await;
     }
 
@@ -531,20 +565,22 @@ fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
     }
 }
 
-fn schema_statements(database: &str, schema_sqls: &[&str]) -> (Vec<String>, Vec<String>) {
-    let statements = schema_sqls.iter().flat_map(|schema_sql| {
-        schema_sql
-            .replace("$DICTIONARY_USER", TEST_USERNAME)
-            .replace("$DICTIONARY_PASSWORD", TEST_PASSWORD)
-            .replace("$DICTIONARY_SECURE", "0")
-            .replace("$DICTIONARY_DATABASE", database)
-            .split(';')
-            .map(str::trim)
-            .filter(|statement| !statement.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    });
-    statements.partition(|statement| statement_kind(statement).starts_with("CREATE TABLE"))
+fn schema_statements(database: &str, schema_sqls: &[&str]) -> Vec<String> {
+    schema_sqls
+        .iter()
+        .flat_map(|schema_sql| {
+            schema_sql
+                .replace("$DICTIONARY_USER", TEST_USERNAME)
+                .replace("$DICTIONARY_PASSWORD", TEST_PASSWORD)
+                .replace("$DICTIONARY_SECURE", "0")
+                .replace("$DICTIONARY_DATABASE", database)
+                .split(';')
+                .map(str::trim)
+                .filter(|statement| !statement.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn unique_database(label: &str) -> String {
