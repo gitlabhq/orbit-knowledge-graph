@@ -6,6 +6,9 @@ if [[ -z "${DOCKER_HOST:-}" && "$(uname -s)" == Darwin ]]; then
 fi
 
 if [[ -n "${GKG_TEST_CLICKHOUSE_URL:-}" ]]; then
+  if [[ -n "${NEXTEST_ARCHIVE_FILE:-}" ]]; then
+    exec cargo nextest run --archive-file "$NEXTEST_ARCHIVE_FILE" --workspace-remap "$PWD" "$@"
+  fi
   exec cargo nextest run "$@"
 fi
 
@@ -51,7 +54,11 @@ drop_run_databases() {
 for _ in {1..200}; do
   if curl --silent --fail --user "default:$password" "$GKG_TEST_CLICKHOUSE_URL/ping" >/dev/null 2>&1; then
     trap 'drop_run_databases || true; cleanup' EXIT
-    cargo nextest run "$@"
+    if [[ -n "${NEXTEST_ARCHIVE_FILE:-}" ]]; then
+      cargo nextest run --archive-file "$NEXTEST_ARCHIVE_FILE" --workspace-remap "$PWD" "$@"
+    else
+      cargo nextest run "$@"
+    fi
     exit
   fi
   sleep 0.05

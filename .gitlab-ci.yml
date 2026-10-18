@@ -3,6 +3,7 @@ variables:
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
   CLICKHOUSE_VERSION: "26.6"
+  NEXTEST_ARCHIVE_FILE: target/nextest/container-tests.tar.zst
   DEV_PREFIX: "dev"
   GCLOUD_PROJECT: gitlab-ci-runners-signing
   SERVICE_ACCOUNT: gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com
@@ -401,15 +402,21 @@ ddl-freshness-check:
     - bash ./scripts/checks/check-ddl-freshness.sh
 
 integration-test-lane-coverage-check:
-  stage: lint
+  stage: test
   extends:
-    - .job-template
-    - .sccache-template
+    - .test-template
     - .mr-and-main-rules
+  tags:
+    - saas-linux-xlarge-amd64
   needs: []
   script:
-    - mise run lint:integration-test-lanes
+    - cargo nextest archive --profile ci --all-features --test server_containers --test indexer_containers -p integration-tests --archive-file "$NEXTEST_ARCHIVE_FILE"
+    - cargo xtask integration-lanes --check --archive-file "$NEXTEST_ARCHIVE_FILE"
     - sccache --show-stats || true
+  artifacts:
+    paths:
+      - $NEXTEST_ARCHIVE_FILE
+    expire_in: 24 hours
 
 migration-ledger-check:
   stage: lint
@@ -830,7 +837,9 @@ cli-integration-test:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     TESTCONTAINERS_HOST_OVERRIDE: docker
-  needs: []
+  needs:
+    - job: integration-test-lane-coverage-check
+      artifacts: true
   before_script:
     - !reference [.sccache-template, before_script]
     - |
@@ -838,8 +847,7 @@ cli-integration-test:
       docker pull nats:2.15.0-alpine &
       wait
   script:
-    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers -E "$NEXTEST_FILTER"
-    - sccache --show-stats || true
+    - ./scripts/dev/run-container-tests.sh --profile ci -E "$NEXTEST_FILTER"
 
 integration-test:
   extends: .integration-test-template
@@ -876,15 +884,16 @@ corpus-smoke-test:
     DOCKER_TLS_CERTDIR: ""
     TESTCONTAINERS_HOST_OVERRIDE: docker
     NEXTEST_FILTER: test(corpus_smoke)
-  needs: []
+  needs:
+    - job: integration-test-lane-coverage-check
+      artifacts: true
   before_script:
     - !reference [.sccache-template, before_script]
     - docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
-    - sccache --show-stats || true
+    - ./scripts/dev/run-container-tests.sh --profile ci --no-capture -E "$NEXTEST_FILTER"
 
 # Benchmark Stage
 #

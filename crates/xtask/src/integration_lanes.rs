@@ -29,7 +29,7 @@ struct PartitionIssues {
     duplicates: BTreeMap<String, Vec<String>>,
 }
 
-pub fn run(check: bool) -> Result<()> {
+pub fn run(check: bool, archive_file: Option<&str>) -> Result<()> {
     if !check {
         bail!("pass --check to verify the integration test lane partition");
     }
@@ -37,7 +37,7 @@ pub fn run(check: bool) -> Result<()> {
     let config = fs::read_to_string(CI_CONFIG).context("reading .gitlab-ci.yml")?;
     let config: BTreeMap<String, serde_json::Value> =
         orbit_utils::yaml::from_str(&config).context("parsing .gitlab-ci.yml")?;
-    let all_tests = list_tests(None)?;
+    let all_tests = list_tests(None, archive_file)?;
     if all_tests.is_empty() {
         bail!("cargo nextest listed no container tests");
     }
@@ -53,7 +53,7 @@ pub fn run(check: bool) -> Result<()> {
         if filter.trim().is_empty() {
             bail!("{lane}.variables.NEXTEST_FILTER must not be empty");
         }
-        let tests = list_tests(Some(&filter))?;
+        let tests = list_tests(Some(&filter), archive_file)?;
         println!("{lane}: {} tests", tests.len());
         lane_tests.insert(lane.to_string(), tests);
     }
@@ -71,21 +71,24 @@ pub fn run(check: bool) -> Result<()> {
     bail!("integration lane filters do not cover every container test exactly once")
 }
 
-fn list_tests(filter: Option<&str>) -> Result<BTreeSet<String>> {
+fn list_tests(filter: Option<&str>, archive_file: Option<&str>) -> Result<BTreeSet<String>> {
     let mut command = Command::new("cargo");
-    command.args([
-        "nextest",
-        "list",
-        "--all-features",
-        "--test",
-        "server_containers",
-        "--test",
-        "indexer_containers",
-        "-p",
-        "integration-tests",
-        "--message-format",
-        "json",
-    ]);
+    command.args(["nextest", "list"]);
+    if let Some(archive_file) = archive_file {
+        command.arg("--archive-file").arg(archive_file);
+        command.arg("--workspace-remap").arg(".");
+    } else {
+        command.args([
+            "--all-features",
+            "--test",
+            "server_containers",
+            "--test",
+            "indexer_containers",
+            "-p",
+            "integration-tests",
+        ]);
+    }
+    command.args(["--message-format", "json"]);
     if let Some(filter) = filter {
         command.args(["-E", filter]);
     }
