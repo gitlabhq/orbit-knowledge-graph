@@ -139,26 +139,8 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.username` | `default` | Auth user |
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
-| `graph.insert_settings` | See [Insert settings](#insert-settings) | Settings applied to INSERT operations only |
+| `graph.insert_settings` | See `config/default.yaml` | Settings applied to INSERT operations only. Quorum clusters drop `async_insert` and `wait_for_async_insert`; set a key here to override its default. |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
-
-### Insert settings
-
-`graph.insert_settings` defaults to these values. A deployment overlay merges key by key, so a key it does not set keeps its default.
-
-| Setting | Default | Effect |
-|---------|---------|--------|
-| `optimize_on_insert` | `0` | Skips merge work at insert time. |
-| `async_insert` | `1` | ClickHouse pools small inserts into fewer parts. |
-| `wait_for_async_insert` | `1` | An insert returns only after its rows are in a part. |
-| `async_insert_busy_timeout_min_ms` | `1000` | Lower bound of the flush timeout. |
-| `async_insert_busy_timeout_max_ms` | `1000` | Upper bound of the flush timeout. Without it, a server upper bound below the lower bound makes ClickHouse ignore the lower bound. |
-
-Arrow data writes and code checkpoints also set `async_insert=1` and `wait_for_async_insert=1` on each insert, so an overlay cannot turn them off. At light traffic each such insert waits about 1 s for the flush. At backfill rates the flush fires on volume.
-
-On a quorum cluster, Orbit drops `async_insert` and `wait_for_async_insert` from every insert. With `replicated: true`, the session also sets `async_insert=0`. The flush timeout keys are still sent, but ClickHouse ignores them when `async_insert` is off.
-
-The graph writer user must be allowed to set all five settings. If a user profile makes one of them read-only or constrains it, ClickHouse fails the insert with `SETTING_CONSTRAINT_VIOLATION` and names the setting. To change a value, set the key in `graph.insert_settings`.
 
 ### Self-managed replicated clusters
 
