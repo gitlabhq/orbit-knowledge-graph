@@ -12,8 +12,8 @@ use super::context::PlanningContext;
 use super::helpers::{FilterOwner, ordered_filters};
 use super::physical::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
 use super::requirements::{
-    Column, OutputValue, Predicate, Projection, id_list, live, node_outputs, property_filter,
-    relationship_kinds, tag_filter,
+    Column, OutputValue, Predicate, Projection, id_list, live, membership, node_outputs,
+    node_predicates, property_filter, relationship_kinds, tag_filter,
 };
 use crate::constants::*;
 use crate::error::{QueryError, Result};
@@ -254,6 +254,7 @@ struct RelationBuilder<'a, M: OrbitQueryModel + ?Sized> {
 struct PlannedNode {
     binding: Option<BindingSource>,
     ids: Option<(RelationId, String)>,
+    bounded_read: Option<RelationId>,
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
@@ -309,6 +310,13 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn ids(&self, node: &str) -> Option<&(RelationId, String)> {
         self.nodes.get(node)?.ids.as_ref()
+    }
+
+    fn reached_ids(&self, node: &str) -> Option<(RelationId, String)> {
+        if self.endpoint_is_selective(node) {
+            return None;
+        }
+        self.ids(node).cloned()
     }
 
     fn set_ids(&mut self, node: &str, ids: (RelationId, String)) {
@@ -403,11 +411,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             }
             let ids = self.node_ids(node)?;
             let column = relation.endpoint_column(node).expect("relation endpoint");
-            predicates.push(Predicate::Membership {
-                columns: vec![Column::new(alias, column)],
-                relation: ids.0,
-                keys: vec![ids.1],
-            });
+            predicates.push(membership(Column::new(alias, column), ids));
         }
 
         let mut source = if relation.max_hops > 1 {
@@ -552,20 +556,29 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             });
         }
         if self.binding(endpoint).is_none() {
-            let mut endpoint = self.facts.nodes[endpoint].clone();
-            endpoint.columns = Some(ColumnSelection::List(vec![]));
-            let ids = self.node_ids_from(&endpoint)?;
-            predicates.push(Predicate::Membership {
-                columns: vec![endpoint_column.clone()],
-                relation: ids.0,
-                keys: vec![ids.1],
-            });
-        } else if let Some((ids, key)) = self.ids(endpoint) {
-            predicates.push(Predicate::Membership {
-                columns: vec![endpoint_column.clone()],
-                relation: *ids,
-                keys: vec![key.clone()],
-            });
+            let reached = if self.endpoint_is_selective(endpoint) {
+                None
+            } else {
+                self.ids_through_holder(&node_source.node, &node_source.column)
+            };
+            if let Some(reached) = reached.clone()
+                && self.facts.nodes[endpoint].joined
+            {
+                self.set_ids(endpoint, reached);
+            } else {
+                let mut endpoint = self.facts.nodes[endpoint].clone();
+                endpoint.columns = Some(ColumnSelection::List(vec![]));
+                if let Some(reached) = reached {
+                    endpoint.predicates.push(membership(
+                        Column::new(&endpoint.alias, DEFAULT_PRIMARY_KEY),
+                        reached,
+                    ));
+                }
+                let ids = self.node_ids_from(&endpoint)?;
+                predicates.push(membership(endpoint_column.clone(), ids));
+            }
+        } else if let Some(ids) = self.ids(endpoint).cloned() {
+            predicates.push(membership(endpoint_column.clone(), ids));
         }
         if let Some(binding) = self.binding(endpoint) {
             if !joined_through_endpoint {
@@ -597,35 +610,39 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
         let mut node = self.facts.nodes[&node_source.node].clone();
         let outputs = node_outputs(&node);
-        if self.facts.aggregate() {
-            let endpoint = [&relation.from_node, &relation.to_node]
-                .into_iter()
-                .find(|endpoint| **endpoint != node_source.node)
-                .expect("node relation endpoint");
-            let endpoint_plan = &self.facts.nodes[endpoint];
-            if !endpoint_plan.node_ids.is_empty() {
-                node.predicates.push(id_list(
-                    &node.alias,
-                    &node_source.column,
-                    &endpoint_plan.node_ids,
-                ));
-            }
-            if let Some(range) = &endpoint_plan.id_range {
-                node.predicates.push(Predicate::IdRange {
-                    column: Column::new(&node.alias, &node_source.column),
-                    start: range.start,
-                    end: range.end,
-                });
-            }
+        let endpoint = [&relation.from_node, &relation.to_node]
+            .into_iter()
+            .find(|endpoint| **endpoint != node_source.node)
+            .expect("node relation endpoint");
+        let endpoint_plan = &self.facts.nodes[endpoint];
+        if !endpoint_plan.node_ids.is_empty() {
+            node.predicates.push(id_list(
+                &node.alias,
+                &node_source.column,
+                &endpoint_plan.node_ids,
+            ));
         }
-        let mut scan = self.node_read(&node)?;
-        if let Some((ids, key)) = self.ids(&node_source.node).cloned() {
-            scan = self
-                .graph
-                .from(scan)
-                .semi_join(Column::new(&node.alias, DEFAULT_PRIMARY_KEY), ids, key)
-                .finish();
+        if let Some(range) = &endpoint_plan.id_range {
+            node.predicates.push(Predicate::IdRange {
+                column: Column::new(&node.alias, &node_source.column),
+                start: range.start,
+                end: range.end,
+            });
         }
+        if let Some(ids) = self.endpoint_ids(endpoint) {
+            node.predicates.push(membership(
+                Column::new(&node.alias, &node_source.column),
+                ids,
+            ));
+        }
+        if let Some(ids) = self.reached_ids(&node_source.node) {
+            node.predicates.push(membership(
+                Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                ids,
+            ));
+        }
+        let scan = self.node_read(&node)?;
+        self.record_read(&node, scan);
         let mut joined_through_endpoint = false;
         self.root = Some(
             match (self.root.take(), self.binding(&node_source.node).cloned()) {
@@ -735,6 +752,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             return Ok(ids.clone());
         }
         let source = self.node_read(node)?;
+        self.record_read(node, source);
         let id = self.graph.project(
             source,
             vec![Projection::new(
@@ -753,26 +771,64 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             if self.ids(node).is_some() {
                 continue;
             }
+            let other = if node == &relation.from_node {
+                &relation.to_node
+            } else {
+                &relation.from_node
+            };
             let used_later = self.facts.relations[index + 1..]
                 .iter()
                 .any(|next| next.endpoint_column(node).is_some())
-                || self.facts.nodes[node].narrowed;
+                || self.facts.nodes[node].narrowed
+                || self.facts.model.supports_selective_latest_rows()
+                    && self.facts.nodes[node].joined
+                    && (self.endpoint_is_selective(other) || self.ids(other).is_some());
             if !used_later {
                 continue;
             }
-            let key = "id".to_string();
-            let id = self
-                .graph
-                .from(source)
-                .bind("_id_source")
-                .project(vec![Projection::new(
-                    OutputValue::Column(Column::new("_id_source", column)),
-                    &key,
-                )])
-                .distinct()
-                .finish();
-            self.set_ids(node, (id, key));
+            let ids = self.ids_reached_by(source, column);
+            self.set_ids(node, ids);
         }
+    }
+
+    fn record_read(&mut self, node: &NodePlan, read: RelationId) {
+        if node_predicates(node).iter().any(Predicate::is_selective) {
+            self.nodes
+                .entry(node.alias.clone())
+                .or_default()
+                .bounded_read = Some(read);
+        }
+    }
+
+    fn endpoint_ids(&mut self, node: &str) -> Option<(RelationId, String)> {
+        if let Some(ids) = self.ids(node) {
+            return Some(ids.clone());
+        }
+        let ids = self.ids_through_holder(node, DEFAULT_PRIMARY_KEY)?;
+        self.set_ids(node, ids.clone());
+        Some(ids)
+    }
+
+    fn ids_through_holder(&mut self, holder: &str, column: &str) -> Option<(RelationId, String)> {
+        if !self.facts.model.supports_selective_latest_rows() {
+            return None;
+        }
+        let read = self.nodes.get(holder)?.bounded_read?;
+        Some(self.ids_reached_by(read, column))
+    }
+
+    fn ids_reached_by(&mut self, source: RelationId, column: &str) -> (RelationId, String) {
+        let key = DEFAULT_PRIMARY_KEY.to_string();
+        let id = self
+            .graph
+            .from(source)
+            .bind("_id_source")
+            .project(vec![Projection::new(
+                OutputValue::Column(Column::new("_id_source", column)),
+                &key,
+            )])
+            .finish();
+        (id, key)
     }
 
     fn ensure_node(&mut self, alias: &str) -> Result<()> {
@@ -782,19 +838,18 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         {
             return Ok(());
         }
-        let node = self.uncovered_node(alias);
-        let outputs = node_outputs(&node);
-        let mut scan = self.node_read(&node)?;
-        if node.narrowed {
-            let (ids, key) = self.ids(alias).cloned().ok_or_else(|| {
-                QueryError::Lowering(format!("node '{alias}' has no narrowing relation"))
-            })?;
-            scan = self
-                .graph
-                .from(scan)
-                .semi_join(Column::new(alias, DEFAULT_PRIMARY_KEY), ids, key)
-                .finish();
+        let mut node = self.uncovered_node(alias);
+        if let Some(ids) = self.reached_ids(alias) {
+            node.predicates
+                .push(membership(Column::new(alias, DEFAULT_PRIMARY_KEY), ids));
+        } else if node.narrowed {
+            return Err(QueryError::Lowering(format!(
+                "node '{alias}' has no narrowing relation"
+            )));
         }
+        let outputs = node_outputs(&node);
+        let scan = self.node_read(&node)?;
+        self.record_read(&node, scan);
         self.root = Some(match (self.root.take(), self.binding(alias).cloned()) {
             (Some(root), Some(binding)) => self.graph.join(
                 root,

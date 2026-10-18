@@ -13,7 +13,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON b.id = _orbit_edge_0.target_id (Deduplicate LimitBy ... (_)) (Bind b (_)))
+        - (Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter b.id IN ?.id, ... (Deduplicate LimitBy ... (_)))))
         - (Aggregate COUNT() FILTER ? AS n, ... (_))
     emitted:
       expect: ["(Aggregate COUNT() FILTER [(_orbit_edge_0.relationship_kind = 'CALLS') AND (_orbit_edge_0.source_kind = 'Definition') AND (_orbit_edge_0.target_kind = 'Definition') AND (_orbit_edge_0._deleted = false) AND (_orbit_edge_0.source_id = 1)] AS n, ... (_))", "(Deduplicate LimitBy 1 BY ... (_))"]

@@ -267,7 +267,6 @@ impl RelationGraph {
                 .map(|column| Projection::col(alias, column))
                 .collect(),
         );
-        let candidate = self.distinct(candidate);
 
         let read = self.read(table, alias, false);
         let current = self.owned(read, owner, alias);

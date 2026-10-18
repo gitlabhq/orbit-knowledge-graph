@@ -141,6 +141,14 @@ pub fn id_list(alias: &str, column: &str, ids: &[i64]) -> Predicate {
     }
 }
 
+pub fn membership(column: Column, (relation, key): (RelationId, String)) -> Predicate {
+    Predicate::Membership {
+        columns: vec![column],
+        relation,
+        keys: vec![key],
+    }
+}
+
 pub fn live(alias: &str) -> Predicate {
     Predicate::Live {
         alias: alias.into(),

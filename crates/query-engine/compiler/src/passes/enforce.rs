@@ -229,6 +229,7 @@ pub fn enforce_role_scans(
         })?;
         let role_alias = format!("_role_{}", input_node.id);
         let role_scan = latest_rows_for_join(
+            &query.ctes,
             &query.from,
             identity,
             table,
@@ -321,6 +322,7 @@ fn enforce_return_columns(
                     ))
                 })?;
                 let latest = latest_rows_for_join(
+                    &q.ctes,
                     &q.from,
                     identity,
                     table,

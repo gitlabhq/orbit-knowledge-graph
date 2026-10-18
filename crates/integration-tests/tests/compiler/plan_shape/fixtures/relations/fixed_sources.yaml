@@ -16,8 +16,8 @@ cases:
             - (Project mr.id AS e0_src, mr.project_id AS e0_dst, ... (_))
             - (Deduplicate LimitBy ... (_))
             - (Scan Table(gl_merge_request) AS mr)
-            - (Project p.id AS id (Filter p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p))))
-          reject: ["(Scan Table(gl_edge) ...)"]
+            - (Filter p.id IN ?.id, p._deleted = false (Deduplicate LimitBy ... (_)))
+          reject: ["(Scan Table(gl_edge) ...)", "(Deduplicate Final (Scan Table(gl_project) AS p))"]
 
   - name: A fixed chain composes routed edge relations
     query:
@@ -51,7 +51,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $ids (Distinct (Project _id_source.target_id AS id (_))))
+            - (CTE $ids (Project _id_source.target_id AS id (_)))
           expect:
             - (Join ON mr.id = _orbit_edge_0.target_id (_) (_))
             - (Scan Table(gl_edge) AS _orbit_edge_0)

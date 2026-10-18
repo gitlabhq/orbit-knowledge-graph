@@ -19,18 +19,31 @@ pub(crate) fn latest_row_dedup(
     (order, Some((1, keys)))
 }
 
-fn resolves_latest_rows(query: &Query, alias: &str) -> bool {
-    query.limit_by.is_some()
-        || matches!(
-            &query.from,
-            TableRef::Subquery {
-                alias: nested_alias,
-                query,
-            } if nested_alias == alias && resolves_latest_rows(query, alias)
-        )
+fn resolves_latest_rows(ctes: &[crate::ast::Cte], query: &Query, alias: &str) -> bool {
+    query.limit_by.is_some() || relation_resolves_latest_rows(ctes, &query.from, alias)
+}
+
+fn relation_resolves_latest_rows(ctes: &[crate::ast::Cte], table: &TableRef, alias: &str) -> bool {
+    match table {
+        TableRef::Subquery {
+            alias: nested,
+            query,
+        } => nested == alias && resolves_latest_rows(ctes, query, alias),
+        TableRef::Cte {
+            name,
+            alias: nested,
+        } => {
+            nested == alias
+                && ctes
+                    .iter()
+                    .any(|cte| cte.name == *name && resolves_latest_rows(ctes, &cte.query, alias))
+        }
+        _ => false,
+    }
 }
 
 pub(in crate::passes) fn latest_rows_for_join(
+    ctes: &[crate::ast::Cte],
     source: &TableRef,
     identity: &Expr,
     table: &str,
@@ -51,14 +64,7 @@ pub(in crate::passes) fn latest_rows_for_join(
     };
     let mut relation = None;
     crate::ast::visit::visit_relations(source, &mut |candidate| {
-        if let TableRef::Subquery {
-            alias: candidate_alias,
-            query,
-            ..
-        } = candidate
-            && candidate_alias == source_alias
-            && resolves_latest_rows(query, source_alias)
-        {
+        if relation_resolves_latest_rows(ctes, candidate, source_alias) {
             relation = Some(candidate.clone());
         }
     });

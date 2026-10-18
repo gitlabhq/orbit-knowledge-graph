@@ -92,6 +92,7 @@ fn emit_ref(
                 relation
                     .alias
                     .clone()
+                    .or_else(|| exposed_alias(relation.id, graph))
                     .unwrap_or_else(|| relation_name(relation.id)),
             ),
             predicates: vec![],
@@ -117,6 +118,27 @@ fn emit_ref(
         );
     }
     output
+}
+
+/// A materialized reference must expose the alias its inline form would, or predicates and join conditions dangle.
+fn exposed_alias(id: RelationId, graph: &RelationGraph) -> Option<String> {
+    match graph.get(id) {
+        RelationNode::Read { alias, .. }
+        | RelationNode::Owned { alias, .. }
+        | RelationNode::UnionAll { alias, .. }
+        | RelationNode::Bind { alias, .. }
+        | RelationNode::Latest { alias, .. } => Some(alias.clone()),
+        RelationNode::Filter { input, .. }
+        | RelationNode::Sort { input, .. }
+        | RelationNode::Limit { input, .. } => input
+            .alias
+            .clone()
+            .or_else(|| exposed_alias(input.id, graph)),
+        RelationNode::Project { input, .. } | RelationNode::Distinct { input } => {
+            Some(input.alias.clone().unwrap_or_else(|| relation_name(id)))
+        }
+        RelationNode::Join { .. } => None,
+    }
 }
 
 fn emit_node(
