@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +11,7 @@ use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
-use arrow::array::{StringArray, UInt64Array};
+use arrow::array::StringArray;
 use orbit_arrow::ArrowUtils;
 
 pub const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
@@ -24,8 +23,6 @@ const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 const SHARED_CLICKHOUSE_URL: &str = "GKG_TEST_CLICKHOUSE_URL";
 const DATABASE_PREFIX: &str = "GKG_TEST_DATABASE_PREFIX";
-const TEMPLATE_READY_TABLE: &str = "_gkg_template_ready";
-const TEMPLATE_ATTEMPTS: u32 = 1200;
 
 const MAX_CONNECTION_ATTEMPTS: u32 = 200;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -197,59 +194,6 @@ impl TestContext {
         )
     }
 
-    pub async fn cached_fork<F, Fut>(&self, key: &str, initialize: F) -> Self
-    where
-        F: FnOnce(TestContext) -> Fut,
-        Fut: Future<Output = ()>,
-    {
-        let input = format!("{}\0{key}", self.schema_sqls.join("\0"));
-        let hash = ontology::migrations::sha256_hex(&input);
-        let template = format!("gkg_seed_{}", &hash[..16]);
-        let admin = test_client(&self.config.url, "default");
-        let client = test_client(&self.config.url, &template);
-
-        match admin
-            .execute(&format!("CREATE DATABASE `{template}`"))
-            .await
-        {
-            Ok(()) => {
-                let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-                Self::clone_tables(
-                    &self.config.url,
-                    &self.config.database,
-                    &template,
-                    &schema_refs,
-                )
-                .await;
-                let context = Self::from_database(
-                    None,
-                    self.config.url.clone(),
-                    template.clone(),
-                    &schema_refs,
-                );
-                initialize(context).await;
-                client
-                    .execute(&format!(
-                        "CREATE TABLE `{template}`.`{TEMPLATE_READY_TABLE}` \
-                         (ready Bool) ENGINE = Memory AS SELECT true"
-                    ))
-                    .await
-                    .unwrap_or_else(|e| {
-                        panic!("failed to mark seed template {template} ready: {e}")
-                    });
-            }
-            Err(error) if error.to_string().contains("DATABASE_ALREADY_EXISTS") => {
-                Self::wait_for_template(&client, &template).await;
-            }
-            Err(error) => panic!("failed to initialize seed template {template}: {error}"),
-        }
-
-        let database = unique_database(key);
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
-        Self::clone_database(&self.config.url, &template, &database, &schema_refs).await;
-        Self::from_database(None, self.config.url.clone(), database, &schema_refs)
-    }
-
     pub fn fork_database_name(&self, name: &str) -> String {
         let hash = ontology::migrations::sha256_hex(name);
         format!(
@@ -351,26 +295,6 @@ impl TestContext {
         }
     }
 
-    async fn wait_for_template(client: &ArrowClickHouseClient, database: &str) {
-        for attempt in 1..=TEMPLATE_ATTEMPTS {
-            let query = format!(
-                "SELECT count() AS ready_count FROM `{database}`.`{TEMPLATE_READY_TABLE}` WHERE ready"
-            );
-            if let Ok(batches) = client.query_arrow(&query).await
-                && batches.first().is_some_and(|batch| {
-                    ArrowUtils::get_column_by_name::<UInt64Array>(batch, "ready_count")
-                        .is_some_and(|column| column.value(0) == 1)
-                })
-            {
-                return;
-            }
-            if attempt == TEMPLATE_ATTEMPTS {
-                panic!("ClickHouse template {database} was not ready");
-            }
-            tokio::time::sleep(CONNECTION_RETRY_DELAY).await;
-        }
-    }
-
     async fn clone_database(url: &str, source: &str, target: &str, schema_sqls: &[&str]) {
         Self::create_database(url, target).await;
         Self::clone_tables(url, source, target, schema_sqls).await;
@@ -380,8 +304,7 @@ impl TestContext {
         let client = test_client(url, target);
         let query = format!(
             "SELECT name FROM system.tables WHERE database = '{source}' \
-             AND engine NOT IN ('View', 'MaterializedView', 'Dictionary') \
-             AND name != '{TEMPLATE_READY_TABLE}'"
+             AND engine NOT IN ('View', 'MaterializedView', 'Dictionary')"
         );
         let batches = client
             .query_arrow(&query)

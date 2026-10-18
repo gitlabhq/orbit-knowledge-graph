@@ -42,11 +42,8 @@ async fn query_settings_scenarios() {
 }
 
 async fn data_correctness_context() -> TestContext {
-    TestContext::new(&[*GRAPH_SCHEMA_SQL])
-        .await
-        .cached_fork("data_correctness", |context| async move {
-            query_scenario::load_yaml_seed(&context, PRESETS, "data_correctness").await;
-            context.optimize_if_needed().await;
-        })
-        .await
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    query_scenario::load_yaml_seed(&context, PRESETS, "data_correctness").await;
+    context.optimize_if_needed().await;
+    context
 }
