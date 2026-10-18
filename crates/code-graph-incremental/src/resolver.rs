@@ -1806,17 +1806,11 @@ fn method_up<'a>(
     role: Role,
 ) -> Vec<Cursor<'a>> {
     let jump = |(sf, n): (u32, u32)| ctx.corpus.jump(sf, n);
-    let find = |role| {
-        members_by_level(
-            vec![(cls.fi(), cls.index())],
-            |id| supertypes(ctx, jump(id)),
-            |id| declared_member(ctx, jump(id), name, role).map(|m| (m.fi(), m.index())),
-        )
-    };
-    let inherited = match find(role) {
-        found if found.is_empty() => find(Role::Any),
-        found => found,
-    };
+    let inherited = members_by_level(
+        vec![(cls.fi(), cls.index())],
+        |id| supertypes(ctx, jump(id)),
+        |id| declared_member(ctx, jump(id), name, role).map(|m| (m.fi(), m.index())),
+    );
     if !inherited.is_empty() {
         return inherited.into_iter().map(jump).collect();
     }
@@ -1862,7 +1856,7 @@ fn member_targets<'a>(
                 .filter(|method| !method.has(C::Declaration))
         })
     };
-    find(role).or_else(|| find(Role::Any)).into_iter().collect()
+    find(role).into_iter().collect()
 }
 
 fn extension_members<'a>(

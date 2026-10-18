@@ -210,7 +210,6 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
 pub enum Role {
     Value,
     Callable,
-    Any,
 }
 
 pub fn members_named<'a, S: Storage<Node = Node>>(
@@ -229,9 +228,7 @@ pub fn find_member_in<'a, S: Storage<Node = Node>>(
     role: Role,
     tags: &ReservedTags,
 ) -> Option<u32> {
-    let mut defs = defs;
     let tag = match role {
-        Role::Any => return defs.next().map(|def| def.index()),
         Role::Value => tags.value,
         Role::Callable => tags.callable,
     };

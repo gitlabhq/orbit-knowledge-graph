@@ -308,9 +308,9 @@ stages:
         tag: { implicit_self: "true" }
       # Remaining bare constants: references
       - match: '(constant)'
-        replace: '(__call (__callee @$ROOT))'
+        replace: '(__call (__property) (__callee @$ROOT))'
       - match: '(scope_resolution)'
-        replace: '(__call (__callee (__member @$ROOT|split_last("::") (__object @$ROOT|strip=::|regex_replace("::[^:]+$", "")))))'
+        replace: '(__call (__property) (__callee (__member @$ROOT|split_last("::") (__object @$ROOT|strip=::|regex_replace("::[^:]+$", "")))))'
 
   - name: ssa-cleanup
     rules:

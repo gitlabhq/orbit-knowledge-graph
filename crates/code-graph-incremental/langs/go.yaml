@@ -180,6 +180,8 @@ stages:
         replace: '(__ssa_loop $B)'
 
       # Struct fields: named → field def; embedded → supertype
+      - match: '(field_declaration name: $N:field_identifier type: $T:func_type)'
+        replace: '(__def (__defname @$N) (__field_def) $T)'
       - match: '(field_declaration name: $N:field_identifier)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(field_declaration type: $T:type_identifier)'
@@ -245,6 +247,8 @@ stages:
         tag: { value: "true" }
       - match: '(__def (__field_def))'
         tag: { value: "true" }
+      - match: '(__def (__field_def) (func_type))'
+        tag: { callable: "true" }
       - match: '(__def (__variable))'
         tag: { value: "true" }
       - match: '(__def (__constant))'

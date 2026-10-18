@@ -196,10 +196,14 @@ stages:
         replace: '(__ssa_loop $B)'
 
       # Members
+      - match: '(field_declaration $$$PRE (variable_declaration type: $T:generic_name (variable_declarator name: $N:identifier $$$V)))'
+        replace: '(__def (__defname @$N) (__field_def) $T $$$V)'
       - match: '(field_declaration $$$PRE (variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $$$V)))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))) $$$V)'
       - match: '(field_declaration $$$PRE (variable_declaration (variable_declarator name: $N:identifier $$$V)))'
         replace: '(__def (__defname @$N) (__field_def) $$$V)'
+      - match: '(property_declaration $$$PRE type: $T:generic_name name: $N:identifier $$$B)'
+        replace: '(__def (__defname @$N) (__property) $T $$$B)'
       - match: '(property_declaration $$$PRE type: $T:identifier name: $N:identifier $$$B)'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))) $$$B)'
       - match: '(property_declaration $$$PRE name: $N:identifier $$$B)'
@@ -242,10 +246,11 @@ stages:
     rules:
       - match: '(block $$$B)'
         replace: '(__scope $$$B)'
+        tag: { hoisted: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__class))'
         tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__lambda))'
@@ -264,6 +269,26 @@ stages:
         tag: { value: "true" }
       - match: '(__def (__field_def))'
         tag: { value: "true" }
+      - match: '(__def (__property) (generic_name (identifier "Func")))'
+        tag: { callable: "true" }
+      - match: '(__def (__property) (generic_name (identifier "Action")))'
+        tag: { callable: "true" }
+      - match: '(__def (__property) (generic_name (identifier "Predicate")))'
+        tag: { callable: "true" }
+      - match: '(__def (__property) (__binding (__rhs (__call (__callee "Action")))))'
+        tag: { callable: "true" }
+      - match: '(__def (__property) (__binding (__rhs (__call (__callee "EventHandler")))))'
+        tag: { callable: "true" }
+      - match: '(__def (__field_def) (generic_name (identifier "Func")))'
+        tag: { callable: "true" }
+      - match: '(__def (__field_def) (generic_name (identifier "Action")))'
+        tag: { callable: "true" }
+      - match: '(__def (__field_def) (generic_name (identifier "Predicate")))'
+        tag: { callable: "true" }
+      - match: '(__def (__field_def) (__binding (__rhs (__call (__callee "Action")))))'
+        tag: { callable: "true" }
+      - match: '(__def (__field_def) (__binding (__rhs (__call (__callee "EventHandler")))))'
+        tag: { callable: "true" }
       - match: '(__def (__property))'
         tag: { value: "true" }
 

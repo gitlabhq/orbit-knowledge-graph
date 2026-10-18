@@ -57,7 +57,7 @@ stages:
   - name: normalize
     rules:
       - match: '(callable_reference $N:simple_identifier)'
-        replace: '(simple_identifier @$N)'
+        replace: '(__call (__callee @$N))'
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_header $I:identifier)'

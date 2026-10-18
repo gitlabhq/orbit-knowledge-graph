@@ -146,6 +146,8 @@ stages:
       # Defs
       - match: '(assignment left: $N right: $R:lambda)'
         replace: '(__def (__defname @$N) (__lambda) $R)'
+      - match: '(assignment left: (attribute object: (identifier "self") attribute: $N) type: $T:type)'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__ssa_typed @$T)))'
       - match: '(assignment left: $N type: $T:type)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(typed_default_parameter name: $N type: (type $T))'
@@ -234,9 +236,9 @@ stages:
       - match: '(__source_file)'
         tag: { scoped: "module" }
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "function" }
+        tag: { callable: "true", value: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "function" }
+        tag: { callable: "true", value: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__lambda))'

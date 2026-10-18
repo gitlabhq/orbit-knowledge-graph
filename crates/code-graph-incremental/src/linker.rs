@@ -1303,7 +1303,6 @@ impl<'t> Fold<'t> {
         let both = |d: Cursor<'t>| d.has_tag(self.tags.value) && d.has_tag(self.tags.callable);
         let role = site.role();
         let filled = match role {
-            Role::Any => true,
             Role::Value => target.has_tag(self.tags.value),
             Role::Callable => target.has_tag(self.tags.callable) && !both(target),
         };
@@ -1472,10 +1471,7 @@ impl<'t> Fold<'t> {
     }
 
     fn find_method_in(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
-        match self.members(container, name, role) {
-            found if found.is_empty() => self.members(container, name, Role::Any),
-            found => found,
-        }
+        self.members(container, name, role)
     }
 }
 

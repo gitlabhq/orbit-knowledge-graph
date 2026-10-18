@@ -282,6 +282,8 @@ stages:
         replace: '(__binding @$N (__rhs @$R))'
       - match: '(public_field_definition name: $N type: (type_annotation $T:type_identifier))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(public_field_definition name: $N type: (type_annotation $T:function_type))'
+        replace: '(__def (__defname @$N) (__property) $T)'
       - match: '(public_field_definition name: $N value: $V)'
         replace: '(__def (__defname @$N) (__property) $V)'
       - match: '(public_field_definition name: $N)'
@@ -319,9 +321,9 @@ stages:
         tag: { flavor: abstract }
       # Functions
       - match: '(function_declaration name: $N parameters: (formal_parameters $$$P:__binding) body: $B)'
-        replace: '(__def (__defname @$N) (__function) $$$P $B)'
+        replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $$$P $B)'
       - match: '(function_declaration name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__function) $B)'
+        replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $B)'
       # Methods — static before generic; parameters: captures ctor param properties.
       # A computed key ([expr]) is not a named member; `#name` drops the hash.
       - match: '(method_definition name: (computed_property_name) body: $B)'
@@ -404,6 +406,12 @@ stages:
         tag: { value: "true" }
       - match: '(__def (__property))'
         tag: { value: "true" }
+      - match: '(__def (__property) (function_type))'
+        tag: { callable: "true" }
+      - match: '(__def (__property) (arrow_function))'
+        tag: { callable: "true" }
+      - match: '(__def (__property) (function_expression))'
+        tag: { callable: "true" }
       - match: '(__def (__variable))'
         tag: { value: "true" }
 

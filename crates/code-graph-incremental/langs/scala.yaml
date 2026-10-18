@@ -58,6 +58,8 @@ stages:
         replace: '(__ivar @$F)'
       - match: '(extends_clause type: $T:type_identifier $$$W:type_identifier)'
         replace: '(extends_clause (__supertype @$T) $$$W=>__supertype)'
+      - match: '(class_parameter name: $N:identifier type: $T:function_type)'
+        replace: '(sc_prop (__def (__defname @$N) (__property) $T) (__binding @$N))'
       - match: '(class_parameter name: $N:identifier type: $T:type_identifier)'
         replace: '(sc_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter name: $N:identifier)'
@@ -170,6 +172,8 @@ stages:
         tag: { value: "true", scoped: "true" }
       - match: '(__def (__property))'
         tag: { value: "true" }
+      - match: '(__def (__property) (function_type))'
+        tag: { callable: "true" }
 
   - name: tag-file-dir
     rules:
