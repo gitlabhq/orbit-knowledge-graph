@@ -27,6 +27,7 @@ const TEST_DATABASE: &str = "test";
 const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 const SHARED_CLICKHOUSE_URL: &str = "GKG_TEST_CLICKHOUSE_URL";
+const DATABASE_PREFIX: &str = "GKG_TEST_DATABASE_PREFIX";
 const TEMPLATE_READY_TABLE: &str = "_gkg_template_ready";
 const TEMPLATE_ATTEMPTS: u32 = 1200;
 
@@ -48,6 +49,7 @@ const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 pub struct TestContext {
     _container: Option<Arc<ContainerAsync<GenericImage>>>,
     pub config: ClickHouseConfiguration,
+    client: ArrowClickHouseClient,
     url: String,
     schema_sqls: Arc<Vec<String>>,
 }
@@ -77,10 +79,12 @@ impl TestContext {
         eprintln!("[context] new(): {:.2?}", t.elapsed());
 
         let config = test_configuration(&url, &database);
+        let client = config.build_client("graph");
 
         Self {
             _container: container,
             config,
+            client,
             url,
             schema_sqls: Arc::new(schema_sqls.iter().map(|s| s.to_string()).collect()),
         }
@@ -189,7 +193,7 @@ impl TestContext {
     }
 
     pub fn create_client(&self) -> ArrowClickHouseClient {
-        self.config.build_client("graph")
+        self.client.clone()
     }
 
     pub async fn isolated(schema_sqls: &[&str]) -> Self {
@@ -200,6 +204,7 @@ impl TestContext {
         Self {
             _container: context._container,
             config: test_configuration(&context.url, &database),
+            client: test_client(&context.url, &database),
             url: context.url,
             schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
         }
@@ -213,6 +218,7 @@ impl TestContext {
         Self {
             _container: self._container.clone(),
             config: test_configuration(&self.url, &database),
+            client: test_client(&self.url, &database),
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),
         }
@@ -245,6 +251,7 @@ impl TestContext {
                 let context = Self {
                     _container: None,
                     config: test_configuration(&self.url, &template),
+                    client: test_client(&self.url, &template),
                     url: self.url.clone(),
                     schema_sqls: Arc::clone(&self.schema_sqls),
                 };
@@ -271,6 +278,7 @@ impl TestContext {
         Self {
             _container: None,
             config: test_configuration(&self.url, &database),
+            client: test_client(&self.url, &database),
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),
         }
@@ -541,7 +549,8 @@ fn schema_statements(database: &str, schema_sqls: &[&str]) -> (Vec<String>, Vec<
 
 fn unique_database(label: &str) -> String {
     format!(
-        "gkg_{}_{}",
+        "{}gkg_{}_{}",
+        std::env::var(DATABASE_PREFIX).unwrap_or_default(),
         database_label(label),
         uuid::Uuid::new_v4().simple()
     )

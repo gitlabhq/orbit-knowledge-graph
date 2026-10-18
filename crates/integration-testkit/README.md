@@ -33,12 +33,13 @@ colima stop gkg
 ```
 
 The `test:integration` tasks set `DOCKER_HOST` and start one ClickHouse container.
+Local tasks reuse the named `gkg-clickhouse-local` container. Remove it to force a clean server.
 If you run `cargo nextest` directly, export `DOCKER_HOST`. The harness then starts
 one ClickHouse container for each top-level test:
 
 ```shell
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
-cargo nextest run --test containers
+cargo nextest run --test server_containers --test indexer_containers
 ```
 
 ## Usage
