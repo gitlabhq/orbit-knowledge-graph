@@ -12,5 +12,6 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Deduplicate Final (Scan Table(gl_ci_edge) AS _orbit_edge_0))
+            - (Deduplicate LimitBy ... (_))
+            - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
             - (Project _orbit_edge_0.relationship_kind AS e0_type, ... (_))

@@ -8,6 +8,13 @@ pub(super) fn column(value: &Column) -> Expr {
     Expr::col(&value.source, &value.name)
 }
 
+fn tuple(values: Vec<Expr>) -> Expr {
+    match values.as_slice() {
+        [value] => value.clone(),
+        _ => Expr::func(Function::Tuple, values),
+    }
+}
+
 pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
         Predicate::Boolean(expression) => expression.fold(
@@ -60,13 +67,13 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             values,
         } => sql::tag_membership(&value.source, &value.name, values),
         Predicate::Membership {
-            column: value,
+            columns,
             relation,
-            key,
+            keys,
         } => Expr::InSubquery {
-            expr: Box::new(column(value)),
+            expr: Box::new(tuple(columns.iter().map(column).collect())),
             cte_name: super::physical::relation_name(*relation),
-            column: key.clone(),
+            columns: keys.clone(),
         },
         Predicate::Scope { alias, proof } => crate::scope::scope_predicate(proof, alias),
     }

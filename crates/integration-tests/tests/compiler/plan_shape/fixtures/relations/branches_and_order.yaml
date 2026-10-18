@@ -34,7 +34,7 @@ cases:
             - (Project mr.project_id AS e0_dst, mr.head_pipeline_id AS e1_dst, ... (_))
           occurrences:
             - pattern: (Scan Table(gl_merge_request) AS mr)
-              count: 1
+              count: 2
 
   - name: A mixed table branch keeps one edge relation per relationship
     query:
@@ -82,10 +82,10 @@ cases:
         planned:
           expect:
             - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.target_id (_) (_))
-            - (Filter _orbit_edge_0.source_id = 1, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))
-            - (Filter _orbit_edge_1.source_id = 2, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_1)))
+            - (Filter _orbit_edge_0.source_id = 1, ... (Deduplicate LimitBy ... (_)))
+            - (Filter _orbit_edge_1.source_id = 2, ... (Deduplicate LimitBy ... (_)))
           reject:
             - (CTE ? (Deduplicate Final (Scan Table(gl_code_edge) ...)))
           occurrences:
             - pattern: (Scan Table(gl_code_edge) ...)
-              count: 2
+              count: 4

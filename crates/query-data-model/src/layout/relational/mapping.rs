@@ -105,6 +105,10 @@ impl DenormalizedCatalog {
 }
 
 pub trait RelationalMapping: Send + Sync {
+    fn supports_selective_latest_rows(&self) -> bool {
+        false
+    }
+
     fn supports_deferred_node_loading(&self) -> bool {
         true
     }

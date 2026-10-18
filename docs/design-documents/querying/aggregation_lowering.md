@@ -1,15 +1,13 @@
 # Aggregation lowering: why FINAL stays the default
 
-Status: decided (FINAL retained). Records an investigation into replacing the
-`FINAL` aggregation form with `argMax`-based alternatives, and why the
-measurements rejected them on a healthy (well-merged) cluster.
+Status: decided. `FINAL` remains the default. The planner can replace a selective
+current-row read with candidate-key discovery and `LIMIT 1 BY`. The rejected
+`argMax` aggregation forms remain out of the compiler.
 
 ## Current form
 
 Count-by-state aggregations ("merged MRs per author", "failed jobs by name")
-lower to one form in `crates/query-engine/compiler/src/passes/lower/`.
-There `single_node.rs` emits `TableRef::scan_final`: scan with `FINAL`, then
-`GROUP BY` and `COUNT()`.
+usually scan with `FINAL`, then apply `GROUP BY` and `COUNT()`.
 
 ```sql
 SELECT j.name, COUNT() FROM gkg.v58_gl_job AS j FINAL
@@ -43,14 +41,26 @@ attributes (`created_at`, `*_id`), and absorbing enum values. Verified:
 `MergeRequest.state=merged` has 0/652127 un-merges; `Job.status` reverses on
 retry so is never stable.
 
-## The alternatives considered
+## Selective current-row reads
+
+The planner can avoid a broad `FINAL` read when a positive predicate has a
+small expected result. It first finds candidate replacement keys without
+`FINAL`. It then reads every version for those keys, keeps the greatest
+`_version` with `LIMIT 1 BY`, and checks the predicates and tombstone again.
+
+This form is latest-correct for mutable fields because candidate discovery does
+not decide the result. It only bounds the keys checked in the second read. The
+planner uses the complete replacement key and keeps `FINAL` for low-selectivity,
+negated, or wide-range predicates.
+
+## The rejected alternatives
 
 | Form | Idea | Latest-correct? |
 |---|---|---|
 | **K1** | filter in `WHERE`, `argMaxIfOrNull(col,_version,_deleted=false)` in `HAVING` | only for version-stable filter columns |
 | **M** | candidate-prune `id IN (selective-set)` + `argMax(col,_version)` in `HAVING` | yes, any column |
 
-Both resolve latest-version-per-id with `GROUP BY id`, so the hash table is
+Both resolve the latest version for each ID with `GROUP BY id`, so the hash table is
 sized to the **result cardinality**.
 
 ## Why they were rejected (settled-parts measurements)
@@ -77,8 +87,9 @@ Authoritative, `log_comment`-tagged, prod v58, scope `1/9970/`, parts merged
 
 ## Decision
 
-Keep `FINAL` as the single aggregation-lowering form. Do not build the K1/M
-multi-strategy selector.
+Keep `FINAL` as the default. Do not build the K1/M `argMax` selector. Use the
+shared planner current-row operation only when ontology and structural metadata
+identify a selective predicate.
 
 The earlier benchmark that motivated this work measured FINAL at 16.5s and
 alternatives 4-16x faster. That benchmark ran while the v58 backfill had gl_job

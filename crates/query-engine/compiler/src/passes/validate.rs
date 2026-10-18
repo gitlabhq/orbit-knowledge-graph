@@ -155,7 +155,7 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 
 /// Maximum span for id_range before it stops counting as selective.
 /// Ranges wider than this are effectively unfiltered full-table scans.
-const MAX_ID_RANGE_SPAN: i64 = 100_000;
+pub(crate) const MAX_ID_RANGE_SPAN: i64 = 100_000;
 
 /// Tighter id_range cap for path_finding endpoints. The frontier BFS is
 /// O(anchors × E^depth), so we bound anchor cardinality to match

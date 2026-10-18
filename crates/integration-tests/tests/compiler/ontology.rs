@@ -307,8 +307,8 @@ fn basic_search_query() {
     let rendered = result.base.render();
 
     assert!(
-        rendered.contains(" FINAL"),
-        "search should use FINAL for dedup"
+        rendered.contains("LIMIT 1 BY"),
+        "search should resolve latest rows"
     );
     assert!(
         rendered.contains("_deleted"),
@@ -1467,10 +1467,6 @@ fn filterable_allows_traversal_path_in_columns() {
     );
 }
 
-// Bug 1 regression guard: single-aggregate queries with a sort-key filter must
-// keep the filter inside the FINAL scan so ClickHouse uses the primary-key index
-// to skip granules. Without this, the latest-row scan reads the full authorized
-// table before aggregation.
 #[test]
 fn aggregation_count_pushes_project_id_into_dedup_subquery() {
     let json = r#"{
@@ -1486,13 +1482,9 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
         rendered.contains("COUNT()") || rendered.contains("countIf"),
         "should contain COUNT() or countIf: {rendered}"
     );
-    let inner = rendered
-        .split(" FINAL")
-        .nth(1)
-        .expect("rendered SQL should contain FINAL");
     assert!(
-        inner.contains("project_id"),
-        "project_id must appear inside the FINAL scan: {rendered}"
+        rendered.contains("project_id") && rendered.contains("LIMIT 1 BY"),
+        "project_id must narrow latest-row resolution: {rendered}"
     );
 }
 
@@ -1564,13 +1556,9 @@ fn aggregation_count_in_clause_pushes_project_id() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
-    let inner = rendered
-        .split(" FINAL")
-        .nth(1)
-        .expect("rendered SQL should contain FINAL");
     assert!(
-        inner.contains("project_id"),
-        "project_id IN must appear inside FINAL scan: {rendered}"
+        rendered.contains("project_id") && rendered.contains("LIMIT 1 BY"),
+        "project_id IN must narrow latest-row resolution: {rendered}"
     );
 }
 

@@ -131,6 +131,10 @@ impl ClickHouseBindings {
 }
 
 impl RelationalMapping for ClickHouseBindings {
+    fn supports_selective_latest_rows(&self) -> bool {
+        true
+    }
+
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variant_route(variant)
     }

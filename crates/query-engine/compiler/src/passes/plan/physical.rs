@@ -96,7 +96,9 @@ impl Relation<'_> {
     }
 
     pub fn semi_join(self, column: Column, keys: RelationId, key: impl Into<String>) -> Self {
-        let id = self.graph.semi_join(self.id, column, keys, key);
+        let id = self
+            .graph
+            .semi_join(self.id, vec![(column, key.into())], keys);
         Self {
             graph: self.graph,
             id,
@@ -118,6 +120,14 @@ impl Relation<'_> {
         condition: Vec<Predicate>,
     ) -> Self {
         let id = self.graph.latest(self.id, alias, sort_key, condition);
+        Self {
+            graph: self.graph,
+            id,
+        }
+    }
+
+    pub fn semi_join_columns(self, columns: Vec<(Column, String)>, keys: RelationId) -> Self {
+        let id = self.graph.semi_join(self.id, columns, keys);
         Self {
             graph: self.graph,
             id,
@@ -233,6 +243,45 @@ impl RelationGraph {
         })
     }
 
+    pub(crate) fn current_rows(
+        &mut self,
+        table: &str,
+        alias: &str,
+        owner: ReadOwner,
+        key: &[String],
+        predicates: Vec<Predicate>,
+        selective_latest: bool,
+    ) -> RelationId {
+        if !selective_latest || !predicates.iter().any(Predicate::is_selective) {
+            let read = self.read(table, alias, true);
+            let owned = self.owned(read, owner, alias);
+            return self.filter(owned, predicates);
+        }
+
+        let candidate_read = self.read(table, alias, false);
+        let candidate = self.owned(candidate_read, owner.clone(), alias);
+        let candidate = self.filter(candidate, predicates.clone());
+        let candidate = self.project(
+            candidate,
+            key.iter()
+                .map(|column| Projection::col(alias, column))
+                .collect(),
+        );
+        let candidate = self.distinct(candidate);
+
+        let read = self.read(table, alias, false);
+        let current = self.owned(read, owner, alias);
+        let current = self.semi_join(
+            current,
+            key.iter()
+                .map(|column| (Column::new(alias, column), column.clone()))
+                .collect(),
+            candidate,
+        );
+        let latest = self.latest(current, alias, key.to_vec(), vec![]);
+        self.filter(latest, predicates)
+    }
+
     pub(crate) fn filter(
         &mut self,
         input: impl Into<RelationRef>,
@@ -299,16 +348,16 @@ impl RelationGraph {
     pub(crate) fn semi_join(
         &mut self,
         input: impl Into<RelationRef>,
-        column: Column,
+        columns: Vec<(Column, String)>,
         keys: RelationId,
-        key: impl Into<String>,
     ) -> RelationId {
+        let (columns, relation_keys): (Vec<_>, Vec<_>) = columns.into_iter().unzip();
         self.filter(
             input,
             vec![Predicate::Membership {
-                column,
+                columns,
                 relation: keys,
-                key: key.into(),
+                keys: relation_keys,
             }],
         )
     }
@@ -453,27 +502,7 @@ impl RelationUsage {
     }
 
     fn selective_predicate(predicate: &Predicate) -> bool {
-        match predicate {
-            Predicate::Boolean(expression) => expression
-                .leaves()
-                .any(|predicate| Self::selective_predicate(predicate)),
-            Predicate::Property {
-                filter,
-                selectivity,
-                ..
-            } => {
-                *selectivity == ontology::FieldSelectivity::High
-                    && filter.rhs_column.is_none()
-                    && matches!(
-                        filter.op,
-                        None | Some(crate::input::FilterOp::Eq | crate::input::FilterOp::In)
-                    )
-            }
-            Predicate::Ids { .. } | Predicate::IdRange { .. } | Predicate::Membership { .. } => {
-                true
-            }
-            _ => false,
-        }
+        predicate.is_selective()
     }
 
     fn materialize(&mut self, id: RelationId) {

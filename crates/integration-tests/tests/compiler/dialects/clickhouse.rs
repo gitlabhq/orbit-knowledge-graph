@@ -420,8 +420,7 @@ fn filter_operators() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // Search uses FINAL for latest-row dedup.
-    assert!(rendered.contains(" FINAL"));
+    assert!(rendered.contains("LIMIT 1 BY"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
@@ -653,6 +652,8 @@ fn multi_table_mixed_types_scan_every_route() {
     assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
     assert!(rendered.contains("FROM gl_edge"), "{rendered}");
     assert!(rendered.contains("UNION ALL"), "{rendered}");
+    assert_eq!(rendered.matches("LIMIT 1 BY").count(), 2, "{rendered}");
+    assert!(!rendered.contains(" FINAL"), "{rendered}");
 }
 
 #[test]

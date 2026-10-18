@@ -54,6 +54,10 @@ pub trait OrbitQueryModel {
         self.query_backend().supports_deferred_node_loading()
     }
 
+    fn supports_selective_latest_rows(&self) -> bool {
+        self.query_backend().supports_selective_latest_rows()
+    }
+
     fn entity(&self, name: &str) -> Option<&Entity> {
         self.graph().entity_named(name)
     }

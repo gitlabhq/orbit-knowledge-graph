@@ -1,0 +1,59 @@
+cases:
+  - name: High-selectivity node filters use find then check
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"name":"build"},"columns":["id","name"]}],"limit":10}
+      gql: |
+        MATCH (j:Job {name: 'build'}) RETURN j.id, j.name LIMIT 10
+    logical:
+      expect: ["(Filter j.name = 'build' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.name = 'build', ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+            - (Filter j.name = 'build', j._deleted = false (_))
+          reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
+
+  - name: Low-selectivity node filters keep FINAL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"status":"failed"},"columns":["id","status"]}],"limit":10}
+      gql: |
+        MATCH (j:Job {status: 'failed'}) RETURN j.id, j.status LIMIT 10
+    logical:
+      expect: ["(Filter j.status = 'failed' (_))"]
+    physical:
+      clickhouse:
+          planned:
+            expect: ["(Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+            reject: ["(Deduplicate LimitBy ... (_))"]
+
+  - name: Negated high-selectivity node filters keep FINAL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","not":{"name":"build"},"columns":["id","name"]}],"limit":10}
+      gql: |
+        MATCH (j:Job) WHERE NOT j.name = 'build' RETURN j.id, j.name LIMIT 10
+    logical:
+      expect: ["(Filter j.name != 'build' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter j.name != 'build', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          reject: ["(Deduplicate LimitBy ... (_))"]
+
+  - name: Wide ID ranges keep FINAL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","id_range":{"start":1,"end":100002},"columns":["id"]}],"limit":10}
+      gql: |
+        MATCH (j:Job) WHERE j.id >= 1 AND j.id <= 100002 RETURN j.id LIMIT 10
+    logical:
+      expect: ["(Filter j.id >= 1, j.id <= 100002 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter j.id >= 1, j.id <= 100002, j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          reject: ["(Deduplicate LimitBy ... (_))"]

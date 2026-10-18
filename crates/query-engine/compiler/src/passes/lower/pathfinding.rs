@@ -340,7 +340,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         edge_filter: Some(Expr::InSubquery {
             expr: Box::new(Expr::col("e1", edge_col)),
             cte_name: cte_name.clone(),
-            column: DEFAULT_PRIMARY_KEY.into(),
+            columns: vec![DEFAULT_PRIMARY_KEY.into()],
         }),
         cte_name: Some(cte_name),
         has_tp,
@@ -388,7 +388,7 @@ fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
         return Some(Expr::InSubquery {
             expr: Box::new(Expr::col(alias, col)),
             cte_name,
-            column: DEFAULT_PRIMARY_KEY.into(),
+            columns: vec![DEFAULT_PRIMARY_KEY.into()],
         });
     }
     None
@@ -398,7 +398,7 @@ fn scope_filter(alias: &str, cte_name: &str) -> Expr {
     Expr::InSubquery {
         expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
         cte_name: cte_name.to_string(),
-        column: TRAVERSAL_PATH_COLUMN.to_string(),
+        columns: vec![TRAVERSAL_PATH_COLUMN.to_string()],
     }
 }
 

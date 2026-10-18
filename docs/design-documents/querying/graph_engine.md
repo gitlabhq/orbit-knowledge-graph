@@ -198,7 +198,7 @@ The planner emits ClickHouse SQL similar to these patterns.
 - Alternate relationship types: a query's relationship types may span multiple physical edge tables, or use a wildcard. In that case the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups. Property groups keep the grouped alias table-backed, so security filters and latest-row checks apply before aggregation.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived-table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. Current node scans use this shape when they carry canonical filters.
+- Derived-table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. Current-row reads can also use the selective form described below.
 - Exact endpoint metadata: a node filter can run on edge tags when every selected relationship variant carries that property.
 - Canonical node reads: uncovered filters and consumed properties join the current node row directly.
 - Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison.
@@ -211,22 +211,31 @@ access when the selected endpoint is known.
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness through `FINAL` or an explicit latest-row operation:
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness through `FINAL` or an explicit latest-row operation.
+
+`FINAL` is the default. A selective current-row read can use a two-step form instead:
+
+1. Read matching candidate rows without `FINAL`, then project and deduplicate the complete replacement key.
+2. Read all versions for those keys, keep the greatest `_version` with `LIMIT 1 BY`, then apply the filters and `_deleted = false` again.
+
+The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
+
+The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive equality or membership filters marked as high selectivity in the ontology. Wide ranges, negated filters, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
-| Single-node traversal | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
-| Canonical endpoint reads | Node table scan with `FINAL` | Supplies current filters and properties that exact edge metadata does not cover. |
-| Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
+| Single-node traversal | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Applies latest-row semantics before filters and limits. |
+| Canonical endpoint reads | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Supplies current filters and properties that exact edge metadata does not cover. |
+| Redaction joins for filtered non-default auth IDs | Current-row node subquery | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read. |
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
-| Main query node scans and joins | Node table scan with `FINAL` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
-| Fixed and variable stored-edge scans | Edge table scan with `FINAL`, then `_deleted = false` | Prevents a newer edge tombstone from exposing an older live edge. |
+| Main query node scans and joins | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
+| Fixed and variable stored-edge scans | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Prevents a newer edge tombstone from exposing an older live edge. |
 | Single-relation aggregation | Non-`FINAL` scan with `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC` | Resolves current edge rows before evaluating the aggregate condition. |
 
-Filter placement rules for node `FINAL` scans:
+Filter placement rules for current-row reads:
 
-- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the `FINAL` scan so ClickHouse can still use primary-key pruning where supported.
-- **Mutable filters** (`state`, `status`, `draft`) also evaluate against the `FINAL` scan, preventing stale row versions from matching.
+- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the current-row read so ClickHouse can still use primary-key pruning where supported.
+- **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
 - **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.
 - **Pinned endpoint IDs** remain predicates on the edge relation and any required current node read.

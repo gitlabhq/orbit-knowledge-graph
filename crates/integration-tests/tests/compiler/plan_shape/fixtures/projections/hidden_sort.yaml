@@ -21,7 +21,7 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project f.path AS f_path (Filter f.id IN [1, 2], ... (Deduplicate Final (Scan Table(gl_file) AS f))))
+        - (Project f.path AS f_path (Filter f.id IN [1, 2], ... (Deduplicate LimitBy ... (_))))
       reject:
         - (Project f.id AS f_id, ... (_))
     emitted:

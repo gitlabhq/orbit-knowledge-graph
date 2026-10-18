@@ -62,7 +62,7 @@ pub enum Expr {
     InSubquery {
         expr: Box<Expr>,
         cte_name: String,
-        column: String,
+        columns: Vec<String>,
     },
     /// Like InSubquery but embeds the query directly instead of referencing
     /// a CTE. Used for narrowing when CTE references would trigger

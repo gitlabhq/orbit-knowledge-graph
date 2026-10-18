@@ -5,7 +5,8 @@ use query_data_model::OrbitQueryModel;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, InputNode, QueryType};
 
-use super::physical::{BindingSource, ExecutionPlan, RelationGraph};
+use super::physical::{BindingSource, ExecutionPlan, ReadOwner, RelationGraph, RelationId};
+use super::requirements::node_predicates;
 use super::{DenormalizedKey, DenormalizedProperty, EdgeRelation, NodePlan, Plan};
 
 pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
@@ -41,20 +42,7 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
             .next()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
         let mut graph = RelationGraph::default();
-        let table = node
-            .table
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        let read = graph.read(table, &node.alias, true);
-        let owned = graph.owned(
-            read,
-            super::physical::ReadOwner::Node(node.alias.clone()),
-            &node.alias,
-        );
-        let root = graph
-            .from(owned)
-            .filter(super::requirements::node_predicates(node))
-            .finish();
+        let root = self.node_read(&mut graph, node)?;
         Ok(ExecutionPlan {
             graph,
             root,
@@ -76,5 +64,20 @@ impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
                     "table '{table}' has no sort key for latest-row resolution"
                 ))
             })
+    }
+
+    pub fn node_read(&self, graph: &mut RelationGraph, node: &NodePlan) -> Result<RelationId> {
+        let table = node
+            .table
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
+        Ok(graph.current_rows(
+            table,
+            &node.alias,
+            ReadOwner::Node(node.alias.clone()),
+            self.latest_row_key(table)?,
+            node_predicates(node),
+            self.model.supports_selective_latest_rows(),
+        ))
     }
 }

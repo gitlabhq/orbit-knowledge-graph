@@ -660,15 +660,31 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
                 .join(", ")
         )],
         Predicate::Membership {
-            column,
+            columns,
             relation,
-            key,
+            keys,
         } => vec![format!(
-            "{} IN _orbit_relation_{}.{key}",
-            planned_column(column),
-            relation.0
+            "{} IN _orbit_relation_{}.{}",
+            membership_columns(columns),
+            relation.0,
+            membership_keys(keys)
         )],
         Predicate::Scope { alias, .. } => vec![format!("scope({alias})")],
+    }
+}
+
+fn membership_columns(columns: &[Column]) -> String {
+    let columns: Vec<_> = columns.iter().map(planned_column).collect();
+    match columns.as_slice() {
+        [column] => column.clone(),
+        _ => format!("({})", columns.join(", ")),
+    }
+}
+
+fn membership_keys(keys: &[String]) -> String {
+    match keys {
+        [key] => key.clone(),
+        _ => format!("({})", keys.join(", ")),
     }
 }
 
@@ -823,8 +839,12 @@ fn expression(value: &Expr) -> String {
         Expr::InSubquery {
             expr,
             cte_name,
-            column,
-        } => format!("{} IN {cte_name}.{column}", expression(expr)),
+            columns,
+        } => format!(
+            "{} IN {cte_name}.{}",
+            expression(expr),
+            membership_keys(columns)
+        ),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
         Expr::Scalar(_) => "scalar(subquery)".into(),
         Expr::Star => "*".into(),

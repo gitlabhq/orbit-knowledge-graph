@@ -8,7 +8,7 @@ query:
     MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS*2..2]->(x:Project) RETURN count(x) AS c LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS g FINAL", "relationship_kind = 'CONTAINS'", "2 AS depth"]
+  sql_contains: ["LIMIT 1 BY g.traversal_path, g.id", "relationship_kind = 'CONTAINS'", "2 AS depth"]
   skip_requirements: ["filter:full_path"]
   row_count: 1
   row_values: [{ c: 1 }]

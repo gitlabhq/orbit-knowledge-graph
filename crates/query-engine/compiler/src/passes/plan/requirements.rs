@@ -64,14 +64,43 @@ pub enum Predicate {
         values: Vec<String>,
     },
     Membership {
-        column: Column,
+        columns: Vec<Column>,
         relation: RelationId,
-        key: String,
+        keys: Vec<String>,
     },
     Scope {
         alias: String,
         proof: crate::scope::ScopeProof,
     },
+}
+
+impl Predicate {
+    pub fn is_selective(&self) -> bool {
+        match self {
+            Self::Boolean(expression) => expression.fold(
+                &|predicate| predicate.is_selective(),
+                &|predicates| predicates.into_iter().any(|selective| selective),
+                &|_| false,
+            ),
+            Self::Property {
+                filter,
+                selectivity,
+                ..
+            } => {
+                *selectivity == ontology::FieldSelectivity::High
+                    && filter.rhs_column.is_none()
+                    && matches!(
+                        filter.op,
+                        None | Some(crate::input::FilterOp::Eq | crate::input::FilterOp::In)
+                    )
+            }
+            Self::Ids { .. } | Self::Membership { .. } => true,
+            Self::IdRange { start, end, .. } => {
+                end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone)]

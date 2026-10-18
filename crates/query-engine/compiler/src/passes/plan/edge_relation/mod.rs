@@ -12,8 +12,8 @@ use super::context::PlanningContext;
 use super::helpers::{FilterOwner, ordered_filters};
 use super::physical::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
 use super::requirements::{
-    Column, OutputValue, Predicate, Projection, id_list, live, node_outputs, node_predicates,
-    property_filter, relationship_kinds, tag_filter,
+    Column, OutputValue, Predicate, Projection, id_list, live, node_outputs, property_filter,
+    relationship_kinds, tag_filter,
 };
 use crate::constants::*;
 use crate::error::{QueryError, Result};
@@ -384,9 +384,9 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         for (node, (ids, key)) in &endpoint_ids {
             if let Some(column) = relation.endpoint_column(node) {
                 predicates.push(Predicate::Membership {
-                    column: Column::new(alias, column),
+                    columns: vec![Column::new(alias, column)],
                     relation: *ids,
-                    key: key.clone(),
+                    keys: vec![key.clone()],
                 });
             }
         }
@@ -404,9 +404,9 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             let ids = self.node_ids(node)?;
             let column = relation.endpoint_column(node).expect("relation endpoint");
             predicates.push(Predicate::Membership {
-                column: Column::new(alias, column),
+                columns: vec![Column::new(alias, column)],
                 relation: ids.0,
-                key: ids.1,
+                keys: vec![ids.1],
             });
         }
 
@@ -561,16 +561,16 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         {
             let ids = self.node_ids(endpoint)?;
             predicates.push(Predicate::Membership {
-                column: endpoint_column.clone(),
+                columns: vec![endpoint_column.clone()],
                 relation: ids.0,
-                key: ids.1,
+                keys: vec![ids.1],
             });
         }
         if let Some((ids, key)) = self.ids(endpoint) {
             predicates.push(Predicate::Membership {
-                column: endpoint_column.clone(),
+                columns: vec![endpoint_column.clone()],
                 relation: *ids,
-                key: key.clone(),
+                keys: vec![key.clone()],
             });
         }
         if let Some(binding) = self.binding(endpoint) {
@@ -832,21 +832,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     }
 
     fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {
-        let table = node
-            .table
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        let read = self.graph.read(table, &node.alias, true);
-        let owned = self.graph.owned(
-            read,
-            super::physical::ReadOwner::Node(node.alias.clone()),
-            &node.alias,
-        );
-        Ok(self
-            .graph
-            .from(owned)
-            .filter(node_predicates(node))
-            .finish())
+        self.facts.node_read(&mut self.graph, node)
     }
 
     fn has_selective_node_filter(&self, alias: &str) -> bool {
@@ -927,6 +913,42 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         final_: bool,
         predicates: Vec<Predicate>,
     ) -> Result<RelationId> {
+        if final_ && let Some(table) = relation.single_edge_table() {
+            return Ok(self.graph.current_rows(
+                table,
+                alias,
+                super::physical::ReadOwner::Relationship(relation.input_index),
+                self.facts.latest_row_key(table)?,
+                predicates,
+                self.facts.model.supports_selective_latest_rows(),
+            ));
+        }
+        if final_
+            && self.facts.model.supports_selective_latest_rows()
+            && predicates.iter().any(Predicate::is_selective)
+        {
+            let routes = relation
+                .edge_tables
+                .iter()
+                .map(|table| {
+                    let current = self.graph.current_rows(
+                        table,
+                        alias,
+                        super::physical::ReadOwner::Relationship(relation.input_index),
+                        self.facts.latest_row_key(table)?,
+                        predicates.clone(),
+                        true,
+                    );
+                    let outputs = EDGE_RESERVED_COLUMNS
+                        .iter()
+                        .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
+                        .map(|column| Projection::col(alias, column))
+                        .collect();
+                    Ok(self.graph.from(current).project(outputs).finish().into())
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(self.graph.union_all(routes, alias));
+        }
         let read = self.edge_read(relation, alias, final_)?;
         Ok(self.graph.from(read).filter(predicates).finish())
     }
