@@ -19,6 +19,17 @@ pub(crate) fn latest_row_dedup(
     (order, Some((1, keys)))
 }
 
+fn resolves_latest_rows(query: &Query, alias: &str) -> bool {
+    query.limit_by.is_some()
+        || matches!(
+            &query.from,
+            TableRef::Subquery {
+                alias: nested_alias,
+                query,
+            } if nested_alias == alias && resolves_latest_rows(query, alias)
+        )
+}
+
 pub(in crate::passes) fn latest_rows_for_join(
     source: &TableRef,
     identity: &Expr,
@@ -46,7 +57,7 @@ pub(in crate::passes) fn latest_rows_for_join(
             ..
         } = candidate
             && candidate_alias == source_alias
-            && query.limit_by.is_some()
+            && resolves_latest_rows(query, source_alias)
         {
             relation = Some(candidate.clone());
         }
