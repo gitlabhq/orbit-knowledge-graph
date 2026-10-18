@@ -5,7 +5,8 @@ mod service;
 mod stages;
 
 pub use helpers::{
-    receive_query_request, result_messages, send_invalid_request_error, send_query_error,
+    ResultChunking, receive_query_request, result_messages, send_invalid_request_error,
+    send_query_error,
 };
 pub use metrics::OTelPipelineObserver;
 pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};

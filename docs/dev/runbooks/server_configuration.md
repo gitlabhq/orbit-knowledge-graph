@@ -471,6 +471,7 @@ Enabling `tls.internal` changes what clients must send:
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
 | `grpc.result_chunk_bytes` | `524288` (512 KiB) | Largest `ResultChunk` the server sends when a client sets `chunked_result`. Must be between 64 KiB and 4 MiB, because GitLab Rails rejects gRPC messages over 8 MiB. Chunks split on UTF-8 boundaries, so a chunk can be up to 3 bytes larger. |
+| `grpc.max_result_bytes` | `67108864` (64 MiB) | Largest result text the server sends in chunks. A larger result fails with a client-safe `compile_error` before the first chunk. Must be at least 1 MiB. |
 
 ### Query settings
 
