@@ -26,8 +26,8 @@ use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
 use crate::item_counts::{ItemCountService, build_item_counts_response};
 use crate::pipeline::{
-    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request, result_messages,
-    send_invalid_request_error, send_query_error,
+    QueryPipelineService, QueryServiceOutput, RawQuery, ResultChunking, receive_query_request,
+    result_messages, send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
@@ -168,7 +168,7 @@ pub struct OrbitServiceImpl {
     indexing_status: IndexingStatusService,
     item_counts: ItemCountService,
     quota: Arc<QuotaService>,
-    result_chunk_bytes: usize,
+    result_chunking: ResultChunking,
 }
 
 impl OrbitServiceImpl {
@@ -200,7 +200,7 @@ impl OrbitServiceImpl {
             indexing_status,
             item_counts,
             quota: Arc::new(QuotaService::disabled()),
-            result_chunk_bytes: grpc.result_chunk_bytes,
+            result_chunking: ResultChunking::from(grpc),
         }
     }
 
@@ -395,7 +395,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
-        let result_chunk_bytes = self.result_chunk_bytes;
+        let result_chunking = self.result_chunking;
         let schema = self.active_schema.snapshot()?;
         let span = tracing::Span::current();
 
@@ -456,11 +456,8 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 };
                 let result = pipeline
                     .run_query(&schema, ctx, query, &tx, stream, |output| {
-                        render(output).map(|result| {
-                            result_messages(
-                                result,
-                                req.chunked_result.then_some(result_chunk_bytes),
-                            )
+                        render(output).and_then(|result| {
+                            result_messages(result, req.chunked_result.then_some(result_chunking))
                         })
                     })
                     .await;

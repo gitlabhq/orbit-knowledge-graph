@@ -1368,6 +1368,11 @@
           "format": "uint",
           "minimum": 65536,
           "maximum": 4194304
+        },
+        "max_result_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 1048576
         }
       },
       "additionalProperties": false,
@@ -1382,7 +1387,8 @@
         "max_connection_age_grace_secs",
         "stream_timeout_secs",
         "max_header_list_size_bytes",
-        "result_chunk_bytes"
+        "result_chunk_bytes",
+        "max_result_bytes"
       ]
     },
     "SchemaConfig": {
