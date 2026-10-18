@@ -52,14 +52,6 @@ impl ClickHouseWriter {
         }
     }
 
-    pub fn with_client(&self, client: ArrowClickHouseClient) -> Self {
-        Self {
-            client,
-            metrics: Arc::clone(&self.metrics),
-            noop: self.noop,
-        }
-    }
-
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
@@ -193,6 +185,30 @@ mod tests {
         assert_eq!(
             insert_overrides(WriteDurability::Durable),
             &[("async_insert", "1"), ("wait_for_async_insert", "1")]
+        );
+    }
+
+    #[test]
+    fn durable_inserts_from_embedded_defaults() {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
+        let mut graph = orbit_server_config::AppConfig::embedded_defaults().graph;
+        let durable_sql = |graph: &orbit_server_config::ClickHouseConfiguration| {
+            graph
+                .build_client("graph")
+                .build_insert_sql_with_overrides("t", insert_overrides(WriteDurability::Durable))
+        };
+        assert_eq!(
+            durable_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert=1, async_insert_busy_timeout_max_ms=1000, \
+             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0, \
+             wait_for_async_insert=1 FORMAT ArrowStream"
+        );
+        graph.replicated = true;
+        assert_eq!(
+            durable_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert_busy_timeout_max_ms=1000, \
+             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0 FORMAT ArrowStream"
         );
     }
 

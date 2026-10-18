@@ -69,6 +69,10 @@ graph:
     max_query_size: "10485760"
   insert_settings:
     optimize_on_insert: "0"
+    async_insert: "1"
+    wait_for_async_insert: "1"
+    async_insert_busy_timeout_min_ms: "1000"
+    async_insert_busy_timeout_max_ms: "1000"
   profiling:
     enabled: false
     explain: false
@@ -139,8 +143,6 @@ engine:
         archive_lease_max_wait_secs: 30
         write_slice_rows: 1000000
         write_max_concurrent: 8
-        async_insert_busy_timeout_min_ms: 1000
-        async_insert_busy_timeout_max_ms: 1000
         small_repo_max_files: 650
         # small_indexing_slots: 6  # unset = derived from container CPU count and memory limit
         # big_indexing_slots: 2    # unset = derived from container CPU count and memory limit

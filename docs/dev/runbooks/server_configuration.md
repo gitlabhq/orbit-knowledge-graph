@@ -139,25 +139,26 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.username` | `default` | Auth user |
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
-| `graph.insert_settings` | `{optimize_on_insert: "0"}` | Settings applied to INSERT operations only, by every module. A write path's own `async_insert` and `wait_for_async_insert` win over these. |
+| `graph.insert_settings` | See [Insert settings](#insert-settings) | Settings applied to INSERT operations only |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
-### Insert settings by environment
+### Insert settings
 
-The data writes and the checkpoint saves below set `async_insert` and `wait_for_async_insert` themselves, so the server and user-profile defaults do not change them.
+`graph.insert_settings` defaults to these values. A deployment overlay merges key by key, so a key it does not set keeps its default.
 
-| Insert | ClickHouse Cloud or a single node | Quorum cluster (`replicated: true` or `insert_quorum`) |
-|--------|-----------------------------------|---------------------------------------------------------|
-| Code tables | `async_insert=1`, `wait_for_async_insert=1`, flush timeout 1000 ms | Synchronous quorum insert |
-| Code checkpoint | `async_insert=1`, `wait_for_async_insert=1`, flush timeout 1000 ms | Synchronous quorum insert |
-| SDLC tables | `async_insert=1`, `wait_for_async_insert=1`, server flush timeout | Synchronous quorum insert |
-| SDLC checkpoints | `async_insert=1`, `wait_for_async_insert` by run mode, server flush timeout | Synchronous quorum insert |
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `optimize_on_insert` | `0` | Skips merge work at insert time. |
+| `async_insert` | `1` | ClickHouse pools small inserts into fewer parts. |
+| `wait_for_async_insert` | `1` | An insert returns only after its rows are in a part. |
+| `async_insert_busy_timeout_min_ms` | `1000` | Lower bound of the flush timeout. |
+| `async_insert_busy_timeout_max_ms` | `1000` | Upper bound of the flush timeout. Without it, a server upper bound below the lower bound makes ClickHouse ignore the lower bound. |
 
-All inserts also get `graph.insert_settings`. A quorum cluster gets none of the async-insert settings above, and its session sets `async_insert=0`.
+Graph data writes and code checkpoints also set `async_insert=1` and `wait_for_async_insert=1` on each insert, so an overlay cannot turn them off. At light traffic each such insert waits about 1 s for the flush. At backfill rates the flush fires on volume.
 
-The code flush timeout sends both bounds, so the server default upper bound (200 ms) cannot make ClickHouse ignore the lower bound. At light traffic a code insert waits about 1 s. A larger part per flush is the gain.
+On a quorum cluster, Orbit drops `async_insert` and `wait_for_async_insert` from every insert, and the session sets `async_insert=0`. The flush timeout keys are still sent, but ClickHouse ignores them when `async_insert` is off.
 
-The graph writer user must be allowed to set `async_insert`, `wait_for_async_insert`, `async_insert_busy_timeout_min_ms`, and `async_insert_busy_timeout_max_ms`. If a user profile makes one of them read-only or constrains it, ClickHouse fails the insert with `SETTING_CONSTRAINT_VIOLATION` and names the setting. The indexer logs that error. Remove the constraint from the profile. To change the code flush timeout, set both pipeline keys. To use the server flush timeout, set both to `0`.
+The graph writer user must be allowed to set all five settings. If a user profile makes one of them read-only or constrains it, ClickHouse fails the insert with `SETTING_CONSTRAINT_VIOLATION` and names the setting. To change a value, set the key in `graph.insert_settings`.
 
 ### Self-managed replicated clusters
 
@@ -324,8 +325,6 @@ Initial-load partition parallelism is no longer configured here; a pipeline decl
 | `engine.handlers.code-indexing-task.pipeline.max_files` | `1,000,000` | Maximum language-supported source files accepted for one pipeline run |
 | `engine.handlers.code-indexing-task.pipeline.worker_threads` | `0` | Rayon workers per language; `0` uses Rayon default |
 | `engine.handlers.code-indexing-task.pipeline.max_concurrent_languages` | `0` | Concurrent language pipelines; `0` uses the pipeline default |
-| `engine.handlers.code-indexing-task.pipeline.async_insert_busy_timeout_min_ms` | `1000` | Lower bound of the server's async-insert flush timeout for code inserts only. `0` sends nothing. See [Insert settings by environment](#insert-settings-by-environment). |
-| `engine.handlers.code-indexing-task.pipeline.async_insert_busy_timeout_max_ms` | `1000` | Upper bound of the same timeout. Must not be below the lower bound. `0` sends nothing. |
 
 ### Retry strategy by topic
 

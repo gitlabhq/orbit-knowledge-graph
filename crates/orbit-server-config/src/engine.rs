@@ -296,10 +296,6 @@ pub struct CodeIndexingPipelineConfig {
     pub write_slice_rows: usize,
     /// Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory. Keep it at or above the number of code tables, so a small job sends every table's insert at once.
     pub write_max_concurrent: usize,
-    /// Lower bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_min_ms`). A higher bound pools more inserts into one part, and each insert waits about that long. Must not exceed `async_insert_busy_timeout_max_ms`. Wins over the same key in `graph.insert_settings`. Needs `async_insert_busy_timeout_max_ms`. Not sent to a quorum cluster, which cannot async insert. 0 = not sent.
-    pub async_insert_busy_timeout_min_ms: u64,
-    /// Upper bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_max_ms`). Sent with the lower bound, so a server default below it cannot make ClickHouse ignore the lower bound. Same rules as `async_insert_busy_timeout_min_ms`. 0 = not sent.
-    pub async_insert_busy_timeout_max_ms: u64,
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane.
     pub small_repo_max_files: usize,
     /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count, capped by its memory limit.
@@ -347,23 +343,6 @@ impl CodeIndexingPipelineConfig {
     pub fn big_indexing_slots(&self) -> usize {
         self.big_indexing_slots
             .expect("code-indexing pipeline.big_indexing_slots unresolved")
-    }
-
-    pub fn async_insert_settings(&self) -> Vec<(&'static str, String)> {
-        [
-            (
-                "async_insert_busy_timeout_min_ms",
-                self.async_insert_busy_timeout_min_ms,
-            ),
-            (
-                "async_insert_busy_timeout_max_ms",
-                self.async_insert_busy_timeout_max_ms,
-            ),
-        ]
-        .into_iter()
-        .filter(|&(_, ms)| ms > 0)
-        .map(|(name, ms)| (name, ms.to_string()))
-        .collect()
     }
 
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
@@ -556,14 +535,6 @@ impl EngineConfiguration {
         if entity_handler.system_notes_resolve_lookup_batch_size == 0 {
             return Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize);
         }
-        let pipeline = &self.handlers.code_indexing_task.pipeline;
-        if pipeline.async_insert_busy_timeout_min_ms > 0
-            && (pipeline.async_insert_busy_timeout_max_ms == 0
-                || pipeline.async_insert_busy_timeout_min_ms
-                    > pipeline.async_insert_busy_timeout_max_ms)
-        {
-            return Err(EngineConfigError::AsyncInsertBusyTimeoutMinAboveMax);
-        }
         Ok(())
     }
 }
@@ -577,11 +548,6 @@ pub enum EngineConfigError {
         "engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size must be at least 1"
     )]
     ZeroSystemNotesResolveLookupBatchSize,
-
-    #[error(
-        "engine.handlers.code-indexing-task.pipeline.async_insert_busy_timeout_min_ms needs a async_insert_busy_timeout_max_ms at or above it"
-    )]
-    AsyncInsertBusyTimeoutMinAboveMax,
 }
 
 /// Top-level schedule configuration.
@@ -754,23 +720,6 @@ mod tests {
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
-    }
-
-    #[test]
-    fn async_insert_busy_timeout_min_above_max_fails_validation() {
-        let mut cfg = AppConfig::embedded_defaults().engine;
-        let pipeline = &mut cfg.handlers.code_indexing_task.pipeline;
-        pipeline.async_insert_busy_timeout_min_ms = 1000;
-        for max_ms in [200, 0] {
-            cfg.handlers
-                .code_indexing_task
-                .pipeline
-                .async_insert_busy_timeout_max_ms = max_ms;
-            assert!(matches!(
-                cfg.validate(),
-                Err(EngineConfigError::AsyncInsertBusyTimeoutMinAboveMax)
-            ));
-        }
     }
 
     #[test]

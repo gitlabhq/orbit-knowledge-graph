@@ -2288,6 +2288,13 @@ async fn code_job_inserts_send_the_default_insert_settings() {
     let mut writer = clickhouse.clone();
     writer.config.username = "orbit_writer".to_string();
     writer.config.password = Some("pw".to_string());
+    writer.config.insert_settings = orbit_server_config::AppConfig::embedded_defaults()
+        .graph
+        .insert_settings;
+    writer
+        .config
+        .insert_settings
+        .insert("wait_for_async_insert".to_string(), "0".to_string());
 
     let deps = CodeIndexingDeps::new(&mock, &writer);
     let handler = deps.code_indexing_task_handler();

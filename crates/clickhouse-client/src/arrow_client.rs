@@ -174,31 +174,18 @@ impl ArrowClickHouseClient {
         }
     }
 
-    /// Adds insert settings that only tune async inserts. A quorum client cannot async insert, so it skips them.
-    pub fn with_async_insert_settings(mut self, settings: &[(&str, String)]) -> Self {
-        if !self.quorum_writes {
-            self.insert_settings
-                .extend(settings.iter().map(|(k, v)| (k.to_string(), v.clone())));
-        }
-        self
-    }
-
     /// Use this for `INSERT` queries so they inherit async-insert and
     /// other write-specific settings. Use `query()` for read operations.
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
-        self.insert_query_with_overrides(sql, &[])
-    }
-
-    pub fn insert_query_with_overrides(&self, sql: &str, overrides: &[(&str, &str)]) -> ArrowQuery {
-        self.query(sql)
-            .with_settings(self.effective_insert_settings(overrides))
+        self.query(sql).with_settings(
+            self.insert_settings
+                .iter()
+                .filter(|(k, _)| !self.should_drop_async_insert_setting(k)),
+        )
     }
 
     /// Sorted so the emitted `SETTINGS` clause is deterministic.
-    fn effective_insert_settings<'a>(
-        &'a self,
-        overrides: &[(&'a str, &'a str)],
-    ) -> std::collections::BTreeMap<&'a str, &'a str> {
+    fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
         let mut merged: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
         for (k, v) in &self.insert_settings {
             merged.insert(k, v);
@@ -207,11 +194,6 @@ impl ArrowClickHouseClient {
             merged.insert(k, v);
         }
         merged.retain(|k, _| !self.should_drop_async_insert_setting(k));
-        merged
-    }
-
-    fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
-        let merged = self.effective_insert_settings(overrides);
         if merged.is_empty() {
             return String::new();
         }
@@ -809,44 +791,6 @@ mod tests {
         assert_eq!(
             client.build_insert_sql("t"),
             "INSERT INTO t SETTINGS optimize_on_insert=0 FORMAT ArrowStream"
-        );
-    }
-
-    #[test]
-    fn async_insert_settings_win_over_configured_settings() {
-        let client = client_with_insert_settings(HashMap::from([
-            ("optimize_on_insert".to_string(), "0".to_string()),
-            (
-                "async_insert_busy_timeout_min_ms".to_string(),
-                "200".to_string(),
-            ),
-        ]))
-        .with_async_insert_settings(&[("async_insert_busy_timeout_min_ms", "1000".to_string())]);
-        let overrides = [("async_insert", "1"), ("wait_for_async_insert", "0")];
-        assert_eq!(
-            client.effective_insert_settings(&overrides),
-            std::collections::BTreeMap::from([
-                ("async_insert", "1"),
-                ("async_insert_busy_timeout_min_ms", "1000"),
-                ("optimize_on_insert", "0"),
-                ("wait_for_async_insert", "0"),
-            ])
-        );
-    }
-
-    #[test]
-    fn quorum_writes_skip_async_insert_settings() {
-        let client =
-            client_with_session_and_insert_settings(insert_quorum_setting(), HashMap::new())
-                .with_async_insert_settings(&[(
-                    "async_insert_busy_timeout_min_ms",
-                    "1000".to_string(),
-                )]);
-        let overrides = [("async_insert", "1"), ("wait_for_async_insert", "0")];
-        assert!(client.effective_insert_settings(&overrides).is_empty());
-        assert_eq!(
-            client.build_insert_sql("t"),
-            "INSERT INTO t FORMAT ArrowStream"
         );
     }
 

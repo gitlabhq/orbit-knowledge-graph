@@ -211,22 +211,25 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .indexed_at
             .map(|indexed_at| indexed_at.format(TIMESTAMP_FORMAT).to_string());
 
-        self.client
-            .insert_query_with_overrides(
-                &format!(
-                    r#"
+        let mut query = self.client.insert_query(&format!(
+            r#"
                 INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, attempts, is_default_branch)
                 VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:Nullable(String)}}, {{attempts:Int64}}, true)
             "#
-                ),
-                insert_overrides(WriteDurability::Durable),
-            )
+        ));
+        if !self.client.has_quorum_writes() {
+            query = query.with_settings(insert_overrides(WriteDurability::Durable).iter().copied());
+        }
+        query
             .param("traversal_path", checkpoint.traversal_path.as_str())
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)
             .param("last_task_id", checkpoint.last_task_id)
-            .param("last_commit", checkpoint.last_commit.as_deref().unwrap_or_default())
+            .param(
+                "last_commit",
+                checkpoint.last_commit.as_deref().unwrap_or_default(),
+            )
             .param("indexed_at", formatted_timestamp)
             .param("attempts", checkpoint.attempts)
             .execute()
