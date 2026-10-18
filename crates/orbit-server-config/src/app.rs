@@ -178,6 +178,24 @@ gitlab:
         assert!(config.engine.max_concurrent_workers.is_none());
     }
 
+    #[test]
+    fn a_pool_insert_settings_overlay_keeps_the_other_defaults() {
+        let yaml = r#"
+graph:
+  insert_settings:
+    wait_for_async_insert: "0"
+"#;
+        let config: AppConfig = builder_with_defaults()
+            .add_source(config::File::from_str(yaml, config::FileFormat::Yaml))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+        let mut expected = AppConfig::embedded_defaults().graph.insert_settings;
+        expected.insert("wait_for_async_insert".to_string(), "0".to_string());
+        assert_eq!(config.graph.insert_settings, expected);
+    }
+
     fn address(value: &str) -> SocketAddr {
         value.parse().unwrap()
     }
