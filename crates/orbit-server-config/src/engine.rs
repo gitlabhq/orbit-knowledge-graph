@@ -296,9 +296,9 @@ pub struct CodeIndexingPipelineConfig {
     pub write_slice_rows: usize,
     /// Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory. Keep it at or above the number of code tables, so a small job sends every table's insert at once.
     pub write_max_concurrent: usize,
-    /// Lower bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_min_ms`). A higher bound pools more inserts into one part, and each insert waits about that long. Must not exceed `async_insert_busy_timeout_max_ms`. Wins over the same key in `graph.insert_settings`. Not sent to a quorum cluster, which cannot async insert. 0 = server default.
+    /// Lower bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_min_ms`). A higher bound pools more inserts into one part, and each insert waits about that long. Must not exceed `async_insert_busy_timeout_max_ms`. Wins over the same key in `graph.insert_settings`. Needs `async_insert_busy_timeout_max_ms`. Not sent to a quorum cluster, which cannot async insert. 0 = not sent.
     pub async_insert_busy_timeout_min_ms: u64,
-    /// Upper bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_max_ms`). Sent with the lower bound, so a server default below it cannot make ClickHouse ignore the lower bound. Same rules as `async_insert_busy_timeout_min_ms`. 0 = server default.
+    /// Upper bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_max_ms`). Sent with the lower bound, so a server default below it cannot make ClickHouse ignore the lower bound. Same rules as `async_insert_busy_timeout_min_ms`. 0 = not sent.
     pub async_insert_busy_timeout_max_ms: u64,
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane.
     pub small_repo_max_files: usize,
@@ -557,8 +557,10 @@ impl EngineConfiguration {
             return Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize);
         }
         let pipeline = &self.handlers.code_indexing_task.pipeline;
-        if pipeline.async_insert_busy_timeout_max_ms > 0
-            && pipeline.async_insert_busy_timeout_min_ms > pipeline.async_insert_busy_timeout_max_ms
+        if pipeline.async_insert_busy_timeout_min_ms > 0
+            && (pipeline.async_insert_busy_timeout_max_ms == 0
+                || pipeline.async_insert_busy_timeout_min_ms
+                    > pipeline.async_insert_busy_timeout_max_ms)
         {
             return Err(EngineConfigError::AsyncInsertBusyTimeoutMinAboveMax);
         }
@@ -577,7 +579,7 @@ pub enum EngineConfigError {
     ZeroSystemNotesResolveLookupBatchSize,
 
     #[error(
-        "engine.handlers.code-indexing-task.pipeline.async_insert_busy_timeout_min_ms must not exceed async_insert_busy_timeout_max_ms"
+        "engine.handlers.code-indexing-task.pipeline.async_insert_busy_timeout_min_ms needs a async_insert_busy_timeout_max_ms at or above it"
     )]
     AsyncInsertBusyTimeoutMinAboveMax,
 }
@@ -759,11 +761,16 @@ mod tests {
         let mut cfg = AppConfig::embedded_defaults().engine;
         let pipeline = &mut cfg.handlers.code_indexing_task.pipeline;
         pipeline.async_insert_busy_timeout_min_ms = 1000;
-        pipeline.async_insert_busy_timeout_max_ms = 200;
-        assert!(matches!(
-            cfg.validate(),
-            Err(EngineConfigError::AsyncInsertBusyTimeoutMinAboveMax)
-        ));
+        for max_ms in [200, 0] {
+            cfg.handlers
+                .code_indexing_task
+                .pipeline
+                .async_insert_busy_timeout_max_ms = max_ms;
+            assert!(matches!(
+                cfg.validate(),
+                Err(EngineConfigError::AsyncInsertBusyTimeoutMinAboveMax)
+            ));
+        }
     }
 
     #[test]

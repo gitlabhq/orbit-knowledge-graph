@@ -679,13 +679,13 @@
           "minimum": 0
         },
         "async_insert_busy_timeout_min_ms": {
-          "description": "Lower bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_min_ms`). A higher bound pools more inserts into one part, and each insert waits about that long. Must not exceed `async_insert_busy_timeout_max_ms`. Wins over the same key in `graph.insert_settings`. Not sent to a quorum cluster, which cannot async insert. 0 = server default.",
+          "description": "Lower bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_min_ms`). A higher bound pools more inserts into one part, and each insert waits about that long. Must not exceed `async_insert_busy_timeout_max_ms`. Wins over the same key in `graph.insert_settings`. Needs `async_insert_busy_timeout_max_ms`. Not sent to a quorum cluster, which cannot async insert. 0 = not sent.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "async_insert_busy_timeout_max_ms": {
-          "description": "Upper bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_max_ms`). Sent with the lower bound, so a server default below it cannot make ClickHouse ignore the lower bound. Same rules as `async_insert_busy_timeout_min_ms`. 0 = server default.",
+          "description": "Upper bound in milliseconds of the server's adaptive flush timeout for code inserts (`async_insert_busy_timeout_max_ms`). Sent with the lower bound, so a server default below it cannot make ClickHouse ignore the lower bound. Same rules as `async_insert_busy_timeout_min_ms`. 0 = not sent.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0

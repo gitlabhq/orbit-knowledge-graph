@@ -144,13 +144,14 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 
 ### Insert settings by environment
 
-Every write path sets `async_insert` and `wait_for_async_insert` itself, so the server and user-profile defaults do not change them.
+The data writes and the checkpoint saves below set `async_insert` and `wait_for_async_insert` themselves, so the server and user-profile defaults do not change them.
 
 | Insert | ClickHouse Cloud or a single node | Quorum cluster (`replicated: true` or `insert_quorum`) |
 |--------|-----------------------------------|---------------------------------------------------------|
 | Code tables | `async_insert=1`, `wait_for_async_insert=1`, flush timeout 1000 ms | Synchronous quorum insert |
 | Code checkpoint | `async_insert=1`, `wait_for_async_insert=1`, flush timeout 1000 ms | Synchronous quorum insert |
 | SDLC tables | `async_insert=1`, `wait_for_async_insert=1`, server flush timeout | Synchronous quorum insert |
+| SDLC checkpoints | `async_insert=1`, `wait_for_async_insert` by run mode, server flush timeout | Synchronous quorum insert |
 
 All inserts also get `graph.insert_settings`. A quorum cluster gets none of the async-insert settings above, and its session sets `async_insert=0`.
 

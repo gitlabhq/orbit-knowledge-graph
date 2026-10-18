@@ -2268,28 +2268,41 @@ async fn code_job_inserts_send_the_default_insert_settings() {
             ("src/helper.py", "def greet():\n    pass\n"),
         ],
     );
-    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
-    index_code(
-        &deps.code_indexing_task_handler(),
-        &clickhouse,
-        project,
-        "first",
-        1,
-        "1/2791/",
-    )
-    .await;
+    clickhouse
+        .execute(
+            "CREATE SETTINGS PROFILE orbit_writer SETTINGS async_insert = 0, wait_for_async_insert = 0",
+        )
+        .await;
+    clickhouse
+        .execute(
+            "CREATE USER orbit_writer IDENTIFIED WITH plaintext_password BY 'pw' \
+             SETTINGS PROFILE 'orbit_writer'",
+        )
+        .await;
+    clickhouse
+        .execute(&format!(
+            "GRANT ALL ON {}.* TO orbit_writer",
+            clickhouse.config.database
+        ))
+        .await;
+    let mut writer = clickhouse.clone();
+    writer.config.username = "orbit_writer".to_string();
+    writer.config.password = Some("pw".to_string());
+
+    let deps = CodeIndexingDeps::new(&mock, &writer);
+    let handler = deps.code_indexing_task_handler();
+    index_code(&handler, &writer, project, "first", 1, "1/2791/").await;
+    mock.replace_archive(project, &[("src/main.py", "print()\n")]);
+    index_code(&handler, &writer, project, "second", 2, "1/2791/").await;
 
     clickhouse.execute("SYSTEM FLUSH LOGS").await;
     let batches = clickhouse
         .query(&format!(
-            "SELECT DISTINCT tables[1], toString(ProfileEvents['AsyncInsertQuery']), \
-                    if(Settings['wait_for_async_insert'] = '', \
-                       toString(toUInt8(getSetting('wait_for_async_insert'))), \
-                       Settings['wait_for_async_insert']), \
+            "SELECT DISTINCT tables[1], Settings['async_insert'], Settings['wait_for_async_insert'], \
                     Settings['async_insert_busy_timeout_min_ms'], \
                     Settings['async_insert_busy_timeout_max_ms'] \
              FROM system.query_log \
-             WHERE type = 'QueryFinish' AND query_kind = 'Insert' \
+             WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND user = 'orbit_writer' \
                AND current_database = '{}' AND length(tables) = 1",
             clickhouse.config.database
         ))

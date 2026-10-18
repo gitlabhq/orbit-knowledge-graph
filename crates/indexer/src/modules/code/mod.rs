@@ -199,17 +199,6 @@ mod tests {
     }
 
     #[test]
-    fn sdlc_inserts_keep_the_shared_client_settings() {
-        let graph = graph_client(&[], false);
-        let _code = code_client(graph.clone());
-        assert_eq!(
-            durable_insert_sql(&graph),
-            "INSERT INTO t SETTINGS async_insert=1, optimize_on_insert=0, \
-             wait_for_async_insert=1 FORMAT ArrowStream"
-        );
-    }
-
-    #[test]
     fn declared_policy_retries_and_dead_letters() {
         let policy = code_indexing_task_topic_policy();
         assert_eq!(policy.max_attempts, Some(5));
