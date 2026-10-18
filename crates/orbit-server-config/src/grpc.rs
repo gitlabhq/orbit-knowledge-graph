@@ -26,7 +26,7 @@ pub struct GrpcConfig {
 }
 
 const RESULT_CHUNK_BYTES: std::ops::RangeInclusive<usize> = 64 * 1024..=4 * 1024 * 1024;
-const MIN_MAX_RESULT_BYTES: usize = 1024 * 1024;
+const MAX_RESULT_BYTES_FLOOR: usize = 1024 * 1024;
 
 impl GrpcConfig {
     pub fn validate(&self) -> Result<(), GrpcConfigError> {
@@ -35,7 +35,7 @@ impl GrpcConfig {
                 self.result_chunk_bytes,
             ));
         }
-        if self.max_result_bytes < MIN_MAX_RESULT_BYTES {
+        if self.max_result_bytes < MAX_RESULT_BYTES_FLOOR {
             return Err(GrpcConfigError::MaxResultBytesTooLow(self.max_result_bytes));
         }
         Ok(())

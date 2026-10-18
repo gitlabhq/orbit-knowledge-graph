@@ -299,6 +299,11 @@ mod tests {
             metadata: None,
         };
         let error = result_messages(result, Some(CHUNKING)).unwrap_err();
+        let at_limit = ExecuteQueryResult {
+            content: Some(ResultJson("x".repeat(CHUNKING.max_bytes))),
+            metadata: None,
+        };
+        assert!(result_messages(at_limit, Some(CHUNKING)).is_ok());
 
         assert_eq!(error.code(), "compile_error");
         assert!(error.is_caller_error(), "{error}");
