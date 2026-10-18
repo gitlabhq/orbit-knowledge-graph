@@ -105,7 +105,7 @@ impl OntologyCatalog {
                     OntologyArchive::bundled(version)?.ok_or(CatalogError::Missing(version))?;
                 self.publish(&archive).await?;
                 tracing::info!(
-                    version,
+                    schema_version = version,
                     "bootstrapped missing ontology archive from release bundle"
                 );
                 Ok(())

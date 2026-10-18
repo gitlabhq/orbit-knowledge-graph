@@ -229,7 +229,11 @@ pub async fn version_tables_complete(
         .collect();
 
     if !missing.is_empty() {
-        tracing::warn!(version, ?missing, "version table set is incomplete");
+        tracing::warn!(
+            schema_version = version,
+            ?missing,
+            "version table set is incomplete"
+        );
         return Ok(false);
     }
 

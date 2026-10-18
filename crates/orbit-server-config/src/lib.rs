@@ -43,7 +43,7 @@ pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
 pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
-pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
+pub use metrics::{ExpandedLogsConfig, MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
 pub use probe_server::{DEFAULT_PROBE_SERVER_PORT, ProbeServerConfig};

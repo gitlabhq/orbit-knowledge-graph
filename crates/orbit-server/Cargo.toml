@@ -38,7 +38,7 @@ named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 query-data-model = { path = "../query-data-model" }
-tower = { workspace = true }
+tower = { workspace = true, features = ["util"] }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
 reqwest = { workspace = true }
@@ -49,7 +49,7 @@ query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
-labkit = { workspace = true, features = ["grpc", "health", "otel", "prometheus"] }
+labkit = { workspace = true, features = ["grpc", "health", "otel", "prometheus", "verbose-logs"] }
 labkit-events = { workspace = true }
 serde = { workspace = true }
 secrecy = { workspace = true }
@@ -62,6 +62,7 @@ tokio = { workspace = true }
 tokio-util.workspace = true
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 tonic = { workspace = true }
@@ -82,7 +83,6 @@ orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }
-tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true
